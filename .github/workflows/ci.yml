@@ -1,0 +1,88 @@
+name: ChemicalOps CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: chemicalops
+          MYSQL_USER: chemicalops
+          MYSQL_PASSWORD: chemicalops
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: chemicalops
+      MYSQL_USER: chemicalops
+      MYSQL_PASSWORD: chemicalops
+      DEMO_DEFAULT_PASSWORD: ChemicalOps@2026
+      JWT_SECRET_KEY: ci-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Initialize database
+        run: mysql -h127.0.0.1 -P3306 -uchemicalops -pchemicalops chemicalops < database/schema.sql
+      - name: Seed demo accounts
+        run: PYTHONPATH=backend python scripts/seed_demo_accounts.py
+      - name: Compile backend
+        run: PYTHONPATH=backend python -m compileall -q backend/app scripts
+      - name: Run tests
+        run: PYTHONPATH=backend python -m pytest -q
+      - name: Start API for smoke load test
+        run: |
+          PYTHONPATH=backend python -m uvicorn app.main:app --host 127.0.0.1 --port 8888 > /tmp/chemicalops-api.log 2>&1 &
+          echo $! > /tmp/chemicalops-api.pid
+          python - <<'PY'
+          import time
+          from urllib.request import urlopen
+
+          for _ in range(30):
+              try:
+                  with urlopen("http://127.0.0.1:8888/health", timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit("API health check failed")
+          PY
+      - name: Run smoke load test
+        run: PYTHONPATH=backend python scripts/run_load_test.py --url http://127.0.0.1:8888/health --requests 100 --concurrency 10
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f /tmp/chemicalops-api.pid ]; then kill "$(cat /tmp/chemicalops-api.pid)" || true; fi
+          if [ -f /tmp/chemicalops-api.log ]; then cat /tmp/chemicalops-api.log; fi
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build

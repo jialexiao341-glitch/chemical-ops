@@ -1,0 +1,208 @@
+"""询价、报价和比价接口的请求与响应模型。"""
+
+from datetime import date, datetime
+from decimal import Decimal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class RFQItemCreate(BaseModel):
+    """创建询价明细时提交的字段。"""
+
+    source_request_item_id: int | None = Field(default=None, gt=0)
+    product_id: int | None = Field(default=None, gt=0)
+    requested_name: str = Field(min_length=1, max_length=255)
+    specification: str | None = Field(default=None, max_length=1000)
+    quantity: Decimal = Field(gt=0)
+    unit_id: int = Field(gt=0)
+    required_delivery_date: date | None = None
+    technical_requirements: str | None = None
+
+
+class RFQCreate(BaseModel):
+    """创建询价单时提交的字段。"""
+
+    source_request_id: int | None = Field(default=None, gt=0)
+    quote_deadline: datetime | None = None
+    requested_delivery_date: date | None = None
+    delivery_requirements: str | None = Field(default=None, max_length=1000)
+    items: list[RFQItemCreate] = Field(min_length=1, max_length=100)
+    supplier_ids: list[int] = Field(min_length=1, max_length=50)
+
+
+class RFQUpdate(BaseModel):
+    """询价草稿允许修改的字段。"""
+
+    quote_deadline: datetime | None = None
+    requested_delivery_date: date | None = None
+    delivery_requirements: str | None = Field(default=None, max_length=1000)
+    items: list[RFQItemCreate] | None = Field(default=None, min_length=1, max_length=100)
+    supplier_ids: list[int] | None = Field(default=None, min_length=1, max_length=50)
+
+
+class RFQSupplierRead(BaseModel):
+    """询价供应商响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    rfq_id: int
+    supplier_id: int
+    invited_at: datetime
+    response_status: str
+    response_at: datetime | None
+    invitation_channel: str | None
+    note: str | None
+
+
+class RFQItemRead(RFQItemCreate):
+    """询价明细响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    rfq_id: int
+    line_no: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class SupplierQuoteItemCreate(BaseModel):
+    """录入供应商报价明细时提交的字段。"""
+
+    rfq_item_id: int = Field(gt=0)
+    supplier_product_id: int | None = Field(default=None, gt=0)
+    supplier_model: str | None = Field(default=None, max_length=128)
+    quoted_quantity: Decimal = Field(gt=0)
+    unit_id: int = Field(gt=0)
+    unit_price: Decimal = Field(ge=0)
+    tax_rate: Decimal | None = Field(default=None, ge=0, le=100)
+    moq_quantity: Decimal | None = Field(default=None, gt=0)
+    moq_unit_id: int | None = Field(default=None, gt=0)
+    lead_days: int | None = Field(default=None, ge=0)
+    payment_terms: str | None = Field(default=None, max_length=255)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class SupplierQuoteCreate(BaseModel):
+    """录入供应商报价时提交的字段。"""
+
+    supplier_id: int = Field(gt=0)
+    quote_date: date | None = None
+    valid_until: date | None = None
+    currency_code: str = Field(default="CNY", min_length=3, max_length=3, pattern="^[A-Z]{3}$")
+    source_file_id: int | None = Field(default=None, gt=0)
+    note: str | None = Field(default=None, max_length=1000)
+    items: list[SupplierQuoteItemCreate] = Field(min_length=1, max_length=100)
+
+
+class SupplierQuoteItemRead(SupplierQuoteItemCreate):
+    """供应商报价明细响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    quote_id: int
+
+
+class SupplierQuoteRead(BaseModel):
+    """供应商报价响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    quote_no: str
+    rfq_id: int
+    supplier_id: int
+    quote_version: int
+    quote_date: date
+    valid_until: date | None
+    currency_code: str
+    status: str
+    source_file_id: int | None
+    received_by: int | None
+    note: str | None
+    created_at: datetime
+    updated_at: datetime
+    items: list[SupplierQuoteItemRead]
+
+
+class QuoteComparisonItemRead(BaseModel):
+    """比价明细响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    comparison_id: int
+    quote_id: int
+    rfq_item_id: int
+    supplier_id: int
+    quoted_unit_price: Decimal
+    total_amount: Decimal | None
+    moq_quantity: Decimal | None
+    lead_days: int | None
+    payment_terms: str | None
+    historical_score: Decimal | None
+    composite_score: Decimal | None
+    rank_no: int | None
+    selection_flag: int
+    note: str | None
+
+
+class QuoteComparisonRead(BaseModel):
+    """比价结果响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    comparison_no: str
+    rfq_id: int
+    created_by: int
+    selected_quote_id: int | None
+    conclusion: str | None
+    selection_reason: str | None
+    status: str
+    confirmed_by: int | None
+    confirmed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    items: list[QuoteComparisonItemRead]
+
+
+class QuoteSelection(BaseModel):
+    """确认中选报价时提交的字段。"""
+
+    comparison_id: int = Field(gt=0)
+    quote_id: int = Field(gt=0)
+    selection_reason: str = Field(min_length=1, max_length=2000)
+
+
+class RFQRead(BaseModel):
+    """询价单详情响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    rfq_no: str
+    source_request_id: int | None
+    requester_id: int
+    quote_deadline: datetime | None
+    requested_delivery_date: date | None
+    delivery_requirements: str | None
+    status: str
+    sent_at: datetime | None
+    closed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    items: list[RFQItemRead]
+    suppliers: list[RFQSupplierRead]
+    quotes: list[SupplierQuoteRead]
+    comparisons: list[QuoteComparisonRead]
+
+
+class RFQPage(BaseModel):
+    """询价单分页响应。"""
+
+    items: list[RFQRead]
+    total: int
+    page: int
+    page_size: int

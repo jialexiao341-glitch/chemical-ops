@@ -1,0 +1,57 @@
+-- ChemicalOps 库存调拨增量迁移，适用于已经存在的开发数据库。
+-- 调拨完成时会同时生成源库位出库流水和目标库位入库流水。
+
+CREATE TABLE IF NOT EXISTS inventory_transfer_requests (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    transfer_no VARCHAR(32) NOT NULL,
+    applicant_id BIGINT UNSIGNED NOT NULL,
+    purpose VARCHAR(500) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+    approved_by BIGINT UNSIGNED NULL,
+    approved_at DATETIME(3) NULL,
+    rejected_at DATETIME(3) NULL,
+    reject_reason VARCHAR(1000) NULL,
+    cancelled_at DATETIME(3) NULL,
+    completed_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_inventory_transfer_no (transfer_no),
+    KEY idx_inventory_transfer_applicant_status (applicant_id, status),
+    KEY idx_inventory_transfer_status_time (status, created_at),
+    CONSTRAINT fk_inventory_transfer_applicant FOREIGN KEY (applicant_id) REFERENCES sys_users (id),
+    CONSTRAINT fk_inventory_transfer_approver FOREIGN KEY (approved_by) REFERENCES sys_users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS inventory_transfer_items (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    transfer_request_id BIGINT UNSIGNED NOT NULL,
+    line_no SMALLINT UNSIGNED NOT NULL,
+    product_id BIGINT UNSIGNED NOT NULL,
+    source_warehouse_id BIGINT UNSIGNED NOT NULL,
+    source_location_id BIGINT UNSIGNED NOT NULL,
+    target_warehouse_id BIGINT UNSIGNED NOT NULL,
+    target_location_id BIGINT UNSIGNED NOT NULL,
+    batch_id BIGINT UNSIGNED NOT NULL,
+    unit_id BIGINT UNSIGNED NOT NULL,
+    requested_quantity DECIMAL(18,6) NOT NULL,
+    transferred_quantity DECIMAL(18,6) NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+    note VARCHAR(1000) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_inventory_transfer_item_line (transfer_request_id, line_no),
+    KEY idx_inventory_transfer_item_source (source_warehouse_id, source_location_id, product_id, batch_id, unit_id),
+    KEY idx_inventory_transfer_item_target (target_warehouse_id, target_location_id, product_id, batch_id, unit_id),
+    CONSTRAINT fk_inventory_transfer_item_request FOREIGN KEY (transfer_request_id) REFERENCES inventory_transfer_requests (id),
+    CONSTRAINT fk_inventory_transfer_item_product FOREIGN KEY (product_id) REFERENCES md_products (id),
+    CONSTRAINT fk_inventory_transfer_item_source_warehouse FOREIGN KEY (source_warehouse_id) REFERENCES warehouses (id),
+    CONSTRAINT fk_inventory_transfer_item_source_location FOREIGN KEY (source_location_id) REFERENCES warehouse_locations (id),
+    CONSTRAINT fk_inventory_transfer_item_target_warehouse FOREIGN KEY (target_warehouse_id) REFERENCES warehouses (id),
+    CONSTRAINT fk_inventory_transfer_item_target_location FOREIGN KEY (target_location_id) REFERENCES warehouse_locations (id),
+    CONSTRAINT fk_inventory_transfer_item_batch FOREIGN KEY (batch_id) REFERENCES inventory_batches (id),
+    CONSTRAINT fk_inventory_transfer_item_unit FOREIGN KEY (unit_id) REFERENCES md_units (id),
+    CONSTRAINT chk_inventory_transfer_item_location CHECK (NOT (source_warehouse_id = target_warehouse_id AND source_location_id = target_location_id)),
+    CONSTRAINT chk_inventory_transfer_item_quantity CHECK (requested_quantity > 0 AND transferred_quantity >= 0 AND transferred_quantity <= requested_quantity)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

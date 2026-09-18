@@ -1,0 +1,25 @@
+# Local secrets and runtime configuration
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv-cache/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+
+# Local runtime data
+logs/
+tmp/
+uploads/
+coverage/
+
+# Local uploaded files and generated parse results
+storage/
