@@ -1,5 +1,6 @@
 """ChemicalOps FastAPI 应用入口。"""
 
+from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI, Request
@@ -8,8 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy import text
 
 from app.core.config import get_settings
+from app.core.db import engine
 from app.core.idempotency import IdempotencyMiddleware
 from app.core.errors import (
     API_ERROR_RESPONSES,
@@ -45,11 +48,124 @@ from app.modules.system.controller import auth_router, router as system_router
 
 settings = get_settings()
 LOGGER = logging.getLogger("chemicalops.api")
+
+
+def _configure_logging() -> None:
+    """Apply the configured log level to application loggers."""
+
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    logger = logging.getLogger("chemicalops")
+    logger.setLevel(level)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
+        logger.addHandler(handler)
+    logger.propagate = False
+
+
+def _check_database() -> bool:
+    """Run a minimal database probe without logging credentials."""
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        LOGGER.exception(
+            "中间件检查失败 name=MySQL 主机=%s 端口=%s 数据库=%s",
+            settings.mysql_host,
+            settings.mysql_port,
+            settings.mysql_database,
+        )
+        return False
+
+    LOGGER.info(
+        "中间件检查通过 name=MySQL 主机=%s 端口=%s 数据库=%s",
+        settings.mysql_host,
+        settings.mysql_port,
+        settings.mysql_database,
+    )
+    return True
+
+
+def _check_minio() -> bool:
+    """Check MinIO and the buckets required by the application."""
+
+    backend = settings.file_storage_backend.strip().lower()
+    if backend not in {"minio", "s3"}:
+        LOGGER.info("中间件检查跳过 name=MinIO 原因=FILE_STORAGE_BACKEND=%s", backend)
+        return True
+
+    if not settings.minio_access_key or not settings.minio_secret_key:
+        LOGGER.error("中间件检查失败 name=MinIO 原因=未配置访问密钥 endpoint=%s", settings.minio_endpoint)
+        return False
+
+    try:
+        from minio import Minio
+
+        client = Minio(
+            settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=settings.minio_secure,
+            region=settings.minio_region,
+        )
+        buckets = (
+            settings.minio_document_bucket or settings.minio_bucket,
+            settings.minio_result_bucket or settings.minio_bucket,
+        )
+        missing_buckets = [bucket for bucket in dict.fromkeys(buckets) if not client.bucket_exists(bucket)]
+    except Exception:
+        LOGGER.exception("中间件检查失败 name=MinIO endpoint=%s", settings.minio_endpoint)
+        return False
+
+    if missing_buckets:
+        LOGGER.warning(
+            "中间件检查部分通过 name=MinIO endpoint=%s 缺少桶=%s",
+            settings.minio_endpoint,
+            ",".join(missing_buckets),
+        )
+        return False
+
+    LOGGER.info(
+        "中间件检查通过 name=MinIO endpoint=%s 桶=%s",
+        settings.minio_endpoint,
+        ",".join(dict.fromkeys(buckets)),
+    )
+    return True
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Log startup progress and critical middleware availability."""
+
+    _configure_logging()
+    LOGGER.info(
+        "ChemicalOps 启动中 环境=%s 存储后端=%s API前缀=%s",
+        settings.app_env,
+        settings.file_storage_backend,
+        settings.api_prefix,
+    )
+    database_ready = _check_database()
+    minio_ready = _check_minio()
+    if database_ready and minio_ready:
+        LOGGER.info("ChemicalOps 启动检查完成 状态=就绪")
+    else:
+        LOGGER.warning(
+            "ChemicalOps 启动检查完成 状态=降级 数据库就绪=%s MinIO就绪=%s",
+            database_ready,
+            minio_ready,
+        )
+    yield
+    LOGGER.info("ChemicalOps 正在关闭")
+
+
+_configure_logging()
 app = FastAPI(
     title=settings.app_name,
     description="化工采购与供应商管理系统后端 API",
     version="0.1.0",
     responses=API_ERROR_RESPONSES,
+    lifespan=lifespan,
 )
 
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]

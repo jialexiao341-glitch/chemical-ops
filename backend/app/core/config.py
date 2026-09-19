@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     api_port: int = 8888
     api_prefix: str = "/api/v1"
     cors_origins: str = "http://localhost:5173"
+    log_level: str = "INFO"
 
     database_url: str | None = None
     database_sync_url: str | None = None
@@ -83,7 +84,7 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.deepseek.com"
     llm_model: str = "deepseek-flash"
     llm_temperature: float = 0.2
-    llm_max_tokens: int = 4096
+    llm_max_tokens: int = 65536
     llm_timeout_seconds: int = 60
     llm_max_retries: int = 2
     agent_enabled: bool = True

@@ -1,6 +1,7 @@
 """AI 助手调用服务。"""
 
 import asyncio
+import base64
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -8,13 +9,15 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
+from app.modules.ai.agent_prompt import GREETING_REPLY, SYSTEM_PROMPT as AGENT_SYSTEM_PROMPT, UNSUPPORTED_REPLY, build_project_reply
+from app.modules.ai.intent import Intent, classify_intent
 from app.modules.ai.model import AIConversation, AIMessage
-from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse
+from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse, AIQueryTrace
 from app.modules.files import service as file_service
 from app.modules.files import mineru
 from app.modules.files.parser import parse_file_content
@@ -23,89 +26,160 @@ from app.modules.system.model import User
 
 
 LOGGER = logging.getLogger("chemicalops.ai")
-SYSTEM_PROMPT = """你是 ChemicalOps 化学品运营助手。
-请优先使用清晰、简洁、可执行的中文回答采购、到货、质量、库存和供应商问题。
-当前阶段你只能提供查询分析和业务草稿建议，不能声称已经修改数据库、提交订单或执行入库。
-如果缺少真实业务数据，请明确说明需要用户提供信息，不要编造数量、订单、供应商或库存结果。"""
-BUSINESS_KEYWORDS = ("采购", "订单", "库存", "到货", "收货", "质量", "验收", "异常", "财务", "供应商")
+SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT
+STREAM_CHUNK_SIZE = 4
+STREAM_CHUNK_DELAY_SECONDS = 0.03
+READ_ONLY_WRITE_MARKERS = (
+    "帮我创建", "帮我修改", "帮我删除", "帮我提交", "帮我审批", "帮我驳回",
+    "帮我下单", "帮我入库", "帮我出库", "帮我付款", "帮我执行",
+    "请创建", "请修改", "请删除", "请提交", "请审批", "请驳回",
+    "请下单", "请入库", "请出库", "请付款", "请执行",
+    "直接创建", "直接修改", "直接提交", "直接审批", "直接下单",
+    "直接入库", "直接出库", "直接付款", "直接执行",
+)
 
 
-def _build_messages(data: AIChatRequest, attachment_context: list[str] | None = None) -> list[dict[str, str]]:
-    """组装系统提示和用户会话消息。"""
+def _build_llm_payload(runtime: Settings, messages: list[dict[str, object]], *, stream: bool = False, response_format: dict[str, str] | None = None) -> dict[str, object]:
+    """组装 OpenAI 兼容请求；DeepSeek Flash 默认支持思考模式，显式开启以获得完整回答。"""
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    payload: dict[str, object] = {
+        "model": runtime.llm_model,
+        "messages": messages,
+        "temperature": runtime.llm_temperature,
+        "max_tokens": runtime.llm_max_tokens,
+    }
+    if runtime.llm_model.lower() == "deepseek-flash":
+        payload["thinking"] = {"type": "enabled"}
+    if stream:
+        payload["stream"] = True
+    if response_format is not None:
+        payload["response_format"] = response_format
+    return payload
+
+
+async def _stream_text_chunks(content: str) -> AsyncIterator[str]:
+    """把已经生成的安全文本分成小段输出，避免前端一次性出现整段内容。"""
+
+    for index in range(0, len(content), STREAM_CHUNK_SIZE):
+        yield content[index : index + STREAM_CHUNK_SIZE]
+        await asyncio.sleep(STREAM_CHUNK_DELAY_SECONDS)
+
+
+def _validate_read_only_request(data: AIChatRequest) -> None:
+    """拒绝明确要求 AI 执行业务写操作的请求。"""
+
+    user_text = " ".join(message.content for message in data.messages if message.role == "user")
+    if any(marker in user_text for marker in READ_ONLY_WRITE_MARKERS):
+        raise BusinessValidationError("AI 仅支持查询和分析，不支持创建、修改、审批、提交、下单、入库、出库或付款等业务操作。")
+def _build_native_image_part(file_name: str, mime_type: str, content: bytes) -> dict[str, object] | None:
+    """为 DeepSeek Flash 组装原生视觉图片块；文档格式仍由解析器处理。"""
+
+    extension = Path(file_name).suffix.lower()
+    if extension not in {".png", ".jpg", ".jpeg"}:
+        return None
+    normalised_mime = (mime_type or "").split(";", 1)[0].strip().lower()
+    if normalised_mime not in {"image/png", "image/jpeg"}:
+        normalised_mime = "image/png" if extension == ".png" else "image/jpeg"
+    encoded = base64.b64encode(content).decode("ascii")
+    return {"type": "image_url", "image_url": {"url": f"data:{normalised_mime};base64,{encoded}"}}
+
+
+def _build_messages(
+    data: AIChatRequest,
+    attachment_context: list[str] | None = None,
+    image_parts: list[dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
+    """组装系统提示、会话消息和模型原生视觉图片块。"""
+
+    messages: list[dict[str, object]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(message.model_dump() for message in data.messages)
+    if image_parts:
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index].get("role") == "user":
+                text_content = str(messages[index].get("content") or "")
+                messages[index] = {
+                    "role": "user",
+                    "content": [{"type": "text", "text": text_content}, *image_parts],
+                }
+                break
     if attachment_context:
         messages.append({"role": "system", "content": "以下是系统提供的已安全校验上下文，仅可据此回答；无法解析或未提供的数据不要猜测。\n" + "\n\n".join(attachment_context)})
-    elif data.attachments:
+    elif data.attachments and not image_parts:
         names = "、".join(data.attachments)
         messages.append({"role": "system", "content": f"用户选择了以下附件，但当前请求没有提供可读取的文件引用：{names}。请不要假设已读取附件。"})
     return messages
 
+def _format_text2sql_result(result: object) -> str:
+    """AI 重组不可用时的自然语言兜底；只使用已经清洗过的查询结果。"""
 
-def _build_business_context(db: Session, user: User, data: AIChatRequest) -> tuple[list[str], list[dict[str, object]]]:
-    """按实时权限为业务问题加载聚合和限量明细，不让 AI 绕过数据权限。"""
-
-    user_text = " ".join(message.content for message in data.messages if message.role == "user")
-    if not any(keyword in user_text for keyword in BUSINESS_KEYWORDS):
-        return [], []
-    role_codes = get_user_role_codes(db, user.id)
-    permission_codes = get_user_permission_codes(db, user.id)
-    if "SYS_ADMIN" not in role_codes and "dashboard.read" not in permission_codes:
-        return [], []
-    try:
-        from app.modules.dashboard.service import get_overview
-        from app.modules.deliveries.model import Delivery
-        from app.modules.finance.model import FinanceReconciliation
-        from app.modules.inventory.model import InventoryBalance, InventoryBatch
-        from app.modules.operation_exceptions.model import OperationException
-        from app.modules.products.model import Product
-        from app.modules.purchase_orders.model import PurchaseOrder
-        from app.modules.purchase_requests.model import Unit
-        from app.modules.quality_acceptances.model import QualityAcceptance
-        from app.modules.suppliers.model import Supplier
-
-        overview = get_overview(db)
-        sections: dict[str, object] = {"dashboard_overview": overview}
-        if "采购" in user_text or "订单" in user_text:
-            if "SYS_ADMIN" in role_codes or "procurement.orders.read" in permission_codes:
-                rows = db.execute(select(PurchaseOrder.po_no, PurchaseOrder.supplier_id, Supplier.supplier_name, PurchaseOrder.order_amount, PurchaseOrder.currency_code, PurchaseOrder.status, PurchaseOrder.expected_arrival_date).join(Supplier, Supplier.id == PurchaseOrder.supplier_id).order_by(PurchaseOrder.created_at.desc()).limit(8)).all()
-                sections["recent_purchase_orders"] = [dict(row._mapping) for row in rows]
-        if "到货" in user_text or "逾期" in user_text or "收货" in user_text:
-            if "SYS_ADMIN" in role_codes or "warehouse.deliveries.read" in permission_codes:
-                rows = db.execute(select(Delivery.delivery_no, Delivery.po_id, Supplier.supplier_name, Delivery.expected_arrival_date, Delivery.actual_arrival_date, Delivery.status, Delivery.tracking_no).join(Supplier, Supplier.id == Delivery.supplier_id).where(Delivery.status == "IN_TRANSIT").order_by(Delivery.expected_arrival_date).limit(8)).all()
-                sections["in_transit_deliveries"] = [dict(row._mapping) for row in rows]
-        if "库存" in user_text:
-            if "SYS_ADMIN" in role_codes or "warehouse.inventory.read" in permission_codes:
-                rows = db.execute(select(Product.product_name, InventoryBalance.quantity, Unit.unit_name, InventoryBatch.batch_no, InventoryBatch.expiry_date).join(Product, Product.id == InventoryBalance.product_id).join(Unit, Unit.id == InventoryBalance.unit_id).join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id).where(InventoryBalance.quantity > 0).order_by(InventoryBatch.expiry_date, Product.id).limit(8)).all()
-                sections["inventory_batches"] = [dict(row._mapping) for row in rows]
-        if "质量" in user_text or "验收" in user_text:
-            if "SYS_ADMIN" in role_codes or "quality.acceptances.read" in permission_codes:
-                rows = db.execute(select(QualityAcceptance.acceptance_no, Delivery.delivery_no, QualityAcceptance.result, QualityAcceptance.inspection_time, QualityAcceptance.certificate_complete, QualityAcceptance.conclusion).join(Delivery, Delivery.id == QualityAcceptance.delivery_id).order_by(QualityAcceptance.created_at.desc()).limit(8)).all()
-                sections["quality_acceptances"] = [dict(row._mapping) for row in rows]
-        if "异常" in user_text:
-            if "SYS_ADMIN" in role_codes or "operations.exceptions.read" in permission_codes:
-                rows = db.execute(select(OperationException.exception_no, OperationException.exception_type, OperationException.severity, OperationException.description, OperationException.status, OperationException.due_at).order_by(OperationException.created_at.desc()).limit(8)).all()
-                sections["operation_exceptions"] = [dict(row._mapping) for row in rows]
-        if "财务" in user_text or "发票" in user_text or "付款" in user_text or "结算" in user_text:
-            if "SYS_ADMIN" in role_codes or "finance.reconciliations.read" in permission_codes:
-                rows = db.execute(select(FinanceReconciliation.reconciliation_no, Supplier.supplier_name, FinanceReconciliation.total_amount, FinanceReconciliation.currency_code, FinanceReconciliation.status).join(Supplier, Supplier.id == FinanceReconciliation.supplier_id).order_by(FinanceReconciliation.created_at.desc()).limit(8)).all()
-                sections["finance_reconciliations"] = [dict(row._mapping) for row in rows]
-        if "供应商" in user_text:
-            if "SYS_ADMIN" in role_codes or "master.suppliers.read" in permission_codes:
-                rows = db.execute(select(Supplier.supplier_code, Supplier.supplier_name, Supplier.region, Supplier.cooperation_level, Supplier.default_lead_days, Supplier.status).order_by(Supplier.created_at.desc()).limit(8)).all()
-                sections["suppliers"] = [dict(row._mapping) for row in rows]
-        context = "以下是按当前用户权限查询的实时业务数据，回答时只能引用其中已有数据，不要补造明细：\n" + json.dumps(sections, ensure_ascii=False, default=str)
-        citation = {"type": "business_context", "source": "实时数据库业务明细", "sections": [key for key in sections]}
-        return [context], [citation]
-    except Exception as exc:
-        LOGGER.warning("AI 实时业务数据读取失败 error=%s", exc.__class__.__name__)
-        return ["当前实时业务数据读取失败，请明确告知用户暂时无法基于数据库给出数量或状态结论。"], [{"type": "dashboard_overview", "source": "实时数据库聚合", "status": "FAILED"}]
+    rows = getattr(result, "rows", [])
+    plan = getattr(result, "plan", None)
+    render_columns = getattr(result, "render_columns", [])
+    labels = {item.get("key"): item.get("label", item.get("key")) for item in render_columns if isinstance(item, dict)}
+    unit = {"CNY": "元（CNY）", "USD": "美元（USD）", "EUR": "欧元（EUR）", "条": "条"}.get(getattr(result, "unit", None) or "", getattr(result, "unit", None) or "")
+    if not rows:
+        return "暂时没有找到符合条件的记录。"
+    lines = [f"找到了 {len(rows)} 条符合条件的记录。"]
+    for index, row in enumerate(rows, start=1):
+        values = "；".join(
+            f"{labels.get(key, key)}：{value}{(' ' + unit) if key == 'metric_value' and unit and unit != '条' else ''}"
+            for key, value in row.items()
+        )
+        lines.append(f"{index}. {values}")
+    if plan is not None and getattr(plan, "limit", None) and getattr(result, "truncated", False):
+        lines.append("当前仅展示部分结果。")
+    return "\n".join(lines)
 
 
-async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None) -> AIChatResponse:
+async def _run_text2sql_for_chat(db: Session, user: User, question: str, settings: Settings) -> tuple[str, dict[str, object], AIQueryTrace]:
+    """聊天入口的业务查询路由；Text2SQL 结果不再经过通用聊天上下文。"""
+
+    from app.modules.ai.text2sql import Text2SQLRequest, run_text2sql
+
+    LOGGER.info("AI 查询开始 user_id=%s user_query=%s", user.id, question)
+    result = await run_text2sql(db, user, Text2SQLRequest(question=question), settings)
+    trace = AIQueryTrace(
+        query=result.question,
+        slots=result.slots,
+        template=result.template,
+        sql=result.sql,
+        parameterized_sql=result.parameterized_sql,
+        columns=result.render_columns,
+        rows=result.rows,
+        unit=result.unit,
+        unit_note=result.unit_note,
+        row_count=result.row_count,
+        truncated=result.truncated,
+        stages=result.stages,
+        render=result.render,
+    )
+    answer = _format_text2sql_result(result)
+    trace.answer = answer
+    LOGGER.info("AI 查询槽位 user_id=%s slots=%s", user.id, json.dumps(result.slots, ensure_ascii=False, default=str))
+    LOGGER.info("AI 查询模板 user_id=%s template=%s", user.id, result.template)
+    LOGGER.info("AI 生成 SQL user_id=%s sql=%s", user.id, " ".join(result.sql.split()))
+    LOGGER.info(
+        "AI 查询完成 user_id=%s row_count=%s truncated=%s unit=%s",
+        user.id,
+        result.row_count,
+        result.truncated,
+        result.unit or "未提供",
+    )
+    LOGGER.info("AI 回复答案 user_id=%s answer=%s", user.id, answer)
+    citation = {
+        "type": "text2sql",
+        "source": "实时数据库只读查询",
+        "row_count": result.row_count,
+        "stages": result.stages,
+        "query_trace": trace.model_dump(mode="json"),
+    }
+    return answer, citation, trace
+
+
+async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, str] | None = None, image_parts: list[dict[str, object]] | None = None) -> AIChatResponse:
     """调用配置的 OpenAI 兼容模型。"""
 
+    _validate_read_only_request(data)
     runtime = settings or get_settings()
     if not runtime.agent_enabled:
         raise BusinessValidationError("AI 助手当前未启用")
@@ -115,12 +189,7 @@ async def chat(data: AIChatRequest, settings: Settings | None = None, attachment
         raise BusinessValidationError(f"暂不支持的 AI 服务商：{runtime.llm_provider}")
 
     url = f"{runtime.openai_base_url.rstrip('/')}/chat/completions"
-    payload = {
-        "model": runtime.llm_model,
-        "messages": _build_messages(data, attachment_context),
-        "temperature": runtime.llm_temperature,
-        "max_tokens": runtime.llm_max_tokens,
-    }
+    payload = _build_llm_payload(runtime, _build_messages(data, attachment_context, image_parts), response_format=response_format)
     headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json"}
     attempts = max(0, runtime.llm_max_retries) + 1
     response: httpx.Response | None = None
@@ -161,6 +230,8 @@ async def chat(data: AIChatRequest, settings: Settings | None = None, attachment
         model=runtime.llm_model,
         provider=runtime.llm_provider,
         usage=normalized_usage,
+        user_query=next((message.content for message in reversed(data.messages) if message.role == "user"), None),
+        answer=content,
     )
 
 
@@ -172,6 +243,13 @@ def _get_owned_conversation(db: Session, user: User, conversation_id: int) -> AI
         raise BusinessValidationError("AI 会话不存在或无权访问")
     return conversation
 
+
+def delete_conversation(db: Session, user: User, conversation_id: int) -> None:
+    """删除当前用户自己的会话及其消息。"""
+    conversation = _get_owned_conversation(db, user, conversation_id)
+    db.execute(delete(AIMessage).where(AIMessage.conversation_id == conversation.id))
+    db.delete(conversation)
+    db.commit()
 
 def list_conversations(db: Session, user: User, *, limit: int = 50) -> tuple[list[AIConversation], int]:
     """按最近消息时间返回当前用户会话。"""
@@ -214,11 +292,45 @@ def _ensure_conversation(db: Session, user: User, data: AIChatRequest) -> AIConv
 async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatResponse:
     """持久化用户消息并调用模型，再持久化助手回复。"""
 
+    _validate_read_only_request(data)
+
     conversation = _ensure_conversation(db, user, data)
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
     if user_message is None:
         raise BusinessValidationError("至少需要一条用户消息")
+    LOGGER.info("AI 请求进入 mode=sync user_id=%s user_query=%s", user.id, user_message.content)
+    intent_result = classify_intent(user_message.content)
+    LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
+    if intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
+        runtime = get_settings()
+        content, citation, query_trace = await _run_text2sql_for_chat(db, user, user_message.content, runtime)
+        citations = [citation]
+        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
+        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
+        conversation.last_message_at = datetime.now()
+        db.commit()
+        return AIChatResponse(
+            message=AIChatMessage(role="assistant", content=content),
+            conversation_id=conversation.id,
+            model="text2sql",
+            provider="chemicalops",
+            citations=citations,
+            query_trace=query_trace,
+            query_slots=query_trace.slots,
+            user_query=user_message.content,
+            answer=content,
+        )
+    if intent_result.intent != Intent.QUERY and not data.attachment_file_ids:
+        fixed_content = build_project_reply(user_message.content) if intent_result.intent is Intent.PROJECT else {Intent.GREETING: GREETING_REPLY, Intent.UNSUPPORTED: UNSUPPORTED_REPLY}[intent_result.intent]
+        LOGGER.info("AI 固定回复 user_id=%s intent=%s user_query=%s answer=%s", user.id, intent_result.intent, user_message.content, fixed_content)
+        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
+        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
+        conversation.last_message_at = datetime.now()
+        db.commit()
+        return AIChatResponse(message=AIChatMessage(role="assistant", content=fixed_content), conversation_id=conversation.id, model="rule-based", provider="chemicalops", citations=None, user_query=user_message.content, answer=fixed_content)
+
     attachment_context: list[str] = []
+    native_image_parts: list[dict[str, object]] = []
     attachment_citations: list[dict[str, object]] = []
     runtime = get_settings()
     for file_id in dict.fromkeys(data.attachment_file_ids):
@@ -230,6 +342,13 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         try:
             _, content = file_service.read_file(db, user, file_id)
             extension = Path(value.file_name).suffix.lower()
+            native_image = _build_native_image_part(value.file_name, value.mime_type, content) if runtime.llm_model.lower() == 'deepseek-flash' else None
+            if native_image is not None:
+                native_image_parts.append(native_image)
+                value.parse_status = 'SUCCEEDED'
+                value.parse_error = None
+                attachment_citations.append({'file_id': value.id, 'file_name': value.file_name, 'source': '用户上传附件', 'parse_status': 'SUCCEEDED', 'parser': 'native-vision', 'references': []})
+                continue
             if runtime.mineru_enabled and extension in mineru.SUPPORTED_REMOTE_EXTENSIONS:
                 value.parse_status = "PROCESSING"
                 value.parse_error = None
@@ -243,6 +362,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
                 parsed = parse_file_content(value.file_name, value.mime_type, content)
             value.parse_status = parsed.status
             value.parse_error = parsed.error
+            attachment_citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": parsed.status, "parser": parsed.parser, "references": parsed.references})
             if parsed.text:
                 attachment_context.append(f"附件：{value.file_name}\n{parsed.text[:12_000]}")
                 try:
@@ -253,21 +373,19 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
                     LOGGER.warning("解析结果保存失败 file_id=%s error=%s", value.id, exc.__class__.__name__)
             else:
                 attachment_context.append(f"附件：{value.file_name}\n{parsed.error or '文件没有可解析正文，请不要猜测其内容。'}")
-            attachment_citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": parsed.status, "parser": parsed.parser, "references": parsed.references})
         except Exception as exc:
             LOGGER.warning("AI 附件读取失败 file_id=%s error=%s", file_id, exc.__class__.__name__)
             value.parse_status = "FAILED"
             value.parse_error = "文件解析失败，请检查文件格式或重新上传"
             attachment_context.append(f"附件：{value.file_name}\n文件读取失败，请不要基于该附件推断业务结论。")
             attachment_citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": "FAILED", "parser": "none", "references": []})
-    business_context, business_citations = _build_business_context(db, user, data)
-    combined_context = attachment_context + business_context
-    combined_citations = attachment_citations + business_citations
+    combined_context = attachment_context
+    combined_citations = attachment_citations
     db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=combined_citations or None))
     conversation.last_message_at = datetime.now()
     db.commit()
     try:
-        result = await chat(data, runtime, attachment_context=combined_context or None)
+        result = await chat(data, runtime, attachment_context=combined_context or None, image_parts=native_image_parts or None)
     except Exception:
         raise
     assistant_message = AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=result.message.content, citations=combined_citations or None)
@@ -276,19 +394,67 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
     db.commit()
     result.conversation_id = conversation.id
     result.citations = combined_citations or None
+    result.user_query = user_message.content
+    result.answer = result.message.content
     return result
 
 
 async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> AsyncIterator[str]:
     """通过 SSE 转发 OpenAI 兼容接口的增量内容，并在结束时持久化。"""
 
+    _validate_read_only_request(data)
+
     conversation = _ensure_conversation(db, user, data)
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
     if user_message is None:
         yield f"event: error\ndata: {json.dumps({'message': '至少需要一条用户消息'}, ensure_ascii=False)}\n\n"
         return
+    LOGGER.info("AI 请求进入 mode=stream user_id=%s user_query=%s", user.id, user_message.content)
+    stream_intent_result = classify_intent(user_message.content)
+    LOGGER.info("AI 意图识别 mode=stream user_id=%s intent=%s reason=%s", user.id, stream_intent_result.intent, stream_intent_result.reason)
+    if stream_intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
+        runtime = get_settings()
+        try:
+            content, citation, query_trace = await _run_text2sql_for_chat(db, user, user_message.content, runtime)
+        except BusinessValidationError as exc:
+            LOGGER.warning("AI 流式查询业务失败 user_id=%s user_query=%s error=%s", user.id, user_message.content, exc)
+            yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
+            return
+        except Exception:
+            LOGGER.exception("AI 流式查询异常 user_id=%s user_query=%s", user.id, user_message.content)
+            yield f"event: error\ndata: {json.dumps({'message': f'查询暂时失败，请稍后重试'}, ensure_ascii=False)}\n\n"
+            return
+        citations = [citation]
+        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
+        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
+        conversation.last_message_at = datetime.now()
+        db.commit()
+        chunk_count = 0
+        async for chunk in _stream_text_chunks(content):
+            chunk_count += 1
+            yield f"event: delta\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+        LOGGER.info("AI 流式回复完成 user_id=%s mode=query chunks=%s", user.id, chunk_count)
+        trace_payload = query_trace.model_dump(mode="json")
+        yield f"event: done\ndata: {json.dumps({'conversation_id': conversation.id, 'model': 'text2sql', 'provider': 'chemicalops', 'citations': citations, 'query_trace': trace_payload, 'query_slots': trace_payload['slots'], 'user_query': user_message.content, 'answer': content}, ensure_ascii=False)}\n\n"
+        return
+    if stream_intent_result.intent != Intent.QUERY and not data.attachment_file_ids:
+        fixed_content = build_project_reply(user_message.content) if stream_intent_result.intent is Intent.PROJECT else {Intent.GREETING: GREETING_REPLY, Intent.UNSUPPORTED: UNSUPPORTED_REPLY}[stream_intent_result.intent]
+        LOGGER.info("AI 流式固定回复开始 user_id=%s intent=%s user_query=%s", user.id, stream_intent_result.intent, user_message.content)
+        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
+        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
+        conversation.last_message_at = datetime.now()
+        db.commit()
+        chunk_count = 0
+        async for chunk in _stream_text_chunks(fixed_content):
+            chunk_count += 1
+            yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
+        LOGGER.info("AI 流式回复完成 user_id=%s mode=rule_based chunks=%s answer=%s", user.id, chunk_count, fixed_content)
+        yield "event: done\ndata: " + json.dumps({"conversation_id": conversation.id, "model": "rule-based", "provider": "chemicalops", "citations": None, "user_query": user_message.content, "answer": fixed_content}, ensure_ascii=False) + "\n\n"
+        return
+
     runtime = get_settings()
     attachment_context: list[str] = []
+    native_image_parts: list[dict[str, object]] = []
     citations: list[dict[str, object]] = []
     for file_id in dict.fromkeys(data.attachment_file_ids):
         value = file_service.get_file(db, user, file_id)
@@ -298,6 +464,13 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         try:
             _, content = file_service.read_file(db, user, file_id)
             extension = Path(value.file_name).suffix.lower()
+            native_image = _build_native_image_part(value.file_name, value.mime_type, content) if runtime.llm_model.lower() == 'deepseek-flash' else None
+            if native_image is not None:
+                native_image_parts.append(native_image)
+                value.parse_status = 'SUCCEEDED'
+                value.parse_error = None
+                citations.append({'file_id': value.id, 'file_name': value.file_name, 'source': '用户上传附件', 'parse_status': 'SUCCEEDED', 'parser': 'native-vision', 'references': []})
+                continue
             if runtime.mineru_enabled and extension in mineru.SUPPORTED_REMOTE_EXTENSIONS:
                 value.parse_status = "PROCESSING"
                 value.parse_error = None
@@ -310,6 +483,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
                 parsed = parse_file_content(value.file_name, value.mime_type, content)
             value.parse_status = parsed.status
             value.parse_error = parsed.error
+            citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": parsed.status, "parser": parsed.parser, "references": parsed.references})
             attachment_context.append(f"附件：{value.file_name}\n{(parsed.text or parsed.error or '文件没有可解析正文，请不要猜测其内容。')[:12_000]}")
             if parsed.text:
                 try:
@@ -318,14 +492,11 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
                         citations.append({"type": "parsed_result", "file_id": value.id, "object_key": result_key, "source": "解析结果 Markdown"})
                 except Exception as exc:
                     LOGGER.warning("流式解析结果保存失败 file_id=%s error=%s", value.id, exc.__class__.__name__)
-            citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": parsed.status, "parser": parsed.parser, "references": parsed.references})
         except Exception as exc:
             LOGGER.warning("AI 流式附件读取失败 file_id=%s error=%s", file_id, exc.__class__.__name__)
             attachment_context.append(f"附件：{value.file_name}\n文件读取失败，请不要基于该附件推断业务结论。")
             citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": "FAILED", "parser": "none", "references": []})
-    business_context, business_citations = _build_business_context(db, user, data)
-    combined_context = attachment_context + business_context
-    citations.extend(business_citations)
+    combined_context = attachment_context
     db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations or None))
     conversation.last_message_at = datetime.now()
     db.commit()
@@ -334,7 +505,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         yield f"event: error\ndata: {json.dumps({'message': 'AI 服务配置不可用，请检查服务开关、API key 和服务商配置'}, ensure_ascii=False)}\n\n"
         return
     url = f"{runtime.openai_base_url.rstrip('/')}/chat/completions"
-    payload = {"model": runtime.llm_model, "messages": _build_messages(data, combined_context or None), "temperature": runtime.llm_temperature, "max_tokens": runtime.llm_max_tokens, "stream": True}
+    payload = _build_llm_payload(runtime, _build_messages(data, combined_context or None, native_image_parts or None), stream=True)
     headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"}
     full_content = ""
     try:
@@ -365,5 +536,6 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=full_content.strip(), citations=citations or None))
     conversation.last_message_at = datetime.now()
     db.commit()
-    done = {"conversation_id": conversation.id, "model": runtime.llm_model, "provider": runtime.llm_provider, "citations": citations or None}
+    LOGGER.info("AI 流式回复完成 user_id=%s mode=llm chunks=streamed user_query=%s answer=%s", user.id, user_message.content, full_content.strip())
+    done = {"conversation_id": conversation.id, "model": runtime.llm_model, "provider": runtime.llm_provider, "citations": citations or None, "user_query": user_message.content, "answer": full_content.strip()}
     yield f"event: done\ndata: {json.dumps(done, ensure_ascii=False)}\n\n"

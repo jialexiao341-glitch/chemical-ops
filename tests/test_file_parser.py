@@ -58,6 +58,6 @@ def test_parse_pdf_and_reject_oversized_content() -> None:
     pdf_result = parse_file_content("空白.pdf", "application/pdf", pdf_buffer.getvalue())
     oversized_result = parse_file_content("超大.txt", "text/plain", b"x" * (MAX_PARSE_BYTES + 1))
 
-    assert pdf_result.status == "EMPTY"
+    assert pdf_result.status == "OCR_REQUIRED"
     assert oversized_result.status == "TOO_LARGE"
 

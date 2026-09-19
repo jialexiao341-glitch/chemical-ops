@@ -1,7 +1,7 @@
 """AI 助手请求与响应模型。"""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,6 +31,29 @@ class AIChatResponse(BaseModel):
     provider: str
     usage: dict[str, int] | None = None
     citations: list | None = None
+    query_trace: "AIQueryTrace | None" = None
+    query_slots: list[dict[str, Any]] | None = None
+    user_query: str | None = None
+    answer: str | None = None
+
+
+class AIQueryTrace(BaseModel):
+    """Text2SQL 的可审计查询链路，供 API、持久化引用和前端渲染复用。"""
+
+    query: str
+    answer: str | None = None
+    slots: list[dict[str, Any]]
+    template: str
+    sql: str
+    parameterized_sql: str | None = None
+    columns: list[dict[str, str]]
+    rows: list[dict[str, Any]]
+    unit: str | None = None
+    unit_note: str | None = None
+    row_count: int
+    truncated: bool
+    stages: list[str]
+    render: dict[str, Any]
 
 
 class AIConversationRead(BaseModel):

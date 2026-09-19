@@ -57,6 +57,8 @@ def test_ai_service_uses_deepseek_model_without_real_network(monkeypatch: pytest
     assert response.model == "deepseek-flash"
     assert FakeClient.last_payload is not None
     assert FakeClient.last_payload["json"]["model"] == "deepseek-flash"
+    assert FakeClient.last_payload["json"]["thinking"] == {"type": "enabled"}
+    assert FakeClient.last_payload["json"].get("response_format") is None
     assert FakeClient.last_payload["json"]["messages"][0]["role"] == "system"
 
 
@@ -84,43 +86,84 @@ def test_ai_message_context_marks_only_verified_attachment_content() -> None:
     assert "尚未读取" not in messages[-1]["content"]
 
 
-def test_ai_business_context_uses_real_dashboard_and_detail_queries(db_session) -> None:
-    from app.modules.ai.service import _build_business_context
-    from app.modules.ai.schema import AIChatRequest
-    from app.modules.system.crud import get_user_by_username
+def test_native_image_payload_skips_document_parser() -> None:
+    from app.modules.ai.service import _build_messages, _build_native_image_part
 
-    user = get_user_by_username(db_session, "system_admin")
-    assert user is not None
-    context, citations = _build_business_context(db_session, user, AIChatRequest(messages=[{"role": "user", "content": "查询库存和采购订单"}]))
+    request = AIChatRequest(messages=[{"role": "user", "content": "请读取图片中的批次号"}], attachments=["label.png"], attachment_file_ids=[12])
+    image_part = _build_native_image_part("label.png", "image/png", b"png-bytes")
 
-    assert context
-    assert "dashboard_overview" in context[0]
-    assert citations[0]["type"] == "business_context"
+    assert image_part is not None
+    messages = _build_messages(request, image_parts=[image_part])
+    content = messages[-1]["content"]
+    assert isinstance(content, list)
+    assert content[0] == {"type": "text", "text": "请读取图片中的批次号"}
+    assert content[1]["type"] == "image_url"
+    assert "data:image/png;base64," in content[1]["image_url"]["url"]
 
 
-def test_ai_business_context_includes_quality_exception_finance_and_supplier_data(db_session) -> None:
-    """系统管理员查询其他业务域时，AI 上下文来自真实只读表且不包含写操作。"""
+def test_ai_business_context_is_not_built_for_queries() -> None:
+    from app.modules.ai import service
 
-    import json
+    assert not hasattr(service, "_build_business_context")
 
-    from app.modules.ai.service import _build_business_context
-    from app.modules.system.crud import get_user_by_username
 
-    user = get_user_by_username(db_session, "system_admin")
-    assert user is not None
-    context, citations = _build_business_context(
-        db_session,
-        user,
-        AIChatRequest(messages=[{"role": "user", "content": "查询质量验收、异常、财务和供应商"}]),
+def test_overdue_delivery_query_has_safe_plan_fallback() -> None:
+    from app.modules.ai.text2sql import _fallback_query_plan
+
+    plan = _fallback_query_plan("查看本周逾期到货")
+    assert plan is not None
+    assert plan.dataset == "deliveries"
+    assert plan.metric == "count"
+    from datetime import date, timedelta
+
+    assert plan.time_field == "expected_arrival_date"
+    assert plan.date_from == date.today() - timedelta(days=date.today().weekday())
+    assert plan.date_to == date.today() - timedelta(days=1)
+    assert plan.filters[0].field == "status"
+    assert plan.filters[0].value == "IN_TRANSIT"
+    assert plan.group_by == "supplier"
+
+
+def test_stream_text_chunks_are_incremental() -> None:
+    from app.modules.ai.service import _stream_text_chunks
+
+    async def collect() -> list[str]:
+        return [chunk async for chunk in _stream_text_chunks("你好，我是化运助手。")]
+
+    chunks = asyncio.run(collect())
+    assert len(chunks) > 1
+    assert "".join(chunks) == "你好，我是化运助手。"
+    assert all(0 < len(chunk) <= 4 for chunk in chunks)
+
+
+def test_ai_chat_routes_business_query_to_text2sql(client: TestClient, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.modules.ai import service
+
+    calls: list[str] = []
+
+    from app.modules.ai.schema import AIQueryTrace
+
+    async def fake_text2sql(*args: object, **_kwargs: object) -> tuple[str, dict[str, object], AIQueryTrace]:
+        calls.append(str(args[2]))
+        trace = AIQueryTrace(query=str(args[2]), slots=[], template="采购订单 · SUM(order_amount)", sql="SELECT ...", columns=[{"key": "supplier", "label": "供应商", "format": "text"}, {"key": "metric_value", "label": "指标值", "format": "amount"}], rows=[{"supplier": "甲公司", "metric_value": "100"}], row_count=1, truncated=False, stages=["execution"], render={"type": "table", "title": "采购订单查询结果", "empty_text": "没有符合条件的数据", "columns": [{"key": "supplier", "label": "供应商", "format": "text"}, {"key": "metric_value", "label": "指标值", "format": "amount"}]})
+        return "查询已通过 Text2SQL 执行，共返回 1 条结果：\n1. 供应商：甲公司；指标值：100", {"type": "text2sql", "source": "实时数据库只读查询", "row_count": 1, "stages": ["execution"], "query_trace": trace.model_dump(mode="json")}, trace
+
+    monkeypatch.setattr(service, "_run_text2sql_for_chat", fake_text2sql)
+    response = client.post(
+        "/api/v1/ai/chat",
+        headers=_login(client, demo_password),
+        json={"messages": [{"role": "user", "content": "查询本月各供应商采购订单总金额"}]},
     )
 
-    assert context
-    payload = json.loads(context[0].split("\n", 1)[1])
-    assert "quality_acceptances" in payload
-    assert "operation_exceptions" in payload
-    assert "finance_reconciliations" in payload
-    assert "suppliers" in payload
-    assert {"quality_acceptances", "operation_exceptions", "finance_reconciliations", "suppliers"}.issubset(set(citations[0]["sections"]))
+    assert response.status_code == 200, response.text
+    assert calls == ["查询本月各供应商采购订单总金额"]
+    assert response.json()["model"] == "text2sql"
+    assert response.json()["citations"][0]["type"] == "text2sql"
+    assert response.json()["user_query"] == "查询本月各供应商采购订单总金额"
+    assert response.json()["answer"].startswith("查询已通过")
+    assert response.json()["query_trace"]["rows"][0]["supplier"] == "甲公司"
+    assert "dashboard_overview" not in response.text
+    assert "recent_purchase_orders" not in response.text
 
 
 def test_ai_conversation_list_requires_login_and_reads_database(client: TestClient, demo_password: str) -> None:
@@ -134,17 +177,14 @@ def test_ai_conversation_list_requires_login_and_reads_database(client: TestClie
 
 def test_ai_chat_persists_conversation_and_messages(client: TestClient, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.modules.ai import service
-    from app.modules.ai.schema import AIChatResponse, AIChatMessage
+    from app.modules.ai.schema import AIQueryTrace
 
-    async def fake_chat(*_args: object, **_kwargs: object) -> AIChatResponse:
-        return AIChatResponse(
-            message=AIChatMessage(role="assistant", content="已基于当前业务数据完成分析。"),
-            conversation_id=0,
-            model="deepseek-flash",
-            provider="openai_compatible",
-        )
+    async def fake_text2sql(*args: object, **_kwargs: object) -> tuple[str, dict[str, object], AIQueryTrace]:
+        assert args[2] == "查询采购订单"
+        trace = AIQueryTrace(query=str(args[2]), slots=[], template="采购订单 · COUNT", sql="SELECT ...", columns=[{"key": "metric_value", "label": "指标值", "format": "text"}], rows=[], row_count=0, truncated=False, stages=["execution"], render={"type": "table", "title": "采购订单查询结果", "empty_text": "没有符合条件的数据", "columns": [{"key": "metric_value", "label": "指标值", "format": "text"}]})
+        return "查询已通过 Text2SQL 执行，但没有找到符合条件的数据。", {"type": "text2sql", "source": "实时数据库只读查询", "row_count": 0, "stages": ["execution"], "query_trace": trace.model_dump(mode="json")}, trace
 
-    monkeypatch.setattr(service, "chat", fake_chat)
+    monkeypatch.setattr(service, "_run_text2sql_for_chat", fake_text2sql)
     headers = _login(client, demo_password)
     response = client.post("/api/v1/ai/chat", headers=headers, json={"messages": [{"role": "user", "content": "查询采购订单"}]})
 

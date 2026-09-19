@@ -6,6 +6,7 @@ from pathlib import Path
 
 MAX_PARSE_BYTES = 10 * 1024 * 1024
 MAX_TEXT_CHARS = 40_000
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 MAX_REFERENCE_COUNT = 100
 
 
@@ -54,7 +55,10 @@ def _parse_pdf(content: bytes) -> ParsedFile:
         if page_text.strip():
             chunks.append(f"[第 {page_number} 页]\n{page_text}")
             references.append({"type": "page", "page": page_number})
-    return _result("pypdf", "\n\n".join(chunks), references)
+    result = _result("pypdf", "\n\n".join(chunks), references)
+    if result.status == "EMPTY":
+        return ParsedFile(status="OCR_REQUIRED", text="", parser="mineru-ocr-required", references=[], error="PDF没有可提取的文本，需要启用 MinerU 进行 OCR")
+    return result
 
 
 def _parse_docx(content: bytes) -> ParsedFile:
@@ -125,6 +129,8 @@ def parse_file_content(file_name: str, mime_type: str, content: bytes) -> Parsed
     extension = Path(file_name).suffix.lower()
     if extension in {".txt", ".csv", ".md", ".json"} or mime_type.startswith("text/"):
         return _parse_text(content, extension.lstrip(".") or "text")
+    if extension in IMAGE_EXTENSIONS or mime_type.startswith("image/"):
+        return ParsedFile(status="OCR_REQUIRED", text="", parser="mineru-ocr-required", references=[], error="图片需要启用 MinerU 进行 OCR")
     if extension == ".pdf" or mime_type == "application/pdf":
         return _parse_pdf(content)
     if extension == ".docx":

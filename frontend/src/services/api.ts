@@ -13,6 +13,44 @@ export interface AIChatMessage {
   content: string;
 }
 
+export interface AIQuerySlot {
+  name: string;
+  label: string;
+  value: unknown;
+  display_value: string;
+  status: "filled" | "empty";
+}
+
+export interface AIQueryColumn {
+  key: string;
+  label: string;
+  format: "text" | "amount";
+}
+
+export interface AIQueryTrace {
+  query: string;
+  answer?: string | null;
+  slots: AIQuerySlot[];
+  template: string;
+  sql: string;
+  parameterized_sql?: string;
+  columns: AIQueryColumn[];
+  rows: Array<Record<string, unknown>>;
+  unit?: string | null;
+  unit_note?: string | null;
+  row_count: number;
+  truncated: boolean;
+  stages: string[];
+  render: {
+    type: "table";
+    title: string;
+    empty_text: string;
+    columns: AIQueryColumn[];
+    unit?: string | null;
+    unit_note?: string | null;
+  };
+}
+
 export interface AIChatResponse {
   message: AIChatMessage;
   conversation_id: number;
@@ -20,6 +58,10 @@ export interface AIChatResponse {
   provider: string;
   usage?: Record<string, number> | null;
   citations?: unknown[] | null;
+  query_trace?: AIQueryTrace | null;
+  query_slots?: AIQuerySlot[] | null;
+  user_query?: string | null;
+  answer?: string | null;
 }
 
 export interface UploadedFileMetadata {
@@ -116,7 +158,7 @@ export function sendAIChat(token: string, messages: AIChatMessage[], attachments
 
 export type AIStreamEvent =
   | { type: "delta"; content: string }
-  | { type: "done"; conversation_id: number; model: string; provider: string; citations?: unknown[] | null }
+  | { type: "done"; conversation_id: number; model: string; provider: string; citations?: unknown[] | null; query_trace?: AIQueryTrace | null; query_slots?: AIQuerySlot[] | null; user_query?: string | null; answer?: string | null }
   | { type: "error"; message: string };
 
 export async function streamAIChat(
@@ -143,13 +185,17 @@ export async function streamAIChat(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let sawDone = false;
   const consume = (record: string) => {
     const eventName = record.match(/^event:\s*(\w+)/m)?.[1] || "message";
     const dataLine = record.split("\n").find((line) => line.startsWith("data:"));
     if (!dataLine) return;
     const data = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
     if (eventName === "delta" && typeof data.content === "string") onEvent({ type: "delta", content: data.content });
-    else if (eventName === "done" && typeof data.conversation_id === "number" && typeof data.model === "string" && typeof data.provider === "string") onEvent({ type: "done", conversation_id: data.conversation_id, model: data.model, provider: data.provider, citations: Array.isArray(data.citations) ? data.citations : null });
+    else if (eventName === "done" && typeof data.conversation_id === "number" && typeof data.model === "string" && typeof data.provider === "string") {
+      sawDone = true;
+      onEvent({ type: "done", conversation_id: data.conversation_id, model: data.model, provider: data.provider, citations: Array.isArray(data.citations) ? data.citations : null, query_trace: data.query_trace && typeof data.query_trace === "object" ? data.query_trace as AIQueryTrace : null, query_slots: Array.isArray(data.query_slots) ? data.query_slots as AIQuerySlot[] : null, user_query: typeof data.user_query === "string" ? data.user_query : null, answer: typeof data.answer === "string" ? data.answer : null });
+    }
     else if (eventName === "error") onEvent({ type: "error", message: typeof data.message === "string" ? data.message : "AI 服务暂时不可用" });
   };
   while (true) {
@@ -161,6 +207,7 @@ export async function streamAIChat(
     if (done) break;
   }
   if (buffer.trim()) consume(buffer);
+  if (!sawDone) throw new Error("AI 响应未完整返回，请重试");
 }
 
 export function getAIConversations(token: string) {
@@ -169,6 +216,10 @@ export function getAIConversations(token: string) {
 
 export function getAIConversationMessages(token: string, conversationId: number) {
   return request<{ items: AIConversationMessage[]; total: number }>(`/ai/conversations/${conversationId}/messages?limit=200`, {}, token);
+}
+
+export function deleteAIConversation(token: string, conversationId: number) {
+  return request<{ deleted: boolean; conversation_id: number }>(`/ai/conversations/${conversationId}`, { method: "DELETE" }, token);
 }
 
 export function getChemicals(token: string, keyword = "", status = "", page = 1, pageSize = 8) {

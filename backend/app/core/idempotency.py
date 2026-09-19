@@ -55,6 +55,10 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         record = None
         try:
             record = db.query(IdempotencyRecord).filter(IdempotencyRecord.actor_key == actor_key, IdempotencyRecord.idempotency_key == key).first()
+            if record is not None and record.expires_at <= datetime.now():
+                db.delete(record)
+                db.commit()
+                record = None
             if record is not None:
                 return self._replay_existing(record, request, request_hash, key)
             record = IdempotencyRecord(idempotency_key=key, actor_key=actor_key, method=request.method, path=request.url.path, request_hash=request_hash, status="IN_PROGRESS", expires_at=datetime.now() + timedelta(hours=24))

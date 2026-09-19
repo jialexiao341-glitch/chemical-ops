@@ -1,7 +1,7 @@
 """MinerU v4 精确解析客户端。
 
 官方接口采用异步流程：申请签名上传地址、PUT 原始文件、轮询任务并下载结果压缩包。
-本模块只负责协议和结果转换，不负责 OCR；调用方可以在业务层决定是否启用远程解析。
+本模块负责 MinerU 协议、结果转换以及 PDF/图片的 OCR 解析；调用方通过 MinerU 开关决定是否启用远程服务。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ class MinerUParseError(RuntimeError):
     """MinerU 请求、任务或结果格式异常。"""
 
 
-SUPPORTED_REMOTE_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
+SUPPORTED_REMOTE_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg"}
 
 
 def _endpoint(base_url: str, path: str) -> str:
@@ -96,6 +96,7 @@ def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFil
     if not settings.mineru_api_key.strip():
         raise MinerUParseError("MinerU API key 未配置")
     extension = Path(file_name).suffix.lower()
+    is_image = extension in {".png", ".jpg", ".jpeg"}
     if extension not in SUPPORTED_REMOTE_EXTENSIONS:
         raise MinerUParseError(f"MinerU 暂不处理 {extension or '未知'} 文件")
 
@@ -157,7 +158,7 @@ def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFil
                         status=status,
                         text=text,
                         parser=f"mineru-v4-{settings.mineru_model_version}",
-                        references=[{"type": "mineru", "locator": "full.md", "batch_id": data["batch_id"]}],
+                        references=[{"type": "mineru", "locator": "full.md", "batch_id": data["batch_id"], "ocr": is_image}],
                     )
                 if state == "failed":
                     raise MinerUParseError("MinerU 文档解析失败")

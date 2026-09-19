@@ -1,7 +1,14 @@
 """统一 Idempotency-Key 中间件测试。"""
 
+from datetime import datetime, timedelta
+from hashlib import sha256
+from uuid import uuid4
+
 import pytest
 from fastapi.testclient import TestClient
+
+from app.core.db import SessionLocal
+from app.modules.system.idempotency_model import IdempotencyRecord
 
 from .conftest import login
 
@@ -42,3 +49,32 @@ def test_idempotency_can_be_enabled_as_a_required_policy(client: TestClient, dem
     response = client.post("/api/v1/notifications/read-all", headers=headers)
     assert response.status_code == 428
     assert "必须携带 Idempotency-Key" in response.json()["detail"]
+
+def test_expired_idempotency_record_can_be_reused(client: TestClient, demo_password: str) -> None:
+    """过期幂等记录会被清理，同一键可以建立新的请求。"""
+
+    headers = login(client, "system_admin", demo_password)
+    key = f"TEST-IDEMPOTENCY-EXPIRED-{uuid4().hex}"
+    headers["Idempotency-Key"] = key
+    actor_key = sha256(headers["Authorization"].encode("utf-8")).hexdigest()
+    db = SessionLocal()
+    try:
+        db.add(
+            IdempotencyRecord(
+                idempotency_key=key,
+                actor_key=actor_key,
+                method="POST",
+                path="/api/v1/notifications/read-all",
+                request_hash=sha256(b"").hexdigest(),
+                status="COMPLETED",
+                response_status=409,
+                response_body={"detail": "过期旧响应"},
+                expires_at=datetime.now() - timedelta(minutes=1),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/api/v1/notifications/read-all", headers=headers)
+    assert response.status_code == 200, response.text
