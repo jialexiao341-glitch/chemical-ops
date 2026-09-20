@@ -142,7 +142,16 @@ function LoginPage({ onLogin }: { onLogin: (user: string, password: string) => P
         <div className="aside-orbit orbit-a" /><div className="aside-orbit orbit-b" />
         <div className="molecule molecule-a"><span /><span /><span /></div>
         <div className="molecule molecule-b"><span /><span /><span /><span /></div>
-        <div className="login-aside-content"><p className="eyebrow">运营中心 / 01</p><h2>数据稳定，<br /><span>决策更快。</span></h2><p>从化学品主数据到库存预警，化学品运营平台把关键动作放在同一张运营地图上。</p><div className="aside-status"><span className="status-dot" />系统服务已准备就绪</div></div>
+        <div className="login-aside-content"><p className="eyebrow">运营中心 / 01</p><h2>数据稳定，<br /><span>决策更快。</span></h2><p>从化学品主数据到库存预警，化学品运营平台把关键动作放在同一张运营地图上。</p></div>
+        <div className="login-aside-footer">
+          <p className="login-aside-slogan"><span>SAFER CHEMISTRY</span><span>BRIGHTER TOMORROW</span></p>
+          <div className="login-benefits" aria-label="平台能力">
+            <span><Icon name="activity" size={18} /><b>高效<br />运行</b></span>
+            <span><Icon name="shield" size={18} /><b>安全<br />合规</b></span>
+            <span><Icon name="beaker" size={18} /><b>低碳<br />运营</b></span>
+            <span><Icon name="users" size={18} /><b>协同<br />作业</b></span>
+          </div>
+        </div>
       </aside>
     </main>
   );

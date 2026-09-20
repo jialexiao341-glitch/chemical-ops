@@ -303,9 +303,29 @@ body { background: var(--canvas); }
 .login-hint { margin-top: 20px; font-size: 11px; }
 .form-error { margin-top: 2px; border-radius: 9px; font-size: 12px; }
 
+/* Login lower-left refinement: keep the slogan and capability strip independent. */
+.login-aside-content { padding-bottom: 142px; }
+.login-aside-footer { position: absolute; z-index: 3; right: clamp(38px, 8vw, 120px); bottom: 34px; left: clamp(38px, 8vw, 120px); display: grid; gap: 13px; }
+.login-aside-slogan { display: grid; gap: 2px; width: fit-content; margin: 0; padding-top: 10px; border-top: 2px solid #31d4c0; color: #8fb5bf; font: 10px/1.55 "IBM Plex Sans Condensed", "Noto Sans SC", sans-serif; letter-spacing: .28em; }
+.login-aside-slogan span { display: block; }
+.login-benefits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-height: 80px; padding: 12px 10px; border: 1px solid rgba(76, 186, 183, .3); border-radius: 15px; background: rgba(7, 42, 54, .34); }
+.login-benefits > span { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; color: #b9d4d9; font-size: 11px; line-height: 1.35; }
+.login-benefits > span + span { border-left: 1px solid rgba(125, 205, 198, .2); }
+.login-benefits svg { flex: 0 0 auto; color: #2ed6c0; }
+.login-benefits b { font-size: 11px; font-weight: 600; }
+
 @media (max-width: 1120px) {
   .content-wrap { padding-right: 26px; padding-left: 26px; }
   .global-search { width: min(290px, 28vw); }
+}
+
+@media (max-width: 980px) and (min-width: 821px) {
+  .login-aside-footer { right: 28px; bottom: 28px; left: 28px; gap: 10px; }
+  .login-benefits { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 0; padding: 10px 8px; }
+  .login-benefits > span { min-height: 31px; font-size: 10px; }
+  .login-benefits > span:nth-child(3) { border-left: 0; }
+  .login-benefits > span:nth-child(n + 3) { border-top: 1px solid rgba(125, 205, 198, .2); padding-top: 8px; }
+  .login-benefits b { font-size: 10px; }
 }
 
 @media (max-width: 820px) {
