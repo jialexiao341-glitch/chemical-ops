@@ -92,7 +92,7 @@ const menuGroups = [
   {
     title: "业务支撑",
     items: [
-      { key: "inventory" as ViewKey, label: "库存台账", icon: "database" as IconName },
+      { key: "inventory" as ViewKey, label: "库存与质量", icon: "database" as IconName },
       { key: "logistics" as ViewKey, label: "询价与供应", icon: "users" as IconName },
       { key: "finance" as ViewKey, label: "财务管理", icon: "database" as IconName },
       { key: "inventory-ops" as ViewKey, label: "仓储作业", icon: "box" as IconName },
@@ -692,6 +692,41 @@ function InventoryPage({ token }: { token: string }) {
   </>;
 }
 
+function InventoryReferencePage({ token }: { token: string }) {
+  const [balances, setBalances] = useState<InventoryBalance[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [qualityItems, setQualityItems] = useState<QualityAcceptance[]>([]);
+  const [productId, setProductId] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedBatch, setSelectedBatch] = useState<InventoryBalance | null>(null);
+  function unitLabel(unitId: number) { return units.find((item) => item.id === unitId)?.unit_name || "吨"; }
+  async function loadReferenceData() {
+    setLoading(true); setError("");
+    try {
+      const [inventoryPage, qualityPage] = await Promise.all([getInventoryBalances(token, productId, warehouseId, 1, 100), getQualityAcceptances(token, "", 1, 100)]);
+      setBalances(inventoryPage.items); setQualityItems(qualityPage.items);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "库存与质量数据加载失败"); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void loadReferenceData(); void getUnits(token).then(setUnits).catch(() => setUnits([])); }, [token]);
+  const totalQuantity = balances.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const frozenCount = balances.filter((item) => item.status === "FROZEN").length;
+  const passedCount = qualityItems.filter((item) => item.result === "PASSED").length;
+  const partialCount = qualityItems.filter((item) => item.result === "PARTIAL").length;
+  const failedCount = qualityItems.filter((item) => item.result === "FAILED").length;
+  const qualityTotal = qualityItems.length || 1;
+  return <>
+    <div className="page-heading inventory-heading"><div><p className="eyebrow">业务运营 / 仓储</p><h1>库存与质量</h1><p>掌握库存状态与质量风险，保障供应连续性与产品合规。</p></div></div>
+    <div className="inventory-filter-bar"><label>仓库<select defaultValue="全部仓库"><option>全部仓库</option></select></label><label>物料类别<select defaultValue="全部"><option>全部</option></select></label><label>物料<select defaultValue="请选择物料"><option>请选择物料</option></select></label><label>日期范围<input value="2024-10-01  ~  2024-10-31" readOnly /></label><button className="primary-button" onClick={() => void loadReferenceData()}>查询</button><button className="outline-button" onClick={() => { setProductId(""); setWarehouseId(""); void loadReferenceData(); }}>重置</button></div>
+    <div className="inventory-summary-grid"><article><span className="summary-icon teal"><Icon name="box" size={21} /></span><span><small>可用库存</small><strong>{formatQuantity(totalQuantity)} 吨</strong><em className="positive">↑ 2.3% <b>较上月</b></em></span></article><article><span className="summary-icon amber"><Icon name="warning" size={21} /></span><span><small>低于安全库存</small><strong>{frozenCount} 个物料</strong><em>↑ {frozenCount} <b>较上月</b></em></span></article><article><span className="summary-icon red"><Icon name="clock" size={21} /></span><span><small>30天内到期</small><strong>{frozenCount} 批次</strong><em>↑ 2 <b>较上月</b></em></span></article><article><span className="summary-icon blue"><Icon name="file" size={21} /></span><span><small>待验收</small><strong>{qualityItems.filter((item) => item.result !== "PASSED").length} 批次</strong><em className="positive">↓ 4 <b>较上月</b></em></span></article></div>
+    <div className="inventory-reference-grid"><section className="surface inventory-table-card"><div className="section-heading"><h2>仓库库存明细</h2><button className="text-button" onClick={() => void loadReferenceData()}>查看全部 <span>→</span></button></div>{error && <div className="inline-error"><Icon name="warning" size={16} />{error}</div>}<div className="table-scroll"><table><thead><tr><th>物料</th><th>批次</th><th>仓库</th><th>可用量</th><th>安全库存</th><th>有效期</th><th>风险状态</th><th>操作</th></tr></thead><tbody>{loading ? <tr><td colSpan={8} className="table-empty">正在加载库存数据…</td></tr> : balances.length === 0 ? <tr><td colSpan={8} className="table-empty">暂无库存余额</td></tr> : balances.slice(0, 8).map((item) => <tr key={item.id}><td className="material-name">物料 #{item.product_id}</td><td className="mono-text">批次 #{item.batch_id}</td><td>仓库 #{item.warehouse_id}</td><td>{formatQuantityWithUnit(item.quantity, item.unit_id, units)}</td><td>{formatQuantityWithUnit(item.locked_quantity, item.unit_id, units)}</td><td>2025-10-08</td><td><span className={`status-pill ${item.status === "FROZEN" ? "inactive" : "active"}`}><i />{item.status === "FROZEN" ? "低于安全库存" : "正常"}</span></td><td><button className="row-action" onClick={() => setSelectedBatch(item)}>详情</button></td></tr>)}</tbody></table></div></section><aside className="surface inventory-quality-panel"><div className="section-heading"><h2>质量检验结果</h2><span className="report-date">近30天⌄</span></div><div className="quality-donut" style={{ background: `conic-gradient(#0c8d91 0 ${passedCount / qualityTotal * 100}%, #f5b43d ${passedCount / qualityTotal * 100}% ${(passedCount + partialCount) / qualityTotal * 100}%, #ef6b69 ${(passedCount + partialCount) / qualityTotal * 100}% 100%)` }}><span><strong>{qualityItems.length}</strong><small>批次</small></span></div><div className="quality-legend"><span><i className="passed" />合格 <b>{passedCount}</b> <em>({Math.round(passedCount / qualityTotal * 100)}%)</em></span><span><i className="partial" />部分合格 <b>{partialCount}</b> <em>({Math.round(partialCount / qualityTotal * 100)}%)</em></span><span><i className="failed" />不合格 <b>{failedCount}</b> <em>({Math.round(failedCount / qualityTotal * 100)}%)</em></span></div><div className="quality-mini-chart"><h3>近6个月质量趋势</h3><div>{[42, 58, 34, 66, 54, 61].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div></div></aside></div>
+    <section className="surface inventory-risk-panel"><div className="section-heading"><h2>风险待办清单</h2><button className="text-button">查看全部 <span>→</span></button></div><div className="risk-tabs"><button className="selected">30天内到期（{frozenCount}）</button><button>冻结库存（{frozenCount}）</button><button>逾期未检（{qualityItems.filter((item) => item.result !== "PASSED").length}）</button></div><div className="risk-items">{balances.slice(0, 5).map((item) => <div key={item.id}><span className="risk-type">◷</span><strong>物料 #{item.product_id}</strong><span>批次 #{item.batch_id}</span><b onClick={() => setSelectedBatch(item)}>处理</b></div>)}</div></section>
+    {selectedBatch && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedBatch(null); }}><section className="modal surface"><div className="section-heading"><div><p className="eyebrow">批次详情</p><h2>物料 #{selectedBatch.product_id}</h2></div><button className="icon-button" aria-label="关闭批次详情" onClick={() => setSelectedBatch(null)}>×</button></div><div className="account-info-grid"><span>批次<strong>#{selectedBatch.batch_id}</strong></span><span>仓库<strong>#{selectedBatch.warehouse_id}</strong></span><span>可用量<strong>{formatQuantityWithUnit(selectedBatch.quantity, selectedBatch.unit_id, units)}</strong></span><span>锁定量<strong>{formatQuantityWithUnit(selectedBatch.locked_quantity, selectedBatch.unit_id, units)}</strong></span></div><div className="modal-actions"><button className="primary-button" onClick={() => setSelectedBatch(null)}>知道了</button></div></section></div>}
+  </>;
+}
+
 function QualityPage({ token }: { token: string }) {
   const [items, setItems] = useState<QualityAcceptance[]>([]);
   const [result, setResult] = useState("");
@@ -750,7 +785,7 @@ export default function App() {
 
   async function handleLogin(username: string, password: string) { const result = await login(username, password); localStorage.setItem("chemicalops_token", result.access_token); setToken(result.access_token); }
   function handleLogout() { localStorage.removeItem("chemicalops_token"); setToken(""); setUser(null); setActiveView("dashboard"); }
-  const page = useMemo(() => { if (activeView === "dashboard" && user) return <Dashboard user={user} token={token} apiOnline={apiOnline} onSelect={setActiveView} />; if (activeView === "chemicals") return <ChemicalsPage token={token} />; if (activeView === "suppliers") return <SupplierPage token={token} />; if (activeView === "products") return <ProductPage token={token} />; if (activeView === "purchases") return <PurchasePage token={token} />; if (activeView === "deliveries") return <DeliveriesPage token={token} />; if (activeView === "inbounds") return <InboundsPage token={token} />; if (activeView === "inventory") return <InventoryPage token={token} />; if (activeView === "quality") return <QualityPage token={token} />; if (activeView === "users") return <UsersPage token={token} />; if (activeView === "finance" || activeView === "logistics" || activeView === "inventory-ops" || activeView === "exceptions" || activeView === "files" || activeView === "supplier-portal" || activeView === "system") return <BusinessModulesPage token={token} section={activeView} />; return <ComingSoon />; }, [activeView, apiOnline, token, user]);
+  const page = useMemo(() => { if (activeView === "dashboard" && user) return <Dashboard user={user} token={token} apiOnline={apiOnline} onSelect={setActiveView} />; if (activeView === "chemicals") return <ChemicalsPage token={token} />; if (activeView === "suppliers") return <SupplierPage token={token} />; if (activeView === "products") return <ProductPage token={token} />; if (activeView === "purchases") return <PurchasePage token={token} />; if (activeView === "deliveries") return <DeliveriesPage token={token} />; if (activeView === "inbounds") return <InboundsPage token={token} />; if (activeView === "inventory") return <InventoryReferencePage token={token} />; if (activeView === "quality") return <QualityPage token={token} />; if (activeView === "users") return <UsersPage token={token} />; if (activeView === "finance" || activeView === "logistics" || activeView === "inventory-ops" || activeView === "exceptions" || activeView === "files" || activeView === "supplier-portal" || activeView === "system") return <BusinessModulesPage token={token} section={activeView} />; return <ComingSoon />; }, [activeView, apiOnline, token, user]);
 
   if (authLoading) return <div className="loading-screen"><span className="loading-ring" /><p>正在连接系统…</p></div>;
   if (!user) return <LoginPage onLogin={async (username, password) => { const result = await login(username, password); localStorage.setItem("chemicalops_token", result.access_token); setToken(result.access_token); }} />;
