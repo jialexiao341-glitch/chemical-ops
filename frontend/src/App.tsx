@@ -124,11 +124,11 @@ function LoginPage({ onLogin }: { onLogin: (user: string, password: string) => P
       <div className="login-decoration decoration-one" />
       <div className="login-decoration decoration-two" />
       <section className="login-panel">
-        <div className="login-brand"><img className="brand-mark brand-logo" src="/chemicalops-icon.svg" alt="化学品运营" /><span>化学品<span>运营</span></span></div>
+        <div className="login-brand"><img className="brand-mark brand-logo" src="/chemicalops-icon.svg" alt="ChemicalOps" /><span>Chemical<span>Ops</span></span></div>
         <div className="login-intro">
-          <p className="eyebrow">化学品运营平台</p>
-          <h1>让每一批化学品，<br /><em>都可追溯、可控、可决策。</em></h1>
-          <p className="login-copy">连接采购、仓储、质量与供应商数据，构建面向化学品业务的运营控制台。</p>
+          <p className="eyebrow">CHEMICALOPS / WORKSPACE</p>
+          <h1>进入化运运营中心</h1>
+          <p className="login-copy">连接采购、仓储、质量与供应商数据，做出更快、更稳的运营决策。</p>
         </div>
         <form onSubmit={submit} className="login-form">
           <label>登录账号<input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入账号" autoComplete="username" /></label>
@@ -138,6 +138,7 @@ function LoginPage({ onLogin }: { onLogin: (user: string, password: string) => P
         </form>
       </section>
       <aside className="login-aside">
+        <div className="login-aside-brand"><img className="brand-mark brand-logo" src="/chemicalops-icon.svg" alt="ChemicalOps" /><span>Chemical<span>Ops</span></span></div>
         <div className="aside-orbit orbit-a" /><div className="aside-orbit orbit-b" />
         <div className="molecule molecule-a"><span /><span /><span /></div>
         <div className="molecule molecule-b"><span /><span /><span /><span /></div>
@@ -151,7 +152,7 @@ function Sidebar({ activeView, onSelect, user }: { activeView: ViewKey; onSelect
   const canUseSupplierPortal = user.role_codes.includes("SUPPLIER_PORTAL") && user.permission_codes.includes("supplier.portal.read");
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand"><img className="brand-mark brand-logo" src="/chemicalops-icon.svg" alt="化学品运营" /><span>化学品<span>运营</span></span></div>
+      <div className="sidebar-brand"><img className="brand-mark brand-logo" src="/chemicalops-icon.svg" alt="ChemicalOps" /><span>Chemical<span>Ops</span></span></div>
       <div className="workspace-switch"><span className="workspace-icon">C</span><span><strong>化学品运营中心</strong><small>主工作区</small></span><Icon name="chevron" size={15} /></div>
       <nav className="sidebar-nav">
         {menuGroups.map((group) => <div className="nav-group" key={group.title}><div className="nav-group-title">{group.title}</div>{group.items.filter((item) => item.key !== "supplier-portal" || canUseSupplierPortal).map((item) => <button key={`${group.title}-${item.label}`} className={`nav-item ${activeView === item.key && item.key !== "coming-soon" ? "active" : ""}`} onClick={() => onSelect(item.key)}><Icon name={item.icon} size={17} /><span>{item.label}</span></button>)}</div>)}
@@ -389,7 +390,7 @@ function Dashboard({ user, token, apiOnline, onSelect }: { user: CurrentUser; to
   const inventoryCostRows: BarChartRow[] = report?.inventory_costs.slice(0, 5).map((row) => ({ id: row.product_id, label: row.product_name, value: Number(row.outbound_cost), detail: `出库 ${formatQuantity(row.outbound_quantity)}`, tone: "amber" })) || [];
   const dataModeLabel = systemStatus?.data_mode === "demo" ? "演示环境" : systemStatus?.data_mode === "production" ? "生产环境" : "环境未知";
   return <>
-    <div className="page-heading"><div><p className="eyebrow">{nowLabel}</p><h1>运营总览</h1><p>早上好，{greeting}。这里是今天的业务脉搏。</p></div><div className="dashboard-heading-actions"><span className="data-source-badge" title="指标来自当前数据库，不代表已接入生产业务系统；页面每 60 秒自动同步"><i className="status-dot" />数据库实时聚合 · {dataModeLabel} · 自动同步 60 秒{lastSyncedAt ? ` · ${formatDateTime(lastSyncedAt)}` : ""}</span><button className="outline-button" onClick={() => void loadDashboard()} disabled={dashboardLoading}>{dashboardLoading ? "同步中…" : "刷新数据"}<span aria-hidden="true">↻</span></button><button className="outline-button" onClick={() => onSelect("chemicals")}><Icon name="database" size={16} />查看化学品台账</button></div></div>
+    <div className="page-heading"><div><p className="eyebrow">{nowLabel}</p><h1>运营总览</h1><p>实时掌握采购、到货、库存与质量状态。</p></div><div className="dashboard-heading-actions"><span className="data-source-badge" title="指标来自当前数据库"> <i className="status-dot" />实时数据 · {dataModeLabel}</span><button className="outline-button" onClick={() => void loadDashboard()} disabled={dashboardLoading}>{dashboardLoading ? "同步中…" : "刷新数据"}<span aria-hidden="true">↻</span></button><button className="outline-button" onClick={() => onSelect("chemicals")}><Icon name="database" size={16} />查看台账</button></div></div>
     {overviewError && <div className="inline-error"><Icon name="warning" size={16} />{overviewError}</div>}<div className="metrics-grid">
       <Metric icon="beaker" label="库存总量" value={inventoryMetric()} change="实时" caption={inventoryCaption()} tone="green" />
       <Metric icon="warning" label="逾期到货" value={overview ? String(overview.deliveries_overdue) : "—"} change="实时" caption="待处理" tone="amber" />
@@ -744,7 +745,7 @@ export default function App() {
 
   if (authLoading) return <div className="loading-screen"><span className="loading-ring" /><p>正在连接系统…</p></div>;
   if (!user) return <LoginPage onLogin={async (username, password) => { const result = await login(username, password); localStorage.setItem("chemicalops_token", result.access_token); setToken(result.access_token); }} />;
-  return <div className="app-shell"><Sidebar activeView={activeView} onSelect={setActiveView} user={user} /><main className="main-content"><header className="topbar"><button className="mobile-menu"><Icon name="menu" size={20} /></button><div className="breadcrumbs"><span>化学品运营中心</span><b>/</b><strong>{activeView === "dashboard" ? "运营总览" : activeView === "chemicals" ? "化学品管理" : activeView === "suppliers" ? "供应商管理" : activeView === "products" ? "产品与包装" : activeView === "purchases" ? "采购申请与订单" : activeView === "deliveries" ? "到货与收货" : activeView === "quality" ? "质量验收" : activeView === "inbounds" ? "库存入库" : activeView === "inventory" ? "库存台账" : activeView === "users" ? "用户与权限" : activeView === "finance" ? "财务管理" : activeView === "logistics" ? "询价与供应" : activeView === "inventory-ops" ? "仓储作业" : activeView === "exceptions" ? "异常与通知" : activeView === "files" ? "文件与附件" : activeView === "supplier-portal" ? "供应商门户" : activeView === "system" ? "组织与权限" : "模块接入中"}</strong></div><div className="topbar-actions"><div className="global-search"><Icon name="search" size={17} /><span>搜索化学品、供应商、订单…</span><kbd>快捷键</kbd></div><button className="icon-button" aria-label="查看通知" onClick={() => setActiveView("exceptions")}><Icon name="warning" size={18} />{unreadCount > 0 && <span className="notification-dot">{unreadCount > 99 ? "99+" : unreadCount}</span>}</button><AccountMenu user={user} token={token} onUserUpdate={setUser} onLogout={handleLogout} /></div></header><div className="content-wrap">{page}</div></main><AIFloatingAssistant token={token} /></div>;
+  return <div className="app-shell"><Sidebar activeView={activeView} onSelect={setActiveView} user={user} /><main className="main-content"><header className="topbar"><button className="mobile-menu" aria-label="打开导航"><Icon name="menu" size={20} /></button><div className="breadcrumbs"><span>ChemicalOps</span><b>/</b><strong>{activeView === "dashboard" ? "运营总览" : activeView === "chemicals" ? "化学品管理" : activeView === "suppliers" ? "供应商管理" : activeView === "products" ? "产品与包装" : activeView === "purchases" ? "采购申请与订单" : activeView === "deliveries" ? "到货与收货" : activeView === "quality" ? "质量验收" : activeView === "inbounds" ? "库存入库" : activeView === "inventory" ? "库存台账" : activeView === "users" ? "用户与权限" : activeView === "finance" ? "财务管理" : activeView === "logistics" ? "询价与供应" : activeView === "inventory-ops" ? "仓储作业" : activeView === "exceptions" ? "异常与通知" : activeView === "files" ? "文件与附件" : activeView === "supplier-portal" ? "供应商门户" : activeView === "system" ? "组织与权限" : "模块接入中"}</strong></div><div className="topbar-actions"><div className="global-search"><Icon name="search" size={17} /><span>搜索化学品、供应商、订单…</span><kbd>⌘ K</kbd></div><button className="icon-button" aria-label="查看通知" onClick={() => setActiveView("exceptions")}><Icon name="warning" size={18} />{unreadCount > 0 && <span className="notification-dot">{unreadCount > 99 ? "99+" : unreadCount}</span>}</button><AccountMenu user={user} token={token} onUserUpdate={setUser} onLogout={handleLogout} /></div></header><div className="content-wrap">{page}</div></main><AIFloatingAssistant token={token} /></div>;
 }
 
 
