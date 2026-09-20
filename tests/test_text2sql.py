@@ -42,6 +42,32 @@ def test_text2sql_plan_rejects_unknown_fields():
         build_statement(QueryPlan(dataset="purchase_orders", metric="count", filters=[QueryFilter(field="password_hash", value="x")]))
 
 
+def test_text2sql_supports_purchase_request_budget_and_region_filters():
+    statement = build_statement(
+        QueryPlan(
+            dataset="purchase_requests",
+            metric="amount",
+            group_by="status",
+            filters=[QueryFilter(field="priority", value="URGENT")],
+        )
+    )
+    compiled = str(statement.compile())
+    assert "purchase_requests" in compiled
+    assert "budget_amount" in compiled
+    assert "priority" in compiled
+
+
+def test_follow_up_plan_inherits_safe_fields_and_updates_explicit_conditions():
+    previous = QueryPlan(dataset="purchase_orders", metric="amount", group_by="supplier", limit=20)
+    merged = text2sql._merge_follow_up_plan("只看华东供应商，前5名，按正序", previous)
+
+    assert merged.dataset == "purchase_orders"
+    assert merged.metric == "amount"
+    assert merged.limit == 5
+    assert merged.order == "asc"
+    assert merged.filters[-1].field == "region"
+
+
 def test_text2sql_normalizes_markdown_json_and_common_aliases(monkeypatch):
     async def fake_chat(*_args, **_kwargs):
         content = "规划结果：\n" + "`" * 3 + "json\n" + '{"dataset":"purchase_order","metric":"sum_amount","group_by":"supplier_name","filters":null,"order":"降序","top_n":"10"}' + "\n" + "`" * 3

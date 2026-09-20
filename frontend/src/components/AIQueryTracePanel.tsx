@@ -13,6 +13,24 @@ function jsonValue(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function BarChart({ trace }: { trace: AIQueryTrace }) {
+  const visualization = trace.render.visualization;
+  if (!visualization || visualization.type !== "bar" || !trace.rows.length) return null;
+  const values = trace.rows.map((row) => Number(row[visualization.value])).filter((value) => Number.isFinite(value));
+  const max = Math.max(...values, 1);
+  return (
+    <div className="ai-query-chart" aria-label={visualization.title}>
+      <div className="ai-query-chart-title">{visualization.title}</div>
+      {trace.rows.map((row, index) => {
+        const value = Number(row[visualization.value]);
+        if (!Number.isFinite(value)) return null;
+        const label = String(row[visualization.category] ?? "—");
+        return <div className="ai-query-chart-row" key={`${label}-${index}`}><span title={label}>{label}</span><div className="ai-query-chart-track"><i style={{ width: `${Math.max((value / max) * 100, 2)}%` }} /></div><b>{formatCell(value, trace.render.columns.find((column) => column.key === visualization.value) || { key: visualization.value, label: visualization.value, format: "text" })}</b></div>;
+      })}
+    </div>
+  );
+}
+
 export default function AIQueryTracePanel({ trace }: { trace: AIQueryTrace }) {
   const columns = trace.render.columns.length ? trace.render.columns : trace.columns;
   return (
@@ -26,6 +44,8 @@ export default function AIQueryTracePanel({ trace }: { trace: AIQueryTrace }) {
         <section className="ai-query-trace-section ai-query-trace-query">
           <div className="ai-query-trace-section-head"><span>01</span><strong>你的问题</strong></div>
           <p>{trace.query}</p>
+          {trace.dataset_label ? <div className="ai-query-source-meta">数据源：{trace.dataset_label}{trace.permission ? ` · 权限：${trace.permission}` : ""}{trace.executed_at ? ` · ${new Date(trace.executed_at).toLocaleString("zh-CN")}` : ""}</div> : null}
+          {trace.context?.continued ? <div className="ai-query-context-meta">↳ 继承上一轮条件：{Array.isArray(trace.context.inherited) ? trace.context.inherited.length : 0} 项 · 本轮修改：{Array.isArray(trace.context.changed) ? trace.context.changed.length : 0} 项</div> : null}
         </section>
 
         <section className="ai-query-trace-section">
@@ -60,6 +80,7 @@ export default function AIQueryTracePanel({ trace }: { trace: AIQueryTrace }) {
               </table>
             </div>
           ) : <div className="ai-query-empty">{trace.render.empty_text}</div>}
+          <BarChart trace={trace} />
         </section>
 
         <details className="ai-query-trace-json">

@@ -33,7 +33,7 @@ def _endpoint(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
-def _request_with_retry(request: Callable[[], httpx.Response], max_retries: int) -> httpx.Response:
+def _request_with_retry(request: Callable[[], httpx.Response], max_retries: int, *, operation: str = "request") -> httpx.Response:
     """仅对网络层瞬时失败做有限退避，不重复提交业务失败请求。"""
 
     attempts = max(0, max_retries) + 1
@@ -43,6 +43,7 @@ def _request_with_retry(request: Callable[[], httpx.Response], max_retries: int)
         except httpx.RequestError:
             if attempt == attempts - 1:
                 raise
+            metrics.increment("mineru_retries", labels={"operation": operation})
             time.sleep(min(2.0, 0.5 * (2**attempt)))
     raise MinerUParseError("MinerU 请求未执行")
 
@@ -121,6 +122,7 @@ def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFil
                 _request_with_retry(
                     lambda: client.post(_endpoint(settings.mineru_base_url, "file-urls/batch"), headers=headers, json=request_body),
                     settings.mineru_max_retries,
+                    operation="submit",
                 ),
                 "签名上传地址申请",
             )
@@ -131,7 +133,7 @@ def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFil
             if not isinstance(upload_url, str) or not upload_url:
                 raise MinerUParseError("MinerU 签名上传地址无效")
 
-            upload_response = _request_with_retry(lambda: client.put(upload_url, content=content), settings.mineru_max_retries)
+            upload_response = _request_with_retry(lambda: client.put(upload_url, content=content), settings.mineru_max_retries, operation="upload")
             try:
                 upload_response.raise_for_status()
             except httpx.HTTPError as exc:
@@ -140,7 +142,7 @@ def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFil
             result_url = _endpoint(settings.mineru_base_url, f"extract-results/batch/{data['batch_id']}")
             while True:
                 result_payload = _json(
-                    _request_with_retry(lambda: client.get(result_url, headers=headers), settings.mineru_max_retries),
+                    _request_with_retry(lambda: client.get(result_url, headers=headers), settings.mineru_max_retries, operation="poll"),
                     "解析任务查询",
                 )
                 items = _extract_result_items(result_payload)
@@ -150,7 +152,7 @@ def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFil
                     full_zip_url = item.get("full_zip_url")
                     if not isinstance(full_zip_url, str) or not full_zip_url:
                         raise MinerUParseError("MinerU 已完成但缺少 full_zip_url")
-                    archive_response = _request_with_retry(lambda: client.get(full_zip_url), settings.mineru_max_retries)
+                    archive_response = _request_with_retry(lambda: client.get(full_zip_url), settings.mineru_max_retries, operation="download")
                     try:
                         archive_response.raise_for_status()
                     except httpx.HTTPError as exc:

@@ -36,3 +36,22 @@ class AIMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     citations: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+
+
+class AIConversationState(Base):
+    """会话级结构化状态；不把 LangGraph 内部 checkpoint 混入用户消息。"""
+
+    __tablename__ = "ai_conversation_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("ai_conversations.id"), nullable=False, unique=True)
+    thread_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    query_plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    query_trace: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    permission_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    attachment_refs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    state_version: Mapped[int] = mapped_column(default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+    updated_at: Mapped[datetime] = mapped_column(
+        DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3)
+    )

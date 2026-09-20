@@ -62,6 +62,53 @@ def test_ai_service_uses_deepseek_model_without_real_network(monkeypatch: pytest
     assert FakeClient.last_payload["json"]["messages"][0]["role"] == "system"
 
 
+def test_ai_service_retries_transient_network_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.modules.ai import service
+
+    class FlakyClient(FakeClient):
+        attempts = 0
+
+        async def post(self, _url: str, *, headers: dict[str, str], json: dict) -> FakeResponse:
+            type(self).attempts += 1
+            if type(self).attempts == 1:
+                raise service.httpx.RequestError("temporary", request=None)
+            return await super().post(_url, headers=headers, json=json)
+
+    monkeypatch.setattr(service.httpx, "AsyncClient", FlakyClient)
+    monkeypatch.setattr(service, "_retry_wait", lambda _attempt: asyncio.sleep(0))
+    settings = Settings(openai_api_key="test-key", llm_max_retries=1)
+    request = AIChatRequest(messages=[{"role": "user", "content": "查询库存"}])
+
+    response = asyncio.run(chat(request, settings))
+
+    assert response.message.content.startswith("已收到")
+    assert FlakyClient.attempts == 2
+
+
+def test_ai_attachment_is_rescanned_before_ai_use(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from app.modules.ai import service
+    from app.modules.files.scanner import FileScanResult
+
+    uploaded_file = SimpleNamespace(id=12, uploader_id=1, file_name="库存.csv", mime_type="text/csv")
+    monkeypatch.setattr(service, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(service.file_service, "get_file", lambda *_args: uploaded_file)
+    monkeypatch.setattr(service.file_service, "read_file", lambda *_args: (uploaded_file, "物料,数量\n乙醇,12".encode("utf-8")))
+    monkeypatch.setattr(service, "scan_content", lambda *_args, **_kwargs: FileScanResult(status="UNAVAILABLE", detail="clamdscan 不可用"))
+
+    context, images, citations = asyncio.run(service._prepare_attachments(
+        SimpleNamespace(),
+        SimpleNamespace(id=1),
+        AIChatRequest(messages=[{"role": "user", "content": "分析附件"}], attachment_file_ids=[12]),
+        Settings(file_scan_enabled=True),
+    ))
+
+    assert context == []
+    assert images == []
+    assert citations[0]["parse_status"] == "SCAN_BLOCKED"
+
+
 def test_ai_service_rejects_missing_api_key() -> None:
     settings = Settings(openai_api_key="")
     request = AIChatRequest(messages=[{"role": "user", "content": "查询库存"}])

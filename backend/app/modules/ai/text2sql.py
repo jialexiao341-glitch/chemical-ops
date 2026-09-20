@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 from datetime import date, datetime, timedelta
@@ -28,6 +29,7 @@ from app.modules.inventory.model import InventoryBalance, InventoryBatch, Wareho
 from app.modules.operation_exceptions.model import OperationException
 from app.modules.products.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.purchase_requests.model import PurchaseRequest
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.suppliers.model import Supplier
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
@@ -37,6 +39,12 @@ from app.modules.ai.service import chat
 
 
 LOGGER = logging.getLogger("chemicalops.ai.text2sql")
+
+
+def _query_hash(question: str) -> str:
+    """查询日志只保留摘要，不写入用户原始问题。"""
+
+    return hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
 
 
 class QueryFilter(BaseModel):
@@ -110,8 +118,10 @@ def validate_sql(sql: str, table_names: frozenset[str]) -> str:
 
 
 def _base_statement(plan: QueryPlan) -> tuple[Select[Any], Any, dict[str, Any]]:
+    if plan.dataset == "purchase_requests":
+        return select(PurchaseRequest), PurchaseRequest, {"status": PurchaseRequest.status, "priority": PurchaseRequest.priority, "currency": PurchaseRequest.currency_code, "currency_code": PurchaseRequest.currency_code}
     if plan.dataset == "purchase_orders":
-        return select(PurchaseOrder).join(Supplier, PurchaseOrder.supplier_id == Supplier.id), PurchaseOrder, {"supplier": Supplier.supplier_name, "status": PurchaseOrder.status, "currency": PurchaseOrder.currency_code, "supplier_name": Supplier.supplier_name, "currency_code": PurchaseOrder.currency_code}
+        return select(PurchaseOrder).join(Supplier, PurchaseOrder.supplier_id == Supplier.id), PurchaseOrder, {"supplier": Supplier.supplier_name, "region": Supplier.region, "status": PurchaseOrder.status, "currency": PurchaseOrder.currency_code, "supplier_name": Supplier.supplier_name, "currency_code": PurchaseOrder.currency_code}
     if plan.dataset == "deliveries":
         return select(Delivery).join(Supplier, Delivery.supplier_id == Supplier.id), Delivery, {"supplier": Supplier.supplier_name, "status": Delivery.status, "supplier_name": Supplier.supplier_name}
     if plan.dataset == "inventory":
@@ -142,7 +152,8 @@ def build_statement(plan: QueryPlan) -> Select[Any]:
     stmt, model, aliases = _base_statement(plan)
     metric = func.count(model.id) if plan.metric in {"count", "amount"} else func.sum(_field(model, "quantity"))
     if plan.metric == "amount":
-        metric = func.sum(_field(model, "order_amount" if plan.dataset == "purchase_orders" else "total_amount"))
+        amount_field = {"purchase_orders": "order_amount", "purchase_requests": "budget_amount"}.get(plan.dataset, "total_amount")
+        metric = func.sum(_field(model, amount_field))
     group_keys = [plan.group_by] if plan.group_by else []
     # 金额必须按币种分组，避免把 CNY、USD 等不同币种直接相加。
     if plan.metric == "amount" and "currency" in aliases and plan.group_by != "currency":
@@ -181,6 +192,7 @@ def _serialize(value: Any) -> Any:
 
 
 DATASET_LABELS = {
+    "purchase_requests": "采购申请",
     "purchase_orders": "采购订单",
     "deliveries": "到货单",
     "inventory": "库存",
@@ -190,7 +202,7 @@ DATASET_LABELS = {
     "suppliers": "供应商",
 }
 METRIC_LABELS = {"count": "数量", "amount": "金额", "sum_quantity": "数量合计"}
-DIMENSION_LABELS = {"supplier": "供应商", "status": "状态", "currency": "币种", "product": "产品", "warehouse": "仓库", "result": "验收结果", "severity": "严重程度", "type": "异常类型"}
+DIMENSION_LABELS = {"supplier": "供应商", "region": "区域", "status": "状态", "priority": "优先级", "currency": "币种", "product": "产品", "warehouse": "仓库", "result": "验收结果", "severity": "严重程度", "type": "异常类型"}
 FIELD_LABELS = {"metric_value": "指标值", **DIMENSION_LABELS}
 
 
@@ -351,24 +363,53 @@ def _fallback_query_plan(question: str) -> QueryPlan | None:
         limit=limit,
     )
 
-async def _understand_question(question: str, settings: Settings) -> QueryPlan:
+def _merge_follow_up_plan(question: str, previous_plan: QueryPlan) -> QueryPlan:
+    """模型不可用时只处理可证明安全的追问修改，其他字段继承上一轮。"""
+
+    normalized = question.lower()
+    updates: dict[str, Any] = {}
+    limit_match = re.search(r"(?:前|top|最多(?:显示)?)\s*(\d+)", normalized)
+    if limit_match:
+        updates["limit"] = min(int(limit_match.group(1)), 100)
+    if "倒序" in normalized or "降序" in normalized:
+        updates["order"] = "desc"
+    elif "正序" in normalized or "升序" in normalized:
+        updates["order"] = "asc"
+    today = date.today()
+    if "本月" in normalized:
+        updates["date_from"] = today.replace(day=1)
+        updates["date_to"] = today
+    elif "上个月" in normalized or "上月" in normalized:
+        first_this_month = today.replace(day=1)
+        last_previous_month = first_this_month - timedelta(days=1)
+        updates["date_from"] = last_previous_month.replace(day=1)
+        updates["date_to"] = last_previous_month
+    if "华东" in normalized and previous_plan.dataset == "purchase_orders":
+        updates["filters"] = [*previous_plan.filters, QueryFilter(field="region", operator="contains", value="华东")]
+    return previous_plan.model_copy(update=updates)
+
+
+async def _understand_question(question: str, settings: Settings, previous_plan: QueryPlan | None = None) -> QueryPlan:
     fallback = _fallback_query_plan(question)
     if fallback is not None and "逾期" in question and any(marker in question for marker in ("到货", "收货", "入库")):
-        LOGGER.info("AI 查询计划使用安全兜底 question=%s plan=%s", question, fallback.model_dump(mode="json"))
+        LOGGER.info("AI 查询计划使用安全兜底 question_hash=%s dataset=%s metric=%s", _query_hash(question), fallback.dataset, fallback.metric)
         return fallback
-    prompt = text2sql_plan_prompt(question)
+    prompt = text2sql_plan_prompt(question, previous_plan.model_dump(mode="json") if previous_plan else None)
     result = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=prompt)]), settings, response_format={"type": "json_object"})
     raw = result.message.content
-    LOGGER.info("AI 查询计划原始输出 question=%s raw=%s", question, raw)
+    LOGGER.info("AI 查询计划原始输出 question_hash=%s raw_length=%s raw_hash=%s", _query_hash(question), len(raw), _query_hash(raw))
     try:
         payload = _extract_query_plan_payload(raw)
         return QueryPlan.model_validate(_normalize_query_plan_payload(payload))
     except (BusinessValidationError, ValueError, TypeError) as exc:
-        LOGGER.warning("AI 查询计划解析失败 question=%s error=%s raw=%s", question, exc, raw)
+        LOGGER.warning("AI 查询计划解析失败 question_hash=%s error_type=%s raw_length=%s", _query_hash(question), exc.__class__.__name__, len(raw))
         fallback = _fallback_query_plan(question)
         if fallback is not None:
-            LOGGER.info("AI 查询计划使用安全兜底 question=%s plan=%s", question, fallback.model_dump(mode="json"))
+            LOGGER.info("AI 查询计划使用安全兜底 question_hash=%s dataset=%s metric=%s", _query_hash(question), fallback.dataset, fallback.metric)
             return fallback
+        if previous_plan is not None:
+            LOGGER.info("AI 查询计划追问使用上一轮安全计划 question_hash=%s dataset=%s", _query_hash(question), previous_plan.dataset)
+            return _merge_follow_up_plan(question, previous_plan)
         raise BusinessValidationError("AI 返回的查询计划格式不正确") from exc
 
 
@@ -391,6 +432,7 @@ class Text2SQLState(TypedDict, total=False):
     render: dict[str, Any]
     unit: str | None
     unit_note: str | None
+    previous_plan: QueryPlan | None
 
 
 async def run_text2sql(
@@ -398,6 +440,9 @@ async def run_text2sql(
     user: User,
     request: Text2SQLRequest,
     settings: Settings | None = None,
+    *,
+    previous_plan: QueryPlan | None = None,
+    thread_id: str | None = None,
 ) -> Text2SQLResponse:
     """执行 Query Understanding -> Slot Filling -> Planning -> Validation -> Execution。"""
 
@@ -408,7 +453,10 @@ async def run_text2sql(
     runtime = settings or get_settings()
 
     async def understand(state: Text2SQLState) -> dict[str, Any]:
-        plan = await _understand_question(state["question"], runtime)
+        if state.get("previous_plan") is None:
+            plan = await _understand_question(state["question"], runtime)
+        else:
+            plan = await _understand_question(state["question"], runtime, state["previous_plan"])
         return {
             "plan": plan,
             "slots": _build_slots(plan),
@@ -440,6 +488,9 @@ async def run_text2sql(
         columns = list(rows[0].keys()) if rows else (["metric_value"] if not state["plan"].group_by else [state["plan"].group_by, "metric_value"])
         render_columns = _build_render_columns(state["plan"], columns)
         unit, unit_note = _unit_metadata(state["plan"], rows)
+        visualization = None
+        if state["plan"].group_by and len(rows) > 1 and any(row.get("metric_value") is not None for row in rows):
+            visualization = {"type": "bar", "category": state["plan"].group_by, "value": "metric_value", "title": "分组结果对比"}
         return {
             "rows": rows,
             "columns": [column for column in columns if column],
@@ -455,6 +506,7 @@ async def run_text2sql(
                 "columns": render_columns,
                 "unit": unit,
                 "unit_note": unit_note,
+                "visualization": visualization,
             },
             "stages": [*state.get("stages", []), "execution"],
         }
@@ -473,8 +525,8 @@ async def run_text2sql(
     graph.add_edge("execution", END)
     app = graph.compile(checkpointer=MemorySaver())
     state = await app.ainvoke(
-        {"question": request.question, "request_limit": request.limit, "stages": []},
-        config={"configurable": {"thread_id": f"text2sql:{user.id}:{uuid4().hex}"}},
+        {"question": request.question, "request_limit": request.limit, "previous_plan": previous_plan, "stages": []},
+        config={"configurable": {"thread_id": thread_id or f"text2sql:{user.id}:{uuid4().hex}"}},
     )
     return Text2SQLResponse(
         question=request.question,

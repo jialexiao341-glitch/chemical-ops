@@ -42,6 +42,13 @@ class AIQueryTrace(BaseModel):
 
     query: str
     answer: str | None = None
+    dataset: str | None = None
+    dataset_label: str | None = None
+    permission: str | None = None
+    thread_id: str | None = None
+    executed_at: datetime | None = None
+    data_scope: dict[str, Any] | None = None
+    context: dict[str, Any] | None = None
     slots: list[dict[str, Any]]
     template: str
     sql: str

@@ -30,6 +30,13 @@ export interface AIQueryColumn {
 export interface AIQueryTrace {
   query: string;
   answer?: string | null;
+  dataset?: string | null;
+  dataset_label?: string | null;
+  permission?: string | null;
+  thread_id?: string | null;
+  executed_at?: string | null;
+  data_scope?: Record<string, unknown> | null;
+  context?: { continued?: boolean; inherited?: string[]; changed?: string[] } | null;
   slots: AIQuerySlot[];
   template: string;
   sql: string;
@@ -48,6 +55,7 @@ export interface AIQueryTrace {
     columns: AIQueryColumn[];
     unit?: string | null;
     unit_note?: string | null;
+    visualization?: { type: "bar"; category: string; value: string; title: string } | null;
   };
 }
 
@@ -163,8 +171,8 @@ export function getCurrentUser(token: string) {
   return request<CurrentUser>("/auth/me", {}, token);
 }
 
-export function sendAIChat(token: string, messages: AIChatMessage[], attachments: string[] = [], attachmentFileIds: number[] = []) {
-  return request<AIChatResponse>("/ai/chat", { method: "POST", body: JSON.stringify({ messages, attachments, attachment_file_ids: attachmentFileIds }) }, token);
+export function sendAIChat(token: string, messages: AIChatMessage[], attachments: string[] = [], attachmentFileIds: number[] = [], conversationId?: number) {
+  return request<AIChatResponse>("/ai/chat", { method: "POST", body: JSON.stringify({ messages, attachments, attachment_file_ids: attachmentFileIds, conversation_id: conversationId }) }, token);
 }
 
 export type AIStreamEvent =
@@ -179,11 +187,12 @@ export async function streamAIChat(
   attachmentFileIds: number[] = [],
   onEvent: (event: AIStreamEvent) => void,
   idempotencyKey?: string,
+  conversationId?: number,
 ) {
   const response = await fetch(`${API_BASE_URL}/ai/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey || newIdempotencyKey(), Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ messages, attachments, attachment_file_ids: attachmentFileIds }),
+    body: JSON.stringify({ messages, attachments, attachment_file_ids: attachmentFileIds, conversation_id: conversationId }),
   });
   if (!response.ok) {
     let message = STATUS_MESSAGES[response.status] || `请求失败（${response.status}）`;
@@ -232,6 +241,10 @@ export function getAIConversationMessages(token: string, conversationId: number)
 
 export function deleteAIConversation(token: string, conversationId: number) {
   return request<{ deleted: boolean; conversation_id: number }>(`/ai/conversations/${conversationId}`, { method: "DELETE" }, token);
+}
+
+export function clearAIQueryContext(token: string, conversationId: number) {
+  return request<{ cleared: boolean; conversation_id: number }>(`/ai/conversations/${conversationId}/query-context`, { method: "DELETE" }, token);
 }
 
 export function getChemicals(token: string, keyword = "", status = "", page = 1, pageSize = 8) {

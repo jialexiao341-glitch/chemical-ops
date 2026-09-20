@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from app.modules.ai.catalog import catalog_prompt
 
 
@@ -49,8 +51,15 @@ PAYLOAD：
 """
 
 
-def text2sql_plan_prompt(question: str) -> str:
-    return TEXT2SQL_PLAN_PROMPT.format(question=question, catalog=catalog_prompt()) + "\n" + TEXT2SQL_PLAN_RULES
+def text2sql_plan_prompt(question: str, previous_plan: dict | None = None) -> str:
+    prompt = TEXT2SQL_PLAN_PROMPT.format(question=question, catalog=catalog_prompt()) + "\n" + TEXT2SQL_PLAN_RULES
+    if previous_plan:
+        prompt += (
+            "\n上一轮已通过权限校验的 QueryPlan 如下。当前问题可能是追问；请继承未被明确修改的字段，"
+            "只修改用户本轮明确改变的条件，并输出完整的新计划：\n"
+            + json.dumps(previous_plan, ensure_ascii=False, default=str)
+        )
+    return prompt
 
 
 def result_rewrite_prompt(payload: str) -> str:
