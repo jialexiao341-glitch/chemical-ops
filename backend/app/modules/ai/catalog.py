@@ -21,7 +21,8 @@ class DatasetSpec:
 
 
 CATALOG: dict[str, DatasetSpec] = {
-    "purchase_orders": DatasetSpec("采购订单", "procurement.orders.read", frozenset({"purchase_orders", "suppliers"}), frozenset({"count", "amount"}), frozenset({"supplier", "status", "currency"}), frozenset({"status", "supplier_name", "currency_code"}), frozenset({"created_at", "order_date", "expected_arrival_date"})),
+    "purchase_requests": DatasetSpec("采购申请", "procurement.requests.read", frozenset({"purchase_requests"}), frozenset({"count", "amount"}), frozenset({"status", "priority", "currency"}), frozenset({"status", "priority", "currency_code"}), frozenset({"created_at", "expected_date", "submitted_at", "approved_at"})),
+    "purchase_orders": DatasetSpec("采购订单", "procurement.orders.read", frozenset({"purchase_orders", "suppliers"}), frozenset({"count", "amount"}), frozenset({"supplier", "region", "status", "currency"}), frozenset({"status", "supplier_name", "region", "currency_code"}), frozenset({"created_at", "order_date", "expected_arrival_date"})),
     "deliveries": DatasetSpec("入库单", "warehouse.deliveries.read", frozenset({"deliveries", "suppliers"}), frozenset({"count"}), frozenset({"supplier", "status"}), frozenset({"status", "supplier_name"}), frozenset({"created_at", "expected_arrival_date", "actual_arrival_date"})),
     "inventory": DatasetSpec("库存", "warehouse.inventory.read", frozenset({"inventory_balances", "inventory_batches", "md_products", "warehouses"}), frozenset({"sum_quantity", "count"}), frozenset({"product", "warehouse", "status", "expiry_date"}), frozenset({"product_name", "warehouse_name", "status"}), frozenset({"created_at", "expiry_date"})),
     "quality_acceptances": DatasetSpec("质量验收", "quality.acceptances.read", frozenset({"quality_acceptances", "deliveries"}), frozenset({"count"}), frozenset({"result", "certificate_complete"}), frozenset({"result", "certificate_complete"}), frozenset({"created_at", "inspection_time"})),

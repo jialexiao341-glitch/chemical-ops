@@ -2,25 +2,29 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
 import httpx
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
+from app.core.observability import get_request_id, metrics
 from app.modules.ai.agent_prompt import GREETING_REPLY, SYSTEM_PROMPT as AGENT_SYSTEM_PROMPT, UNSUPPORTED_REPLY, build_project_reply
 from app.modules.ai.intent import Intent, classify_intent
-from app.modules.ai.model import AIConversation, AIMessage
+from app.modules.ai.model import AIConversation, AIConversationState, AIMessage
 from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse, AIQueryTrace
 from app.modules.files import service as file_service
 from app.modules.files import mineru
 from app.modules.files.parser import parse_file_content
+from app.modules.files.scanner import scan_content
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
 
@@ -29,6 +33,8 @@ LOGGER = logging.getLogger("chemicalops.ai")
 SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT
 STREAM_CHUNK_SIZE = 4
 STREAM_CHUNK_DELAY_SECONDS = 0.03
+MAX_ATTACHMENT_CONTEXT_CHARS = 48_000
+MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
 READ_ONLY_WRITE_MARKERS = (
     "帮我创建", "帮我修改", "帮我删除", "帮我提交", "帮我审批", "帮我驳回",
     "帮我下单", "帮我入库", "帮我出库", "帮我付款", "帮我执行",
@@ -71,6 +77,31 @@ def _validate_read_only_request(data: AIChatRequest) -> None:
     user_text = " ".join(message.content for message in data.messages if message.role == "user")
     if any(marker in user_text for marker in READ_ONLY_WRITE_MARKERS):
         raise BusinessValidationError("AI 仅支持查询和分析，不支持创建、修改、审批、提交、下单、入库、出库或付款等业务操作。")
+
+
+def _text_fingerprint(value: str) -> str:
+    """日志只保留不可逆摘要，避免记录问题、答案或附件正文。"""
+
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def _query_log_fields(user: User, query: str) -> dict[str, object]:
+    return {
+        "request_id": get_request_id(),
+        "user_id": user.id,
+        "query_length": len(query),
+        "query_hash": _text_fingerprint(query),
+    }
+
+
+def _retryable_status(status_code: int) -> bool:
+    return status_code in {408, 425, 429} or status_code >= 500
+
+
+async def _retry_wait(attempt: int) -> None:
+    await asyncio.sleep(min(2.0, 0.25 * (2**attempt)))
+
+
 def _build_native_image_part(file_name: str, mime_type: str, content: bytes) -> dict[str, object] | None:
     """为 DeepSeek Flash 组装原生视觉图片块；文档格式仍由解析器处理。"""
 
@@ -82,6 +113,105 @@ def _build_native_image_part(file_name: str, mime_type: str, content: bytes) -> 
         normalised_mime = "image/png" if extension == ".png" else "image/jpeg"
     encoded = base64.b64encode(content).decode("ascii")
     return {"type": "image_url", "image_url": {"url": f"data:{normalised_mime};base64,{encoded}"}}
+
+
+async def _prepare_attachments(
+    db: Session,
+    user: User,
+    data: AIChatRequest,
+    runtime: Settings,
+) -> tuple[list[str], list[dict[str, object]], list[dict[str, object]]]:
+    """读取当前用户可访问的附件，并生成稳定、受限的上下文和引用。"""
+
+    attachment_context: list[str] = []
+    native_image_parts: list[dict[str, object]] = []
+    citations: list[dict[str, object]] = []
+    context_chars = 0
+    role_codes = set(get_user_role_codes(db, user.id))
+
+    for file_id in dict.fromkeys(data.attachment_file_ids):
+        value = file_service.get_file(db, user, file_id)
+        if value.uploader_id != user.id and "SYS_ADMIN" not in role_codes:
+            raise BusinessValidationError("只能将自己上传的文件提交给 AI 分析")
+        try:
+            _, content = file_service.read_file(db, user, file_id)
+            scan_result = scan_content(content, settings=runtime)
+            if runtime.file_scan_enabled and scan_result.status != "CLEAN":
+                value.parse_status = "FAILED"
+                value.parse_error = "附件未通过当前安全扫描，AI 不会读取其内容"
+                citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": "SCAN_BLOCKED", "parser": "clamav", "references": [], "error": scan_result.detail or value.parse_error, "context_included": False})
+                continue
+            extension = Path(value.file_name).suffix.lower()
+            native_image = _build_native_image_part(value.file_name, value.mime_type, content) if runtime.llm_model.lower() == "deepseek-flash" else None
+            if native_image is not None:
+                if len(content) > MAX_ATTACHMENT_IMAGE_BYTES:
+                    value.parse_status = "TOO_LARGE"
+                    value.parse_error = "图片超过 AI 单次视觉分析上限"
+                    citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": "TOO_LARGE", "parser": "native-vision", "references": [], "error": value.parse_error})
+                else:
+                    native_image_parts.append(native_image)
+                    value.parse_status = "SUCCEEDED"
+                    value.parse_error = None
+                    citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": "SUCCEEDED", "parser": "native-vision", "references": []})
+                continue
+
+            remote_error: str | None = None
+            if runtime.mineru_enabled and extension in mineru.SUPPORTED_REMOTE_EXTENSIONS:
+                value.parse_status = "PROCESSING"
+                value.parse_error = None
+                db.flush()
+                try:
+                    parsed = await asyncio.to_thread(mineru.parse_bytes, value.file_name, content, runtime)
+                except mineru.MinerUParseError as exc:
+                    remote_error = str(exc)
+                    LOGGER.warning("MinerU 附件解析失败，回退本地解析 file_id=%s error_type=%s", file_id, exc.__class__.__name__)
+                    parsed = parse_file_content(value.file_name, value.mime_type, content)
+            else:
+                parsed = parse_file_content(value.file_name, value.mime_type, content)
+
+            value.parse_status = parsed.status
+            value.parse_error = parsed.error or remote_error
+            citation: dict[str, object] = {
+                "file_id": value.id,
+                "file_name": value.file_name,
+                "source": "用户上传附件",
+                "parse_status": parsed.status,
+                "parser": parsed.parser,
+                "references": parsed.references,
+            }
+            if remote_error:
+                citation["remote_error"] = remote_error
+            if parsed.error:
+                citation["error"] = parsed.error
+            citations.append(citation)
+
+            text = parsed.text or parsed.error or "文件没有可解析正文，请不要猜测其内容。"
+            remaining = MAX_ATTACHMENT_CONTEXT_CHARS - context_chars
+            if remaining <= 0:
+                citations[-1]["context_included"] = False
+                continue
+            clipped = text[:remaining]
+            if len(clipped) < len(text):
+                clipped += "\n[附件上下文已达到本次查询上限，未继续读取。]"
+                citations[-1]["context_truncated"] = True
+            attachment_context.append(f"附件：{value.file_name}\n{clipped}")
+            context_chars += len(clipped)
+            citations[-1]["context_included"] = True
+            if parsed.text:
+                try:
+                    result_key = file_service.store_parse_result(value.id, parsed.text)
+                    if result_key:
+                        citations.append({"type": "parsed_result", "file_id": value.id, "object_key": result_key, "source": "解析结果 Markdown"})
+                except Exception as exc:
+                    LOGGER.warning("解析结果保存失败 file_id=%s error_type=%s", value.id, exc.__class__.__name__)
+        except Exception as exc:
+            LOGGER.warning("AI 附件读取失败 file_id=%s error_type=%s", file_id, exc.__class__.__name__)
+            value.parse_status = "FAILED"
+            value.parse_error = "文件解析失败，请检查文件格式或重新上传"
+            citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": "FAILED", "parser": "none", "references": [], "error": value.parse_error, "context_included": True})
+            attachment_context.append(f"附件：{value.file_name}\n{value.parse_error}，请不要基于该附件推断业务结论。")
+
+    return attachment_context, native_image_parts, citations
 
 
 def _build_messages(
@@ -131,16 +261,51 @@ def _format_text2sql_result(result: object) -> str:
     return "\n".join(lines)
 
 
-async def _run_text2sql_for_chat(db: Session, user: User, question: str, settings: Settings) -> tuple[str, dict[str, object], AIQueryTrace]:
+async def _run_text2sql_for_chat(
+    db: Session,
+    user: User,
+    question: str,
+    settings: Settings,
+    *,
+    previous_plan: object | None = None,
+    thread_id: str | None = None,
+) -> tuple[str, dict[str, object], AIQueryTrace]:
     """聊天入口的业务查询路由；Text2SQL 结果不再经过通用聊天上下文。"""
 
     from app.modules.ai.text2sql import Text2SQLRequest, run_text2sql
 
-    LOGGER.info("AI 查询开始 user_id=%s query_length=%s", user.id, len(question))
-    result = await run_text2sql(db, user, Text2SQLRequest(question=question), settings)
+    query_fields = _query_log_fields(user, question)
+    LOGGER.info("AI 查询开始 %s", query_fields)
+    result = await run_text2sql(db, user, Text2SQLRequest(question=question), settings, previous_plan=previous_plan, thread_id=thread_id)
+    from app.modules.ai.catalog import CATALOG
+
+    executed_at = datetime.now()
+    dataset_spec = CATALOG[result.plan.dataset]
+    data_scope = {
+        "date_from": result.plan.date_from.isoformat() if result.plan.date_from else None,
+        "date_to": result.plan.date_to.isoformat() if result.plan.date_to else None,
+        "filters": [item.model_dump(mode="json") for item in result.plan.filters],
+    }
+    context = None
+    if previous_plan is not None:
+        old_plan = previous_plan.model_dump(mode="json") if hasattr(previous_plan, "model_dump") else {}
+        new_plan = result.plan.model_dump(mode="json")
+        changed = [key for key in new_plan if old_plan.get(key) != new_plan.get(key)]
+        context = {
+            "continued": True,
+            "inherited": [key for key in new_plan if key not in changed],
+            "changed": changed,
+        }
     trace = AIQueryTrace(
         query=result.question,
         slots=result.slots,
+        dataset=result.plan.dataset,
+        dataset_label=dataset_spec.label,
+        permission=dataset_spec.permission,
+        thread_id=thread_id,
+        executed_at=executed_at,
+        data_scope=data_scope,
+        context=context,
         template=result.template,
         sql=result.sql,
         parameterized_sql=result.parameterized_sql,
@@ -155,9 +320,9 @@ async def _run_text2sql_for_chat(db: Session, user: User, question: str, setting
     )
     answer = _format_text2sql_result(result)
     trace.answer = answer
-    LOGGER.info("AI 查询槽位 user_id=%s slots=%s", user.id, json.dumps(result.slots, ensure_ascii=False, default=str))
-    LOGGER.info("AI 查询模板 user_id=%s template=%s", user.id, result.template)
-    LOGGER.info("AI 生成 SQL user_id=%s sql=%s", user.id, " ".join(result.sql.split()))
+    LOGGER.info("AI 查询槽位 user_id=%s slot_count=%s filled_count=%s", user.id, len(result.slots), sum(slot.get("status") == "filled" for slot in result.slots))
+    LOGGER.info("AI 查询模板 user_id=%s template_hash=%s", user.id, _text_fingerprint(result.template))
+    LOGGER.info("AI 生成 SQL user_id=%s sql_hash=%s", user.id, _text_fingerprint(result.sql))
     LOGGER.info(
         "AI 查询完成 user_id=%s row_count=%s truncated=%s unit=%s",
         user.id,
@@ -165,10 +330,17 @@ async def _run_text2sql_for_chat(db: Session, user: User, question: str, setting
         result.truncated,
         result.unit or "未提供",
     )
-    LOGGER.info("AI 回复答案 user_id=%s answer_length=%s", user.id, len(answer))
+    LOGGER.info("AI 回复答案 user_id=%s answer_length=%s answer_hash=%s", user.id, len(answer), _text_fingerprint(answer))
     citation = {
         "type": "text2sql",
         "source": "实时数据库只读查询",
+        "dataset": result.plan.dataset,
+        "dataset_label": dataset_spec.label,
+        "permission": dataset_spec.permission,
+        "thread_id": thread_id,
+        "executed_at": executed_at.isoformat(),
+        "data_scope": data_scope,
+        "query_plan": result.plan.model_dump(mode="json"),
         "row_count": result.row_count,
         "stages": result.stages,
         "query_trace": trace.model_dump(mode="json"),
@@ -193,34 +365,56 @@ async def chat(data: AIChatRequest, settings: Settings | None = None, attachment
     headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json"}
     attempts = max(0, runtime.llm_max_retries) + 1
     response: httpx.Response | None = None
+    started = perf_counter()
+    metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "started"})
     for attempt in range(attempts):
         try:
             async with httpx.AsyncClient(timeout=runtime.llm_timeout_seconds) as client:
                 response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
+            metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "success"})
             break
         except httpx.TimeoutException as exc:
             if attempt == attempts - 1:
-                LOGGER.warning("AI 服务请求超时，已重试 %s 次", attempt)
+                metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "timeout"})
+                LOGGER.warning("AI 服务请求超时 retries=%s", attempt)
                 raise BusinessValidationError("AI 服务响应超时，请稍后重试") from exc
+            metrics.increment("ai_external_retries", labels={"mode": "sync", "reason": "timeout"})
+            await _retry_wait(attempt)
         except httpx.RequestError as exc:
             if attempt == attempts - 1:
-                LOGGER.warning("AI 服务网络请求失败：%s", exc.__class__.__name__)
+                metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "network_error"})
+                LOGGER.warning("AI 服务网络请求失败 error_type=%s retries=%s", exc.__class__.__name__, attempt)
                 raise BusinessValidationError("AI 服务暂时不可用，请检查网络或稍后重试") from exc
+            metrics.increment("ai_external_retries", labels={"mode": "sync", "reason": "network_error"})
+            await _retry_wait(attempt)
         except httpx.HTTPStatusError as exc:
-            LOGGER.warning("AI 服务返回 HTTP %s", exc.response.status_code)
+            status_code = exc.response.status_code if exc.response is not None else 0
+            if _retryable_status(status_code) and attempt < attempts - 1:
+                metrics.increment("ai_external_retries", labels={"mode": "sync", "reason": f"http_{status_code}"})
+                await _retry_wait(attempt)
+                continue
+            metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": f"http_{status_code}"})
+            LOGGER.warning("AI 服务返回 HTTP status=%s retries=%s", status_code, attempt)
+            if _retryable_status(status_code):
+                raise BusinessValidationError("AI 服务暂时不可用，请稍后重试") from exc
             raise BusinessValidationError("AI 服务拒绝了请求，请检查 API key、模型和额度配置") from exc
 
     if response is None:
+        metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "empty"})
         raise BusinessValidationError("AI 服务没有返回结果")
     try:
         result = response.json()
         raw_message = result["choices"][0]["message"]
         content = str(raw_message.get("content") or "").strip()
     except (KeyError, IndexError, TypeError, ValueError) as exc:
+        metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "invalid_response"})
         raise BusinessValidationError("AI 服务返回了无法识别的结果") from exc
     if not content:
+        metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "empty_answer"})
         raise BusinessValidationError("AI 服务返回了空答案")
+
+    metrics.observe("ai_external_duration_seconds", perf_counter() - started, labels={"mode": "sync", "provider": runtime.llm_provider})
 
     usage = result.get("usage")
     normalized_usage = usage if isinstance(usage, dict) and all(isinstance(value, int) for value in usage.values()) else None
@@ -244,12 +438,73 @@ def _get_owned_conversation(db: Session, user: User, conversation_id: int) -> AI
     return conversation
 
 
+def _conversation_state_enabled(db: Session) -> bool:
+    """迁移尚未执行时保持旧版本可用；完成 017 后自动启用持久化上下文。"""
+
+    try:
+        bind = db.get_bind()
+        return bool(bind is not None and inspect(bind).has_table(AIConversationState.__tablename__))
+    except Exception as exc:
+        LOGGER.warning("AI 会话状态表检查失败 error_type=%s", exc.__class__.__name__)
+        return False
+
+
+def _permission_snapshot(db: Session, user: User) -> dict[str, list[str]]:
+    return {"roles": get_user_role_codes(db, user.id), "permissions": get_user_permission_codes(db, user.id)}
+
+
+def _load_conversation_state(db: Session, conversation: AIConversation) -> AIConversationState | None:
+    if not _conversation_state_enabled(db):
+        return None
+    return db.scalar(select(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
+
+
+def _save_query_state(
+    db: Session,
+    user: User,
+    conversation: AIConversation,
+    *,
+    plan: object,
+    trace: AIQueryTrace,
+    citations: list[dict[str, object]],
+) -> None:
+    if not _conversation_state_enabled(db):
+        return
+    existing = _load_conversation_state(db, conversation)
+    state = existing or AIConversationState(
+        conversation_id=conversation.id,
+        thread_id=f"ai:{user.id}:{conversation.id}",
+        state_version=1,
+    )
+    state.query_plan = plan.model_dump(mode="json") if hasattr(plan, "model_dump") else None
+    state.query_trace = trace.model_dump(mode="json", exclude={"sql", "parameterized_sql", "rows"})
+    state.permission_snapshot = _permission_snapshot(db, user)
+    state.attachment_refs = [
+        {key: item.get(key) for key in ("file_id", "file_name", "parse_status", "parser", "object_key") if key in item}
+        for item in citations
+        if isinstance(item, dict) and item.get("file_id")
+    ] or None
+    if existing is None:
+        db.add(state)
+
+
 def delete_conversation(db: Session, user: User, conversation_id: int) -> None:
     """删除当前用户自己的会话及其消息。"""
     conversation = _get_owned_conversation(db, user, conversation_id)
+    if _conversation_state_enabled(db):
+        db.execute(delete(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
     db.execute(delete(AIMessage).where(AIMessage.conversation_id == conversation.id))
     db.delete(conversation)
     db.commit()
+
+
+def clear_query_context(db: Session, user: User, conversation_id: int) -> None:
+    """清除结构化 QueryPlan，不删除用户可见聊天记录。"""
+
+    conversation = _get_owned_conversation(db, user, conversation_id)
+    if _conversation_state_enabled(db):
+        db.execute(delete(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
+        db.commit()
 
 def list_conversations(db: Session, user: User, *, limit: int = 50) -> tuple[list[AIConversation], int]:
     """按最近消息时间返回当前用户会话。"""
@@ -274,13 +529,15 @@ def _ensure_conversation(db: Session, user: User, data: AIChatRequest) -> AIConv
     """获取或创建会话，并保存权限快照。"""
 
     if data.conversation_id:
-        return _get_owned_conversation(db, user, data.conversation_id)
+        conversation = _get_owned_conversation(db, user, data.conversation_id)
+        conversation.permission_snapshot = _permission_snapshot(db, user)
+        return conversation
     first_user = next((message.content.strip() for message in data.messages if message.role == "user" and message.content.strip()), "新建对话")
     conversation = AIConversation(
         user_id=user.id,
         title=first_user[:80],
         business_scene="GENERAL",
-        permission_snapshot={"roles": get_user_role_codes(db, user.id), "permissions": get_user_permission_codes(db, user.id)},
+        permission_snapshot=_permission_snapshot(db, user),
         status="ACTIVE",
         last_message_at=datetime.now(),
     )
@@ -303,8 +560,25 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
     LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
     if intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
         runtime = get_settings()
-        content, citation, query_trace = await _run_text2sql_for_chat(db, user, user_message.content, runtime)
+        conversation_state = _load_conversation_state(db, conversation)
+        previous_plan = None
+        if conversation_state and conversation_state.query_plan:
+            from app.modules.ai.text2sql import QueryPlan
+
+            try:
+                previous_plan = QueryPlan.model_validate(conversation_state.query_plan)
+            except (TypeError, ValueError):
+                LOGGER.warning("AI 会话 QueryPlan 状态无效 conversation_id=%s", conversation.id)
+        thread_id = f"ai:{user.id}:{conversation.id}"
+        content, citation, query_trace = await _run_text2sql_for_chat(
+            db, user, user_message.content, runtime, previous_plan=previous_plan, thread_id=thread_id
+        )
         citations = [citation]
+        from app.modules.ai.text2sql import QueryPlan
+
+        plan_payload = citation.get("query_plan") if isinstance(citation, dict) else None
+        if isinstance(plan_payload, dict):
+            _save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
         db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
         db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
         conversation.last_message_at = datetime.now()
@@ -329,58 +603,8 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         db.commit()
         return AIChatResponse(message=AIChatMessage(role="assistant", content=fixed_content), conversation_id=conversation.id, model="rule-based", provider="chemicalops", citations=None, user_query=user_message.content, answer=fixed_content)
 
-    attachment_context: list[str] = []
-    native_image_parts: list[dict[str, object]] = []
-    attachment_citations: list[dict[str, object]] = []
     runtime = get_settings()
-    for file_id in dict.fromkeys(data.attachment_file_ids):
-        value = file_service.get_file(db, user, file_id)
-        if value.uploader_id != user.id and "SYS_ADMIN" not in get_user_role_codes(db, user.id):
-            raise BusinessValidationError("只能将自己上传的文件提交给 AI 分析")
-        if len(attachment_context) >= 20:
-            break
-        try:
-            _, content = file_service.read_file(db, user, file_id)
-            extension = Path(value.file_name).suffix.lower()
-            native_image = _build_native_image_part(value.file_name, value.mime_type, content) if runtime.llm_model.lower() == 'deepseek-flash' else None
-            if native_image is not None:
-                native_image_parts.append(native_image)
-                value.parse_status = 'SUCCEEDED'
-                value.parse_error = None
-                attachment_citations.append({'file_id': value.id, 'file_name': value.file_name, 'source': '用户上传附件', 'parse_status': 'SUCCEEDED', 'parser': 'native-vision', 'references': []})
-                continue
-            if runtime.mineru_enabled and extension in mineru.SUPPORTED_REMOTE_EXTENSIONS:
-                value.parse_status = "PROCESSING"
-                value.parse_error = None
-                db.commit()
-                try:
-                    parsed = await asyncio.to_thread(mineru.parse_bytes, value.file_name, content, runtime)
-                except mineru.MinerUParseError:
-                    LOGGER.warning("MinerU 附件解析失败，回退本地解析 file_id=%s", file_id)
-                    parsed = parse_file_content(value.file_name, value.mime_type, content)
-            else:
-                parsed = parse_file_content(value.file_name, value.mime_type, content)
-            value.parse_status = parsed.status
-            value.parse_error = parsed.error
-            attachment_citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": parsed.status, "parser": parsed.parser, "references": parsed.references})
-            if parsed.text:
-                attachment_context.append(f"附件：{value.file_name}\n{parsed.text[:12_000]}")
-                try:
-                    result_key = file_service.store_parse_result(value.id, parsed.text)
-                    if result_key:
-                        attachment_citations.append({"type": "parsed_result", "file_id": value.id, "object_key": result_key, "source": "解析结果 Markdown"})
-                except Exception as exc:
-                    LOGGER.warning("解析结果保存失败 file_id=%s error=%s", value.id, exc.__class__.__name__)
-            else:
-                attachment_context.append(f"附件：{value.file_name}\n{parsed.error or '文件没有可解析正文，请不要猜测其内容。'}")
-        except Exception as exc:
-            LOGGER.warning("AI 附件读取失败 file_id=%s error=%s", file_id, exc.__class__.__name__)
-            value.parse_status = "FAILED"
-            value.parse_error = "文件解析失败，请检查文件格式或重新上传"
-            attachment_context.append(f"附件：{value.file_name}\n文件读取失败，请不要基于该附件推断业务结论。")
-            attachment_citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": "FAILED", "parser": "none", "references": []})
-    combined_context = attachment_context
-    combined_citations = attachment_citations
+    combined_context, native_image_parts, combined_citations = await _prepare_attachments(db, user, data, runtime)
     db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=combined_citations or None))
     conversation.last_message_at = datetime.now()
     db.commit()
@@ -409,94 +633,76 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     if user_message is None:
         yield f"event: error\ndata: {json.dumps({'message': '至少需要一条用户消息'}, ensure_ascii=False)}\n\n"
         return
-    LOGGER.info("AI 请求进入 mode=stream user_id=%s user_query=%s", user.id, user_message.content)
+    LOGGER.info("AI 请求进入 mode=stream %s", _query_log_fields(user, user_message.content))
     stream_intent_result = classify_intent(user_message.content)
     LOGGER.info("AI 意图识别 mode=stream user_id=%s intent=%s reason=%s", user.id, stream_intent_result.intent, stream_intent_result.reason)
     if stream_intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
         runtime = get_settings()
+        conversation_state = _load_conversation_state(db, conversation)
+        previous_plan = None
+        if conversation_state and conversation_state.query_plan:
+            from app.modules.ai.text2sql import QueryPlan
+
+            try:
+                previous_plan = QueryPlan.model_validate(conversation_state.query_plan)
+            except (TypeError, ValueError):
+                LOGGER.warning("AI 流式会话 QueryPlan 状态无效 conversation_id=%s", conversation.id)
+        thread_id = f"ai:{user.id}:{conversation.id}"
         try:
-            content, citation, query_trace = await _run_text2sql_for_chat(db, user, user_message.content, runtime)
+            content, citation, query_trace = await _run_text2sql_for_chat(
+                db, user, user_message.content, runtime, previous_plan=previous_plan, thread_id=thread_id
+            )
         except BusinessValidationError as exc:
-            LOGGER.warning("AI 流式查询业务失败 user_id=%s user_query=%s error=%s", user.id, user_message.content, exc)
+            LOGGER.warning("AI 流式查询业务失败 user_id=%s query_hash=%s error_type=%s", user.id, _text_fingerprint(user_message.content), exc.__class__.__name__)
             yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
             return
         except Exception:
-            LOGGER.exception("AI 流式查询异常 user_id=%s user_query=%s", user.id, user_message.content)
+            LOGGER.exception("AI 流式查询异常 user_id=%s query_hash=%s", user.id, _text_fingerprint(user_message.content))
             yield f"event: error\ndata: {json.dumps({'message': f'查询暂时失败，请稍后重试'}, ensure_ascii=False)}\n\n"
             return
         citations = [citation]
-        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
-        conversation.last_message_at = datetime.now()
-        db.commit()
         chunk_count = 0
         async for chunk in _stream_text_chunks(content):
             chunk_count += 1
             yield f"event: delta\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+        from app.modules.ai.text2sql import QueryPlan
+
+        plan_payload = citation.get("query_plan") if isinstance(citation, dict) else None
+        if isinstance(plan_payload, dict):
+            _save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
+        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
+        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
+        conversation.last_message_at = datetime.now()
+        db.commit()
         LOGGER.info("AI 流式回复完成 user_id=%s mode=query chunks=%s", user.id, chunk_count)
         trace_payload = query_trace.model_dump(mode="json")
         yield f"event: done\ndata: {json.dumps({'conversation_id': conversation.id, 'model': 'text2sql', 'provider': 'chemicalops', 'citations': citations, 'query_trace': trace_payload, 'query_slots': trace_payload['slots'], 'user_query': user_message.content, 'answer': content}, ensure_ascii=False)}\n\n"
         return
     if stream_intent_result.intent != Intent.QUERY and not data.attachment_file_ids:
         fixed_content = build_project_reply(user_message.content) if stream_intent_result.intent is Intent.PROJECT else {Intent.GREETING: GREETING_REPLY, Intent.UNSUPPORTED: UNSUPPORTED_REPLY}[stream_intent_result.intent]
-        LOGGER.info("AI 流式固定回复开始 user_id=%s intent=%s user_query=%s", user.id, stream_intent_result.intent, user_message.content)
-        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
-        conversation.last_message_at = datetime.now()
-        db.commit()
+        LOGGER.info("AI 流式固定回复开始 user_id=%s intent=%s query_hash=%s", user.id, stream_intent_result.intent, _text_fingerprint(user_message.content))
         chunk_count = 0
         async for chunk in _stream_text_chunks(fixed_content):
             chunk_count += 1
             yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
-        LOGGER.info("AI 流式回复完成 user_id=%s mode=rule_based chunks=%s answer=%s", user.id, chunk_count, fixed_content)
+        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
+        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
+        conversation.last_message_at = datetime.now()
+        db.commit()
+        LOGGER.info("AI 流式回复完成 user_id=%s mode=rule_based chunks=%s answer_length=%s answer_hash=%s", user.id, chunk_count, len(fixed_content), _text_fingerprint(fixed_content))
         yield "event: done\ndata: " + json.dumps({"conversation_id": conversation.id, "model": "rule-based", "provider": "chemicalops", "citations": None, "user_query": user_message.content, "answer": fixed_content}, ensure_ascii=False) + "\n\n"
         return
 
     runtime = get_settings()
-    attachment_context: list[str] = []
-    native_image_parts: list[dict[str, object]] = []
-    citations: list[dict[str, object]] = []
-    for file_id in dict.fromkeys(data.attachment_file_ids):
-        value = file_service.get_file(db, user, file_id)
-        if value.uploader_id != user.id and "SYS_ADMIN" not in get_user_role_codes(db, user.id):
-            yield f"event: error\ndata: {json.dumps({'message': '只能将自己上传的文件提交给 AI 分析'}, ensure_ascii=False)}\n\n"
-            return
-        try:
-            _, content = file_service.read_file(db, user, file_id)
-            extension = Path(value.file_name).suffix.lower()
-            native_image = _build_native_image_part(value.file_name, value.mime_type, content) if runtime.llm_model.lower() == 'deepseek-flash' else None
-            if native_image is not None:
-                native_image_parts.append(native_image)
-                value.parse_status = 'SUCCEEDED'
-                value.parse_error = None
-                citations.append({'file_id': value.id, 'file_name': value.file_name, 'source': '用户上传附件', 'parse_status': 'SUCCEEDED', 'parser': 'native-vision', 'references': []})
-                continue
-            if runtime.mineru_enabled and extension in mineru.SUPPORTED_REMOTE_EXTENSIONS:
-                value.parse_status = "PROCESSING"
-                value.parse_error = None
-                db.commit()
-                try:
-                    parsed = await asyncio.to_thread(mineru.parse_bytes, value.file_name, content, runtime)
-                except mineru.MinerUParseError:
-                    parsed = parse_file_content(value.file_name, value.mime_type, content)
-            else:
-                parsed = parse_file_content(value.file_name, value.mime_type, content)
-            value.parse_status = parsed.status
-            value.parse_error = parsed.error
-            citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": parsed.status, "parser": parsed.parser, "references": parsed.references})
-            attachment_context.append(f"附件：{value.file_name}\n{(parsed.text or parsed.error or '文件没有可解析正文，请不要猜测其内容。')[:12_000]}")
-            if parsed.text:
-                try:
-                    result_key = file_service.store_parse_result(value.id, parsed.text)
-                    if result_key:
-                        citations.append({"type": "parsed_result", "file_id": value.id, "object_key": result_key, "source": "解析结果 Markdown"})
-                except Exception as exc:
-                    LOGGER.warning("流式解析结果保存失败 file_id=%s error=%s", value.id, exc.__class__.__name__)
-        except Exception as exc:
-            LOGGER.warning("AI 流式附件读取失败 file_id=%s error=%s", file_id, exc.__class__.__name__)
-            attachment_context.append(f"附件：{value.file_name}\n文件读取失败，请不要基于该附件推断业务结论。")
-            citations.append({"file_id": value.id, "file_name": value.file_name, "source": "用户上传附件", "parse_status": "FAILED", "parser": "none", "references": []})
-    combined_context = attachment_context
+    try:
+        combined_context, native_image_parts, citations = await _prepare_attachments(db, user, data, runtime)
+    except BusinessValidationError as exc:
+        yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
+        return
+    except Exception:
+        LOGGER.exception("AI 流式附件准备失败 user_id=%s", user.id)
+        yield f"event: error\ndata: {json.dumps({'message': '附件暂时无法读取，请检查文件权限或重新上传'}, ensure_ascii=False)}\n\n"
+        return
     db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations or None))
     conversation.last_message_at = datetime.now()
     db.commit()
@@ -508,26 +714,48 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     payload = _build_llm_payload(runtime, _build_messages(data, combined_context or None, native_image_parts or None), stream=True)
     headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"}
     full_content = ""
-    try:
-        async with httpx.AsyncClient(timeout=runtime.llm_timeout_seconds) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(raw)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content") or ""
-                    except (ValueError, TypeError, IndexError, KeyError):
-                        continue
-                    if delta:
-                        full_content += delta
-                        yield f"event: delta\ndata: {json.dumps({'content': delta}, ensure_ascii=False)}\n\n"
-    except (httpx.HTTPError, httpx.TimeoutException) as exc:
-        LOGGER.warning("AI SSE 请求失败 error=%s", exc.__class__.__name__)
+    first_token_at: float | None = None
+    stream_error: Exception | None = None
+    started = perf_counter()
+    attempts = max(0, runtime.llm_max_retries) + 1
+    metrics.increment("ai_external_requests", labels={"mode": "stream", "provider": runtime.llm_provider, "status": "started"})
+    for attempt in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=runtime.llm_timeout_seconds) as client:
+                async with client.stream("POST", url, headers=headers, json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        raw = line[5:].strip()
+                        if raw == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(raw)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content") or ""
+                        except (ValueError, TypeError, IndexError, KeyError):
+                            continue
+                        if delta:
+                            if first_token_at is None:
+                                first_token_at = perf_counter()
+                                metrics.observe("ai_first_token_seconds", first_token_at - started, labels={"mode": "stream", "provider": runtime.llm_provider})
+                            full_content += delta
+                            yield f"event: delta\ndata: {json.dumps({'content': delta}, ensure_ascii=False)}\n\n"
+            stream_error = None
+            metrics.increment("ai_external_requests", labels={"mode": "stream", "provider": runtime.llm_provider, "status": "success"})
+            break
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            stream_error = exc
+            # 已经向客户端发送过内容时不能重试，否则会重复输出；同时绝不保存半截答案。
+            retryable = not isinstance(exc, httpx.HTTPStatusError) or _retryable_status(exc.response.status_code if exc.response is not None else 0)
+            if full_content or attempt == attempts - 1 or not retryable:
+                break
+            metrics.increment("ai_external_retries", labels={"mode": "stream", "reason": exc.__class__.__name__})
+            await _retry_wait(attempt)
+    metrics.observe("ai_external_duration_seconds", perf_counter() - started, labels={"mode": "stream", "provider": runtime.llm_provider})
+    if stream_error is not None:
+        metrics.increment("ai_external_requests", labels={"mode": "stream", "provider": runtime.llm_provider, "status": "failure"})
+        LOGGER.warning("AI SSE 请求失败 error_type=%s retries=%s partial=%s", stream_error.__class__.__name__, attempt, bool(full_content))
         yield f"event: error\ndata: {json.dumps({'message': 'AI 服务暂时不可用，请稍后重试'}, ensure_ascii=False)}\n\n"
         return
     if not full_content.strip():
@@ -536,6 +764,6 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=full_content.strip(), citations=citations or None))
     conversation.last_message_at = datetime.now()
     db.commit()
-    LOGGER.info("AI 流式回复完成 user_id=%s mode=llm chunks=streamed user_query=%s answer=%s", user.id, user_message.content, full_content.strip())
+    LOGGER.info("AI 流式回复完成 user_id=%s mode=llm answer_length=%s answer_hash=%s", user.id, len(full_content.strip()), _text_fingerprint(full_content.strip()))
     done = {"conversation_id": conversation.id, "model": runtime.llm_model, "provider": runtime.llm_provider, "citations": citations or None, "user_query": user_message.content, "answer": full_content.strip()}
     yield f"event: done\ndata: {json.dumps(done, ensure_ascii=False)}\n\n"

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { deleteAIConversation, getAIConversationMessages, getAIConversations, streamAIChat, uploadModuleFile } from "../services/api";
+import { clearAIQueryContext, deleteAIConversation, getAIConversationMessages, getAIConversations, streamAIChat, uploadModuleFile } from "../services/api";
 import type { AIQueryTrace } from "../services/api";
 import AIQueryTracePanel from "./AIQueryTracePanel";
 
@@ -122,6 +122,9 @@ function citationSourceLabels(citations?: unknown[] | null) {
     const type = (citation as { type?: unknown }).type;
     if ((type === "dashboard_overview" || type === "business_context") && typeof source === "string") return [source];
     if (type === "text2sql" && typeof source === "string") return ["Text2SQL · " + source];
+    const fileName = (citation as { file_name?: unknown }).file_name;
+    const parseStatus = (citation as { parse_status?: unknown }).parse_status;
+    if (typeof fileName === "string" && fileName) return [`附件 · ${fileName}${typeof parseStatus === "string" ? ` · ${parseStatus}` : ""}`];
     return [];
   });
 }
@@ -309,7 +312,7 @@ export default function AIFloatingAssistant({ token }: { token: string }) {
         if (event.type === "done") setThinking(false);
         if (event.type === "done") setThreads((current) => current.map((thread) => thread.id === activeThreadId ? { ...thread, conversationId: event.conversation_id, time: "刚刚", messages: thread.messages.map((message) => message.id === assistantId ? { ...message, sources: citationSourceLabels(event.citations), trace: buildMessageTrace(event.citations, message.content), queryTrace: event.query_trace || queryTraceFromCitations(event.citations) } : message) } : thread));
         if (event.type === "error") throw new Error(event.message);
-      });
+      }, undefined, activeThread?.conversationId);
     } catch (reason) {
       const assistantMessage: ChatMessage = { id: Date.now() + 1, role: "assistant", content: `AI 暂时无法回答：${reason instanceof Error ? reason.message : "服务暂时不可用，请稍后重试"}` };
       setThreads((current) => current.map((thread) => {
@@ -354,6 +357,16 @@ export default function AIFloatingAssistant({ token }: { token: string }) {
     }
   }
 
+  async function clearCurrentQueryContext() {
+    if (!activeThread?.conversationId || sending) return;
+    try {
+      await clearAIQueryContext(token, activeThread.conversationId);
+      setDraft("");
+    } catch (reason) {
+      setDraft(reason instanceof Error ? reason.message : "清空查询上下文失败");
+    }
+  }
+
   const panelStyle = position
     ? { left: `${position.x}px`, top: `${position.y}px`, right: "auto", bottom: "auto" }
     : undefined;
@@ -389,6 +402,7 @@ export default function AIFloatingAssistant({ token }: { token: string }) {
                 <span><strong>{activeThread?.title || "化运助手"}</strong><small><i />业务数据助手 · 可拖动</small></span>
               </div>
               <div className="ai-assistant-header-actions">
+                <button type="button" aria-label="清空查询上下文" title="清空查询上下文" onClick={() => void clearCurrentQueryContext()}>⌫</button>
                 <button type="button" aria-label="收起 AI 聊天窗" onClick={() => setOpen(false)}>−</button>
                 <button type="button" aria-label="关闭 AI 聊天窗" onClick={() => setOpen(false)}>×</button>
               </div>

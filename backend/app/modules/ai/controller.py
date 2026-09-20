@@ -1,6 +1,7 @@
 """AI 助手 HTTP 接口。"""
 
 import logging
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.db import get_db
-from app.core.observability import metrics, observe_duration
+from app.core.observability import get_request_id, metrics, observe_duration
 from app.modules.ai import service
 from app.modules.ai import text2sql as text2sql_service
 from app.modules.ai.text2sql import Text2SQLRequest, Text2SQLResponse
@@ -32,7 +33,8 @@ async def chat_persisted(data: AIChatRequest, db: Session = Depends(get_db), use
     """调用 AI 模型并将用户消息、助手回复保存到当前用户会话。"""
 
     user_query = next((message.content for message in reversed(data.messages) if message.role == "user"), "")
-    LOGGER.info("AI HTTP 请求 mode=sync user_id=%s conversation_id=%s attachments=%s query_length=%s", user.id, data.conversation_id or "new", len(data.attachment_file_ids), len(user_query))
+    started = perf_counter()
+    LOGGER.info("AI HTTP 请求 mode=sync request_id=%s user_id=%s conversation_id=%s attachments=%s query_length=%s", get_request_id(), user.id, data.conversation_id or "new", len(data.attachment_file_ids), len(user_query))
     with observe_duration("ai_request_duration_seconds", labels={"mode": "sync"}):
         try:
             result = await service.chat_for_user(db, user, data)
@@ -40,10 +42,11 @@ async def chat_persisted(data: AIChatRequest, db: Session = Depends(get_db), use
             metrics.observe("ai_response_bytes", len((result.answer or result.message.content).encode("utf-8")), labels={"mode": "sync", "model": result.model})
             if result.usage and isinstance(result.usage.get("total_tokens"), int):
                 metrics.increment("ai_tokens", labels={"mode": "sync", "model": result.model}, value=result.usage["total_tokens"])
-        except Exception:
+        except Exception as exc:
             metrics.increment("ai_requests", labels={"mode": "sync", "status": "failure"})
+            LOGGER.warning("AI HTTP 失败 mode=sync request_id=%s user_id=%s duration_ms=%.2f error_type=%s", get_request_id(), user.id, (perf_counter() - started) * 1000, exc.__class__.__name__)
             raise
-    LOGGER.info("AI HTTP 回复 mode=sync user_id=%s conversation_id=%s model=%s answer_length=%s", user.id, result.conversation_id, result.model, len(result.answer or result.message.content))
+    LOGGER.info("AI HTTP 回复 mode=sync request_id=%s user_id=%s conversation_id=%s model=%s duration_ms=%.2f status=success answer_length=%s", get_request_id(), user.id, result.conversation_id, result.model, (perf_counter() - started) * 1000, len(result.answer or result.message.content))
     return result
 
 
@@ -86,3 +89,11 @@ def delete_conversation(conversation_id: int, db: Session = Depends(get_db), use
 
     service.delete_conversation(db, user, conversation_id)
     return {"deleted": True, "conversation_id": conversation_id}
+
+
+@router.delete("/conversations/{conversation_id}/query-context", summary="清空 AI 查询上下文")
+def clear_query_context(conversation_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, object]:
+    """清空当前会话的结构化 QueryPlan，保留历史消息和审计引用。"""
+
+    service.clear_query_context(db, user, conversation_id)
+    return {"cleared": True, "conversation_id": conversation_id}
