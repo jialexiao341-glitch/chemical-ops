@@ -60,19 +60,13 @@ Coupa Supplier Portal 的官方文档展示了全局工具栏、通知、帮助�
 
 ### 颜色
 
-- Reference Navy：`#122337`，侧栏、工作区导航和 AI 历史会话区。
-- Reference Deep Navy：`#0B1A2A`，登录页左侧品牌叙事区。
-- Reference Teal：`#087A7F`，主按钮、选中状态和 AI 入口。
-- Reference Teal Bright：`#06D9C3`，品牌高亮、图表线条和 AI 标识。
-- Reference Teal Soft：`#D5F4F1`，指标图标、成功状态和助手提示。
-- Reference Canvas：`#F0F3F8`，后台工作区背景。
-- Reference Paper：`#FDFEFE`，卡片、表格和详情面板背景。
-- Risk Amber：`#F2AD3B`，临期、待处理和警告。
-- Risk Coral：`#EF6668`，逾期、不合格和高风险。
-- Reference Text：`#10243B`，页面标题和核心数值。
-- Reference Muted：`#718198`，辅助说明和次级数据。
-
-实现时所有页面统一使用 `frontend/src/styles.css` 中的 `--ref-*` tokens，不再为单个页面另起一套配色；页面骨架也固定为深色侧栏、顶部工具栏、浅色工作区、内容区和按需展开的右侧详情/依据面板。
+- Ink Navy：`#0D2133`，侧栏、主标题和高对比区域。
+- Chemical Teal：`#0D9B91`，主按钮、选中状态和 AI 入口。
+- Mint Surface：`#E8F7F3`，AI 卡片、成功状态和轻提示。
+- Warm White：`#F8FAF9`，应用背景。
+- Risk Amber：`#D98C22`，临期、待处理和警告。
+- Risk Coral：`#D9534F`，逾期、不合格和高风险。
+- Text Gray：`#62737A`，辅助说明和次级数据。
 
 ### 排版和布局
 

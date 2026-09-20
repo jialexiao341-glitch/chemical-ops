@@ -438,20 +438,6 @@ export default function AIFloatingAssistant({ token }: { token: string }) {
             </form>
             <p className="ai-assistant-footnote">AI 建议仅供参考，正式业务操作仍需确认。</p>
           </div>
-          <aside className="ai-assistant-evidence">
-            <div className="ai-evidence-heading"><div><span className="ai-evidence-mark">✓</span><strong>查询依据</strong></div><span className="ai-evidence-ok">结果可追溯</span></div>
-            <section><h3>数据集</h3><strong>采购订单事实表（dw_purchase_order）</strong><small>来自企业数据中心 · 已更新至 2024-10-31</small></section>
-            <section><h3>时间范围</h3><strong>2024-10-01 至 2024-10-31</strong><small>本月</small></section>
-            <section><h3>权限范围</h3><strong>基于您当前的组织权限</strong><small>采购相关数据</small></section>
-            <section className="ai-evidence-verified"><h3>已验证查询 <time>10:24</time></h3><strong>SQL 已执行并通过校验</strong><small>返回 5 条供应商结果</small></section>
-            <details open className="ai-evidence-sql"><summary>SQL 语句 <span>⌃</span></summary><pre>SELECT supplier_name, SUM(order_amount) AS amount
-FROM dw_purchase_order
-WHERE order_date BETWEEN '2024-10-01' AND '2024-10-31'
-GROUP BY supplier_name
-ORDER BY amount DESC
-LIMIT 5;</pre></details>
-            <details open className="ai-evidence-source"><summary>数据来源 <span>⌃</span></summary><div><b>1</b><span>采购订单事实表<br /><small>企业数据中心 · 2024-10-31 更新</small></span>↗</div><div><b>2</b><span>供应商维度表<br /><small>企业数据中心 · 2024-10-31 更新</small></span>↗</div></details>
-          </aside>
         </section>
       )}
 
