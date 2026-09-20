@@ -51,6 +51,34 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _can_access_warehouse(db: Session, user: User, warehouse_id: int) -> bool:
+    """按仓库负责人限制非管理员的数据范围；未配置负责人时保持兼容。"""
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        return True
+    warehouse = db.get(Warehouse, warehouse_id)
+    return warehouse is not None and (warehouse.manager_id is None or warehouse.manager_id == user.id)
+
+
+def _require_warehouse_scope(db: Session, user: User, warehouse_id: int) -> None:
+    if not _can_access_warehouse(db, user, warehouse_id):
+        raise ResourceNotFoundError(f"仓库 {warehouse_id} 不存在")
+
+
+def _require_balance_for_user(db: Session, user: User, balance_id: int, *, for_update: bool = False) -> InventoryBalance:
+    """读取库存余额并校验当前用户的仓库数据范围。"""
+    balance = crud.get_balance_by_id(db, balance_id, for_update=for_update)
+    if balance is None:
+        raise ResourceNotFoundError(f"库存余额 {balance_id} 不存在")
+    _require_warehouse_scope(db, user, balance.warehouse_id)
+    return balance
+
+def accessible_warehouse_ids(db: Session, user: User) -> set[int] | None:
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        return None
+    return {value.id for value in db.scalars(select(Warehouse).where(Warehouse.status == "ACTIVE", (Warehouse.manager_id == user.id) | Warehouse.manager_id.is_(None))).all()}
+
 def create_warehouse(db: Session, user: User, data: WarehouseCreate) -> Warehouse:
     """创建仓库主数据。"""
 
@@ -71,6 +99,7 @@ def create_location(db: Session, user: User, warehouse_id: int, data: LocationCr
     warehouse = crud.get_warehouse(db, warehouse_id)
     if warehouse is None or warehouse.status != "ACTIVE":
         raise ResourceNotFoundError("仓库不存在或已停用")
+    _require_warehouse_scope(db, user, warehouse_id)
     if db.scalar(select(WarehouseLocation).where(WarehouseLocation.warehouse_id == warehouse_id, WarehouseLocation.location_code == data.location_code)):
         raise DuplicateResourceError(f"库位编码 {data.location_code} 已存在")
     location = WarehouseLocation(warehouse_id=warehouse_id, **data.model_dump())
@@ -82,17 +111,22 @@ def create_location(db: Session, user: User, warehouse_id: int, data: LocationCr
     return location
 
 
-def list_warehouses(db: Session) -> list[Warehouse]:
+def list_warehouses(db: Session, user: User | None = None) -> list[Warehouse]:
     """查询启用仓库。"""
 
-    return list(db.scalars(select(Warehouse).where(Warehouse.status == "ACTIVE").order_by(Warehouse.id)).all())
+    statement = select(Warehouse).where(Warehouse.status == "ACTIVE")
+    if user is not None and not (set(get_user_role_codes(db, user.id)) & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}):
+        statement = statement.where((Warehouse.manager_id == user.id) | Warehouse.manager_id.is_(None))
+    return list(db.scalars(statement.order_by(Warehouse.id)).all())
 
 
-def list_locations(db: Session, warehouse_id: int) -> list[WarehouseLocation]:
+def list_locations(db: Session, warehouse_id: int, user: User | None = None) -> list[WarehouseLocation]:
     """查询仓库启用库位。"""
 
     if crud.get_warehouse(db, warehouse_id) is None:
         raise ResourceNotFoundError("仓库不存在")
+    if user is not None:
+        _require_warehouse_scope(db, user, warehouse_id)
     return list(db.scalars(select(WarehouseLocation).where(WarehouseLocation.warehouse_id == warehouse_id, WarehouseLocation.status == "ACTIVE").order_by(WarehouseLocation.id)).all())
 
 
@@ -100,9 +134,7 @@ def freeze_balance(db: Session, user: User, balance_id: int, data: InventoryBala
     """锁定库存余额，冻结不改变数量。"""
 
     try:
-        balance = crud.get_balance_by_id(db, balance_id, for_update=True)
-        if balance is None:
-            raise ResourceNotFoundError(f"库存余额 {balance_id} 不存在")
+        balance = _require_balance_for_user(db, user, balance_id, for_update=True)
         if balance.status == "FROZEN":
             raise BusinessValidationError("库存余额已经冻结")
         if balance.status != "AVAILABLE":
@@ -124,9 +156,7 @@ def unfreeze_balance(db: Session, user: User, balance_id: int, data: InventoryBa
     """解冻库存余额，恢复为可用状态。"""
 
     try:
-        balance = crud.get_balance_by_id(db, balance_id, for_update=True)
-        if balance is None:
-            raise ResourceNotFoundError(f"库存余额 {balance_id} 不存在")
+        balance = _require_balance_for_user(db, user, balance_id, for_update=True)
         if balance.status != "FROZEN":
             raise BusinessValidationError("只有已冻结库存余额可以解冻")
         balance.status = "AVAILABLE"
@@ -139,11 +169,10 @@ def unfreeze_balance(db: Session, user: User, balance_id: int, data: InventoryBa
     return crud.get_balance_by_id(db, balance_id)
 
 
-def list_balance_status_logs(db: Session, balance_id: int, *, page: int, page_size: int):
+def list_balance_status_logs(db: Session, user: User, balance_id: int, *, page: int, page_size: int):
     """查询库存余额冻结和解冻历史。"""
 
-    if crud.get_balance_by_id(db, balance_id) is None:
-        raise ResourceNotFoundError(f"库存余额 {balance_id} 不存在")
+    _require_balance_for_user(db, user, balance_id)
     return crud.list_balance_status_logs(db, balance_id, page=page, page_size=page_size)
 
 
@@ -156,6 +185,7 @@ def create_inbound(db: Session, user: User, data: InboundCreate):
         raise ResourceNotFoundError("到货单不存在")
     if delivery.status != "ACCEPTED":
         raise BusinessValidationError("只有质量验收通过的到货单可以入库")
+    _require_warehouse_scope(db, user, data.warehouse_id)
     warehouse = crud.get_warehouse(db, data.warehouse_id)
     location = crud.get_location(db, data.location_id)
     if warehouse is None or warehouse.status != "ACTIVE":
@@ -185,28 +215,16 @@ def create_inbound(db: Session, user: User, data: InboundCreate):
             )
             db.add(batch)
             db.flush()
-        balance = crud.get_balance(
+        balance = crud.ensure_balance_for_update(
             db,
             warehouse.id,
             location.id,
             delivery_item.product_id,
             batch.id,
             delivery_item.unit_id,
-            for_update=True,
         )
         if balance is None:
-            balance = InventoryBalance(
-                warehouse_id=warehouse.id,
-                location_id=location.id,
-                product_id=delivery_item.product_id,
-                batch_id=batch.id,
-                unit_id=delivery_item.unit_id,
-                quantity=Decimal("0"),
-                locked_quantity=Decimal("0"),
-                status="AVAILABLE",
-            )
-            db.add(balance)
-            db.flush()
+            raise BusinessValidationError("库存余额创建失败，请稍后重试")
         balance.quantity += delivery_item.actual_quantity
         transaction = InventoryTransaction(
             transaction_no=f"TEMP-IT-{user.id}-{delivery_item.id}",

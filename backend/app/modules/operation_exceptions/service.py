@@ -3,9 +3,10 @@
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.errors import BusinessValidationError, ResourceNotFoundError
+from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.operation_exceptions import crud
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment
@@ -36,10 +37,10 @@ def _can_manage_all(db: Session, user: User) -> bool:
     return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY"} & set(get_user_role_codes(db, user.id)))
 
 
-def _require_exception(db: Session, exception_id: int) -> OperationException:
+def _require_exception(db: Session, exception_id: int, *, for_update: bool = False) -> OperationException:
     """查询异常，不存在时抛出业务异常。"""
 
-    exception = crud.get_by_id(db, exception_id)
+    exception = crud.get_by_id(db, exception_id, for_update=for_update)
     if exception is None:
         raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
     return exception
@@ -74,6 +75,9 @@ def create_exception(db: Session, user: User, data: OperationExceptionCreate) ->
     """登记一条采购运营异常。"""
 
     _validate_source(db, data)
+    duplicate = db.scalar(select(OperationException).where(OperationException.exception_type == data.exception_type, OperationException.source_type == data.source_type, OperationException.source_id == data.source_id, OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED"))))
+    if duplicate is not None:
+        raise DuplicateResourceError("同一来源的未关闭异常已存在")
     exception = OperationException(
         exception_no=f"TEMP-EX-{user.id}-{int(_now().timestamp())}",
         **data.model_dump(),
@@ -132,10 +136,17 @@ def create_automatic_exception(
         description=description,
         status="OPEN",
     )
-    db.add(exception)
-    db.flush()
-    exception.exception_no = f"EX{_now():%Y%m%d}{exception.id:06d}"
-    add_audit_log(db, actor_id=user.id, action_type="AUTO_CREATE", resource_type="OPERATION_EXCEPTION", resource_id=exception.id, request_summary="业务事件自动生成运营异常", result_status="SUCCESS")
+    try:
+        with db.begin_nested():
+            db.add(exception)
+            db.flush()
+            exception.exception_no = f"EX{_now():%Y%m%d}{exception.id:06d}"
+            add_audit_log(db, actor_id=user.id, action_type="AUTO_CREATE", resource_type="OPERATION_EXCEPTION", resource_id=exception.id, request_summary="业务事件自动生成运营异常", result_status="SUCCESS")
+    except IntegrityError:
+        existing = db.scalar(select(OperationException).where(OperationException.exception_type == exception_type, OperationException.source_type == source_type, OperationException.source_id == source_id, OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED"))).order_by(OperationException.id).limit(1))
+        if existing is not None:
+            return None
+        raise
     return exception
 
 
@@ -146,10 +157,10 @@ def list_exceptions(db: Session, user: User, *, exception_type: str | None, stat
     return crud.list_page(db, owner_id=owner_id, exception_type=exception_type, status=status, page=page, page_size=page_size)
 
 
-def get_exception(db: Session, user: User, exception_id: int) -> OperationException:
+def get_exception(db: Session, user: User, exception_id: int, *, for_update: bool = False) -> OperationException:
     """查询异常并校验负责人数据范围。"""
 
-    exception = _require_exception(db, exception_id)
+    exception = _require_exception(db, exception_id, for_update=for_update)
     if not _can_manage_all(db, user) and exception.owner_id != user.id:
         raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
     return exception
@@ -158,7 +169,7 @@ def get_exception(db: Session, user: User, exception_id: int) -> OperationExcept
 def update_exception(db: Session, user: User, exception_id: int, data: OperationExceptionUpdate) -> OperationException:
     """指派负责人并推进异常状态。"""
 
-    exception = get_exception(db, user, exception_id)
+    exception = get_exception(db, user, exception_id, for_update=True)
     if exception.status in {"CLOSED", "CANCELLED"}:
         raise BusinessValidationError("已关闭或已取消的异常不能修改")
     values = data.model_dump(exclude_unset=True)
@@ -196,10 +207,10 @@ def _can_access_task(db: Session, user: User, task: OperationTask) -> bool:
     return _can_manage_all(db, user) or exception.owner_id == user.id or task.assignee_id == user.id
 
 
-def _require_task(db: Session, task_id: int) -> OperationTask:
+def _require_task(db: Session, task_id: int, *, for_update: bool = False) -> OperationTask:
     """查询任务，不存在时抛出业务异常。"""
 
-    task = crud.get_task(db, task_id)
+    task = crud.get_task(db, task_id, for_update=for_update)
     if task is None:
         raise ResourceNotFoundError(f"异常任务 {task_id} 不存在")
     return task

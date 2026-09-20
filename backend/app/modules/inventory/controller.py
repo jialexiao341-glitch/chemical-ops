@@ -48,10 +48,10 @@ def create_warehouse(data: WarehouseCreate, db: Session = Depends(get_db), user:
 
 
 @router.get("/warehouses", response_model=list[WarehouseRead], summary="查询仓库")
-def list_warehouses(db: Session = Depends(get_db), _: User = Depends(require_permission("warehouse.inventory.read"))) -> list[WarehouseRead]:
+def list_warehouses(db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> list[WarehouseRead]:
     """查询启用仓库。"""
 
-    return service.list_warehouses(db)
+    return service.list_warehouses(db, user)
 
 
 @router.post("/warehouses/{warehouse_id}/locations", response_model=LocationRead, status_code=status.HTTP_201_CREATED, summary="创建库位")
@@ -62,10 +62,10 @@ def create_location(warehouse_id: int, data: LocationCreate, db: Session = Depen
 
 
 @router.get("/warehouses/{warehouse_id}/locations", response_model=list[LocationRead], summary="查询库位")
-def list_locations(warehouse_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("warehouse.inventory.read"))) -> list[LocationRead]:
+def list_locations(warehouse_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> list[LocationRead]:
     """查询仓库启用库位。"""
 
-    return service.list_locations(db, warehouse_id)
+    return service.list_locations(db, warehouse_id, user)
 
 
 @router.post("/inbounds", response_model=InboundRead, status_code=status.HTTP_201_CREATED, summary="执行库存入库")
@@ -77,10 +77,13 @@ def create_inbound(data: InboundCreate, db: Session = Depends(get_db), user: Use
 
 
 @router.get("/balances", response_model=InventoryBalancePage, summary="查询库存余额")
-def list_balances(product_id: int | None = Query(default=None, gt=0), warehouse_id: int | None = Query(default=None, gt=0), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), _: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryBalancePage:
+def list_balances(product_id: int | None = Query(default=None, gt=0), warehouse_id: int | None = Query(default=None, gt=0), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryBalancePage:
     """按产品和仓库查询库存余额。"""
 
-    items, total = crud.list_balances(db, product_id=product_id, warehouse_id=warehouse_id, page=page, page_size=page_size)
+    warehouse_ids = service.accessible_warehouse_ids(db, user)
+    if warehouse_id is not None and warehouse_ids is not None and warehouse_id not in warehouse_ids:
+        raise service.ResourceNotFoundError(f"仓库 {warehouse_id} 不存在")
+    items, total = crud.list_balances(db, product_id=product_id, warehouse_id=warehouse_id, warehouse_ids=warehouse_ids, page=page, page_size=page_size)
     return InventoryBalancePage(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -99,18 +102,18 @@ def unfreeze_balance(balance_id: int, data: InventoryBalanceStatusChange, db: Se
 
 
 @router.get("/balances/{balance_id}/status-logs", response_model=InventoryBalanceStatusLogPage, summary="查询库存状态变更记录")
-def list_balance_status_logs(balance_id: int, page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), _: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryBalanceStatusLogPage:
+def list_balance_status_logs(balance_id: int, page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryBalanceStatusLogPage:
     """查询库存余额冻结和解冻历史。"""
 
-    items, total = service.list_balance_status_logs(db, balance_id, page=page, page_size=page_size)
+    items, total = service.list_balance_status_logs(db, user, balance_id, page=page, page_size=page_size)
     return InventoryBalanceStatusLogPage(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/transactions", response_model=InventoryTransactionPage, summary="查询库存流水")
-def list_transactions(product_id: int | None = Query(default=None, gt=0), transaction_type: str | None = Query(default=None, pattern="^(INBOUND|OUTBOUND|ADJUSTMENT)$"), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), _: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryTransactionPage:
+def list_transactions(product_id: int | None = Query(default=None, gt=0), transaction_type: str | None = Query(default=None, pattern="^(INBOUND|OUTBOUND|ADJUSTMENT)$"), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryTransactionPage:
     """按产品和流水类型查询库存变化记录。"""
 
-    items, total = crud.list_transactions(db, product_id=product_id, transaction_type=transaction_type, page=page, page_size=page_size)
+    items, total = crud.list_transactions(db, product_id=product_id, transaction_type=transaction_type, warehouse_ids=service.accessible_warehouse_ids(db, user), page=page, page_size=page_size)
     return InventoryTransactionPage(items=items, total=total, page=page, page_size=page_size)
 
 

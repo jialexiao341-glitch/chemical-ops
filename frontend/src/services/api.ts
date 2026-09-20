@@ -95,6 +95,14 @@ interface ApiErrorResponse {
   detail?: string | Array<{ message?: string }>;
 }
 
+interface ApiRequestOptions extends RequestInit {
+  idempotencyKey?: string;
+}
+
+function newIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 const STATUS_MESSAGES: Record<number, string> = {
   400: "请求不符合业务规则",
   401: "登录已失效，请重新登录",
@@ -107,17 +115,20 @@ const STATUS_MESSAGES: Record<number, string> = {
   500: "服务器内部错误，请稍后重试",
 };
 
-export async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}, token?: string): Promise<T> {
   const isFormData = options.body instanceof FormData;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const method = (options.method || "GET").toUpperCase();
+  const headers = new Headers(options.headers);
+  if (!isFormData && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", "Bearer " + token);
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method) && !headers.has("Idempotency-Key")) {
+    headers.set("Idempotency-Key", options.idempotencyKey || newIdempotencyKey());
+  }
+  const response = await fetch(API_BASE_URL + path, {
     ...options,
-    headers: {
-      ...(isFormData ? {} : { "Content-Type": "application/json" }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
+    method,
+    headers,
   });
-
   if (!response.ok) {
     let message = STATUS_MESSAGES[response.status] || `请求失败（${response.status}）`;
     try {
@@ -167,10 +178,11 @@ export async function streamAIChat(
   attachments: string[] = [],
   attachmentFileIds: number[] = [],
   onEvent: (event: AIStreamEvent) => void,
+  idempotencyKey?: string,
 ) {
   const response = await fetch(`${API_BASE_URL}/ai/chat/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey || newIdempotencyKey(), Authorization: `Bearer ${token}` },
     body: JSON.stringify({ messages, attachments, attachment_file_ids: attachmentFileIds }),
   });
   if (!response.ok) {

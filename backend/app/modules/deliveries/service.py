@@ -45,7 +45,7 @@ def _require_order(db: Session, user: User, po_id: int, *, for_update: bool = Fa
     order = crud.get_order(db, po_id, for_update=for_update)
     if order is None:
         raise ResourceNotFoundError(f"采购订单 {po_id} 不存在")
-    if not _can_manage_all(db, user) and order.buyer_id != user.id:
+    if not _can_manage_all(db, user) and not ((user.department_id is not None and order.department_id == user.department_id) or (user.department_id is None and order.buyer_id == user.id)):
         raise ResourceNotFoundError(f"采购订单 {po_id} 不存在")
     return order
 
@@ -60,7 +60,7 @@ def _check_dates(production_date: date | None, expiry_date: date | None) -> None
 def create_delivery(db: Session, user: User, data: DeliveryCreate) -> Delivery:
     """为已下单采购订单登记到货计划。"""
 
-    order = _require_order(db, user, data.po_id)
+    order = _require_order(db, user, data.po_id, for_update=True)
     if order.status not in {"ORDERED", "PARTIAL"}:
         raise BusinessValidationError("只有已下单或部分到货的采购订单可以登记到货")
     po_items = {item.id: item for item in order.items}
@@ -117,7 +117,8 @@ def list_deliveries(db: Session, user: User, *, keyword: str | None, status: str
 
     po_ids = None
     if not _can_manage_all(db, user):
-        po_ids = {order.id for order in db.scalars(select(PurchaseOrder).where(PurchaseOrder.buyer_id == user.id)).all()}
+        conditions = [PurchaseOrder.buyer_id == user.id] if user.department_id is None else [PurchaseOrder.department_id == user.department_id]
+        po_ids = {order.id for order in db.scalars(select(PurchaseOrder).where(*conditions)).all()}
     return crud.list_page(db, po_ids=po_ids, keyword=keyword, status=status, page=page, page_size=page_size)
 
 

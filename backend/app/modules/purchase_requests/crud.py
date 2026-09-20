@@ -10,20 +10,24 @@ from app.modules.purchase_requests.model import (
 )
 
 
-def get_by_id(db: Session, request_id: int) -> PurchaseRequest | None:
+def get_by_id(db: Session, request_id: int, *, for_update: bool = False) -> PurchaseRequest | None:
     """按主键查询采购申请及其明细、审批记录。"""
 
-    return db.scalar(
+    statement = (
         select(PurchaseRequest)
         .options(selectinload(PurchaseRequest.items), selectinload(PurchaseRequest.approvals))
         .where(PurchaseRequest.id == request_id)
     )
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def list_page(
     db: Session,
     *,
     applicant_id: int | None,
+    department_id: int | None = None,
     keyword: str | None,
     status: str | None,
     page: int,
@@ -34,6 +38,8 @@ def list_page(
     conditions = []
     if applicant_id is not None:
         conditions.append(PurchaseRequest.applicant_id == applicant_id)
+    if department_id is not None:
+        conditions.append(PurchaseRequest.department_id == department_id)
     if keyword:
         conditions.append(
             PurchaseRequest.request_no.like(f"%{keyword}%")
@@ -56,10 +62,10 @@ def list_page(
     return items, total
 
 
-def get_pending_approval(db: Session, request_id: int) -> PurchaseRequestApproval | None:
+def get_pending_approval(db: Session, request_id: int, *, for_update: bool = False) -> PurchaseRequestApproval | None:
     """查询采购申请当前待处理的审批节点。"""
 
-    return db.scalar(
+    statement = (
         select(PurchaseRequestApproval)
         .where(
             PurchaseRequestApproval.request_id == request_id,
@@ -67,6 +73,9 @@ def get_pending_approval(db: Session, request_id: int) -> PurchaseRequestApprova
         )
         .order_by(PurchaseRequestApproval.sequence_no)
     )
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def delete_items(db: Session, request_id: int) -> None:

@@ -7,10 +7,13 @@ from app.modules.deliveries.model import Delivery
 from app.modules.quality_acceptances.model import QualityAcceptance
 
 
-def get_by_id(db: Session, acceptance_id: int) -> QualityAcceptance | None:
+def get_by_id(db: Session, acceptance_id: int, *, for_update: bool = False) -> QualityAcceptance | None:
     """按主键查询验收记录。"""
 
-    return db.get(QualityAcceptance, acceptance_id)
+    statement = select(QualityAcceptance).where(QualityAcceptance.id == acceptance_id)
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def list_page(
@@ -43,10 +46,13 @@ def list_page(
     return items, total
 
 
-def get_delivery(db: Session, delivery_id: int) -> Delivery | None:
+def get_delivery(db: Session, delivery_id: int, *, for_update: bool = False) -> Delivery | None:
     """查询到货单。"""
 
-    return db.get(Delivery, delivery_id)
+    statement = select(Delivery).where(Delivery.id == delivery_id)
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def get_by_delivery(db: Session, delivery_id: int) -> QualityAcceptance | None:

@@ -34,10 +34,10 @@ def _can_manage_all(db: Session, user: User) -> bool:
     return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(get_user_role_codes(db, user.id)))
 
 
-def _require_order(db: Session, order_id: int) -> PurchaseOrder:
+def _require_order(db: Session, order_id: int, *, for_update: bool = False) -> PurchaseOrder:
     """查询采购订单，不存在时抛出业务异常。"""
 
-    order = crud.get_by_id(db, order_id)
+    order = crud.get_by_id(db, order_id, for_update=for_update)
     if order is None:
         raise ResourceNotFoundError(f"采购订单 {order_id} 不存在")
     return order
@@ -97,6 +97,8 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate) -> Purchase
     """根据已确认的中选报价生成采购订单草稿。"""
 
     comparison, quote, source_request, rfq_items, quote_items = _validate_source(db, data)
+    if not _can_manage_all(db, user) and user.department_id is not None and source_request.department_id != user.department_id:
+        raise ResourceNotFoundError("报价来源采购申请不存在")
     existing_order = db.scalar(select(PurchaseOrder.id).where(PurchaseOrder.source_quote_id == quote.id))
     if existing_order is not None:
         raise BusinessValidationError("该中选报价已经生成采购订单，不能重复下单")
@@ -148,15 +150,17 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate) -> Purchase
 def list_orders(db: Session, user: User, *, keyword: str | None, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询采购订单。"""
 
-    buyer_id = None if _can_manage_all(db, user) else user.id
-    return crud.list_page(db, buyer_id=buyer_id, keyword=keyword, status=status, page=page, page_size=page_size)
+    can_manage_all = _can_manage_all(db, user)
+    buyer_id = None if can_manage_all or user.department_id is not None else user.id
+    department_id = user.department_id if not can_manage_all else None
+    return crud.list_page(db, buyer_id=buyer_id, department_id=department_id, keyword=keyword, status=status, page=page, page_size=page_size)
 
 
-def get_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
+def get_order(db: Session, user: User, order_id: int, *, for_update: bool = False) -> PurchaseOrder:
     """查询订单详情并执行数据范围校验。"""
 
-    order = _require_order(db, order_id)
-    if not _can_manage_all(db, user) and order.buyer_id != user.id:
+    order = _require_order(db, order_id, for_update=for_update)
+    if not _can_manage_all(db, user) and not ((user.department_id is not None and order.department_id == user.department_id) or (user.department_id is None and order.buyer_id == user.id)):
         raise ResourceNotFoundError(f"采购订单 {order_id} 不存在")
     return order
 
@@ -164,7 +168,7 @@ def get_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
 def update_order(db: Session, user: User, order_id: int, data: PurchaseOrderUpdate) -> PurchaseOrder:
     """更新采购订单草稿。"""
 
-    order = get_order(db, user, order_id)
+    order = get_order(db, user, order_id, for_update=True)
     if order.status != "DRAFT":
         raise BusinessValidationError("只有草稿状态的采购订单可以修改")
     for key, value in data.model_dump(exclude_unset=True).items():
@@ -177,7 +181,7 @@ def update_order(db: Session, user: User, order_id: int, data: PurchaseOrderUpda
 def submit_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
     """提交采购订单并创建采购经理审批节点。"""
 
-    order = get_order(db, user, order_id)
+    order = get_order(db, user, order_id, for_update=True)
     if order.status != "DRAFT":
         raise BusinessValidationError("只有草稿状态的采购订单可以提交")
     if not order.items:
@@ -203,10 +207,10 @@ def submit_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
 def act_on_order(db: Session, user: User, order_id: int, data: PurchaseOrderApprovalAction, target_status: str) -> PurchaseOrder:
     """处理采购订单审批通过或驳回。"""
 
-    order = get_order(db, user, order_id)
+    order = get_order(db, user, order_id, for_update=True)
     if order.status != "APPROVING":
         raise BusinessValidationError("只有审批中的采购订单可以处理")
-    approval = crud.get_pending_approval(db, order.id)
+    approval = crud.get_pending_approval(db, order.id, for_update=True)
     if approval is None:
         raise BusinessValidationError("当前订单没有待处理审批节点")
     approval.action = "APPROVED" if target_status == "APPROVED" else "REJECTED"
@@ -226,7 +230,7 @@ def act_on_order(db: Session, user: User, order_id: int, data: PurchaseOrderAppr
 def place_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
     """将已审批订单置为已下单，并回写采购申请已采购数量。"""
 
-    order = get_order(db, user, order_id)
+    order = get_order(db, user, order_id, for_update=True)
     if order.status != "APPROVED":
         raise BusinessValidationError("只有已审批的采购订单可以下单")
     previous = order.status
@@ -251,7 +255,7 @@ def place_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
 def cancel_order(db: Session, user: User, order_id: int, data: PurchaseOrderCancelAction) -> PurchaseOrder:
     """取消尚未下单或执行中的采购订单。"""
 
-    order = get_order(db, user, order_id)
+    order = get_order(db, user, order_id, for_update=True)
     if order.status not in {"DRAFT", "APPROVING", "APPROVED"}:
         raise BusinessValidationError("当前订单状态不允许取消")
     previous = order.status

@@ -186,6 +186,28 @@ def _can_read_resource(db: Session, user: User, resource_type: str) -> bool:
     return required_permission is not None and required_permission in get_user_permission_codes(db, user.id)
 
 
+def _can_access_resource_instance(db: Session, user: User, resource_type: str, resource) -> bool:
+    """在通用权限之外校验业务资源的数据归属。"""
+    if _is_system_admin(db, user):
+        return True
+    role_codes = set(get_user_role_codes(db, user.id))
+    if resource_type == "PURCHASE_ORDER":
+        return resource.buyer_id == user.id or (user.department_id is not None and resource.department_id == user.department_id) or bool(role_codes & {"PROCUREMENT_MANAGER", "FINANCE_MANAGER"})
+    if resource_type == "DELIVERY":
+        order = db.get(PurchaseOrder, resource.po_id)
+        return order is not None and _can_access_resource_instance(db, user, "PURCHASE_ORDER", order)
+    if resource_type == "QUALITY_ACCEPTANCE":
+        delivery = db.get(Delivery, resource.delivery_id)
+        return delivery is not None and _can_access_resource_instance(db, user, "DELIVERY", delivery)
+    if resource_type == "OPERATION_EXCEPTION":
+        return resource.owner_id == user.id or bool(role_codes & {"PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY"})
+    if resource_type in {"INVENTORY_RETURN", "REPLENISHMENT"}:
+        return resource.applicant_id == user.id or bool(role_codes & {"PROCUREMENT_MANAGER", "WAREHOUSE"})
+    if resource_type == "FINANCE_INVOICE":
+        return True
+    return False
+
+
 def _check_resource_access(db: Session, user: User, resource_type: str, resource_id: int) -> None:
     """校验业务附件接口不会绕过对应业务资源的读取权限。"""
 
@@ -194,7 +216,8 @@ def _check_resource_access(db: Session, user: User, resource_type: str, resource
         raise BusinessValidationError("该资源类型暂不支持附件权限校验")
     if not _can_read_resource(db, user, resource_type):
         raise ResourceNotFoundError(f"业务资源 {resource_type}:{resource_id} 不存在")
-    if db.get(model, resource_id) is None:
+    resource = db.get(model, resource_id)
+    if resource is None or not _can_access_resource_instance(db, user, resource_type, resource):
         raise ResourceNotFoundError(f"业务资源 {resource_type}:{resource_id} 不存在")
 
 
@@ -207,7 +230,12 @@ def _check_file_access(db: Session, user: User, value: SysFile) -> None:
     if is_admin or (value.access_level == "PRIVATE" and value.uploader_id == user.id):
         return
     linked_resources = db.scalars(select(SysFileAttachment).where(SysFileAttachment.file_id == value.id)).all()
-    if linked_resources and not any(_can_read_resource(db, user, item.resource_type) for item in linked_resources):
+    for item in linked_resources:
+        model = RESOURCE_MODELS.get(item.resource_type)
+        resource = db.get(model, item.resource_id) if model is not None else None
+        if resource is not None and _can_read_resource(db, user, item.resource_type) and _can_access_resource_instance(db, user, item.resource_type, resource):
+            return
+    if linked_resources:
         raise ResourceNotFoundError(f"文件 {value.id} 不存在")
 
 

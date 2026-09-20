@@ -17,16 +17,20 @@ def detail_options():
     )
 
 
-def get_by_id(db: Session, order_id: int) -> PurchaseOrder | None:
+def get_by_id(db: Session, order_id: int, *, for_update: bool = False) -> PurchaseOrder | None:
     """按主键查询订单及其明细、审批和事件。"""
 
-    return db.scalar(select(PurchaseOrder).options(*detail_options()).where(PurchaseOrder.id == order_id))
+    statement = select(PurchaseOrder).options(*detail_options()).where(PurchaseOrder.id == order_id)
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def list_page(
     db: Session,
     *,
     buyer_id: int | None,
+    department_id: int | None = None,
     keyword: str | None,
     status: str | None,
     page: int,
@@ -37,6 +41,8 @@ def list_page(
     conditions = []
     if buyer_id is not None:
         conditions.append(PurchaseOrder.buyer_id == buyer_id)
+    if department_id is not None:
+        conditions.append(PurchaseOrder.department_id == department_id)
     if keyword:
         conditions.append(PurchaseOrder.po_no.like(f"%{keyword}%"))
     if status:
@@ -75,14 +81,17 @@ def get_comparison(db: Session, comparison_id: int) -> QuoteComparison | None:
     )
 
 
-def get_pending_approval(db: Session, order_id: int) -> PurchaseOrderApproval | None:
+def get_pending_approval(db: Session, order_id: int, *, for_update: bool = False) -> PurchaseOrderApproval | None:
     """查询订单当前待处理的审批节点。"""
 
-    return db.scalar(
+    statement = (
         select(PurchaseOrderApproval)
         .where(PurchaseOrderApproval.po_id == order_id, PurchaseOrderApproval.action == "PENDING")
         .order_by(PurchaseOrderApproval.sequence_no)
     )
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def get_event_count(db: Session, order_id: int) -> int:

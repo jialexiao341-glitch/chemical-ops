@@ -30,10 +30,10 @@ def _can_manage_all(db: Session, user: User) -> bool:
     return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "QUALITY", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
 
 
-def _require_acceptance(db: Session, acceptance_id: int) -> QualityAcceptance:
+def _require_acceptance(db: Session, acceptance_id: int, *, for_update: bool = False) -> QualityAcceptance:
     """查询验收记录，不存在时抛出业务异常。"""
 
-    acceptance = crud.get_by_id(db, acceptance_id)
+    acceptance = crud.get_by_id(db, acceptance_id, for_update=for_update)
     if acceptance is None:
         raise ResourceNotFoundError(f"质量验收记录 {acceptance_id} 不存在")
     return acceptance
@@ -42,7 +42,7 @@ def _require_acceptance(db: Session, acceptance_id: int) -> QualityAcceptance:
 def create_acceptance(db: Session, user: User, data: QualityAcceptanceCreate) -> QualityAcceptance:
     """为已收货到货单创建待检验记录。"""
 
-    delivery = crud.get_delivery(db, data.delivery_id)
+    delivery = crud.get_delivery(db, data.delivery_id, for_update=True)
     if delivery is None:
         raise ResourceNotFoundError("到货单不存在")
     if delivery.status != "RECEIVED":
@@ -81,10 +81,10 @@ def list_acceptances(db: Session, user: User, *, result: str | None, page: int, 
     return crud.list_page(db, delivery_ids=delivery_ids, result=result, page=page, page_size=page_size)
 
 
-def get_acceptance(db: Session, user: User, acceptance_id: int) -> QualityAcceptance:
+def get_acceptance(db: Session, user: User, acceptance_id: int, *, for_update: bool = False) -> QualityAcceptance:
     """查询验收记录并校验用户数据范围。"""
 
-    acceptance = _require_acceptance(db, acceptance_id)
+    acceptance = _require_acceptance(db, acceptance_id, for_update=for_update)
     if not _can_manage_all(db, user) and acceptance.inspector_id != user.id:
         raise ResourceNotFoundError(f"质量验收记录 {acceptance_id} 不存在")
     return acceptance
@@ -93,10 +93,10 @@ def get_acceptance(db: Session, user: User, acceptance_id: int) -> QualityAccept
 def submit_result(db: Session, user: User, acceptance_id: int, data: QualityAcceptanceResult) -> QualityAcceptance:
     """提交验收结果，并同步更新到货单质量状态。"""
 
-    acceptance = get_acceptance(db, user, acceptance_id)
+    acceptance = get_acceptance(db, user, acceptance_id, for_update=True)
     if acceptance.result in {"PASSED", "PARTIAL", "FAILED"} and data.result != "REINSPECTION":
         raise BusinessValidationError("已完成的验收只能先发起复检")
-    delivery = crud.get_delivery(db, acceptance.delivery_id)
+    delivery = crud.get_delivery(db, acceptance.delivery_id, for_update=True)
     if delivery is None:
         raise ResourceNotFoundError("关联到货单不存在")
     acceptance.result = data.result

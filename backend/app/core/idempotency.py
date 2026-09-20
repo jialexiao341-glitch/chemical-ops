@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 import json
 
+import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -11,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.core.security import decode_access_token
 from app.modules.system.idempotency_model import IdempotencyRecord
 
 
@@ -20,7 +22,8 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
     @staticmethod
     def _replay_existing(record: IdempotencyRecord, request: Request, request_hash: str, key: str):
         """检查已有记录是否属于当前请求，并返回回放或冲突响应。"""
-        if record.expires_at <= datetime.now() or record.method != request.method or record.path != request.url.path or record.request_hash != request_hash:
+        request_path = str(request.url.path) + (f"?{request.url.query}" if request.url.query else "")
+        if record.expires_at <= datetime.now() or record.method != request.method or record.path != request_path or record.request_hash != request_hash:
             return JSONResponse(status_code=409, content={"code": 409, "message": "数据已存在", "detail": "Idempotency-Key 已用于其他请求"})
         if record.status == "IN_PROGRESS":
             return JSONResponse(status_code=409, content={"code": 409, "message": "数据已存在", "detail": "相同请求正在处理中，请稍后重试"})
@@ -50,7 +53,16 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=422, content={"code": 422, "message": "请求参数校验失败", "detail": "Idempotency-Key 长度不能超过 128 个字符"})
         body = await request.body()
         request_hash = sha256(body).hexdigest()
-        actor_key = sha256(request.headers.get("Authorization", "anonymous").encode("utf-8")).hexdigest()
+        authorization = request.headers.get("Authorization", "")
+        actor_identifier = authorization or "anonymous"
+        if authorization.lower().startswith("bearer "):
+            try:
+                actor_identifier = f"user:{decode_access_token(authorization[7:].strip())}"
+            except jwt.InvalidTokenError:
+                # 认证依赖会返回 401；这里仍需让非法令牌彼此隔离，避免误回放。
+                actor_identifier = f"token:{authorization}"
+        actor_key = sha256(actor_identifier.encode("utf-8")).hexdigest()
+        request_path = str(request.url.path) + (f"?{request.url.query}" if request.url.query else "")
         db = SessionLocal()
         record = None
         try:
@@ -61,7 +73,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 record = None
             if record is not None:
                 return self._replay_existing(record, request, request_hash, key)
-            record = IdempotencyRecord(idempotency_key=key, actor_key=actor_key, method=request.method, path=request.url.path, request_hash=request_hash, status="IN_PROGRESS", expires_at=datetime.now() + timedelta(hours=24))
+            record = IdempotencyRecord(idempotency_key=key, actor_key=actor_key, method=request.method, path=request_path, request_hash=request_hash, status="IN_PROGRESS", expires_at=datetime.now() + timedelta(hours=24))
             db.add(record)
             try:
                 db.commit()

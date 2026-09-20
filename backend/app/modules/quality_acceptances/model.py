@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, ForeignKey, SmallInteger, String, Text, func
+from sqlalchemy import JSON, ForeignKey, SmallInteger, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +14,7 @@ class QualityAcceptance(Base):
     """一张到货单对应的质量验收记录。"""
 
     __tablename__ = "quality_acceptances"
+    __table_args__ = (UniqueConstraint("delivery_id", name="uk_acceptance_delivery"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     acceptance_no: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)

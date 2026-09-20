@@ -1,6 +1,6 @@
 """库存模块的数据访问操作。"""
 
-from sqlalchemy import func, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.inventory.model import (
@@ -64,6 +64,30 @@ def get_balance(
     return db.scalar(statement)
 
 
+def ensure_balance_for_update(
+    db: Session,
+    warehouse_id: int,
+    location_id: int,
+    product_id: int,
+    batch_id: int,
+    unit_id: int,
+) -> InventoryBalance | None:
+    """原子确保库存余额存在，再以统一顺序锁定余额行。"""
+
+    db.execute(
+        insert(InventoryBalance).prefix_with("IGNORE").values(
+            warehouse_id=warehouse_id,
+            location_id=location_id,
+            product_id=product_id,
+            batch_id=batch_id,
+            unit_id=unit_id,
+            quantity=0,
+            locked_quantity=0,
+            status="AVAILABLE",
+        )
+    )
+    return get_balance(db, warehouse_id, location_id, product_id, batch_id, unit_id, for_update=True)
+
 def get_balance_by_id(db: Session, balance_id: int, *, for_update: bool = False) -> InventoryBalance | None:
     """按主键查询库存余额，可选锁定余额行。"""
 
@@ -96,7 +120,7 @@ def get_transaction_by_delivery_item(db: Session, delivery_item_id: int) -> Inve
     return db.scalar(select(InventoryTransaction).where(InventoryTransaction.delivery_item_id == delivery_item_id))
 
 
-def list_balances(db: Session, *, product_id: int | None, warehouse_id: int | None, page: int, page_size: int) -> tuple[list[InventoryBalance], int]:
+def list_balances(db: Session, *, product_id: int | None, warehouse_id: int | None, warehouse_ids: set[int] | None = None, page: int, page_size: int) -> tuple[list[InventoryBalance], int]:
     """分页查询库存余额。"""
 
     conditions = []
@@ -104,6 +128,8 @@ def list_balances(db: Session, *, product_id: int | None, warehouse_id: int | No
         conditions.append(InventoryBalance.product_id == product_id)
     if warehouse_id is not None:
         conditions.append(InventoryBalance.warehouse_id == warehouse_id)
+    if warehouse_ids is not None:
+        conditions.append(InventoryBalance.warehouse_id.in_(warehouse_ids))
     total = db.scalar(select(func.count(InventoryBalance.id)).where(*conditions)) or 0
     items = list(
         db.scalars(
@@ -113,7 +139,7 @@ def list_balances(db: Session, *, product_id: int | None, warehouse_id: int | No
     return items, total
 
 
-def list_transactions(db: Session, *, product_id: int | None, transaction_type: str | None, page: int, page_size: int) -> tuple[list[InventoryTransaction], int]:
+def list_transactions(db: Session, *, product_id: int | None, transaction_type: str | None, warehouse_ids: set[int] | None = None, page: int, page_size: int) -> tuple[list[InventoryTransaction], int]:
     """分页查询库存流水。"""
 
     conditions = []
@@ -121,6 +147,8 @@ def list_transactions(db: Session, *, product_id: int | None, transaction_type: 
         conditions.append(InventoryTransaction.product_id == product_id)
     if transaction_type:
         conditions.append(InventoryTransaction.transaction_type == transaction_type)
+    if warehouse_ids is not None:
+        conditions.append(InventoryTransaction.warehouse_id.in_(warehouse_ids))
     total = db.scalar(select(func.count(InventoryTransaction.id)).where(*conditions)) or 0
     items = list(
         db.scalars(

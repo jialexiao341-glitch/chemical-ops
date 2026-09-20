@@ -36,10 +36,10 @@ def _can_manage_all(db: Session, user: User) -> bool:
     return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(get_user_role_codes(db, user.id)))
 
 
-def _require_request(db: Session, request_id: int) -> PurchaseRequest:
+def _require_request(db: Session, request_id: int, *, for_update: bool = False) -> PurchaseRequest:
     """查询采购申请，不存在时抛出业务异常。"""
 
-    request = crud.get_by_id(db, request_id)
+    request = crud.get_by_id(db, request_id, for_update=for_update)
     if request is None:
         raise ResourceNotFoundError(f"采购申请 {request_id} 不存在")
     return request
@@ -126,10 +126,13 @@ def list_requests(
 ) -> tuple[list[PurchaseRequest], int]:
     """按用户数据范围查询采购申请。"""
 
-    applicant_id = None if _can_manage_all(db, user) else user.id
+    can_manage_all = _can_manage_all(db, user)
+    applicant_id = None if can_manage_all or user.department_id is not None else user.id
+    department_id = user.department_id if not can_manage_all else None
     return crud.list_page(
         db,
         applicant_id=applicant_id,
+        department_id=department_id,
         keyword=keyword,
         status=status,
         page=page,
@@ -137,11 +140,11 @@ def list_requests(
     )
 
 
-def get_request(db: Session, user: User, request_id: int) -> PurchaseRequest:
+def get_request(db: Session, user: User, request_id: int, *, for_update: bool = False) -> PurchaseRequest:
     """查询采购申请详情并执行数据范围校验。"""
 
-    request = _require_request(db, request_id)
-    if not _can_manage_all(db, user) and request.applicant_id != user.id:
+    request = _require_request(db, request_id, for_update=for_update)
+    if not _can_manage_all(db, user) and not ((user.department_id is not None and request.department_id == user.department_id) or (user.department_id is None and request.applicant_id == user.id)):
         raise ResourceNotFoundError(f"采购申请 {request_id} 不存在")
     return request
 
@@ -149,7 +152,7 @@ def get_request(db: Session, user: User, request_id: int) -> PurchaseRequest:
 def update_request(db: Session, user: User, request_id: int, data: PurchaseRequestUpdate) -> PurchaseRequest:
     """更新草稿或被驳回的采购申请。"""
 
-    request = get_request(db, user, request_id)
+    request = get_request(db, user, request_id, for_update=True)
     if request.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的采购申请可以修改")
     values = data.model_dump(exclude_unset=True)
@@ -174,7 +177,7 @@ def update_request(db: Session, user: User, request_id: int, data: PurchaseReque
 def submit_request(db: Session, user: User, request_id: int) -> PurchaseRequest:
     """提交采购申请并创建首个审批节点。"""
 
-    request = get_request(db, user, request_id)
+    request = get_request(db, user, request_id, for_update=True)
     if request.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的采购申请可以提交")
     if not request.items:
@@ -208,8 +211,8 @@ def act_on_request(
 ) -> PurchaseRequest:
     """处理当前审批节点，并完成采购申请状态流转。"""
 
-    request = _require_request(db, request_id)
-    approval = crud.get_pending_approval(db, request_id)
+    request = _require_request(db, request_id, for_update=True)
+    approval = crud.get_pending_approval(db, request_id, for_update=True)
     # SUBMITTED 是旧数据和现有数据库种子使用的状态；两者都表示存在待审批节点。
     if request.status not in {"SUBMITTED", "APPROVING"} or approval is None:
         raise BusinessValidationError("采购申请当前没有待处理的审批节点")
@@ -240,7 +243,7 @@ def act_on_request(
 def cancel_request(db: Session, user: User, request_id: int, data: CancelAction) -> PurchaseRequest:
     """取消草稿或已驳回的采购申请。"""
 
-    request = get_request(db, user, request_id)
+    request = get_request(db, user, request_id, for_update=True)
     if request.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的采购申请可以取消")
     request.status = "CANCELLED"

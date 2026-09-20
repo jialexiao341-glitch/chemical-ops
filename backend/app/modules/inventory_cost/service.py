@@ -75,6 +75,14 @@ def create_fifo_outbound(db: Session, user: User, data: FifoOutboundCreate) -> I
     if unit is None or unit.status != "ACTIVE":
         raise BusinessValidationError("计量单位不存在或已停用")
     try:
+        # 所有履约路径先锁库存余额，再锁成本层，避免 FIFO 与普通出库形成反向锁顺序。
+        candidate_layers = list(db.scalars(select(InventoryCostLayer).where(InventoryCostLayer.product_id == data.product_id, InventoryCostLayer.warehouse_id == data.warehouse_id, InventoryCostLayer.location_id == data.location_id, InventoryCostLayer.unit_id == data.unit_id, InventoryCostLayer.remaining_quantity > 0).order_by(InventoryCostLayer.created_at, InventoryCostLayer.id)).all())
+        balance_by_batch = {}
+        for batch_id in sorted({layer.batch_id for layer in candidate_layers}):
+            balance = db.scalar(select(InventoryBalance).where(InventoryBalance.warehouse_id == data.warehouse_id, InventoryBalance.location_id == data.location_id, InventoryBalance.product_id == data.product_id, InventoryBalance.batch_id == batch_id, InventoryBalance.unit_id == data.unit_id).with_for_update())
+            if balance is None:
+                raise BusinessValidationError(f"批次 {batch_id} 没有对应库存余额")
+            balance_by_batch[batch_id] = balance
         layers = list(db.scalars(select(InventoryCostLayer).where(InventoryCostLayer.product_id == data.product_id, InventoryCostLayer.warehouse_id == data.warehouse_id, InventoryCostLayer.location_id == data.location_id, InventoryCostLayer.unit_id == data.unit_id, InventoryCostLayer.remaining_quantity > 0).order_by(InventoryCostLayer.created_at, InventoryCostLayer.id).with_for_update()).all())
         remaining = data.quantity
         if sum((layer.remaining_quantity for layer in layers), Decimal("0")) < remaining:
@@ -86,7 +94,7 @@ def create_fifo_outbound(db: Session, user: User, data: FifoOutboundCreate) -> I
         for layer in layers:
             if remaining <= 0:
                 break
-            balance = db.scalar(select(InventoryBalance).where(InventoryBalance.warehouse_id == data.warehouse_id, InventoryBalance.location_id == data.location_id, InventoryBalance.product_id == data.product_id, InventoryBalance.batch_id == layer.batch_id, InventoryBalance.unit_id == data.unit_id).with_for_update())
+            balance = balance_by_batch.get(layer.batch_id)
             if balance is None or balance.status != "AVAILABLE" or balance.quantity - balance.locked_quantity < min(remaining, layer.remaining_quantity):
                 raise BusinessValidationError(f"批次 {layer.batch_id} 可用库存不足或已冻结")
             allocated = min(remaining, layer.remaining_quantity)

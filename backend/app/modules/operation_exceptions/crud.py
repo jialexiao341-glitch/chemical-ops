@@ -6,10 +6,13 @@ from sqlalchemy.orm import Session
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment
 
 
-def get_by_id(db: Session, exception_id: int) -> OperationException | None:
+def get_by_id(db: Session, exception_id: int, *, for_update: bool = False) -> OperationException | None:
     """按主键查询异常。"""
 
-    return db.get(OperationException, exception_id)
+    statement = select(OperationException).where(OperationException.id == exception_id)
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def list_page(db: Session, *, owner_id: int | None, exception_type: str | None, status: str | None, page: int, page_size: int) -> tuple[list[OperationException], int]:
@@ -31,10 +34,13 @@ def list_page(db: Session, *, owner_id: int | None, exception_type: str | None, 
     return items, total
 
 
-def get_task(db: Session, task_id: int) -> OperationTask | None:
+def get_task(db: Session, task_id: int, *, for_update: bool = False) -> OperationTask | None:
     """按主键查询异常处理任务。"""
 
-    return db.get(OperationTask, task_id)
+    statement = select(OperationTask).where(OperationTask.id == task_id)
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def list_tasks(db: Session, *, exception_id: int, status: str | None, page: int, page_size: int) -> tuple[list[OperationTask], int]:
