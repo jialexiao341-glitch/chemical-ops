@@ -136,7 +136,7 @@ async def _run_text2sql_for_chat(db: Session, user: User, question: str, setting
 
     from app.modules.ai.text2sql import Text2SQLRequest, run_text2sql
 
-    LOGGER.info("AI 查询开始 user_id=%s user_query=%s", user.id, question)
+    LOGGER.info("AI 查询开始 user_id=%s query_length=%s", user.id, len(question))
     result = await run_text2sql(db, user, Text2SQLRequest(question=question), settings)
     trace = AIQueryTrace(
         query=result.question,
@@ -165,7 +165,7 @@ async def _run_text2sql_for_chat(db: Session, user: User, question: str, setting
         result.truncated,
         result.unit or "未提供",
     )
-    LOGGER.info("AI 回复答案 user_id=%s answer=%s", user.id, answer)
+    LOGGER.info("AI 回复答案 user_id=%s answer_length=%s", user.id, len(answer))
     citation = {
         "type": "text2sql",
         "source": "实时数据库只读查询",
@@ -298,7 +298,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
     if user_message is None:
         raise BusinessValidationError("至少需要一条用户消息")
-    LOGGER.info("AI 请求进入 mode=sync user_id=%s user_query=%s", user.id, user_message.content)
+    LOGGER.info("AI 请求进入 mode=sync user_id=%s query_length=%s", user.id, len(user_message.content))
     intent_result = classify_intent(user_message.content)
     LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
     if intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
@@ -322,7 +322,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         )
     if intent_result.intent != Intent.QUERY and not data.attachment_file_ids:
         fixed_content = build_project_reply(user_message.content) if intent_result.intent is Intent.PROJECT else {Intent.GREETING: GREETING_REPLY, Intent.UNSUPPORTED: UNSUPPORTED_REPLY}[intent_result.intent]
-        LOGGER.info("AI 固定回复 user_id=%s intent=%s user_query=%s answer=%s", user.id, intent_result.intent, user_message.content, fixed_content)
+        LOGGER.info("AI 固定回复 user_id=%s intent=%s query_length=%s answer_length=%s", user.id, intent_result.intent, len(user_message.content), len(fixed_content))
         db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
         db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
         conversation.last_message_at = datetime.now()

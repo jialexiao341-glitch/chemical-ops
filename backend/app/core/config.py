@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     cors_origins: str = "http://localhost:5173"
     log_level: str = "INFO"
+    slow_request_ms: int = 1000
+    db_slow_query_ms: int = 500
 
     database_url: str | None = None
     database_sync_url: str | None = None

@@ -16,6 +16,7 @@ from typing import Any, Callable
 import httpx
 
 from app.core.config import Settings
+from app.core.observability import metrics
 from app.modules.files.parser import MAX_TEXT_CHARS, ParsedFile
 
 
@@ -93,7 +94,9 @@ def _find_markdown(archive: bytes) -> str:
 def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFile:
     """通过 MinerU v4 解析本地文件并返回统一的附件解析结果。"""
 
+    metrics.increment("mineru_requests", labels={"status": "started"})
     if not settings.mineru_api_key.strip():
+        metrics.increment("mineru_requests", labels={"status": "failed"})
         raise MinerUParseError("MinerU API key 未配置")
     extension = Path(file_name).suffix.lower()
     is_image = extension in {".png", ".jpg", ".jpeg"}
@@ -154,6 +157,7 @@ def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFil
                         raise MinerUParseError("MinerU 结果下载失败") from exc
                     text = _find_markdown(archive_response.content)
                     status = "SUCCEEDED" if text else "EMPTY"
+                    metrics.increment("mineru_requests", labels={"status": "success"})
                     return ParsedFile(
                         status=status,
                         text=text,
@@ -165,7 +169,12 @@ def parse_bytes(file_name: str, content: bytes, settings: Settings) -> ParsedFil
                 if time.monotonic() >= deadline:
                     raise MinerUParseError("MinerU 文档解析超时")
                 time.sleep(max(0.0, settings.mineru_poll_interval_seconds))
+    except MinerUParseError:
+        metrics.increment("mineru_requests", labels={"status": "failed"})
+        raise
     except httpx.TimeoutException as exc:
+        metrics.increment("mineru_requests", labels={"status": "failed"})
         raise MinerUParseError("MinerU 请求超时") from exc
     except httpx.RequestError as exc:
+        metrics.increment("mineru_requests", labels={"status": "failed"})
         raise MinerUParseError("MinerU 网络请求失败") from exc

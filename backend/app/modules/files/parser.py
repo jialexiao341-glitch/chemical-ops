@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from app.core.observability import metrics
 
 MAX_PARSE_BYTES = 10 * 1024 * 1024
 MAX_TEXT_CHARS = 40_000
@@ -33,6 +34,7 @@ def _result(parser: str, text: str, references: list[dict[str, object]]) -> Pars
 
     cleaned = _trim(text)
     status = "SUCCEEDED" if cleaned else "EMPTY"
+    metrics.increment("file_parse", labels={"parser": parser, "status": status})
     return ParsedFile(status=status, text=cleaned, parser=parser, references=references[:MAX_REFERENCE_COUNT])
 
 

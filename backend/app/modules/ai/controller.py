@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.db import get_db
+from app.core.observability import metrics, observe_duration
 from app.modules.ai import service
 from app.modules.ai import text2sql as text2sql_service
 from app.modules.ai.text2sql import Text2SQLRequest, Text2SQLResponse
@@ -31,9 +32,18 @@ async def chat_persisted(data: AIChatRequest, db: Session = Depends(get_db), use
     """调用 AI 模型并将用户消息、助手回复保存到当前用户会话。"""
 
     user_query = next((message.content for message in reversed(data.messages) if message.role == "user"), "")
-    LOGGER.info("AI HTTP 请求 mode=sync user_id=%s conversation_id=%s attachments=%s query=%s", user.id, data.conversation_id or "new", len(data.attachment_file_ids), user_query[:300])
-    result = await service.chat_for_user(db, user, data)
-    LOGGER.info("AI HTTP 回复 mode=sync user_id=%s conversation_id=%s model=%s answer=%s", user.id, result.conversation_id, result.model, (result.answer or result.message.content)[:300])
+    LOGGER.info("AI HTTP 请求 mode=sync user_id=%s conversation_id=%s attachments=%s query_length=%s", user.id, data.conversation_id or "new", len(data.attachment_file_ids), len(user_query))
+    with observe_duration("ai_request_duration_seconds", labels={"mode": "sync"}):
+        try:
+            result = await service.chat_for_user(db, user, data)
+            metrics.increment("ai_requests", labels={"mode": "sync", "status": "success", "model": result.model})
+            metrics.observe("ai_response_bytes", len((result.answer or result.message.content).encode("utf-8")), labels={"mode": "sync", "model": result.model})
+            if result.usage and isinstance(result.usage.get("total_tokens"), int):
+                metrics.increment("ai_tokens", labels={"mode": "sync", "model": result.model}, value=result.usage["total_tokens"])
+        except Exception:
+            metrics.increment("ai_requests", labels={"mode": "sync", "status": "failure"})
+            raise
+    LOGGER.info("AI HTTP 回复 mode=sync user_id=%s conversation_id=%s model=%s answer_length=%s", user.id, result.conversation_id, result.model, len(result.answer or result.message.content))
     return result
 
 
@@ -42,7 +52,8 @@ async def chat_stream(data: AIChatRequest, db: Session = Depends(get_db), user: 
     """以 SSE 增量返回模型内容，正常结束后保存完整助手消息。"""
 
     user_query = next((message.content for message in reversed(data.messages) if message.role == "user"), "")
-    LOGGER.info("AI HTTP 请求 mode=stream user_id=%s conversation_id=%s attachments=%s query=%s", user.id, data.conversation_id or "new", len(data.attachment_file_ids), user_query[:300])
+    LOGGER.info("AI HTTP 请求 mode=stream user_id=%s conversation_id=%s attachments=%s query_length=%s", user.id, data.conversation_id or "new", len(user_query))
+    metrics.increment("ai_requests", labels={"mode": "stream", "status": "started"})
     return StreamingResponse(
         service.stream_chat_for_user(db, user, data),
         media_type="text/event-stream",

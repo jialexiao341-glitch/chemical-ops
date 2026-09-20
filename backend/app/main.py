@@ -7,13 +7,14 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.core.db import engine
 from app.core.idempotency import IdempotencyMiddleware
+from app.core.observability import JsonFormatter, RequestContextMiddleware, metrics
 from app.core.errors import (
     API_ERROR_RESPONSES,
     STATUS_MESSAGES,
@@ -58,7 +59,7 @@ def _configure_logging() -> None:
     logger.setLevel(level)
     if not logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
+        handler.setFormatter(JsonFormatter())
         logger.addHandler(handler)
     logger.propagate = False
 
@@ -177,6 +178,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(IdempotencyMiddleware)
+app.add_middleware(RequestContextMiddleware, slow_request_ms=settings.slow_request_ms)
 
 
 def custom_openapi() -> dict:
@@ -285,13 +287,19 @@ def handle_validation_error(_: Request, exc: RequestValidationError) -> JSONResp
 def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
     """将未处理异常转换为不泄露服务细节的 500 响应。"""
 
-    LOGGER.exception("未处理 API 异常 path=%s method=%s", request.url.path, request.method)
+    LOGGER.error(
+        "未处理 API 异常 path=%s method=%s",
+        request.url.path,
+        request.method,
+        exc_info=(type(exc), exc, exc.__traceback__),
+        extra={"request_id": request.state.request_id, "trace_id": request.state.trace_id},
+    )
     return _error_response(500, "服务器暂时无法处理该请求")
 
 
-@app.get("/health", tags=["系统"], summary="健康检查")
+@app.get("/health", tags=["系统"], summary="存活检查")
 def health() -> dict[str, str]:
-    """返回服务状态及数据环境，帮助前端区分实时聚合和演示数据。"""
+    """轻量存活探针，不访问外部依赖，供负载均衡器使用。"""
 
     environment = settings.app_env.lower()
     data_mode = "demo" if environment in {"development", "test"} else "production"
@@ -302,6 +310,37 @@ def health() -> dict[str, str]:
         "data_source": "database",
         "data_mode": data_mode,
     }
+
+
+@app.get("/health/ready", tags=["系统"], summary="就绪检查")
+def readiness(response: Response) -> dict[str, object]:
+    """检查数据库、对象存储和关键运行配置，供发布平台决定是否接流量。"""
+
+    database_ready = _check_database()
+    storage_ready = _check_minio()
+    ai_configured = bool(settings.openai_api_key.strip()) if settings.agent_enabled else True
+    scanner_ready = not settings.file_scan_enabled or bool(settings.file_scan_command.strip())
+    scheduler_ready = settings.overdue_scan_interval_seconds > 0
+    ready = database_ready and storage_ready and scanner_ready and scheduler_ready and ai_configured
+    response.status_code = 200 if ready else 503
+    return {
+        "status": "ready" if ready else "not_ready",
+        "checks": {
+            "database": "ok" if database_ready else "failed",
+            "object_storage": "ok" if storage_ready else "failed",
+            "ai_configuration": "ok" if ai_configured else "not_configured",
+            "file_scanner_configuration": "ok" if scanner_ready else "invalid",
+            "scheduler_configuration": "ok" if scheduler_ready else "invalid",
+        },
+        "metrics": {"api_requests": "GET /metrics"},
+    }
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics_endpoint() -> PlainTextResponse:
+    """输出 Prometheus 兼容的进程内指标。"""
+
+    return PlainTextResponse(metrics.render_prometheus(), media_type="text/plain; version=0.0.4")
 
 
 app.include_router(chemicals_router, prefix=settings.api_prefix)

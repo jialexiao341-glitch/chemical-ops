@@ -43,6 +43,15 @@ jobs:
         run: PYTHONPATH=backend python scripts/seed_demo_accounts.py
       - name: Compile backend
         run: PYTHONPATH=backend python -m compileall -q backend/app scripts
+      - name: Validate migration and production guard
+        run: |
+          PYTHONPATH=backend python scripts/apply_task2_consistency_migration.py
+          APP_ENV=ci PYTHONPATH=backend python scripts/check_production_config.py
+      - name: Dependency and code security scan
+        run: |
+          python -m pip install pip-audit bandit
+          pip-audit -r backend/requirements.txt
+          bandit -q -r backend/app scripts
       - name: Run tests
         run: PYTHONPATH=backend python -m pytest -q
       - name: Start API for smoke load test
@@ -86,3 +95,6 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+      - name: Frontend dependency security audit
+        working-directory: frontend
+        run: npm audit --audit-level=high
