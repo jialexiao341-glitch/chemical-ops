@@ -29,6 +29,9 @@ const [Modal, modalApi] = useVbenModal({
       message.success('已创建质量验收记录');
       emit('success');
       modalApi.close();
+    } catch {
+      // 请求层已统一弹出后端返回的中文错误，这里保持弹窗打开，
+      // 让用户修正后重新提交；不吞掉异常会导致未捕获的 Promise 拒绝。
     } finally {
       modalApi.unlock();
     }

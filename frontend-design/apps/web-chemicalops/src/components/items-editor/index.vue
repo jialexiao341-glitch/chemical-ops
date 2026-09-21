@@ -5,7 +5,7 @@
  * 采购申请、询价单等单据都包含「表头 + 若干明细行」的结构，
  * 这里把可编辑明细表抽成通用组件，各页面只描述列与新增行的默认值。
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -65,23 +65,46 @@ function nextRowId() {
   return `row-${rowSeed}`;
 }
 
-/** 给外部传入的行补齐内部唯一键，确保表格渲染稳定 */
-function normalize(list: Record<string, any>[]) {
-  return list.map((row) =>
-    row[ROW_KEY] ? row : { ...row, [ROW_KEY]: nextRowId() },
-  );
-}
-
 /** 异步选项加载结果 */
 const asyncOptions = ref<Record<string, Array<{ label: string; value: any }>>>(
   {},
 );
 const loadingOptions = ref(false);
 
+/**
+ * 表格数据源。
+ *
+ * 直接暴露外部传入的数组，不能在这里做「补齐 __rowId」这类产生新对象的转换：
+ * 该 getter 每次渲染都会被调用，若返回新对象，`v-model` 的写入会落到被丢弃的
+ * 副本上，父组件的数据永远不会更新（表现为初始行填了值却仍提示缺字段）。
+ */
 const rows = computed({
-  get: () => normalize(props.modelValue),
+  get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value),
 });
+
+/**
+ * 就地补齐 __rowId。
+ *
+ * 直接改写行对象的属性而不复制，保证与父组件持有的是同一份引用；
+ * 随后 emit 一次新数组，让父组件的数组本身也刷新。
+ */
+watch(
+  () => props.modelValue,
+  (list) => {
+    let mutated = false;
+    for (const row of list) {
+      if (!row[ROW_KEY]) {
+        row[ROW_KEY] = nextRowId();
+        mutated = true;
+      }
+    }
+    if (mutated) {
+      emit('update:modelValue', [...list]);
+    }
+  },
+  { deep: true, immediate: true },
+);
 
 /** 解析每列的选项：同步数组直接用，函数则先加载 */
 function optionsOf(column: ItemsEditorColumn) {

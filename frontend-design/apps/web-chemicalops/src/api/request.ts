@@ -36,13 +36,19 @@ interface ChemicalOpsErrorBody {
 /**
  * 从后端错误响应中提取可以直接展示给用户的中文提示。
  *
- * 后端 `message` 字段已经是面向用户的中文文案；422 参数校验错误的
- * 具体信息在 `detail` 数组中，这里做一次拼接，避免只看到「参数校验失败」。
+ * 后端的错误体是 `{ code, message, detail }`：
+ * - `message` 是按状态码给的通用文案（如「数据已存在」「资源不存在」）
+ * - `detail` 才是具体的业务原因（如「CAS 号 64-17-5 已存在」）
+ *
+ * 因此优先展示 `detail`，否则用户只能看到笼统的「数据已存在」，
+ * 不知道到底哪里冲突。422 参数校验错误的 `detail` 是数组，
+ * 逐项拼成人话；数组为空或没有 detail 时才退回 `message`。
  */
 function resolveErrorMessage(error: any): string {
   const body: ChemicalOpsErrorBody = error?.response?.data ?? {};
   const baseMessage = typeof body.message === 'string' ? body.message : '';
 
+  // detail 为数组：参数校验错误，逐项描述字段问题
   if (Array.isArray(body.detail) && body.detail.length > 0) {
     const details = body.detail
       .map((item: any) => {
@@ -59,8 +65,14 @@ function resolveErrorMessage(error: any): string {
       .slice(0, 3)
       .join('；');
     if (details) {
-      return baseMessage ? `${baseMessage}：${details}` : details;
+      // 通用文案与首条明细常常重复，仅在确实不同才拼接
+      return details === baseMessage ? details : `${baseMessage}：${details}`;
     }
+  }
+
+  // detail 为字符串：具体业务原因，比 message 更有信息量
+  if (typeof body.detail === 'string' && body.detail.trim()) {
+    return body.detail.trim();
   }
 
   if (baseMessage) {
