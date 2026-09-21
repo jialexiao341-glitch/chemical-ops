@@ -1,0 +1,22 @@
+/**
+ * 应用级样式覆盖。
+ *
+ * 这里只放对 Vben 内置组件的少量调整，业务样式一律走 Tailwind 工具类。
+ */
+
+/**
+ * 侧栏 Logo：「图标 + 文字」整体水平居中。
+ *
+ * Vben 的 Logo 组件在展示文字时固定使用 `justify-start px-3`，
+ * 导致标识贴着侧栏左边缘。这里把承载它的 <a> 撑满宽度并改为居中，
+ * 使标识在侧栏里视觉居中（收起时 Vben 本身就是居中，规则同样适用）。
+ *
+ * 选择器用 `:has(img[alt='ChemicalOps'])` 精确定位到本项目 logo，
+ * 避免影响侧栏内的其他链接。注意这里必须是后代选择器：Logo 组件在
+ * icon 模式下把 <img> 包在 <VbenAvatar>（span[data-slot=avatar]）里，
+ * 并不是 <a> 的直接子元素。
+ */
+aside a:has(img[alt='ChemicalOps']) {
+  justify-content: center;
+  width: 100%;
+}
