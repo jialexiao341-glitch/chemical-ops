@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Computed, ForeignKey, Integer, String, Text, func
+from sqlalchemy import ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,7 +32,6 @@ class OperationException(Base):
     closed_by: Mapped[int | None] = mapped_column(ForeignKey("sys_users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)
     closing_note: Mapped[str | None] = mapped_column(String(2000), nullable=True)
-    active_dedupe_key: Mapped[str | None] = mapped_column(String(200), Computed("CASE WHEN status IN ('OPEN', 'PROCESSING', 'RESOLVED') THEN CONCAT(exception_type, ':' , source_type, ':' , source_id) ELSE NULL END", persisted=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
     updated_at: Mapped[datetime] = mapped_column(
         DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3)

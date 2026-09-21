@@ -129,8 +129,8 @@ uv run main.py run --env=dev
 ### 5. 启动前端
 
 ```powershell
-npm --prefix frontend install
-npm --prefix frontend run dev
+corepack pnpm --dir frontend install
+corepack pnpm --dir frontend dev
 ```
 
 前端默认地址：`http://localhost:3000`。
@@ -165,7 +165,7 @@ ChemicalOps/
 ## 验证命令
 
 ```powershell
-npm --prefix frontend run build
+corepack pnpm --dir frontend build
 uv run pytest -q
 ```
 

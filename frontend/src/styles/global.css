@@ -1,0 +1,30 @@
+/* simplebar */
+@import url(simplebar-react/dist/simplebar.min.css) layer(simplebar);
+
+/* simplebar */
+@layer simplebar {
+	.simplebar-scrollbar::before {
+		background-color: #909399;
+	}
+
+	.simplebar-content {
+		height: 100%;
+	}
+}
+
+#root {
+	height: 100vh;
+}
+
+img {
+	max-width: 100%;
+	height: auto;
+}
+
+html.color-blind-mode {
+	@apply invert;
+}
+
+html.gray-mode {
+	@apply grayscale;
+}
