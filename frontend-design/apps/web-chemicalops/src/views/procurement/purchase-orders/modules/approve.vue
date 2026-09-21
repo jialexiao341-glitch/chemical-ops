@@ -1,0 +1,89 @@
+<script lang="ts" setup>
+import { computed, ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { Alert, Input, message } from 'antdv-next';
+
+import { approvePurchaseOrderApi, rejectPurchaseOrderApi } from '#/api';
+
+const emit = defineEmits(['success']);
+
+/** 采购订单审批：通过时意见选填，驳回时必填 */
+const orderId = ref<number>();
+const poNo = ref('');
+const action = ref<'approve' | 'reject'>('approve');
+const opinion = ref('');
+
+const isApprove = computed(() => action.value === 'approve');
+
+const [Modal, modalApi] = useVbenModal<null | {
+        action: 'approve' | 'reject';
+        id: number;
+        poNo: string;
+      }>({
+  async onConfirm() {
+    if (!isApprove.value && !opinion.value.trim()) {
+      message.warning('驳回时必须填写审批意见');
+      return;
+    }
+    if (!orderId.value) {
+      return;
+    }
+    modalApi.lock();
+    try {
+      if (isApprove.value) {
+        await approvePurchaseOrderApi(orderId.value, opinion.value || undefined);
+      } else {
+        await rejectPurchaseOrderApi(orderId.value, opinion.value.trim());
+      }
+      message.success(isApprove.value ? '订单已审批通过' : '订单已驳回');
+      emit('success');
+      modalApi.close();
+    } finally {
+      modalApi.unlock();
+    }
+  },
+  onOpenChange(isOpen) {
+    if (isOpen) {
+      const data = modalApi.getData();
+      action.value = data?.action ?? 'approve';
+      orderId.value = data?.id;
+      poNo.value = data?.poNo ?? '';
+      opinion.value = '';
+    }
+  },
+});
+
+const title = computed(() =>
+  isApprove.value ? `审批通过 ${poNo.value}` : `驳回 ${poNo.value}`,
+);
+</script>
+
+<template>
+  <Modal :title="title" class="w-[520px]">
+    <div class="space-y-4 px-1">
+      <Alert
+        :message="
+          isApprove
+            ? '审批通过后订单进入已批准状态，可执行正式下单。'
+            : '驳回后订单会回到草稿状态，采购员可修改后重新提交。'
+        "
+        :type="isApprove ? 'info' : 'warning'"
+        show-icon
+      />
+      <div>
+        <div class="mb-2 text-sm">
+          审批意见
+          <span v-if="!isApprove" class="text-red-500">*</span>
+        </div>
+        <Input.TextArea
+          v-model:value="opinion"
+          :maxlength="500"
+          :rows="3"
+          :placeholder="isApprove ? '选填' : '请说明驳回原因（必填）'"
+        />
+      </div>
+    </div>
+  </Modal>
+</template>

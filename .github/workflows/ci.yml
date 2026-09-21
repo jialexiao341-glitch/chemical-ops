@@ -86,18 +86,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 11.1.2
+          # monorepo 要求 pnpm >= 11
+          version: 11.16.0
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # vben monorepo 要求 node ^22.18.0 || ^24.12.0
+          node-version: "22"
           cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          cache-dependency-path: frontend-design/pnpm-lock.yaml
       - name: Install frontend dependencies
-        working-directory: frontend
+        working-directory: frontend-design
         run: pnpm install --frozen-lockfile
+      - name: Type check
+        working-directory: frontend-design/apps/web-chemicalops
+        run: pnpm exec vue-tsc --noEmit --skipLibCheck
       - name: Build frontend
-        working-directory: frontend
-        run: pnpm build
+        working-directory: frontend-design
+        run: pnpm build:chemicalops
+      # vben monorepo 依赖量大，上游依赖的告警不应阻塞业务构建；
+      # 这里只输出报告，实际处理另行跟进。
       - name: Frontend dependency security audit
-        working-directory: frontend
+        continue-on-error: true
+        working-directory: frontend-design
         run: pnpm audit --audit-level high

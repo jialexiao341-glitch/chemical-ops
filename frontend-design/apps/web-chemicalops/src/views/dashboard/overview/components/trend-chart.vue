@@ -1,0 +1,86 @@
+<script lang="ts" setup>
+import type { DashboardApi } from '#/api';
+import type { EchartsUIType } from '@vben/plugins/echarts';
+
+import { nextTick, onMounted, ref, watch } from 'vue';
+
+import { EchartsUI, useEcharts } from '@vben/plugins/echarts';
+
+import { Empty } from 'antdv-next';
+
+import { CHART_BASE, CHART_COLORS } from '#/constants/chart';
+import { formatAmount } from '#/utils/format';
+
+const props = defineProps<{ data: DashboardApi.TrendRow[] }>();
+
+const chartRef = ref<EchartsUIType>();
+const { renderEcharts } = useEcharts(chartRef);
+
+function render() {
+  const rows = props.data ?? [];
+  if (rows.length === 0) {
+    return;
+  }
+  renderEcharts({
+    grid: { bottom: 30, containLabel: true, left: 10, right: 20, top: 40 },
+    legend: { data: ['采购金额', '订单数'], right: 10, top: 4 },
+    series: [
+      {
+        barMaxWidth: 26,
+        data: rows.map((row) => Number(row.order_amount)),
+        itemStyle: { borderRadius: [4, 4, 0, 0], color: CHART_COLORS.primarySoft },
+        name: '采购金额',
+        type: 'bar',
+      },
+      {
+        data: rows.map((row) => row.order_count),
+        itemStyle: { color: CHART_COLORS.primary },
+        name: '订单数',
+        smooth: true,
+        symbolSize: 6,
+        type: 'line',
+        yAxisIndex: 1,
+      },
+    ],
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: any) => formatAmount(value),
+    },
+    xAxis: {
+      ...CHART_BASE,
+      axisTick: { show: false },
+      data: rows.map((row) => row.date),
+      type: 'category' as const,
+    },
+    yAxis: [
+      {
+        ...CHART_BASE,
+        axisLine: { show: false },
+        name: '金额',
+        nameTextStyle: { color: CHART_COLORS.neutral, fontSize: 11 },
+        type: 'value' as const,
+      },
+      {
+        ...CHART_BASE,
+        axisLine: { show: false },
+        name: '订单数',
+        nameTextStyle: { color: CHART_COLORS.neutral, fontSize: 11 },
+        splitLine: { show: false },
+        type: 'value' as const,
+      },
+    ],
+  });
+}
+
+onMounted(() => nextTick(render));
+watch(
+  () => props.data,
+  () => nextTick(render),
+  { deep: true },
+);
+</script>
+
+<template>
+  <Empty v-if="!data || data.length === 0" description="所选区间没有采购数据" />
+  <EchartsUI v-else ref="chartRef" height="300px" />
+</template>

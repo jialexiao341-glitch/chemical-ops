@@ -128,19 +128,26 @@ uv run main.py run --env=dev
 
 ### 5. 启动前端
 
+前端基于 Vben Admin（Vue 3 + antdv-next），位于 `frontend-design/apps/web-chemicalops`。
+
 ```powershell
-corepack pnpm --dir frontend install
-corepack pnpm --dir frontend dev
+# monorepo 要求 pnpm >= 11，首次先激活
+corepack prepare pnpm@11.16.0 --activate
+
+corepack pnpm --dir frontend-design install
+corepack pnpm --dir frontend-design dev:chemicalops
 ```
 
-前端默认地址：`http://localhost:3000`。
+前端默认地址：`http://localhost:3000`，已配置代理把 `/api` 与 `/health` 转发到后端 8888。
+
+依赖安装与构建的注意事项见 [`docs/build-notes/前端构建环境说明.md`](docs/build-notes/前端构建环境说明.md)。
 
 ## 目录结构
 
 ```text
 ChemicalOps/
 ├─ backend/       FastAPI 后端、业务模块、权限和文件服务
-├─ frontend/      React + TypeScript 前端
+├─ frontend-design/  Vben Admin monorepo，业务前端在 apps/web-chemicalops
 ├─ database/      数据库初始化和迁移脚本
 ├─ deploy/        Docker 与部署配置
 ├─ docs/          需求、接口、流程和实现进度文档
@@ -165,7 +172,7 @@ ChemicalOps/
 ## 验证命令
 
 ```powershell
-corepack pnpm --dir frontend build
+corepack pnpm --dir frontend-design build:chemicalops
 uv run pytest -q
 ```
 

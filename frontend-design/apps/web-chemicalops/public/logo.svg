@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="11.4 11.75 48.8 40.5" width="64" height="53" role="img" aria-label="ChemicalOps">
+  <title>ChemicalOps</title>
+
+  <!--
+    标识构成：深蓝 C（Chemical）＋ 亮蓝环与橙色核心（O，Ops）＋ 连接两端的分子键。
+    viewBox 紧密贴合图形外接框（宽 48.8 × 高 40.5），使放进方形 logo 容器时
+    由浏览器自动对称留白，避免出现一侧空隙过大的错位观感。
+    C 用填充路径而非描边，以便把两个端头做成斜切，贴近参考图形态。
+  -->
+
+  <!-- C：右侧开口的圆环，端头斜切 -->
+  <path
+    d="M40.4 22.2 A19.05 19.05 0 1 0 40.4 41.8 L32.3 40.2 A11.55 11.55 0 1 1 32.3 23.8 Z"
+    fill="#12315E"
+  />
+
+  <!-- 分子键：左侧节点 + 横杆 -->
+  <path
+    d="M16.5 36 H45"
+    fill="none"
+    stroke="#1E6BF5"
+    stroke-linecap="round"
+    stroke-width="4.2"
+  />
+  <circle cx="16.5" cy="36" fill="#1E6BF5" r="3.9" />
+
+  <!-- O 外环：左侧留缺口让分子键穿过 -->
+  <path
+    d="M35.1 30.8 A11.2 11.2 0 1 1 35.1 41.2"
+    fill="none"
+    stroke="#1E6BF5"
+    stroke-linecap="butt"
+    stroke-width="5.6"
+  />
+
+  <!-- O 核心 -->
+  <circle cx="45" cy="36" fill="#F5821F" r="5.9" />
+</svg>

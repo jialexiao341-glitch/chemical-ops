@@ -1,0 +1,68 @@
+<script lang="ts" setup>
+import type { ProductApi } from '#/api';
+
+import { computed, nextTick, ref } from 'vue';
+
+import { useVbenDrawer } from '@vben/common-ui';
+
+import { useVbenForm } from '#/adapter/form';
+import { createProductApi, updateProductApi } from '#/api';
+
+import { useFormSchema } from '../data';
+
+const emit = defineEmits(['success']);
+
+const id = ref<number>();
+
+const [Form, formApi] = useVbenForm({
+  layout: 'vertical',
+  schema: useFormSchema(),
+  showDefaultActions: false,
+  wrapperClass: 'grid-cols-2',
+});
+
+const [Drawer, drawerApi] = useVbenDrawer<null | ProductApi.Product>({
+  async onConfirm() {
+    const { valid } = await formApi.validate();
+    if (!valid) {
+      return;
+    }
+    const values = await formApi.getValues();
+    drawerApi.lock();
+    try {
+      if (id.value) {
+        await updateProductApi(id.value, values);
+      } else {
+        await createProductApi(values as ProductApi.ProductPayload);
+      }
+      emit('success');
+      drawerApi.close();
+    } finally {
+      drawerApi.unlock();
+    }
+  },
+  async onOpenChange(isOpen) {
+    if (!isOpen) {
+      return;
+    }
+    const data = drawerApi.getData();
+    formApi.reset();
+    id.value = data?.id;
+
+    await nextTick();
+    if (data) {
+      formApi.setValues(data);
+    }
+  },
+});
+
+const title = computed(() => (id.value ? '编辑产品规格' : '新增产品规格'));
+
+defineExpose({ drawerApi });
+</script>
+
+<template>
+  <Drawer :title="title" class="w-[680px]">
+    <Form />
+  </Drawer>
+</template>

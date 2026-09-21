@@ -1,0 +1,50 @@
+{
+  "name": "@vben/web-chemicalops",
+  "version": "0.1.0",
+  "homepage": "https://github.com/xiao-jiale/chemicalops",
+  "bugs": {
+    "url": "https://gitee.com/xiao-jiale/chemical-ops/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitee.com/xiao-jiale/chemical-ops.git",
+    "directory": "frontend-design/apps/web-chemicalops"
+  },
+  "author": {
+    "name": "ChemicalOps"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "pnpm vite build --mode production",
+    "build:analyze": "pnpm vite build --mode analyze",
+    "dev": "pnpm vite --mode development",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck"
+  },
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "dependencies": {
+    "@vben/access": "workspace:*",
+    "@vben/common-ui": "workspace:*",
+    "@vben/constants": "workspace:*",
+    "@vben/hooks": "workspace:*",
+    "@vben/icons": "workspace:*",
+    "@vben/layouts": "workspace:*",
+    "@vben/locales": "workspace:*",
+    "@vben/plugins": "workspace:*",
+    "@vben/preferences": "workspace:*",
+    "@vben/request": "workspace:*",
+    "@vben/stores": "workspace:*",
+    "@vben/styles": "workspace:*",
+    "@vben/types": "workspace:*",
+    "@vben/utils": "workspace:*",
+    "@vueuse/core": "catalog:",
+    "antdv-next": "catalog:",
+    "dayjs": "catalog:",
+    "pinia": "catalog:",
+    "vue": "catalog:",
+    "vue-router": "catalog:"
+  },
+  "description": "ChemicalOps 化工运营管理平台前端"
+}

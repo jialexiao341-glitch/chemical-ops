@@ -27,3 +27,6 @@ coverage/
 
 # Local uploaded files and generated parse results
 storage/
+
+# 本地构建辅助缓存（含预下载的大体积 tarball）
+.cache/

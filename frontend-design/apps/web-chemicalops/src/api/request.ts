@@ -1,0 +1,183 @@
+/**
+ * ChemicalOps 请求客户端。
+ *
+ * 与 vben 默认约定的区别：
+ * - 后端（FastAPI）成功时直接返回业务数据本身，没有 `{ code, data }` 外层包装。
+ *   因此这里用 `successCode: () => true` + `dataField: (body) => body`，
+ *   以「HTTP 2xx 即成功」为准，并把整个响应体作为结果返回。
+ * - 失败时后端返回 `{ code, message, detail }`，`message` 已经是中文提示，
+ *   优先透传给用户，而不是使用按状态码生成的通用文案。
+ * - 后端没有 refresh token 接口，401 直接走重新登录。
+ */
+import type { RequestClientOptions } from '@vben/request';
+
+import { useAppConfig } from '@vben/hooks';
+import { preferences } from '@vben/preferences';
+import {
+  authenticateResponseInterceptor,
+  defaultResponseInterceptor,
+  RequestClient,
+} from '@vben/request';
+import { useAccessStore } from '@vben/stores';
+
+import { message } from 'antdv-next';
+
+import { useAuthStore } from '#/store';
+
+const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+
+/** 后端统一错误响应体 */
+interface ChemicalOpsErrorBody {
+  code?: number;
+  detail?: unknown;
+  message?: string;
+}
+
+/**
+ * 从后端错误响应中提取可以直接展示给用户的中文提示。
+ *
+ * 后端 `message` 字段已经是面向用户的中文文案；422 参数校验错误的
+ * 具体信息在 `detail` 数组中，这里做一次拼接，避免只看到「参数校验失败」。
+ */
+function resolveErrorMessage(error: any): string {
+  const body: ChemicalOpsErrorBody = error?.response?.data ?? {};
+  const baseMessage = typeof body.message === 'string' ? body.message : '';
+
+  if (Array.isArray(body.detail) && body.detail.length > 0) {
+    const details = body.detail
+      .map((item: any) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+        const location = Array.isArray(item?.location)
+          ? item.location.filter((part: unknown) => part !== 'body').join('.')
+          : '';
+        const text = item?.message ?? '';
+        return location ? `${location}: ${text}` : text;
+      })
+      .filter(Boolean)
+      .slice(0, 3)
+      .join('；');
+    if (details) {
+      return baseMessage ? `${baseMessage}：${details}` : details;
+    }
+  }
+
+  if (baseMessage) {
+    return baseMessage;
+  }
+
+  const status = error?.response?.status;
+  if (status === 401) {
+    return '登录状态已失效，请重新登录';
+  }
+  if (status === 403) {
+    return '没有权限执行该操作';
+  }
+  if (!error?.response) {
+    return '网络异常，请检查后端服务是否已启动';
+  }
+  return '请求处理失败';
+}
+
+function createRequestClient(baseURL: string, options?: RequestClientOptions) {
+  const client = new RequestClient({
+    ...options,
+    baseURL,
+  });
+
+  /**
+   * 401 之后的重新认证：清除令牌并退出登录。
+   * 后端未提供 refresh token 接口，因此不做静默续期。
+   */
+  async function doReAuthenticate() {
+    const accessStore = useAccessStore();
+    const authStore = useAuthStore();
+    accessStore.setAccessToken(null);
+    if (
+      preferences.app.loginExpiredMode === 'modal' &&
+      accessStore.isAccessChecked
+    ) {
+      accessStore.setLoginExpired(true);
+    } else {
+      await authStore.logout();
+    }
+  }
+
+  // 请求头处理
+  client.addRequestInterceptor({
+    fulfilled: async (config) => {
+      const accessStore = useAccessStore();
+      const token = accessStore.accessToken;
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      config.headers['Accept-Language'] = preferences.app.locale;
+      return config;
+    },
+  });
+
+  // 响应解包：HTTP 2xx 直接返回响应体
+  client.addResponseInterceptor(
+    defaultResponseInterceptor({
+      codeField: 'code',
+      dataField: (response: any) => response,
+      successCode: () => true,
+    }),
+  );
+
+  // 401 处理
+  client.addResponseInterceptor(
+    authenticateResponseInterceptor({
+      client,
+      doReAuthenticate,
+      doRefreshToken: async () => '',
+      enableRefreshToken: false,
+      formatToken: (token) => (token ? `Bearer ${token}` : null),
+    }),
+  );
+
+  // 通用错误提示：优先使用后端返回的中文 message
+  client.addResponseInterceptor({
+    rejected: (error: any) => {
+      // 登录接口自身的 401 由登录页处理，避免重复弹出全局提示
+      const isLoginRequest = String(error?.config?.url ?? '').includes(
+        '/auth/login',
+      );
+      if (!isLoginRequest) {
+        message.error(resolveErrorMessage(error));
+      }
+      return Promise.reject(error);
+    },
+  });
+
+  return client;
+}
+
+export const requestClient = createRequestClient(apiURL, {
+  responseReturn: 'data',
+  timeout: 30_000,
+});
+
+/**
+ * 不经过响应解包的客户端，用于下载等需要完整 Axios 响应的场景。
+ */
+export const baseRequestClient = new RequestClient({
+  baseURL: apiURL,
+  timeout: 60_000,
+});
+
+/** 后端统一分页响应 */
+export interface PageResult<T> {
+  items: T[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+/** 分页查询的通用入参 */
+export interface PageQuery {
+  page?: number;
+  page_size?: number;
+  [key: string]: any;
+}

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ChemicalOps logo">
+  <defs>
+    <linearGradient id="navyGrad" x1="80" y1="80" x2="360" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0A3A78"/>
+      <stop offset="1" stop-color="#052D64"/>
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="250" y1="140" x2="450" y2="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1676FF"/>
+      <stop offset="1" stop-color="#0157E8"/>
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="350" y1="210" x2="430" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF9A2E"/>
+      <stop offset="1" stop-color="#F47A16"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Chemical / C -->
+  <path d="M 320 92 A 184 184 0 1 0 320 420"
+        fill="none" stroke="url(#navyGrad)" stroke-width="84" stroke-linecap="round"/>
+
+  <!-- Ops / O as open ring -->
+  <path d="M 323 161 A 111 111 0 1 1 323 351"
+        fill="none" stroke="url(#blueGrad)" stroke-width="64" stroke-linecap="butt"/>
+
+  <!-- Data / process connector -->
+  <line x1="202" y1="256" x2="385" y2="256"
+        stroke="url(#blueGrad)" stroke-width="38" stroke-linecap="round"/>
+  <circle cx="198" cy="256" r="50" fill="url(#blueGrad)"/>
+
+  <!-- Core node -->
+  <circle cx="389" cy="256" r="53" fill="url(#orangeGrad)"/>
+</svg>
