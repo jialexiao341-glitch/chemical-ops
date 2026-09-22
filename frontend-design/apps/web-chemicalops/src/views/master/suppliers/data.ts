@@ -95,13 +95,21 @@ export function useGridFormSchema(): VbenFormSchema[] {
   return [
     {
       component: 'Input',
-      componentProps: { allowClear: true, placeholder: '请输入供应商名称或编码' },
+      componentProps: {
+        allowClear: true,
+        class: 'w-64',
+        placeholder: '请输入供应商名称或编码',
+      },
       fieldName: 'keyword',
       label: '关键字',
     },
     {
       component: 'Input',
-      componentProps: { allowClear: true, placeholder: '请输入地区' },
+      componentProps: {
+        allowClear: true,
+        class: 'w-72',
+        placeholder: '请输入地区',
+      },
       fieldName: 'region',
       label: '地区',
     },
@@ -109,6 +117,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
       component: 'Select',
       componentProps: {
         allowClear: true,
+        class: 'w-52',
         options: SUPPLIER_STATUS_DICT.options(),
         placeholder: '全部状态',
       },

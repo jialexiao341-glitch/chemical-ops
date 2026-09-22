@@ -105,7 +105,11 @@ export function useGridFormSchema(): VbenFormSchema[] {
   return [
     {
       component: 'Input',
-      componentProps: { allowClear: true, placeholder: '请输入产品编码或名称' },
+      componentProps: {
+        allowClear: true,
+        class: 'w-64',
+        placeholder: '请输入产品编码或名称',
+      },
       fieldName: 'keyword',
       label: '关键字',
     },
@@ -120,7 +124,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
             value: item.id,
           }));
         },
-        class: 'w-full',
+        class: 'w-72',
         placeholder: '全部化学品',
         showSearch: true,
       },
@@ -131,6 +135,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
       component: 'Select',
       componentProps: {
         allowClear: true,
+        class: 'w-52',
         options: PRODUCT_STATUS_DICT.options(),
         placeholder: '全部状态',
       },
