@@ -215,7 +215,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | IssueRequestApi.IssueRequest>({
     // 批次选项：拉库存余额 + 主数据名称拼 label
     if (balanceOptions.value.length === 0) {
       const [balances, products, warehouses, units] = await Promise.all([
-        getBalanceListApi({ page: 1, page_size: 200 }),
+        getBalanceListApi({ page: 1, page_size: 100 }),
         getProductListApi({ page: 1, page_size: 100 }),
         getWarehouseListApi(),
         getUnitListApi(),

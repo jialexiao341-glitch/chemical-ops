@@ -223,7 +223,7 @@ const [Drawer, drawerApi] = useVbenDrawer<
 
     if (balanceOptions.value.length === 0) {
       const [balances, products, warehouses, units] = await Promise.all([
-        getBalanceListApi({ page: 1, page_size: 200 }),
+        getBalanceListApi({ page: 1, page_size: 100 }),
         getProductListApi({ page: 1, page_size: 100 }),
         getWarehouseListApi(),
         getUnitListApi(),

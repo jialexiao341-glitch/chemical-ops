@@ -5,9 +5,10 @@
  * 采购申请、询价单等单据都包含「表头 + 若干明细行」的结构，
  * 这里把可编辑明细表抽成通用组件，各页面只描述列与新增行的默认值。
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch, watchEffect } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
+import { Plus } from '@vben/icons';
 
 import {
   Button,
@@ -19,7 +20,6 @@ import {
   Table,
   Tooltip,
 } from 'antdv-next';
-import { Plus } from '@vben/icons';
 
 /** 明细列定义 */
 export interface ItemsEditorColumn {
@@ -34,7 +34,7 @@ export interface ItemsEditorColumn {
   /** 表头 */
   label: string;
   /** 选项，传函数可异步加载 */
-  options?: Array<{ label: string; value: any }> | (() => Promise<any[]>);
+  options?: (() => Promise<any[]>) | Array<{ label: string; value: any }>;
   /** 是否必填，仅用于展示星号提示 */
   required?: boolean;
 }
@@ -143,7 +143,15 @@ const tableColumns = computed(() => [
   { key: '__action', title: '操作', width: 70 },
 ]);
 
-onMounted(async () => {
+/**
+ * 异步选项加载。
+ *
+ * 用 watchEffect 而不是 onMounted：选项函数往往读取父组件晚填充的
+ * ref（如领用/调拨/盘点的 balanceOptions，在抽屉 onOpenChange 里才拉数据）。
+ * 函数在 effect 内同步读取该 ref 即被追踪，数据晚到时自动重跑，
+ * 避免挂载瞬间缓存到空数组后下拉永远「暂无数据」。
+ */
+watchEffect(async () => {
   const asyncColumns = props.columns.filter(
     (column) => typeof column.options === 'function',
   );

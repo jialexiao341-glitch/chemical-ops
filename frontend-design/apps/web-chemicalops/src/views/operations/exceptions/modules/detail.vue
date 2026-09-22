@@ -499,6 +499,11 @@ defineExpose({ drawerApi });
                   </Button>
                 </div>
               </template>
+              <!-- antdv-next 的 bodyCell 提供后未命中的列不回退默认渲染，
+                   必须显式兜底，否则任务标题等普通文本列永远空白 -->
+              <template v-else>
+                {{ (record as Record<string, any>)[column.key!] }}
+              </template>
             </template>
           </Table>
         </div>

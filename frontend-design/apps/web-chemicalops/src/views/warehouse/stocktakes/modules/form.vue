@@ -124,7 +124,7 @@ async function reloadOptions(warehouse?: null | number) {
   }
   const [locations, balances, products, units] = await Promise.all([
     getLocationListApi(warehouse),
-    getBalanceListApi({ page: 1, page_size: 200, warehouse_id: warehouse }),
+    getBalanceListApi({ page: 1, page_size: 100, warehouse_id: warehouse }),
     getProductListApi({ page: 1, page_size: 100, status: 'ACTIVE' }),
     getUnitListApi(),
   ]);
