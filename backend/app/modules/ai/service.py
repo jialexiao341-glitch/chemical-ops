@@ -642,6 +642,47 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
     LOGGER.info("AI 请求进入 mode=sync user_id=%s query_length=%s", user.id, len(user_message.content))
     intent_result = classify_intent(user_message.content)
     LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
+    if intent_result.intent is Intent.DOC and not data.attachment_file_ids:
+        from app.modules.doc_kb.retrieve import build_doc_context, retrieve_sections
+
+        hits = await retrieve_sections(db, user_message.content)
+        if not hits:
+            fixed_content = (
+                "没有在化学品知识库中匹配到相关文档。"
+                "请改用 CAS 号（例如 64-17-5）或准确的中英文名称（例如 乙醇 / Ethanol）再试。"
+            )
+            LOGGER.info("AI 文档检索为空 user_id=%s question_hash=%s", user.id, _text_fingerprint(user_message.content))
+            db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
+            db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
+            conversation.last_message_at = datetime.now()
+            db.commit()
+            return AIChatResponse(
+                message=AIChatMessage(role="assistant", content=fixed_content),
+                conversation_id=conversation.id,
+                model="rule-based",
+                provider="chemicalops",
+                citations=None,
+                user_query=user_message.content,
+                answer=fixed_content,
+            )
+        context, citations = build_doc_context(hits)
+        runtime = get_settings()
+        result = await chat(data, runtime, attachment_context=[context])
+        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
+        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=result.message.content, citations=citations))
+        conversation.last_message_at = datetime.now()
+        db.commit()
+        result.conversation_id = conversation.id
+        result.citations = citations
+        result.user_query = user_message.content
+        result.answer = result.message.content
+        LOGGER.info(
+            "AI 文档问答完成 user_id=%s hits=%s answer_length=%s",
+            user.id,
+            len(hits),
+            len(result.message.content),
+        )
+        return result
     if intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
         runtime = get_settings()
         conversation_state = _load_conversation_state(db, conversation)
@@ -722,6 +763,54 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     LOGGER.info("AI 请求进入 mode=stream %s", _query_log_fields(user, user_message.content))
     stream_intent_result = classify_intent(user_message.content)
     LOGGER.info("AI 意图识别 mode=stream user_id=%s intent=%s reason=%s", user.id, stream_intent_result.intent, stream_intent_result.reason)
+    if stream_intent_result.intent is Intent.DOC and not data.attachment_file_ids:
+        from app.modules.doc_kb.retrieve import build_doc_context, retrieve_sections
+
+        hits = await retrieve_sections(db, user_message.content)
+        doc_citations: list | None = None
+        doc_model = "rule-based"
+        if hits:
+            context, doc_citations = build_doc_context(hits)
+            runtime = get_settings()
+            try:
+                result = await chat(data, runtime, attachment_context=[context])
+            except BusinessValidationError as exc:
+                LOGGER.warning("AI 流式文档问答失败 user_id=%s error_type=%s", user.id, exc.__class__.__name__)
+                yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
+                return
+            except Exception:
+                LOGGER.exception("AI 流式文档问答异常 user_id=%s", user.id)
+                yield f"event: error\ndata: {json.dumps({'message': '文档问答暂时失败，请稍后重试'}, ensure_ascii=False)}\n\n"
+                return
+            doc_content = result.answer or result.message.content
+            doc_model = result.model
+            LOGGER.info("AI 流式文档问答完成 user_id=%s hits=%s answer_length=%s", user.id, len(hits), len(doc_content))
+        else:
+            doc_content = (
+                "没有在化学品知识库中匹配到相关文档。"
+                "请改用 CAS 号（例如 64-17-5）或准确的中英文名称（例如 乙醇 / Ethanol）再试。"
+            )
+            LOGGER.info("AI 流式文档检索为空 user_id=%s", user.id)
+        chunk_count = 0
+        async for chunk in _stream_text_chunks(doc_content):
+            chunk_count += 1
+            yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
+        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=doc_citations))
+        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=doc_content, citations=doc_citations))
+        conversation.last_message_at = datetime.now()
+        db.commit()
+        yield "event: done\ndata: " + json.dumps(
+            {
+                "conversation_id": conversation.id,
+                "model": doc_model,
+                "provider": "chemicalops",
+                "citations": doc_citations,
+                "user_query": user_message.content,
+                "answer": doc_content,
+            },
+            ensure_ascii=False,
+        ) + "\n\n"
+        return
     if stream_intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
         runtime = get_settings()
         conversation_state = _load_conversation_state(db, conversation)

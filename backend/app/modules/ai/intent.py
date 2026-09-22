@@ -5,14 +5,16 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
 
 class Intent(StrEnum):
-    """AI 当前支持的四类入口意图。"""
+    """AI 支持的入口意图：数据查询 / 文档问答 / 功能介绍 / 问候 / 范围外。"""
 
     QUERY = "query"
+    DOC = "doc"
     PROJECT = "project"
     GREETING = "greeting"
     UNSUPPORTED = "unsupported"
@@ -173,6 +175,62 @@ QUERY_MARKERS = (
 )
 
 
+# 文档问答：化学品属性/安全类问题走 TDS/MSDS 知识库，不进 Text2SQL。
+DOC_MARKERS = (
+    "闪点",
+    "沸点",
+    "熔点",
+    "分子式",
+    "分子量",
+    "危险性",
+    "危险类别",
+    "危险声明",
+    "信号词",
+    "ghs",
+    "msds",
+    "sds",
+    "安全数据表",
+    "急救",
+    "消防",
+    "灭火",
+    "泄漏处置",
+    "职业接触",
+    "tlv",
+    "ld50",
+    "lc50",
+    "毒性",
+    "储存条件",
+    "存储条件",
+    "相容性",
+    "不相容",
+    "nfpa",
+)
+
+# CAS 结构：A(2-7位)-B(2位)-C(1位校验码)。日期（2026-09-22）末段是两位不匹配；
+# 匹配后再做校验码验证，进一步压掉随机数字串。
+_CAS_RE = re.compile(r"(?<![\d-])\d{2,7}-\d{2}-\d(?![\d-])")
+
+
+def valid_cas_checksum(cas: str) -> bool:
+    """校验 CAS 校验码（加权求和取模）。"""
+
+    digits = cas.replace("-", "")
+    check_digit = int(digits[-1])
+    weighted = sum(int(digit) * index for index, digit in enumerate(reversed(digits[:-1]), start=1))
+    return weighted % 10 == check_digit
+
+
+def extract_valid_cas(text: str) -> list[str]:
+    """提取文本中校验码合法的 CAS 号（去重、保序）。"""
+
+    found: list[str] = []
+    for match in _CAS_RE.finditer(text):
+        cas = match.group(0)
+        if valid_cas_checksum(cas) and cas not in found:
+            found.append(cas)
+    return found
+
+
 def classify_intent(text: str) -> IntentResult:
     """按确定性规则识别入口意图；不确定时默认拒绝。"""
 
@@ -185,6 +243,10 @@ def classify_intent(text: str) -> IntentResult:
         return IntentResult(Intent.GREETING, "greeting_marker")
     if any(marker in normalized for marker in UNSUPPORTED_MARKERS):
         return IntentResult(Intent.UNSUPPORTED, "unsupported_marker")
+    if extract_valid_cas(text):
+        return IntentResult(Intent.DOC, "cas_pattern")
+    if any(marker in normalized for marker in DOC_MARKERS):
+        return IntentResult(Intent.DOC, "doc_marker")
     if any(marker in normalized for marker in QUERY_MARKERS):
         return IntentResult(Intent.QUERY, "business_query_marker")
     return IntentResult(Intent.UNSUPPORTED, "no_supported_marker")

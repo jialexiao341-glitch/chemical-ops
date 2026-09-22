@@ -94,6 +94,14 @@ class Settings(BaseSettings):
     agent_save_input_content: bool = False
     agent_save_output_content: bool = False
 
+    # 文档知识库向量检索：Qdrant 存章节向量，embeddings 走 OpenAI 兼容接口（本地 LM Studio）。
+    qdrant_host: str = "127.0.0.1"
+    qdrant_port: int = 6333
+    qdrant_collection: str = "chemicalops_doc_sections"
+    embedding_base_url: str = "http://127.0.0.1:1234/v1"
+    embedding_model: str = "text-embedding-qwen3-embedding-0.6b"
+    embedding_api_key: str = "lm-studio"
+
     @property
     def resolved_database_url(self) -> str:
         """优先根据 MYSQL_* 配置拼接同步 SQLAlchemy 连接地址。
