@@ -24,6 +24,8 @@ interface UiMessage {
   id: string;
   /** 后端 Text2SQL 查询链路，仅助手消息可能携带 */
   queryTrace?: any;
+  /** 查询链路详情是否展开（默认收起，点击查看） */
+  traceOpen?: boolean;
   role: 'assistant' | 'user';
   /** 流式回复是否仍在输出 */
   streaming?: boolean;
@@ -182,6 +184,13 @@ async function onSend() {
   }
 }
 
+/** 展开/收起某条消息的查询链路详情 */
+function toggleTrace(id: string) {
+  messages.value = messages.value.map((item) =>
+    item.id === id ? { ...item, traceOpen: !item.traceOpen } : item,
+  );
+}
+
 function onTextKeydown(event: KeyboardEvent) {
   // Enter 发送，Shift+Enter 换行
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -285,7 +294,7 @@ onMounted(loadConversations);
                   v-if="item.content"
                   class="chat-md [&_a]:text-blue-500 [&_a]:underline [&_code]:bg-black/20 [&_code]:rounded [&_code]:px-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:my-1"
                   v-html="renderMarkdown(item.content)"
-                />
+                ></div>
                 <span v-else-if="item.streaming" class="animate-pulse">
                   正在思考…
                 </span>
@@ -293,11 +302,45 @@ onMounted(loadConversations);
                   v-if="item.queryTrace"
                   class="border-border/50 mt-2 border-t pt-2 text-xs opacity-80"
                 >
-                  <div>数据集：{{ item.queryTrace.dataset_label || item.queryTrace.dataset || '-' }}</div>
-                  <div>命中 {{ item.queryTrace.row_count }} 行</div>
-                  <pre
-                    class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap"
-                  >{{ item.queryTrace.sql }}</pre>
+                  <!-- 默认收起：标题行常驻摘要，点击展开槽位与 SQL -->
+                  <button
+                    class="flex w-full cursor-pointer items-center gap-1 text-left select-none"
+                    type="button"
+                    @click="toggleTrace(item.id)"
+                  >
+                    <span
+                      class="transition-transform"
+                      :class="item.traceOpen ? 'rotate-90' : ''"
+                    >▸</span>
+                    <span>
+                      查询链路 ·
+                      {{ item.queryTrace.dataset_label || item.queryTrace.dataset || '-' }} ·
+                      命中 {{ item.queryTrace.row_count }} 行
+                    </span>
+                    <span class="text-muted-foreground">
+                      {{ item.traceOpen ? '收起' : '查看' }}
+                    </span>
+                  </button>
+                  <template v-if="item.traceOpen">
+                    <!-- 已抽取槽位：label: display_value，empty 状态降透明度区分 -->
+                    <div
+                      v-if="item.queryTrace.slots?.length"
+                      class="mt-2 flex flex-wrap gap-1"
+                    >
+                      <Tag
+                        v-for="slot in item.queryTrace.slots"
+                        :key="slot.name"
+                        class="!mr-0"
+                        :class="slot.status === 'filled' ? '' : 'opacity-50'"
+                        :color="slot.status === 'filled' ? 'blue' : undefined"
+                      >
+                        {{ slot.label }}：{{ slot.display_value }}
+                      </Tag>
+                    </div>
+                    <pre
+                      class="mt-2 max-h-32 overflow-auto whitespace-pre-wrap"
+                    >{{ item.queryTrace.sql }}</pre>
+                  </template>
                 </div>
               </div>
             </div>
