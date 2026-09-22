@@ -1,6 +1,6 @@
 """AI 助手请求与响应模型。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -100,3 +100,53 @@ class AIMessagePage(BaseModel):
 
     items: list[AIMessageRead]
     total: int
+
+
+class BriefingRequest(BaseModel):
+    """生成运营晨报时提交的字段。"""
+
+    push: bool = Field(default=False, description="是否同时发送站内通知")
+    notify_role_codes: list[str] | None = Field(
+        default=None,
+        max_length=10,
+        description="覆盖默认通知角色；为空时通知 SYS_ADMIN 与 PROCUREMENT_MANAGER",
+    )
+
+
+class BriefingResponse(BaseModel):
+    """AI 运营晨报响应。"""
+
+    content: str
+    snapshot: dict[str, Any]
+    model: str
+    provider: str
+    generated_at: datetime
+    pushed: bool
+    notified_count: int = 0
+
+
+class NLFilterRequest(BaseModel):
+    """自然语言解析列表筛选条件的请求。"""
+
+    dataset: str = Field(min_length=1, max_length=64, description="目录中的数据集键")
+    question: str = Field(min_length=1, max_length=500, description="自然语言筛选描述")
+
+
+class NLFilterTimeRange(BaseModel):
+    """解析出的时间范围（字段必须在数据集白名单内）。"""
+
+    field: str
+    date_from: date | None = None
+    date_to: date | None = None
+
+
+class NLFilterResult(BaseModel):
+    """自然语言筛选解析结果；只产出条件，不执行查询。"""
+
+    dataset: str
+    dataset_label: str
+    filters: dict[str, str] = Field(default_factory=dict)
+    time_range: NLFilterTimeRange | None = None
+    keywords: str | None = None
+    dropped: list[str] = Field(default_factory=list, description="被白名单或格式校验剔除的条件说明")
+    raw: str = Field(default="", description="模型原始输出，便于排查")

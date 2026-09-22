@@ -10,10 +10,23 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.db import get_db
 from app.core.observability import get_request_id, metrics, observe_duration
+from app.modules.ai import briefing as briefing_service
+from app.modules.ai import nl_filters as nl_filters_service
 from app.modules.ai import service
 from app.modules.ai import text2sql as text2sql_service
 from app.modules.ai.text2sql import Text2SQLRequest, Text2SQLResponse
-from app.modules.ai.schema import AIChatRequest, AIChatResponse, AIConversationPage, AIConversationRead, AIMessagePage, AIMessageRead
+from app.modules.ai.schema import (
+    AIChatRequest,
+    AIChatResponse,
+    AIConversationPage,
+    AIConversationRead,
+    AIMessagePage,
+    AIMessageRead,
+    BriefingRequest,
+    BriefingResponse,
+    NLFilterRequest,
+    NLFilterResult,
+)
 from app.modules.system.model import User
 
 
@@ -26,6 +39,20 @@ async def text2sql(data: Text2SQLRequest, db: Session = Depends(get_db), user: U
     """执行受白名单、权限和 SELECT-only 校验保护的自然语言查询。"""
 
     return await text2sql_service.run_text2sql(db, user, data)
+
+
+@router.post("/briefing", response_model=BriefingResponse, summary="生成 AI 运营晨报")
+async def briefing(data: BriefingRequest | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> BriefingResponse:
+    """聚合 dashboard 指标生成中文晨报；push=true 时同时站内通知（默认 SYS_ADMIN 与 PROCUREMENT_MANAGER）。"""
+
+    return await briefing_service.generate_briefing(db, user, data or BriefingRequest())
+
+
+@router.post("/parse-filters", response_model=NLFilterResult, summary="自然语言解析列表筛选条件")
+async def parse_filters(data: NLFilterRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> NLFilterResult:
+    """把自然语言解析成数据集白名单内的列表筛选参数；只产出条件，不执行查询。"""
+
+    return await nl_filters_service.parse_filters(db, user, data)
 
 
 @router.post("/chat", response_model=AIChatResponse, summary="调用 AI 助手")
