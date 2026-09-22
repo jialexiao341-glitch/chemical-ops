@@ -14,6 +14,7 @@ import {
   streamChatApi,
 } from '#/api';
 import { formatDateTime } from '#/utils/format';
+import { renderMarkdown } from '#/utils/markdown';
 
 defineOptions({ name: 'AiWorkspace' });
 
@@ -269,15 +270,22 @@ onMounted(loadConversations);
               class="flex"
               :class="item.role === 'user' ? 'justify-end' : 'justify-start'"
             >
+              <!-- 用户消息按纯文本展示；助手消息渲染 Markdown -->
               <div
-                class="max-w-[75%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm"
-                :class="
-                  item.role === 'user'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-accent'
-                "
+                v-if="item.role === 'user'"
+                class="bg-primary max-w-[75%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm text-primary-foreground"
               >
-                <template v-if="item.content">{{ item.content }}</template>
+                {{ item.content }}
+              </div>
+              <div
+                v-else
+                class="bg-accent max-w-[75%] rounded-lg px-3 py-2 text-sm"
+              >
+                <div
+                  v-if="item.content"
+                  class="chat-md [&_a]:text-blue-500 [&_a]:underline [&_code]:bg-black/20 [&_code]:rounded [&_code]:px-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:my-1"
+                  v-html="renderMarkdown(item.content)"
+                />
                 <span v-else-if="item.streaming" class="animate-pulse">
                   正在思考…
                 </span>

@@ -56,7 +56,14 @@ PAYLOAD：
 
 
 def text2sql_plan_prompt(question: str, previous_plan: dict | None = None) -> str:
-    prompt = TEXT2SQL_PLAN_PROMPT.format(question=question, catalog=catalog_prompt()) + "\n" + TEXT2SQL_PLAN_RULES
+    from datetime import date
+
+    prompt = (
+        TEXT2SQL_PLAN_PROMPT.format(question=question, catalog=catalog_prompt())
+        + f"\n今天是 {date.today().isoformat()}；「本月/本周/最近N天」等相对时间必须以此换算成绝对日期。"
+        + "\n"
+        + TEXT2SQL_PLAN_RULES
+    )
     if previous_plan:
         prompt += (
             "\n上一轮已通过权限校验的 QueryPlan 如下。当前问题可能是追问；请继承未被明确修改的字段，"

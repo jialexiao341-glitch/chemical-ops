@@ -240,3 +240,13 @@ def test_system_prompt_has_style_and_readonly_rules():
     assert "先给结论" in agent_prompt.SYSTEM_PROMPT
     assert "不要编造" in agent_prompt.SYSTEM_PROMPT
     assert "不能创建或修改业务数据" in agent_prompt.SYSTEM_PROMPT
+
+
+def test_plan_prompt_includes_today_date():
+    """计划提示词必须带今天日期，否则模型把「本月」猜成错误月份导致命中0行。"""
+
+    from datetime import date
+
+    prompt = agent_prompt.text2sql_plan_prompt("查询本月各供应商采购金额")
+    assert date.today().isoformat() in prompt
+    assert "相对时间" in prompt
