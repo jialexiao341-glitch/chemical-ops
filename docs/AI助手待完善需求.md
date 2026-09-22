@@ -39,7 +39,7 @@ LangGraph Checkpointer 和业务会话表不是同一种数据：
 |---|---|---|
 | 用户可见消息 | `ai_messages` | 展示对话、答案和引用 |
 | 会话元数据 | `ai_conversations` | 用户、标题、权限范围、状态 |
-| 查询计划和 Trace | `ai_query_runs` 或 `ai_conversation_state` | 多轮查询、结果解释、审计 |
+| 查询计划和 Trace | `ai_conversation_state`（最近一次）+ `ai_query_log`（每轮留档） | 多轮查询、结果解释、审计与历史回溯 |
 | LangGraph checkpoint | 专用持久化 Checkpointer | 节点状态、暂停点、恢复和故障续跑 |
 | 附件和解析结果 | 对象存储 | 原文件、Markdown、报告文件 |
 | 长期用户偏好 | MySQL Store 或独立 Store | 常用筛选、偏好和跨会话记忆 |
@@ -50,7 +50,7 @@ LangGraph Checkpointer 和业务会话表不是同一种数据：
 
 当前项目主数据库是 MySQL，短期优先采用 MySQL 保存业务层状态，不立即引入新的数据库类型。
 
-建议新增 `ai_query_runs` 或 `ai_conversation_state`，至少保存：
+已新增 `ai_conversation_state`（会话级最近状态）和 `ai_query_log`（每轮追加留档），至少保存：
 
 - `conversation_id`。
 - 稳定的 `thread_id`。
@@ -209,7 +209,7 @@ Redis Checkpointer 只有在需要长时间运行、人工审批暂停、断点�
 
 ## 二、第一阶段：提升查询可用性（P0）
 
-### P0 当前落实进度（2026-09-20）
+### P0 当前落实进度（2026-09-22）
 
 - [x] 新增 `ai_conversation_state` 结构化状态表，保存稳定 `thread_id`、最近 QueryPlan、查询 Trace 摘要和权限摘要。
 - [x] AI 会话查询使用 `ai:{user_id}:{conversation_id}` 作为稳定线程标识；每轮仍重新执行当前权限校验。
@@ -218,10 +218,11 @@ Redis Checkpointer 只有在需要长时间运行、人工审批暂停、断点�
 - [x] 增加采购申请只读查询，以及采购订单按供应商区域筛选。
 - [x] 查询引用补充数据集、权限编码、查询时间、线程标识、时间范围和过滤条件。
 - [x] 对分组查询增加安全的柱状图数据描述和前端展示；无法形成分组结果时仍回退为表格。
+- [x] 新增 `ai_query_log` 追加式查询留档表（迁移 020）：每轮 Text2SQL 记录槽位快照、模板、SQL、行数和问题指纹，与会话级“最近一次”状态互补保留完整历史轨迹。
 - [ ] 采购订单明细、交付完成率、质量关联、库存安全库存、供应商绩效、异常负责人和财务发票/付款明细仍需继续拆分数据集实现。
 - [ ] “继续分析第二个附件”及附件位置级引用仍需继续完善。
 
-本次实现采用“业务状态先落 MySQL、LangGraph 负责编排”的第一阶段方案。正式执行 `database/migrations/017_ai_conversation_state.sql` 后，会话即可跨请求复用结构化查询上下文；在迁移尚未执行的环境中，系统会暂时保持旧查询链路可用。
+本次实现采用“业务状态先落 MySQL、LangGraph 负责编排”的第一阶段方案。正式执行 `database/migrations/017_ai_conversation_state.sql` 后，会话即可跨请求复用结构化查询上下文；在迁移尚未执行的环境中，系统会暂时保持旧查询链路可用。`ai_conversation_state.query_trace` 为覆盖式（每会话仅保留最近一次，驱动下轮追问衔接）；需要回溯历史查询时使用 `database/migrations/020_ai_query_log.sql` 建立的追加式留档表，迁移未执行时留档自动跳过，不影响主链路。
 
 ### 2.1 多轮上下文查询
 

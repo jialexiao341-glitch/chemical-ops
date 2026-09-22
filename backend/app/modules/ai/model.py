@@ -55,3 +55,25 @@ class AIConversationState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3)
     )
+
+
+class AIQueryLog(Base):
+    """Text2SQL 每轮查询的追加式留档；会话状态只留最近一次，本表保留历史轨迹。"""
+
+    __tablename__ = "ai_query_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("ai_conversations.id"), nullable=False)
+    thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    question_hash: Mapped[str] = mapped_column(String(16), nullable=False)
+    dataset: Mapped[str] = mapped_column(String(64), nullable=False)
+    dataset_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    slots: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sql_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    row_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    truncated: Mapped[bool] = mapped_column(default=False, nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))

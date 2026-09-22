@@ -26,7 +26,7 @@ from app.modules.ai.agent_prompt import (
     result_rewrite_prompt,
 )
 from app.modules.ai.intent import Intent, classify_intent
-from app.modules.ai.model import AIConversation, AIConversationState, AIMessage
+from app.modules.ai.model import AIConversation, AIConversationState, AIMessage, AIQueryLog
 from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse, AIQueryTrace
 from app.modules.files import service as file_service
 from app.modules.files import mineru
@@ -543,6 +543,41 @@ def _load_conversation_state(db: Session, conversation: AIConversation) -> AICon
     return db.scalar(select(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
 
 
+def _query_log_enabled(db: Session) -> bool:
+    """迁移 020 尚未执行时跳过留档，保持旧环境可用。"""
+
+    try:
+        bind = db.get_bind()
+        return bool(bind is not None and inspect(bind).has_table(AIQueryLog.__tablename__))
+    except Exception as exc:
+        LOGGER.warning("AI 查询留档表检查失败 error_type=%s", exc.__class__.__name__)
+        return False
+
+
+def _append_query_log(db: Session, conversation: AIConversation, trace: AIQueryTrace) -> None:
+    """每轮 Text2SQL 追加一条留档，与会话级“最近一次”状态互补保留历史轨迹。"""
+
+    if not _query_log_enabled(db):
+        return
+    db.add(
+        AIQueryLog(
+            conversation_id=conversation.id,
+            thread_id=trace.thread_id,
+            question=trace.query,
+            question_hash=_text_fingerprint(trace.query),
+            dataset=trace.dataset or "unknown",
+            dataset_label=trace.dataset_label,
+            slots=trace.model_dump(mode="json", include={"slots"})["slots"],
+            template=trace.template,
+            sql_text=trace.sql,
+            row_count=trace.row_count,
+            truncated=trace.truncated,
+            unit=trace.unit,
+            executed_at=trace.executed_at,
+        )
+    )
+
+
 def _save_query_state(
     db: Session,
     user: User,
@@ -577,6 +612,8 @@ def delete_conversation(db: Session, user: User, conversation_id: int) -> None:
     conversation = _get_owned_conversation(db, user, conversation_id)
     if _conversation_state_enabled(db):
         db.execute(delete(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
+    if _query_log_enabled(db):
+        db.execute(delete(AIQueryLog).where(AIQueryLog.conversation_id == conversation.id))
     db.execute(delete(AIMessage).where(AIMessage.conversation_id == conversation.id))
     db.delete(conversation)
     db.commit()
@@ -704,6 +741,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         plan_payload = citation.get("query_plan") if isinstance(citation, dict) else None
         if isinstance(plan_payload, dict):
             _save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
+        _append_query_log(db, conversation, query_trace)
         db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
         db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
         conversation.last_message_at = datetime.now()
@@ -845,6 +883,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         plan_payload = citation.get("query_plan") if isinstance(citation, dict) else None
         if isinstance(plan_payload, dict):
             _save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
+        _append_query_log(db, conversation, query_trace)
         db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
         db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
         conversation.last_message_at = datetime.now()
