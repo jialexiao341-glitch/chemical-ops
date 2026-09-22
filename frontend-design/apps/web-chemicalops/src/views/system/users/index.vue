@@ -11,7 +11,7 @@ import { Plus } from '@vben/icons';
 import { Button, message, Modal } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { deleteUserApi, getUserListApi } from '#/api';
+import { deleteUserApi, getUserApi, getUserListApi } from '#/api';
 
 import { useColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
@@ -63,7 +63,16 @@ function onActionClick({
       break;
     }
     case 'edit': {
-      formDrawerApi.setData(row).open();
+      // 列表行不含 role_ids，编辑前拉详情以便回填已绑定角色
+      void (async () => {
+        try {
+          const detail = await getUserApi(row.id);
+          formDrawerApi.setData({ ...row, ...detail }).open();
+        } catch {
+          // 详情失败时退回列表数据（角色不回填，保持旧行为）
+          formDrawerApi.setData(row).open();
+        }
+      })();
       break;
     }
   }

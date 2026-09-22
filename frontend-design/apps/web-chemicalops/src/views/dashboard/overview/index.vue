@@ -193,6 +193,7 @@ onMounted(async () => {
             icon="lucide:file-check-2"
             hint="已确认的财务对账单"
             title="已确认对账"
+            to="/finance/reconciliations"
             :value="overview?.confirmed_reconciliations ?? '-'"
           />
           <StatCard
@@ -200,6 +201,7 @@ onMounted(async () => {
             hint="已完成支付的金额合计"
             title="已付款金额"
             tone="success"
+            to="/finance/payments"
             :value="formatAmount(overview?.paid_amount)"
           />
         </div>

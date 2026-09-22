@@ -407,7 +407,7 @@ def load_procurement(
             "supplier_id": supplier.id, "source_comparison_id": comparison.id, "source_quote_id": quote.id,
             "source_request_id": rfq.source_request_id, "department_id": departments["PROCUREMENT"].id, "buyer_id": users["buyer"].id,
             "order_amount": quote_item.unit_price * clean_decimal(quote_item.quoted_quantity), "currency_code": "CNY",
-            "delivery_address": f"{supplier.region} 化学品仓储中心", "order_date": TODAY - timedelta(days=30 + index % 150),
+            "delivery_address": f"{supplier.region} 化学品仓储中心", "order_date": TODAY - timedelta(days=index % 150),
             "expected_arrival_date": TODAY - timedelta(days=12 - index % 6), "status": order_status,
             "supplier_confirmed_at": dt(25 + index % 20), "approved_at": dt(28 + index % 20),
         }, counts)

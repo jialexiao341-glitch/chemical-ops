@@ -79,6 +79,8 @@ const [Drawer, drawerApi] = useVbenDrawer<null | SystemUserApi.SystemUser>({
         display_name: data.display_name,
         email: data.email ?? undefined,
         phone: data.phone ?? undefined,
+        // 详情接口返回已绑定角色，回填后用户可增删；留空提交仍保持不变
+        role_ids: data.role_ids?.length ? data.role_ids : undefined,
         status: data.status,
         username: data.username,
       });

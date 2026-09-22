@@ -45,7 +45,7 @@ def get_overview(db: Session):
 
 
 def get_report(db: Session, *, date_from: date | None, date_to: date | None) -> dict:
-    """按创建日期聚合采购订单和供应商履约指标。"""
+    """按订单日期聚合采购订单和供应商履约指标。"""
     if date_from is not None and date_to is not None and date_from > date_to:
         raise BusinessValidationError("统计开始日期不能晚于结束日期")
 
@@ -56,23 +56,25 @@ def get_report(db: Session, *, date_from: date | None, date_to: date | None) -> 
         Delivery.expected_arrival_date < date.today(),
     ]
     if date_from is not None:
-        order_conditions.append(func.date(PurchaseOrder.created_at) >= date_from)
+        # 采购趋势/状态/供应商金额都按业务上的「下单日期」统计，
+        # created_at 只是种子落库时间，会把历史订单全部挤到同一天。
+        order_conditions.append(PurchaseOrder.order_date >= date_from)
         delivery_conditions.append(func.date(Delivery.created_at) >= date_from)
     if date_to is not None:
-        order_conditions.append(func.date(PurchaseOrder.created_at) <= date_to)
+        order_conditions.append(PurchaseOrder.order_date <= date_to)
         delivery_conditions.append(func.date(Delivery.created_at) <= date_to)
 
     trend_start = date_from or date.fromordinal(date.today().toordinal() - 29)
     trend_end = date_to or date.today()
     trend_rows = db.execute(
         select(
-            func.date(PurchaseOrder.created_at),
+            PurchaseOrder.order_date,
             func.count(PurchaseOrder.id),
             func.coalesce(func.sum(PurchaseOrder.order_amount), 0),
         )
-        .where(func.date(PurchaseOrder.created_at) >= trend_start, func.date(PurchaseOrder.created_at) <= trend_end)
-        .group_by(func.date(PurchaseOrder.created_at))
-        .order_by(func.date(PurchaseOrder.created_at))
+        .where(PurchaseOrder.order_date.is_not(None), PurchaseOrder.order_date >= trend_start, PurchaseOrder.order_date <= trend_end)
+        .group_by(PurchaseOrder.order_date)
+        .order_by(PurchaseOrder.order_date)
     ).all()
     trend_by_date = {
         trend_date: {"order_count": count, "order_amount": Decimal(amount)}

@@ -64,6 +64,8 @@ class UserRead(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    # 详情/更新接口会填充；分页列表不逐行查角色，保持 None
+    role_ids: list[int] | None = None
 
 
 class UserPage(BaseModel):

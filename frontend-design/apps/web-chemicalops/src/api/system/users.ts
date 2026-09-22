@@ -11,6 +11,8 @@ export namespace SystemUserApi {
     email?: null | string;
     id: number;
     phone?: null | string;
+    /** 详情/更新接口返回已绑定角色；分页列表为 null */
+    role_ids?: null | number[];
     status: string;
     updated_at?: string;
     username: string;

@@ -131,16 +131,20 @@ def list_users(
 
 @router.get("/system/users/{user_id}", response_model=UserRead, summary="查询用户详情")
 def get_user(user_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("system.users.read"))) -> UserRead:
-    """按用户 ID 查询用户详情。"""
+    """按用户 ID 查询用户详情（含已绑定角色 ID，供编辑回填）。"""
 
-    return service._require_user(db, user_id)
+    read = UserRead.model_validate(service._require_user(db, user_id))
+    read.role_ids = crud.get_user_role_ids(db, user_id)
+    return read
 
 
 @router.patch("/system/users/{user_id}", response_model=UserRead, summary="更新用户")
 def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db), _: User = Depends(require_permission("system.users.write"))) -> UserRead:
     """部分更新用户资料、密码、状态和角色。"""
 
-    return service.update_user(db, user_id, data)
+    read = UserRead.model_validate(service.update_user(db, user_id, data))
+    read.role_ids = crud.get_user_role_ids(db, user_id)
+    return read
 
 
 @router.delete("/system/users/{user_id}", response_model=UserRead, summary="停用用户")
