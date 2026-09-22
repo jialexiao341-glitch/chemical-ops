@@ -49,10 +49,18 @@ USER_AGENT = (
 )
 DEFAULT_DELAY_SECONDS = 1.0
 DEFAULT_TIMEOUT_SECONDS = 20.0
+DEFAULT_RETRIES = 2
+CAS_PATTERN = re.compile(r"\d{2,7}-\d{2}-\d")
 RUN_ROOT = ROOT / "storage" / "imports" / "tds_msds"
 MANIFEST_PATH = RUN_ROOT / "manifest.jsonl"
 MSDS_BUCKET_SUFFIX = "chemicalops-msds"
 TDS_BUCKET_SUFFIX = "chemicalops-tds"
+
+
+def valid_cas(cas: str) -> bool:
+    """CAS 号格式预检（结构校验；校验码交给站点 404 兜底）。"""
+
+    return bool(CAS_PATTERN.fullmatch(cas))
 
 
 @dataclass
@@ -271,17 +279,32 @@ class RobotsGate:
 
 
 class HttpxFetcher:
-    def __init__(self, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> None:
-        self._client = httpx.Client(
+    """带瞬时故障重试的 HTTP 抓取器（4xx 不重试，5xx/网络错误退避重试）。"""
+
+    def __init__(self, timeout: float = DEFAULT_TIMEOUT_SECONDS, retries: int = DEFAULT_RETRIES, client: httpx.Client | None = None) -> None:
+        self._retries = max(0, retries)
+        self._client = client or httpx.Client(
             headers={"User-Agent": USER_AGENT, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
             timeout=timeout,
             follow_redirects=True,
         )
 
     def get(self, url: str) -> tuple[int, bytes, str]:
-        response = self._client.get(url)
-        content_type = response.headers.get("content-type", "")
-        return response.status_code, response.content, content_type
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(self._retries + 1):
+            try:
+                response = self._client.get(url)
+                if response.status_code >= 500 and attempt < self._retries:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                content_type = response.headers.get("content-type", "")
+                return response.status_code, response.content, content_type
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if attempt >= self._retries:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
+        raise last_error if last_error else RuntimeError("HTTP 抓取失败")
 
     def close(self) -> None:
         self._client.close()
@@ -428,8 +451,10 @@ def resolve_cas_list(args: argparse.Namespace) -> list[str]:
 
         db = SessionLocal()
         try:
-            rows = db.scalars(select(Chemical.cas_no).where(Chemical.status == "ACTIVE").order_by(Chemical.id).limit(args.limit)).all()
-            return list(rows)
+            statement = select(Chemical.cas_no).where(Chemical.status == "ACTIVE").order_by(Chemical.id)
+            if args.limit > 0:
+                statement = statement.limit(args.limit)
+            return list(db.scalars(statement).all())
         finally:
             db.close()
     return []
@@ -461,18 +486,31 @@ def crawl(args: argparse.Namespace) -> dict[str, int]:
     gate = None if args.ignore_robots else RobotsGate(BASE_URL)
 
     stats = {"requested": len(cas_list), "uploaded": 0, "skipped_existing": 0, "failed_cas": 0, "failed_docs": 0}
+    stored_by_kind: dict[str, int] = {}
     run_manifest: list[dict[str, Any]] = []
     failures: list[str] = []
 
     try:
         for index, cas in enumerate(cas_list, start=1):
             print(f"[{index}/{len(cas_list)}] cas={cas}")
+            # 格式不合法的 CAS（如演示数据后缀）直接跳过，不浪费请求
+            if not valid_cas(cas):
+                stats["failed_cas"] += 1
+                failures.append(f"{cas}: CAS 格式不合法，已跳过")
+                print("  failed: CAS 格式不合法，已跳过")
+                continue
             try:
                 result = crawl_cas(cas, fetch, gate)
             except httpx.HTTPError as exc:
                 stats["failed_cas"] += 1
                 failures.append(f"{cas}: 网络错误 {exc}")
                 print(f"  failed network: {exc}")
+                time.sleep(args.delay)
+                continue
+            except Exception as exc:  # 单个 CAS 的意外错误不中断整批
+                stats["failed_cas"] += 1
+                failures.append(f"{cas}: 未预期错误 {type(exc).__name__}: {exc}")
+                print(f"  failed unexpected: {type(exc).__name__}: {exc}")
                 time.sleep(args.delay)
                 continue
 
@@ -492,12 +530,18 @@ def crawl(args: argparse.Namespace) -> dict[str, int]:
                 row = manifest_row(doc)
                 run_manifest.append(row)
                 stats["uploaded"] += 1
+                kind = "_".join(
+                    part for part in (doc.doc_type, doc.name_suffix.strip("-"), doc.ext.lstrip(".")) if part
+                )
+                stored_by_kind[kind] = stored_by_kind.get(kind, 0) + 1
                 print(f"  stored {doc.bucket}/{doc.object_key} ({len(doc.content)} bytes, {doc.doc_type})")
             failures.extend(f"{cas}: {item}" for item in result.failures)
             stats["failed_docs"] += len(result.failures)
             time.sleep(args.delay)
     finally:
         fetch.close()
+
+    stats["stored_by_kind"] = stored_by_kind
 
     (run_dir / "stats.json").write_text(
         json.dumps({**stats, "failures": failures, "dry_run": args.dry_run}, ensure_ascii=False, indent=2),
@@ -512,6 +556,9 @@ def crawl(args: argparse.Namespace) -> dict[str, int]:
 
     print(f"run_dir={run_dir}")
     print(f"requested={stats['requested']} uploaded={stats['uploaded']} skipped={stats['skipped_existing']} failed_cas={stats['failed_cas']} failed_docs={stats['failed_docs']} dry_run={args.dry_run}")
+    if stored_by_kind:
+        breakdown = " ".join(f"{kind}={count}" for kind, count in sorted(stored_by_kind.items()))
+        print(f"stored_by_kind: {breakdown}")
     if failures:
         print("failures:")
         for item in failures:
@@ -524,7 +571,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cas", nargs="*", help="CAS 号列表，如 --cas 64-17-5 64-19-7")
     parser.add_argument("--cas-file", help="每行一个 CAS 的文本文件（# 开头为注释）")
     parser.add_argument("--from-chemicals", action="store_true", help="从 md_chemicals 表读取 ACTIVE 化学品的 CAS")
-    parser.add_argument("--limit", type=int, default=20, help="--from-chemicals 时最多取多少条，默认 20")
+    parser.add_argument("--limit", type=int, default=20, help="--from-chemicals 时最多取多少条，0 表示全库，默认 20")
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS, help="每次抓取后的间隔秒数，默认 1.0")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS, help="单请求超时秒数，默认 20")
     parser.add_argument("--dry-run", action="store_true", help="只下载到本地 run 目录，不写 MinIO")

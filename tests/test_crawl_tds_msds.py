@@ -239,3 +239,67 @@ def test_parse_args_defaults_and_sources():
     args2 = crawler.parse_args(["--from-chemicals", "--limit", "5"])
     assert args2.from_chemicals is True
     assert args2.limit == 5
+
+    # --limit 0 表示全库
+    args3 = crawler.parse_args(["--from-chemicals", "--limit", "0"])
+    assert args3.limit == 0
+
+
+def test_valid_cas_structure_check():
+    assert crawler.valid_cas("64-17-5")
+    assert crawler.valid_cas("1310-73-2")
+    assert not crawler.valid_cas("64-17-5-DEMO")  # 演示数据脏 CAS
+    assert not crawler.valid_cas("")
+    assert not crawler.valid_cas("ethanol")
+
+
+def test_htt_fetcher_retries_transport_error_then_succeeds():
+    import httpx
+
+    request = httpx.Request("GET", "https://example.com/x.pdf")
+    responses = iter(
+        [
+            httpx.RequestError("temporary network failure", request=request),
+            httpx.Response(200, content=b"%PDF-ok", headers={"content-type": "application/pdf"}, request=request),
+        ]
+    )
+
+    class FlakyClient:
+        def get(self, _url):
+            item = next(responses)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    fetcher = crawler.HttpxFetcher(retries=2, client=FlakyClient())  # type: ignore[arg-type]
+    # 重试间隔直接跳过，避免测试等待
+    import scripts.crawl_tds_msds as mod
+
+    original_sleep = mod.time.sleep
+    mod.time.sleep = lambda _s: None
+    try:
+        status, body, ctype = fetcher.get("https://example.com/x.pdf")
+    finally:
+        mod.time.sleep = original_sleep
+
+    assert status == 200
+    assert body.startswith(b"%PDF")
+    assert "pdf" in ctype
+
+
+def test_htt_fetcher_does_not_retry_4xx():
+    import httpx
+
+    request = httpx.Request("GET", "https://example.com/missing")
+    calls = []
+
+    class NotFoundClient:
+        def get(self, _url):
+            calls.append(1)
+            return httpx.Response(404, content=b"nope", request=request)
+
+    fetcher = crawler.HttpxFetcher(retries=3, client=NotFoundClient())  # type: ignore[arg-type]
+    status, _body, _ctype = fetcher.get("https://example.com/missing")
+
+    assert status == 404
+    assert len(calls) == 1  # 4xx 不重试
