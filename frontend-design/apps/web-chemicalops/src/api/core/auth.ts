@@ -34,6 +34,13 @@ export namespace AuthApi {
     new_password: string;
     old_password: string;
   }
+
+  /** 个人中心可更新的资料字段（角色/部门/状态不在此列，后端也会丢弃） */
+  export interface ProfileParams {
+    display_name?: string;
+    email?: null | string;
+    phone?: null | string;
+  }
 }
 
 /**
@@ -53,6 +60,30 @@ export async function loginApi(data: AuthApi.LoginParams) {
  */
 export async function getCurrentUserApi() {
   return requestClient.get<AuthApi.CurrentUser>('/auth/me');
+}
+
+/**
+ * 更新个人资料（昵称/邮箱/手机）。
+ *
+ * 后端只接受白名单字段，角色与部门无法通过此接口修改。
+ */
+export async function updateProfileApi(data: AuthApi.ProfileParams) {
+  return requestClient.request<AuthApi.CurrentUser>('/auth/me', {
+    data,
+    method: 'PATCH',
+  });
+}
+
+/**
+ * 修改个人登录密码（校验原密码）。
+ *
+ * JWT 无状态：修改成功后旧令牌在到期前仍有效，界面应提示重新登录。
+ */
+export async function changePasswordApi(data: AuthApi.ChangePasswordParams) {
+  return requestClient.request<{ changed: boolean }>('/auth/me/password', {
+    data,
+    method: 'PUT',
+  });
 }
 
 /**

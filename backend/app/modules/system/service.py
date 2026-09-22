@@ -9,12 +9,15 @@ from app.core.errors import AuthenticationError, BusinessValidationError, Duplic
 from app.core.security import create_access_token, hash_password, verify_password
 from app.modules.system import crud
 from app.modules.system.model import Department, Permission, Role, RolePermission, User
+from app.modules.system.audit import add_audit_log
 from app.modules.system.schema import (
     DepartmentCreate,
     DepartmentUpdate,
     LoginRequest,
+    PasswordChange,
     PermissionCreate,
     PermissionUpdate,
+    ProfileUpdate,
     RoleCreate,
     RoleUpdate,
     UserCreate,
@@ -244,3 +247,45 @@ def login(db: Session, data: LoginRequest) -> tuple[str, int]:
 
     settings = get_settings()
     return create_access_token(user.id), settings.access_token_expire_minutes * 60
+
+
+def update_profile(db: Session, user: User, data: ProfileUpdate) -> User:
+    """个人中心更新自己的昵称/邮箱/手机。"""
+
+    values = data.model_dump(exclude_unset=True)
+    if not values:
+        raise BusinessValidationError("没有需要更新的字段")
+    for field_name, value in values.items():
+        setattr(user, field_name, value)
+    add_audit_log(
+        db,
+        actor_id=user.id,
+        action_type="UPDATE",
+        resource_type="USER",
+        resource_id=user.id,
+        request_summary="个人中心更新资料",
+        result_status="SUCCESS",
+    )
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def change_password(db: Session, user: User, data: PasswordChange) -> None:
+    """个人中心修改自己的密码；校验原密码后重置哈希。"""
+
+    if not verify_password(data.old_password, user.password_hash):
+        raise BusinessValidationError("原密码不正确")
+    if data.old_password == data.new_password:
+        raise BusinessValidationError("新密码不能与原密码相同")
+    user.password_hash = hash_password(data.new_password)
+    add_audit_log(
+        db,
+        actor_id=user.id,
+        action_type="CHANGE_PASSWORD",
+        resource_type="USER",
+        resource_id=user.id,
+        request_summary="个人中心修改登录密码",
+        result_status="SUCCESS",
+    )
+    db.commit()

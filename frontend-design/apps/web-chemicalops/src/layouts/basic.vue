@@ -42,6 +42,13 @@ const menus = computed(() => [
   },
   {
     handler: () => {
+      router.push({ name: 'Profile' });
+    },
+    icon: 'lucide:user-round',
+    text: '个人中心',
+  },
+  {
+    handler: () => {
       router.push({ name: 'NotificationCenter' });
     },
     icon: 'lucide:bell',

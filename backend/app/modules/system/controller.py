@@ -15,10 +15,12 @@ from app.modules.system.schema import (
     DepartmentRead,
     DepartmentUpdate,
     LoginRequest,
+    PasswordChange,
     PermissionCreate,
     PermissionPage,
     PermissionRead,
     PermissionUpdate,
+    ProfileUpdate,
     RoleCreate,
     RolePage,
     RoleRead,
@@ -57,6 +59,30 @@ def current_user(user: User = Depends(get_current_user), db: Session = Depends(g
     """返回当前登录用户的基本信息、角色和权限。"""
 
     return _current_user_response(db, user)
+
+
+@auth_router.patch("/me", response_model=CurrentUserRead, summary="更新个人资料")
+def update_current_user(
+    data: ProfileUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CurrentUserRead:
+    """个人中心更新昵称/邮箱/手机（不含角色与部门）。"""
+
+    service.update_profile(db, user, data)
+    return _current_user_response(db, user)
+
+
+@auth_router.put("/me/password", summary="修改个人登录密码")
+def change_current_password(
+    data: PasswordChange,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, bool]:
+    """校验原密码后修改自己的登录密码；JWT 无状态，旧令牌到期前仍有效。"""
+
+    service.change_password(db, user, data)
+    return {"changed": True}
 
 
 @router.post("/system/users", response_model=UserRead, status_code=status.HTTP_201_CREATED, summary="新增用户")

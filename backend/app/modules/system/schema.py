@@ -17,6 +17,25 @@ class UserCreate(BaseModel):
     role_ids: list[int] = Field(default_factory=list)
 
 
+class ProfileUpdate(BaseModel):
+    """个人中心更新自己的资料。
+
+    只开放昵称/邮箱/手机；角色、部门、状态属于管理动作，
+    必须走 /system/users 并受对应权限码保护。
+    """
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=100)
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=32)
+
+
+class PasswordChange(BaseModel):
+    """个人中心修改自己的登录密码。"""
+
+    old_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class UserUpdate(BaseModel):
     """更新用户时提交的可选字段。"""
 
