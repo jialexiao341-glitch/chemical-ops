@@ -109,6 +109,8 @@ export const DELIVERY_STATUS_DICT = buildDict([
 
 /** 质量验收结果 */
 export const ACCEPTANCE_RESULT_DICT = buildDict([
+  // 后端创建验收时初始态为 PENDING（尚未录入结果）
+  { color: 'processing', label: '待检验', value: 'PENDING' },
   { color: 'success', label: '合格', value: 'PASSED' },
   { color: 'warning', label: '部分合格', value: 'PARTIAL' },
   { color: 'error', label: '不合格', value: 'FAILED' },

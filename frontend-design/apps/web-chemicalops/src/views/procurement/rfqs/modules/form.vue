@@ -91,7 +91,11 @@ const itemColumns = [
     field: 'product_id',
     label: '关联产品',
     options: async () => {
-      const res = await getProductListApi({ page: 1, page_size: 100 });
+      const res = await getProductListApi({
+        page: 1,
+        page_size: 100,
+        status: 'ACTIVE',
+      });
       return res.items.map((item) => ({
         label: item.product_name,
         value: item.id,
@@ -121,7 +125,9 @@ const itemColumns = [
     label: '单位',
     options: async () => {
       const units = await getUnitListApi();
-      return units.map((item) => ({ label: item.unit_name, value: item.id }));
+      return units
+        .filter((item) => !item.status || item.status === 'ACTIVE')
+        .map((item) => ({ label: item.unit_name, value: item.id }));
     },
     required: true,
     width: 100,
@@ -209,13 +215,15 @@ const [Drawer, drawerApi] = useVbenDrawer<null | RfqApi.Rfq>({
     supplierIds.value = [];
     supplierOptions.value = [];
 
-    // 供应商列表按需加载一次
-    getSupplierListApi({ page: 1, page_size: 100 }).then((res) => {
-      supplierOptions.value = res.items.map((item) => ({
-        label: item.supplier_name,
-        value: item.id,
-      }));
-    });
+    // 供应商列表按需加载一次，只列合作中的（后端拒绝非 ACTIVE 供应商询价）
+    getSupplierListApi({ page: 1, page_size: 100, status: 'ACTIVE' }).then(
+      (res) => {
+        supplierOptions.value = res.items.map((item) => ({
+          label: item.supplier_name,
+          value: item.id,
+        }));
+      },
+    );
 
     await nextTick();
     if (data) {

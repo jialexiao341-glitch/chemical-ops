@@ -29,7 +29,10 @@ const [Form, formApi] = useVbenForm({
       component: 'RadioGroup',
       componentProps: {
         buttonStyle: 'solid',
-        options: ACCEPTANCE_RESULT_DICT.options(),
+        // PENDING 是「尚未录入」的初始态，不是可提交的结果，排除掉
+        options: ACCEPTANCE_RESULT_DICT.options().filter(
+          (item) => item.value !== 'PENDING',
+        ),
         optionType: 'button',
       },
       fieldName: 'result',
@@ -99,6 +102,9 @@ const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance
       });
       emit('success');
       drawerApi.close();
+    } catch {
+      // 请求层已统一弹出后端返回的中文错误，这里保持抽屉打开，
+      // 让用户修正后重新提交；不吞掉异常会导致未捕获的 Promise 拒绝。
     } finally {
       drawerApi.unlock();
     }

@@ -66,9 +66,11 @@ export function useColumns(
           {
             code: 'result',
             text: '录入结果',
-            // 已出最终结果的验收单不允许直接改判，需先提交复检
+            // PENDING（刚创建）和 REINSPECTION（复检中）可录入；
+            // 已出最终结果（PASSED/PARTIAL/FAILED）的不允许直接改判
             show: (row: QualityAcceptanceApi.Acceptance) =>
               !row.result ||
+              row.result === 'PENDING' ||
               row.result === 'REINSPECTION',
           },
         ],

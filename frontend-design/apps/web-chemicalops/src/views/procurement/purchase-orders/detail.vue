@@ -157,6 +157,8 @@ async function runAction(action: () => Promise<any>, successText: string) {
     await action();
     message.success(successText);
     await load();
+  } catch {
+    // 请求层已统一弹出后端返回的中文错误；不吞掉异常会导致未捕获的 Promise 拒绝。
   } finally {
     acting.value = false;
   }

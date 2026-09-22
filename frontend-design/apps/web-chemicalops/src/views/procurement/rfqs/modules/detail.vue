@@ -34,6 +34,7 @@ import {
 import { formatAmount, formatDateTime, formatQuantity } from '#/utils/format';
 import { getSupplierNameMap } from '#/utils/lookup';
 
+import QuoteModal from './quote.vue';
 import SelectQuoteModal from './select-quote.vue';
 
 const emit = defineEmits(['success']);
@@ -47,6 +48,11 @@ const activeTab = ref('items');
 
 const [SelectQuote, selectQuoteApi] = useVbenModal({
   connectedComponent: SelectQuoteModal,
+  destroyOnClose: true,
+});
+
+const [Quote, quoteApi] = useVbenModal({
+  connectedComponent: QuoteModal,
   destroyOnClose: true,
 });
 
@@ -113,6 +119,8 @@ async function onSend() {
     message.success('询价单已发送');
     await reload();
     emit('success');
+  } catch {
+    // 请求层已统一弹出后端返回的中文错误；不吞掉异常会导致未捕获的 Promise 拒绝。
   } finally {
     acting.value = false;
   }
@@ -129,9 +137,25 @@ async function onBuildComparison() {
     activeTab.value = 'comparison';
     await reload();
     emit('success');
+  } catch {
+    // 同 onSend：错误提示由请求层负责，这里保持按钮可用以便重试。
   } finally {
     acting.value = false;
   }
+}
+
+function onQuote() {
+  if (!detail.value?.id) {
+    return;
+  }
+  quoteApi
+    .setData({ id: detail.value.id, rfqNo: detail.value.rfq_no })
+    .open();
+}
+
+async function onQuoteSuccess() {
+  await reload();
+  emit('success');
 }
 
 function onSelectQuote(record: RfqApi.ComparisonItem) {
@@ -169,12 +193,18 @@ async function onCreateOrder() {
     });
     message.success('采购订单草稿已生成，请到采购订单页面提交审批');
     emit('success');
+  } catch {
+    // 同 onSend：错误提示由请求层负责，这里保持按钮可用以便重试。
   } finally {
     acting.value = false;
   }
 }
 
 const canSend = computed(() => detail.value?.status === 'DRAFT');
+/** 后端只在 SENT / RESPONDING 状态接受报价 */
+const canQuote = computed(() =>
+  ['RESPONDING', 'SENT'].includes(detail.value?.status ?? ''),
+);
 const canCompare = computed(
   () =>
     (detail.value?.quotes?.length ?? 0) > 0 && detail.value?.status !== 'CLOSED',
@@ -225,6 +255,7 @@ defineExpose({ drawerApi });
 <template>
   <Drawer :title="`询价单 ${detail?.rfq_no ?? ''}`" class="w-[1100px]">
     <SelectQuote @success="onSelectSuccess" />
+    <Quote @success="onQuoteSuccess" />
     <Spin :spinning="loading">
       <Empty v-if="!detail && !loading" description="未找到该询价单" />
       <div v-else-if="detail" class="space-y-5">
@@ -254,6 +285,9 @@ defineExpose({ drawerApi });
         <div class="flex flex-wrap gap-2">
           <Button v-if="canSend" :loading="acting" type="primary" @click="onSend">
             发送询价单
+          </Button>
+          <Button v-if="canQuote" type="primary" @click="onQuote">
+            录入报价
           </Button>
           <Button v-if="canCompare" :loading="acting" @click="onBuildComparison">
             生成比价
