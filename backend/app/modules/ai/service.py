@@ -17,7 +17,14 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
 from app.core.observability import get_request_id, metrics
-from app.modules.ai.agent_prompt import GREETING_REPLY, SYSTEM_PROMPT as AGENT_SYSTEM_PROMPT, UNSUPPORTED_REPLY, build_project_reply
+from app.modules.ai.agent_prompt import (
+    SYSTEM_PROMPT as AGENT_SYSTEM_PROMPT,
+    UNSUPPORTED_REPLY,
+    build_project_reply,
+    fallback_guidance_prompt,
+    greeting_reply,
+    result_rewrite_prompt,
+)
 from app.modules.ai.intent import Intent, classify_intent
 from app.modules.ai.model import AIConversation, AIConversationState, AIMessage
 from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse, AIQueryTrace
@@ -261,6 +268,79 @@ def _format_text2sql_result(result: object) -> str:
     return "\n".join(lines)
 
 
+async def _rewrite_text2sql_answer(result: object, dataset_label: str, settings: Settings) -> str | None:
+    """把查询结果交给模型重写成结论先行的自然中文。
+
+    任何失败（未启用、超时、格式错误）都返回 None，由 _format_text2sql_result 模板兜底，
+    保证查询路径永远有答案。
+    """
+
+    try:
+        payload = json.dumps(
+            {
+                "question": getattr(result, "question", ""),
+                "dataset_label": dataset_label,
+                "rows": list(getattr(result, "rows", []) or [])[:50],
+                "render_columns": getattr(result, "render_columns", []),
+                "unit": getattr(result, "unit", None),
+                "unit_note": getattr(result, "unit_note", None),
+                "row_count": getattr(result, "row_count", 0),
+                "truncated": bool(getattr(result, "truncated", False)),
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        rewritten = await chat(
+            AIChatRequest(messages=[AIChatMessage(role="user", content=result_rewrite_prompt(payload))]),
+            settings,
+            response_format={"type": "json_object"},
+        )
+        raw = (rewritten.answer or rewritten.message.content or "").strip()
+        if not raw:
+            return None
+        from app.modules.ai.text2sql import _extract_query_plan_payload
+
+        parsed = _extract_query_plan_payload(raw)
+        answer = parsed.get("answer")
+        if isinstance(answer, str) and answer.strip():
+            return answer.strip()
+        return None
+    except Exception as exc:  # 重写失败不能影响查询主链路
+        LOGGER.warning("AI 答案重写失败，使用模板兜底 error_type=%s", type(exc).__name__)
+        return None
+
+
+async def _compose_non_query_reply(
+    intent: Intent, reason: str, question: str, settings: Settings | None = None
+) -> tuple[str, str]:
+    """非查询意图的回复组装，返回 (内容, model 标签)。
+
+    - PROJECT / GREETING / 明确的范围外问题：确定性文案，不调用模型；
+    - 未命中任何规则的疑问（no_supported_marker）：交给模型做范围判断与改问引导，
+      失败时退回固定文案，保证永远有回复。
+    """
+
+    if intent is Intent.PROJECT:
+        return build_project_reply(question), "rule-based"
+    if intent is Intent.GREETING:
+        return greeting_reply(), "rule-based"
+    # 空消息与明确的范围外话题保持固定拒绝，不浪费模型调用
+    if reason != "no_supported_marker":
+        return UNSUPPORTED_REPLY, "rule-based"
+    try:
+        runtime = settings or get_settings()
+        guided = await chat(
+            AIChatRequest(messages=[AIChatMessage(role="user", content=fallback_guidance_prompt(question))]),
+            runtime,
+        )
+        content = (guided.answer or guided.message.content or "").strip()
+        if content:
+            return content, "guidance"
+    except Exception as exc:
+        LOGGER.warning("AI 引导回复失败，使用固定文案 error_type=%s", type(exc).__name__)
+    return UNSUPPORTED_REPLY, "rule-based"
+
+
 async def _run_text2sql_for_chat(
     db: Session,
     user: User,
@@ -319,6 +399,10 @@ async def _run_text2sql_for_chat(
         render=result.render,
     )
     answer = _format_text2sql_result(result)
+    # 先模板后重写：模型输出自然中文结论，失败时模板兜底，查询链路永不因重写而中断
+    rewritten = await _rewrite_text2sql_answer(result, dataset_spec.label, settings)
+    if rewritten:
+        answer = rewritten
     trace.answer = answer
     LOGGER.info("AI 查询槽位 user_id=%s slot_count=%s filled_count=%s", user.id, len(result.slots), sum(slot.get("status") == "filled" for slot in result.slots))
     LOGGER.info("AI 查询模板 user_id=%s template_hash=%s", user.id, _text_fingerprint(result.template))
@@ -595,13 +679,15 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
             answer=content,
         )
     if intent_result.intent != Intent.QUERY and not data.attachment_file_ids:
-        fixed_content = build_project_reply(user_message.content) if intent_result.intent is Intent.PROJECT else {Intent.GREETING: GREETING_REPLY, Intent.UNSUPPORTED: UNSUPPORTED_REPLY}[intent_result.intent]
-        LOGGER.info("AI 固定回复 user_id=%s intent=%s query_length=%s answer_length=%s", user.id, intent_result.intent, len(user_message.content), len(fixed_content))
+        fixed_content, model_tag = await _compose_non_query_reply(
+            intent_result.intent, intent_result.reason, user_message.content
+        )
+        LOGGER.info("AI 非查询回复 user_id=%s intent=%s reason=%s model=%s answer_length=%s", user.id, intent_result.intent, intent_result.reason, model_tag, len(fixed_content))
         db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
         db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
         conversation.last_message_at = datetime.now()
         db.commit()
-        return AIChatResponse(message=AIChatMessage(role="assistant", content=fixed_content), conversation_id=conversation.id, model="rule-based", provider="chemicalops", citations=None, user_query=user_message.content, answer=fixed_content)
+        return AIChatResponse(message=AIChatMessage(role="assistant", content=fixed_content), conversation_id=conversation.id, model=model_tag, provider="chemicalops", citations=None, user_query=user_message.content, answer=fixed_content)
 
     runtime = get_settings()
     combined_context, native_image_parts, combined_citations = await _prepare_attachments(db, user, data, runtime)
@@ -679,8 +765,10 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         yield f"event: done\ndata: {json.dumps({'conversation_id': conversation.id, 'model': 'text2sql', 'provider': 'chemicalops', 'citations': citations, 'query_trace': trace_payload, 'query_slots': trace_payload['slots'], 'user_query': user_message.content, 'answer': content}, ensure_ascii=False)}\n\n"
         return
     if stream_intent_result.intent != Intent.QUERY and not data.attachment_file_ids:
-        fixed_content = build_project_reply(user_message.content) if stream_intent_result.intent is Intent.PROJECT else {Intent.GREETING: GREETING_REPLY, Intent.UNSUPPORTED: UNSUPPORTED_REPLY}[stream_intent_result.intent]
-        LOGGER.info("AI 流式固定回复开始 user_id=%s intent=%s query_hash=%s", user.id, stream_intent_result.intent, _text_fingerprint(user_message.content))
+        fixed_content, model_tag = await _compose_non_query_reply(
+            stream_intent_result.intent, stream_intent_result.reason, user_message.content
+        )
+        LOGGER.info("AI 流式非查询回复开始 user_id=%s intent=%s reason=%s model=%s query_hash=%s", user.id, stream_intent_result.intent, stream_intent_result.reason, model_tag, _text_fingerprint(user_message.content))
         chunk_count = 0
         async for chunk in _stream_text_chunks(fixed_content):
             chunk_count += 1
@@ -689,8 +777,8 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
         conversation.last_message_at = datetime.now()
         db.commit()
-        LOGGER.info("AI 流式回复完成 user_id=%s mode=rule_based chunks=%s answer_length=%s answer_hash=%s", user.id, chunk_count, len(fixed_content), _text_fingerprint(fixed_content))
-        yield "event: done\ndata: " + json.dumps({"conversation_id": conversation.id, "model": "rule-based", "provider": "chemicalops", "citations": None, "user_query": user_message.content, "answer": fixed_content}, ensure_ascii=False) + "\n\n"
+        LOGGER.info("AI 流式回复完成 user_id=%s mode=%s chunks=%s answer_length=%s answer_hash=%s", user.id, model_tag, chunk_count, len(fixed_content), _text_fingerprint(fixed_content))
+        yield "event: done\ndata: " + json.dumps({"conversation_id": conversation.id, "model": model_tag, "provider": "chemicalops", "citations": None, "user_query": user_message.content, "answer": fixed_content}, ensure_ascii=False) + "\n\n"
         return
 
     runtime = get_settings()

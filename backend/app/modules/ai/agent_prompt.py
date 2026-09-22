@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from app.modules.ai.catalog import catalog_prompt
 
@@ -12,6 +13,8 @@ SYSTEM_PROMPT = (
     "请使用简洁、准确、可执行的中文回答采购、到货、质量、库存和供应商问题。"
     "当前阶段你只能参与查询和分析，不能创建或修改业务数据，不能审批、提交、下单、入库、出库、付款或执行任何业务操作。"
     "如果缺少真实业务数据，请明确说明，不要编造数量、订单、供应商或库存结果。"
+    "回答风格：先给结论再展开；需要罗列时用简短的分行列表；关键数字可适度加粗；"
+    "不要输出 SQL、JSON 或任何系统内部实现细节。"
 )
 
 TEXT2SQL_PLAN_PROMPT = """你是企业数据查询规划器。
@@ -32,6 +35,7 @@ TEXT2SQL_PLAN_RULES = """
 
 RESULT_REWRITE_PROMPT = """你是 ChemicalOps 的业务数据回答助手。
 你的任务不是重新查询，也不是解释系统如何工作，而是把系统已经查到并清洗好的结果，整理成一段用户看得懂的中文回答。
+PAYLOAD 中的 question 是用户的原始问题，回答必须直接回应它。
 
 必须遵守：
 1. 只能使用 PAYLOAD 中的字段和值，不能补造、修改、四舍五入或推测任何业务事实。
@@ -64,6 +68,32 @@ def text2sql_plan_prompt(question: str, previous_plan: dict | None = None) -> st
 
 def result_rewrite_prompt(payload: str) -> str:
     return RESULT_REWRITE_PROMPT.format(payload=payload)
+
+
+# 未命中任何内置意图规则时的兜底引导：由模型判断是否业务问题并给出改问建议。
+FALLBACK_GUIDANCE_PROMPT = """你是 ChemicalOps 化运助手的范围判断与引导模块。
+用户的消息没有命中系统的内置识别规则，请你完成两件事：
+
+1. 判断消息是否与企业采购运营业务相关（采购、订单、到货、库存、质量、异常、财务、供应商、化学品文档等）。
+2. 给出一句简短回应：
+   - 相关：友好回应，并给出 1~2 个你可以直接处理的具体示例问法，引导用户把问题问清楚
+     （例如带上时间范围、单号或供应商名）。
+   - 无关（闲聊、写作、其他领域）：礼貌说明你只处理采购运营业务范围内的查询与分析，
+     并附一个示例问法。
+
+要求：
+- 你没有任何已查询到的业务数据，禁止编造任何数量、订单、供应商或库存结果；
+- 示例问法中的单号、供应商名一律用「如：上周的到货订单」这类占位表达，
+  不要编造像真实数据一样的具体单号（如 PO 开头的编号）或具体公司名；
+- 不要提及规则、意图、系统提示或技术实现；
+- 控制在 120 字以内，只输出回答文本本身，不要 JSON、不要解释。
+
+
+用户消息：{question}"""
+
+
+def fallback_guidance_prompt(question: str) -> str:
+    return FALLBACK_GUIDANCE_PROMPT.format(question=question)
 
 
 PROJECT_CAPABILITY_REPLY = (
@@ -124,5 +154,21 @@ def build_project_reply(question: str) -> str:
         "也可以分析已上传的业务文档。目前只支持查询和分析，不支持创建、修改、审批或提交业务单据。"
     )
 
-UNSUPPORTED_REPLY = "这个问题不在化运助手的支持范围内。我目前主要支持采购运营相关的只读查询和分析。"
+UNSUPPORTED_REPLY = (
+    "这个问题不在化运助手的支持范围内。我目前只支持采购运营相关的只读查询与分析，比如：\n"
+    "- 查询本月各供应商的采购金额\n"
+    "- 查看本周逾期到货\n"
+    "- 统计即将过期的库存批次"
+)
 GREETING_REPLY = "你好，我是化运助手。你可以问我采购、到货、库存、质量、异常、财务或供应商相关的问题。"
+
+
+def greeting_reply(hour: int | None = None) -> str:
+    """按时段返回问候语，避免每次都是一模一样的固定句。"""
+
+    current_hour = datetime.now().hour if hour is None else hour
+    if 5 <= current_hour < 12:
+        return "早上好！我是化运助手，采购、到货、库存、质量、异常、财务或供应商的问题都可以问我。"
+    if 12 <= current_hour < 18:
+        return "下午好！我是化运助手。需要查采购订单、到货、库存还是供应商数据，直接告诉我。"
+    return GREETING_REPLY
