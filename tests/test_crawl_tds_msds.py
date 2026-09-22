@@ -64,23 +64,26 @@ def test_is_pdf_checks_magic_bytes():
 
 
 def test_build_documents_collects_msds_html_pdf_and_tds_pdf():
+    property_html = b"<html><head><title>Ethanol | 64-17-5</title></head><body>props</body></html>"
     result = crawler.build_documents(
         "64-17-5",
         MSDS_HTML,
         (200, FAKE_PDF),
         ("https://www.chemicalbook.com/tds-coa/ethanol.pdf", FAKE_PDF),
+        ("https://www.chemicalbook.com/ChemicalProductProperty_EN_CB2362508.htm", property_html),
     )
 
     kinds = {(doc.doc_type, doc.ext) for doc in result.documents}
-    assert kinds == {("msds", ".html"), ("msds", ".pdf"), ("tds", ".pdf")}
+    assert kinds == {("msds", ".html"), ("msds", ".pdf"), ("tds", ".pdf"), ("tds", ".html")}
     assert result.failures == []
     # 分桶：msds 与 tds 进不同桶
     buckets = {doc.bucket for doc in result.documents}
     assert buckets == {"chemicalops-msds", "chemicalops-tds"}
-    # 对象键按 CAS 命名
+    # 对象键按 CAS 命名，物性页带 -property 后缀
     assert {doc.object_key for doc in result.documents} == {
         "64-17-5.html",
         "64-17-5.pdf",
+        "64-17-5-property.html",
     }
 
 
@@ -98,6 +101,34 @@ def test_build_documents_falls_back_to_tds_html_when_pdf_missing():
     tds_docs = [doc for doc in result.documents if doc.doc_type == "tds"]
     assert len(tds_docs) == 1
     assert tds_docs[0].ext == ".html"
+
+
+def test_extract_cas_cb_reads_own_cb_from_msd_page():
+    html = b'<a href="https://msds.chemicalbook.com/SearchEN?keyword=CB7854099">View more versions</a>'
+    assert crawler.extract_cas_cb(html) == "CB7854099"
+    assert crawler.extract_cas_cb(MSDS_HTML) is None
+
+
+def test_validate_property_html_requires_cas_in_title():
+    ok = b"<html><head><title>Methanol | 67-56-1</title></head></html>"
+    other = b"<html><head><title>Ethanol | 64-17-5</title></head></html>"
+    assert crawler.validate_property_html(ok, "67-56-1")
+    assert not crawler.validate_property_html(other, "67-56-1")
+    assert not crawler.validate_property_html(b"<html></html>", "67-56-1")
+
+
+def test_build_documents_skips_property_page_when_title_mismatch():
+    wrong = b"<html><head><title>Ethanol | 64-17-5</title></head></html>"
+    result = crawler.build_documents(
+        "67-56-1",
+        MSDS_HTML,
+        None,
+        None,
+        ("https://www.chemicalbook.com/ChemicalProductProperty_EN_CB1.htm", wrong),
+    )
+
+    assert not any(doc.name_suffix == "-property" for doc in result.documents)
+    assert any("物性页" in item for item in result.failures)
 
 
 def test_manifest_row_is_json_serializable_and_has_provenance():
@@ -121,11 +152,17 @@ def test_manifest_row_is_json_serializable_and_has_provenance():
 
 
 def test_crawl_cas_full_chain_with_fake_fetcher():
+    msds_with_cb = MSDS_HTML.replace(
+        b"</body>",
+        b'<a href="https://msds.chemicalbook.com/SearchEN?keyword=CB2362508">View more versions</a></body>',
+    )
+    property_html = b"<html><head><title>Ethanol | 64-17-5</title></head><body>props</body></html>"
     fetcher = FakeFetcher(
         {
-            "https://www.chemicalbook.com/MSDS/64-17-5.htm": (200, MSDS_HTML, "text/html"),
+            "https://www.chemicalbook.com/MSDS/64-17-5.htm": (200, msds_with_cb, "text/html"),
             # MSDS PDF 直链 404（站点现状），TDS PDF 200
             "https://www.chemicalbook.com/tds-coa/ethanol.pdf": (200, FAKE_PDF, "application/pdf"),
+            "https://www.chemicalbook.com/ChemicalProductProperty_EN_CB2362508.htm": (200, property_html, "text/html"),
         }
     )
 
@@ -134,10 +171,13 @@ def test_crawl_cas_full_chain_with_fake_fetcher():
     kinds = {(doc.doc_type, doc.ext) for doc in result.documents}
     assert ("msds", ".html") in kinds
     assert ("tds", ".pdf") in kinds
+    assert ("tds", ".html") in kinds  # 物性页
     assert ("msds", ".pdf") not in kinds  # 404 不收
-    # 抓取顺序：MSDS 页 → MSDS PDF 尝试 → TDS PDF
+    # 抓取顺序：MSDS 页 → MSDS PDF 尝试 → TDS PDF → 物性页
     assert fetcher.requested[0].endswith("/MSDS/64-17-5.htm")
     assert any(url.endswith("/tds-coa/ethanol.pdf") for url in fetcher.requested)
+    property_doc = next(doc for doc in result.documents if doc.name_suffix == "-property")
+    assert property_doc.object_key == "64-17-5-property.html"
 
 
 def test_crawl_cas_reports_missing_msds_page():

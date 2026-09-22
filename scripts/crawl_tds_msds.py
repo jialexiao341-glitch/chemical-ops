@@ -4,10 +4,13 @@
     MSDS 页   GET https://www.chemicalbook.com/MSDS/{cas}.htm   → 完整 SDS 的 HTML
     MSDS PDF  GET https://www.chemicalbook.com/msds/{cas}.pdf   → 站点多数返回 404，成功才存
     TDS  PDF  从 MSDS 页 title 取英文名 → slug → GET /tds-coa/{slug}.pdf
+    物性页    从 MSDS 页提取本物质 CB 号（keyword=CBxxx）→ GET
+              /ChemicalProductProperty_EN_{CB}.htm（title 含 CAS 才收）→
+              富 TDS 内容：物性表、风险安全声明、性质/用途/制备长文
 
 存储（分桶，桶不存在时自动创建）：
     chemicalops-msds/{cas}.html|.pdf
-    chemicalops-tds/{cas}.pdf|.html
+    chemicalops-tds/{cas}.pdf|.html|-property.html
 
 示例：
     python scripts/crawl_tds_msds.py --cas 64-17-5 64-19-7
@@ -62,6 +65,8 @@ class Document:
     source_url: str
     content: bytes
     content_type: str
+    # 同 CAS 同扩展名的多份文档用后缀区分，如物性页 "-property"
+    name_suffix: str = ""
 
     @property
     def sha256(self) -> str:
@@ -73,7 +78,7 @@ class Document:
 
     @property
     def object_key(self) -> str:
-        return f"{self.cas}{self.ext}"
+        return f"{self.cas}{self.name_suffix}{self.ext}"
 
 
 @dataclass
@@ -134,7 +139,31 @@ def is_pdf(content: bytes) -> bool:
     return content[:5] == b"%PDF-"
 
 
-def build_documents(cas: str, msds_html: bytes, msds_pdf: tuple[int, bytes] | None, tds_payload: tuple[str, bytes] | None) -> CrawlResult:
+def extract_cas_cb(html: bytes) -> str | None:
+    """从 MSDS 页提取本物质的 ChemicalBook 编号（View more versions 链接的 keyword）。"""
+
+    match = re.search(rb"keyword=(CB\d{5,})", html)
+    if match:
+        return match.group(1).decode("ascii")
+    return None
+
+
+def validate_property_html(html: bytes, cas: str) -> bool:
+    """物性页标题必须包含目标 CAS，防止把模板里的示例物质页面当正文。"""
+
+    match = re.search(rb"<title>([^<]+)</title>", html, re.IGNORECASE)
+    if not match:
+        return False
+    return cas in match.group(1).decode("utf-8", errors="ignore")
+
+
+def build_documents(
+    cas: str,
+    msds_html: bytes,
+    msds_pdf: tuple[int, bytes] | None,
+    tds_payload: tuple[str, bytes] | None,
+    property_payload: tuple[str, bytes] | None = None,
+) -> CrawlResult:
     """把原始响应组装成文档列表（纯组装，便于单测）。"""
 
     result = CrawlResult(cas=cas)
@@ -179,6 +208,24 @@ def build_documents(cas: str, msds_html: bytes, msds_pdf: tuple[int, bytes] | No
             result.failures.append("TDS 响应既不是 PDF 也不是 HTML，已跳过")
     else:
         result.failures.append("未找到可用的 TDS 文档")
+    if property_payload is not None:
+        property_url, property_body = property_payload
+        if b"<html" in property_body[:2048].lower() and validate_property_html(property_body, cas):
+            result.documents.append(
+                Document(
+                    cas=cas,
+                    doc_type="tds",
+                    ext=".html",
+                    name_suffix="-property",
+                    source_url=property_url,
+                    content=property_body,
+                    content_type="text/html; charset=utf-8",
+                )
+            )
+        else:
+            result.failures.append("物性页标题不含目标 CAS，已跳过")
+    else:
+        result.failures.append("未找到可用的物性页")
     if not result.documents:
         result.failures.append("没有任何可存储的文档")
     return result
@@ -281,7 +328,29 @@ def crawl_cas(cas: str, fetch: Fetcher, gate: RobotsGate | None = None) -> Crawl
     else:
         result.failures.append("无法从 MSDS 页解析英文名，跳过 TDS")
 
-    return build_documents(cas, msds_html, msds_pdf, tds_payload)
+    # 物性页：MSDS 页里的 keyword=CBxxx 是本物质编号；页面模板还带若干
+    # 示例 CB（安全段落的固定外链），逐个尝试并用「title 含 CAS」兜底校验。
+    property_payload: tuple[str, bytes] | None = None
+    cb_candidates: list[str] = []
+    own_cb = extract_cas_cb(msds_html)
+    if own_cb:
+        cb_candidates.append(own_cb)
+    for match in re.finditer(rb"\bCB\d{5,}\b", msds_html):
+        token = match.group(0).decode("ascii")
+        if token not in cb_candidates:
+            cb_candidates.append(token)
+        if len(cb_candidates) >= 5:
+            break
+    for token in cb_candidates[:5]:
+        property_url = f"{BASE_URL}/ChemicalProductProperty_EN_{token}.htm"
+        if gate is not None and not gate.allowed(property_url):
+            continue
+        prop_status, prop_body, _ = fetch.get(property_url)
+        if prop_status == 200 and validate_property_html(prop_body, cas):
+            property_payload = (property_url, prop_body)
+            break
+
+    return build_documents(cas, msds_html, msds_pdf, tds_payload, property_payload)
 
 
 # ---------- 存储实现 ----------
