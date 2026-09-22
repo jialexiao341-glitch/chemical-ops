@@ -50,6 +50,8 @@ MSDS_REQUIRED_SECTIONS = frozenset({1, 2, 9, 14})
 MSDS_MIN_SECTIONS = 10
 PROPERTY_MIN_CHARS = 2000
 TDS_MIN_CHARS = 300
+# 单页地板：裁掉 Disclaimer/Recommended 样板后不足此长度的 PDF 页视为页脚垃圾
+TDS_PAGE_MIN_CHARS = 100
 
 
 @dataclass
@@ -372,14 +374,22 @@ def qc_property(doc: ParsedDoc, html: str, cas: str) -> list[str]:
 
 
 def sections_from_pdf_pages(pages: list[str]) -> list[ParsedSection]:
-    """PDF 逐页成节；跳过纯免责声明页（站点模板的第 2 页）。"""
+    """PDF 逐页成节；跳过免责声明页与页脚垃圾页。
+
+    实测站点模板第 2 页有两种形态：
+    1. 整页 Disclaimer 开头 → 裁尾后为空；
+    2. 先 logo/页码后 Disclaimer（如 "ChemicalBook\\nChemical Book\\n2"）
+       → 裁尾后只剩十几字垃圾。
+    统一口径：裁样板后正文不足 100 字的页一律丢弃（真实规格页 ≥500 字）。
+    """
 
     sections: list[ParsedSection] = []
     for page_no, page_text in enumerate(pages, start=1):
-        content = cut_tail_boilerplate(normalize_text(page_text))
-        if not content:
+        raw = normalize_text(page_text)
+        if page_no > 1 and raw.lower().startswith("disclaimer"):
             continue
-        if page_no > 1 and content.lower().startswith("disclaimer"):
+        content = cut_tail_boilerplate(raw)
+        if len(content) < TDS_PAGE_MIN_CHARS:
             continue
         sections.append(
             ParsedSection(

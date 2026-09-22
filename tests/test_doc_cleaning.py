@@ -155,7 +155,8 @@ def test_extract_property_rejects_title_without_cas():
 
 def test_sections_from_pdf_pages_drops_disclaimer_page():
     pages = [
-        "Technical Data Sheet\nMethanol\npurity NLT 99.5%",
+        # 规格页正文必须过 100 字的单页地板
+        "Technical Data Sheet\nMethanol\npurity NLT 99.5%\n" + "specification line. " * 10,
         "Disclaimer: This information relates only to the specific material...",
     ]
     sections = service.sections_from_pdf_pages(pages)
@@ -163,6 +164,21 @@ def test_sections_from_pdf_pages_drops_disclaimer_page():
     assert len(sections) == 1
     assert sections[0].section_no == 1
     assert "Methanol" in sections[0].content
+
+
+def test_sections_from_pdf_pages_drops_footer_junk_page():
+    """先 logo/页码、后 Disclaimer 的页脚页：裁尾后只剩垃圾字，必须整页丢弃。"""
+
+    pages = [
+        "Technical Data Sheet\nPhenol\npurity 99.9% " + "spec detail. " * 60,
+        "ChemicalBook\nChemical Book\n2\nDisclaimer: This information relates only to the specified product and may not be valid for any other use.",
+    ]
+    sections = service.sections_from_pdf_pages(pages)
+
+    assert len(sections) == 1
+    all_text = "\n".join(section.content for section in sections)
+    assert "ChemicalBook" not in all_text
+    assert "Disclaimer" not in all_text
 
 
 def test_parse_document_dispatch():
