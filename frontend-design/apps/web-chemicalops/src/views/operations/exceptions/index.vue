@@ -1,0 +1,97 @@
+<script lang="ts" setup>
+import type {
+  OnActionClickParams,
+  VxeTableGridOptions,
+} from '#/adapter/vxe-table';
+import type { OperationExceptionApi } from '#/api';
+
+import { onMounted, ref } from 'vue';
+
+import { Page, useVbenDrawer } from '@vben/common-ui';
+
+import { Button } from 'antdv-next';
+
+import { useVbenVxeGrid } from '#/adapter/vxe-table';
+import { getExceptionListApi, getUserListApi } from '#/api';
+
+import { useColumns, useGridFormSchema } from './data';
+import DetailDrawer from './modules/detail.vue';
+
+defineOptions({ name: 'OperationExceptionList' });
+
+const [Detail, detailApi] = useVbenDrawer({
+  connectedComponent: DetailDrawer,
+  destroyOnClose: true,
+});
+
+const resolveOwner = ref<(id?: null | number) => string>(() => '-');
+
+const [Grid, gridApi] = useVbenVxeGrid({
+  formOptions: {
+    schema: useGridFormSchema(),
+  },
+  gridOptions: {
+    columns: useColumns((id) => resolveOwner.value(id)),
+    height: 'auto',
+    keepSource: true,
+    proxyConfig: {
+      ajax: {
+        query: async ({ page }, formValues) => {
+          return await getExceptionListApi({
+            page: page.currentPage,
+            page_size: page.pageSize,
+            ...formValues,
+          });
+        },
+      },
+    },
+    rowConfig: { keyField: 'id' },
+    toolbarConfig: {
+      custom: true,
+      export: false,
+      refresh: true,
+      search: true,
+      zoom: true,
+    },
+  } as VxeTableGridOptions<OperationExceptionApi.Exception>,
+});
+
+function onActionClick({
+  row,
+}: OnActionClickParams<OperationExceptionApi.Exception>) {
+  detailApi.setData(row).open();
+}
+
+onMounted(async () => {
+  // 负责人 ID → 姓名（失败时降级显示 #ID）
+  try {
+    const users = await getUserListApi({ page: 1, page_size: 100 });
+    const map = new Map(users.items.map((item) => [item.id, item.display_name || item.username]));
+    resolveOwner.value = (id) => {
+      if (!id) {
+        return '-';
+      }
+      return map.get(id) ?? `#${id}`;
+    };
+  } catch {
+    resolveOwner.value = (id) => (id ? `#${id}` : '-');
+  }
+  gridApi.query();
+});
+</script>
+
+<template>
+  <Page auto-content-height>
+    <Detail @success="gridApi.query()" />
+    <Grid table-title="运营异常">
+      <template #toolbar-tools>
+        <Button @click="gridApi.query()">刷新</Button>
+      </template>
+      <template #operation="{ row }">
+        <Button size="small" type="link" @click="onActionClick({ row } as any)">
+          详情
+        </Button>
+      </template>
+    </Grid>
+  </Page>
+</template>

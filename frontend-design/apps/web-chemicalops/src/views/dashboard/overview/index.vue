@@ -148,8 +148,9 @@ onMounted(async () => {
           />
           <StatCard
             icon="lucide:bell-ring"
-            hint="尚未关闭的运营异常"
+            hint="尚未关闭的运营异常，点击查看"
             title="开放异常"
+            to="/operations/exceptions"
             tone="danger"
             :value="overview?.open_exceptions ?? '-'"
           />

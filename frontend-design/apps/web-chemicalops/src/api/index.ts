@@ -5,3 +5,5 @@ export * from './warehouse';
 export * from './quality';
 export * from './system';
 export * from './dashboard';
+export * from './operations';
+export * from './ai';

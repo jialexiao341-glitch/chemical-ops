@@ -53,6 +53,36 @@ const routes: RouteRecordRaw[] = [
           title: '有效期预警',
         },
       },
+      {
+        name: 'IssueRequestList',
+        path: 'issue-requests',
+        component: () => import('#/views/warehouse/issue-requests/index.vue'),
+        meta: {
+          authority: ['warehouse.inventory.issue.read'],
+          icon: 'lucide:package-open',
+          title: '库存领用',
+        },
+      },
+      {
+        name: 'TransferRequestList',
+        path: 'transfers',
+        component: () => import('#/views/warehouse/transfers/index.vue'),
+        meta: {
+          authority: ['warehouse.inventory.transfer.read'],
+          icon: 'lucide:replace',
+          title: '库存调拨',
+        },
+      },
+      {
+        name: 'StocktakeList',
+        path: 'stocktakes',
+        component: () => import('#/views/warehouse/stocktakes/index.vue'),
+        meta: {
+          authority: ['warehouse.inventory.stocktake.read'],
+          icon: 'lucide:list-checks',
+          title: '库存盘点',
+        },
+      },
     ],
   },
 ];
