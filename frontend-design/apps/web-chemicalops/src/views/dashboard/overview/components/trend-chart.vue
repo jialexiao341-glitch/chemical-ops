@@ -48,23 +48,28 @@ function render() {
     },
     xAxis: {
       ...CHART_BASE,
+      axisLabel: {
+        ...CHART_BASE.axisLabel,
+        // 半年区间按天出数据：首标保留年份，其余只显示月-日，并自动隐藏重叠标签
+        formatter: (value: string, index: number) =>
+          index === 0 ? value : String(value).slice(5),
+        hideOverlap: true,
+      },
       axisTick: { show: false },
       data: rows.map((row) => row.date),
       type: 'category' as const,
     },
     yAxis: [
+      // 不再渲染轴名称：默认 nameLocation 会把它画在轴顶端，
+      // 与顶部刻度数值、右上角图例文字直接重叠；序列含义由图例与 tooltip 承担
       {
         ...CHART_BASE,
         axisLine: { show: false },
-        name: '金额',
-        nameTextStyle: { color: CHART_COLORS.neutral, fontSize: 11 },
         type: 'value' as const,
       },
       {
         ...CHART_BASE,
         axisLine: { show: false },
-        name: '订单数',
-        nameTextStyle: { color: CHART_COLORS.neutral, fontSize: 11 },
         splitLine: { show: false },
         type: 'value' as const,
       },
