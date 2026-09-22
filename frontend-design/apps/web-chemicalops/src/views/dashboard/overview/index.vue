@@ -159,7 +159,29 @@ onMounted(async () => {
             hint="按计量单位分别汇总"
             title="库存总量"
             :value="inventoryText"
-          />
+          >
+            <!-- 数量用统一 24px 数字字号，单位降到 base 号并弱化配色，与纯数字卡片视觉一致 -->
+            <template #value>
+              <span class="block" :title="inventoryText">
+                <template
+                  v-for="(unit, index) in overview?.inventory_units ?? []"
+                  :key="unit.unit_id"
+                >
+                  <span v-if="index > 0" class="text-muted-foreground">
+                    /
+                  </span>
+                  {{ formatQuantity(unit.quantity) }}<span
+                    class="ml-1 text-base font-medium text-muted-foreground"
+                  >
+                    {{ unit.unit_name }}
+                  </span>
+                </template>
+                <template v-if="(overview?.inventory_units ?? []).length === 0">
+                  {{ inventoryText }}
+                </template>
+              </span>
+            </template>
+          </StatCard>
           <StatCard
             icon="lucide:calendar-clock"
             hint="已过期与临期批次"
