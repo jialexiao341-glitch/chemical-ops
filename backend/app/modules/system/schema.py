@@ -20,13 +20,15 @@ class UserCreate(BaseModel):
 class ProfileUpdate(BaseModel):
     """个人中心更新自己的资料。
 
-    只开放昵称/邮箱/手机；角色、部门、状态属于管理动作，
+    只开放昵称/邮箱/手机/头像；角色、部门、状态属于管理动作，
     必须走 /system/users 并受对应权限码保护。
+    avatar_base64：图片 base64（可带 data: 前缀）更新头像，null/空串清除。
     """
 
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     email: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
+    avatar_base64: str | None = Field(default=None, max_length=3_000_000)
 
 
 class PasswordChange(BaseModel):
@@ -222,3 +224,5 @@ class CurrentUserRead(UserRead):
 
     role_codes: list[str]
     permission_codes: list[str]
+    # 头像以 data URL 返回（data:image/...;base64,...），img 直接可用、无需鉴权头
+    avatar: str | None = None

@@ -21,13 +21,14 @@ import { $t } from '#/locales';
  */
 function toUserInfo(current: {
   [key: string]: any;
+  avatar?: null | string;
   display_name: string;
   id: number;
   role_codes: string[];
   username: string;
 }): UserInfo {
   return {
-    avatar: '',
+    avatar: current.avatar ?? '',
     displayName: current.display_name,
     departmentId: current.department_id ?? null,
     email: current.email ?? '',

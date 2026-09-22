@@ -1,5 +1,7 @@
 """系统管理和登录认证业务服务。"""
 
+import base64
+import binascii
 from datetime import datetime
 
 from sqlalchemy import select
@@ -249,21 +251,55 @@ def login(db: Session, data: LoginRequest) -> tuple[str, int]:
     return create_access_token(user.id), settings.access_token_expire_minutes * 60
 
 
+AVATAR_MAX_BYTES = 512 * 1024
+
+
+def _looks_like_image(raw: bytes) -> bool:
+    """按魔数识别 JPG/PNG/GIF/WebP，防止把任意字节塞进头像列。"""
+
+    if raw.startswith((b"\xff\xd8\xff", b"\x89PNG", b"GIF8")):
+        return True
+    return raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
+
+
+def _decode_avatar(value: str | None) -> bytes | None:
+    """校验并解码头像 base64；None/空串表示清除。"""
+
+    if value is None or not value.strip():
+        return None
+    try:
+        # 容错：允许前端带上 data:image/...;base64, 前缀
+        payload = value.split(",", 1)[1] if value.startswith("data:") else value
+        raw = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise BusinessValidationError("头像 base64 格式不正确") from exc
+    if len(raw) > AVATAR_MAX_BYTES:
+        raise BusinessValidationError("头像过大，请压缩到 512KB 以内")
+    if not _looks_like_image(raw):
+        raise BusinessValidationError("仅支持 JPG/PNG/GIF/WebP 图片")
+    return raw
+
+
 def update_profile(db: Session, user: User, data: ProfileUpdate) -> User:
-    """个人中心更新自己的昵称/邮箱/手机。"""
+    """个人中心更新自己的昵称/邮箱/手机/头像。"""
 
     values = data.model_dump(exclude_unset=True)
-    if not values:
+    has_avatar = "avatar_base64" in values
+    avatar_value = values.pop("avatar_base64", None)
+    if not values and not has_avatar:
         raise BusinessValidationError("没有需要更新的字段")
+    if has_avatar:
+        user.avatar = _decode_avatar(avatar_value)
     for field_name, value in values.items():
         setattr(user, field_name, value)
+    summary = "更新头像" if has_avatar and not values else "个人中心更新资料"
     add_audit_log(
         db,
         actor_id=user.id,
         action_type="UPDATE",
         resource_type="USER",
         resource_id=user.id,
-        request_summary="个人中心更新资料",
+        request_summary=summary,
         result_status="SUCCESS",
     )
     db.commit()

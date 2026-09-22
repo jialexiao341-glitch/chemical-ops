@@ -16,6 +16,8 @@ export namespace AuthApi {
 
   /** 当前登录用户，对应后端 CurrentUserRead */
   export interface CurrentUser {
+    /** 头像 data URL（data:image/...;base64,...），无头像为 null */
+    avatar?: null | string;
     created_at?: string;
     department_id?: null | number;
     display_name: string;
@@ -40,6 +42,8 @@ export namespace AuthApi {
     display_name?: string;
     email?: null | string;
     phone?: null | string;
+    /** 头像 base64（可带 data: 前缀）；null 表示清除头像 */
+    avatar_base64?: null | string;
   }
 }
 

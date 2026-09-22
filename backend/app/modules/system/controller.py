@@ -37,12 +37,34 @@ router = APIRouter(tags=["系统管理"])
 auth_router = APIRouter(prefix="/auth", tags=["登录认证"])
 
 
+def _avatar_data_url(user: User) -> str | None:
+    """头像二进制 → data URL；按魔数识别格式，识别不了视为无头像。"""
+
+    raw = getattr(user, "avatar", None)
+    if not raw:
+        return None
+    if raw.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    elif raw.startswith(b"\x89PNG"):
+        mime = "image/png"
+    elif raw.startswith(b"GIF8"):
+        mime = "image/gif"
+    elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        mime = "image/webp"
+    else:
+        return None
+    import base64 as base64_module
+
+    return f"data:{mime};base64,{base64_module.b64encode(raw).decode()}"
+
+
 def _current_user_response(db: Session, user: User) -> CurrentUserRead:
     """组装当前用户、角色和权限信息。"""
 
     data = UserRead.model_validate(user).model_dump()
     data["role_codes"] = crud.get_user_role_codes(db, user.id)
     data["permission_codes"] = crud.get_user_permission_codes(db, user.id)
+    data["avatar"] = _avatar_data_url(user)
     return CurrentUserRead.model_validate(data)
 
 

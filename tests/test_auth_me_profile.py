@@ -102,8 +102,84 @@ def test_change_password_short_new_rejected_by_schema(client: TestClient, demo_p
     assert response.status_code == 422, response.text
 
 
-def test_change_password_success_then_login_with_new(
+# 1×1 透明 PNG 的标准 base64（不含 data: 前缀）
+TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+    "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def test_patch_me_avatar_accepts_png_and_returns_data_url(
     client: TestClient, demo_password: str
+):
+    headers = _login(client, demo_password)
+
+    response = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"avatar_base64": TINY_PNG_B64},
+    )
+
+    assert response.status_code == 200, response.text
+    avatar = response.json()["avatar"]
+    assert avatar is not None
+    assert avatar.startswith("data:image/png;base64,")
+    # GET /me 同步可见
+    me = client.get("/api/v1/auth/me", headers=headers).json()
+    assert (me["avatar"] or "").startswith("data:image/png;base64,")
+
+    # 清除头像
+    cleared = client.patch("/api/v1/auth/me", headers=headers, json={"avatar_base64": None})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["avatar"] is None
+
+
+def test_patch_me_avatar_allows_data_url_prefix(client: TestClient, demo_password: str):
+    """前端即使带上 data:image/png;base64, 前缀也接受。"""
+
+    headers = _login(client, demo_password)
+
+    response = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"avatar_base64": f"data:image/png;base64,{TINY_PNG_B64}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert (response.json()["avatar"] or "").startswith("data:image/png;base64,")
+    client.patch("/api/v1/auth/me", headers=headers, json={"avatar_base64": None})
+
+
+def test_patch_me_avatar_rejects_bad_base64(client: TestClient, demo_password: str):
+    headers = _login(client, demo_password)
+
+    response = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"avatar_base64": "!!!not-base64!!!"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "base64" in response.json()["detail"]
+
+
+def test_patch_me_avatar_rejects_non_image_bytes(client: TestClient, demo_password: str):
+    """魔数校验：合法 base64 但不是图片（如 hello 文本）也要拒。"""
+
+    headers = _login(client, demo_password)
+
+    response = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"avatar_base64": "aGVsbG8td29ybGQ="},  # "hello-world"
+    )
+
+    assert response.status_code == 400, response.text
+    assert "图片" in response.json()["detail"]
+
+
+def test_change_password_success_then_login_with_new(
+    client: TestClient, demo_password: str,
 ):
     """改密成功后旧密码失效、新密码可登录；测试事务回滚后原状恢复。"""
 
