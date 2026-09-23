@@ -230,7 +230,7 @@ uv run python scripts\seed_demo_accounts.py
 
 ## 11. 库存与入库接口
 
-库存代码目录：`backend/app/modules/inventory/`。库存模块使用增量迁移脚本创建仓库、库位、库存批次、库存余额和库存流水表。
+库存代码目录：`backend/app/modules/inventory/`。库存模块的数据结构由 `database/migrations/` 中的编号迁移维护，并通过统一迁移 runner 按序升级。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -244,13 +244,7 @@ uv run python scripts\seed_demo_accounts.py
 
 入库时按产品、批次、仓库、库位和单位维护库存余额，并保存来源到货明细。库存写权限仅授予仓库角色，入库前必须经过质量验收。
 
-首次在已有数据库启用库存模块时执行：
-
-```powershell
-$env:PYTHONPATH = "backend"
-uv run python scripts\apply_inventory_migration.py
-uv run python scripts\seed_demo_master_data.py
-```
+已有数据库升级时，按项目 README 的数据库升级流程运行统一迁移 runner；它会按序执行所有待处理迁移并在升级前备份。演示主数据仅在开发环境需要时单独运行 `scripts/seed_demo_master_data.py`。
 
 库存数据表字段中的 `warehouse_id + location_id + product_id + batch_id + unit_id` 使用联合唯一约束；`inventory_transactions.delivery_item_id` 使用唯一约束，保证同一到货明细不会被重复入库。库存余额状态为 `AVAILABLE` 或 `FROZEN`；冻结状态会阻止领用、调拨和盘点差异调整。
 
@@ -272,13 +266,7 @@ uv run python scripts\seed_demo_master_data.py
 
 执行出库时会锁定领用申请和库存余额记录，校验可用库存 `quantity - locked_quantity`，避免库存扣减为负数。多个明细按固定键顺序加锁，降低并发出库死锁风险；同一申请只有 `APPROVED` 状态可以执行，重复执行不会再次扣减。出库流水使用 `source_type=ISSUE_REQUEST` 和 `source_id=领用申请 ID` 追溯来源。
 
-首次在已有数据库启用领用模块时执行：
-
-```powershell
-$env:PYTHONPATH = "backend"
-uv run python scripts\apply_inventory_issue_migration.py
-uv run python scripts\seed_demo_accounts.py
-```
+已有数据库升级时使用统一迁移 runner；无需单独运行领用模块的迁移脚本。演示账号仅在开发环境需要时单独运行 `scripts/seed_demo_accounts.py`。
 
 ## 13. 库存调拨接口
 
@@ -298,13 +286,7 @@ uv run python scripts\seed_demo_accounts.py
 
 执行调拨前会校验源库位可用库存和目标库位状态，并按固定顺序锁定涉及的库存余额。目标库位没有余额记录时会幂等创建零余额行；同一调拨申请只有 `APPROVED` 状态可以执行，重复执行不会再次变更库存。调拨流水使用 `source_type=INVENTORY_TRANSFER` 和 `source_id=调拨申请 ID` 追溯来源。
 
-首次在已有数据库启用调拨模块时执行：
-
-```powershell
-$env:PYTHONPATH = "backend"
-uv run python scripts\apply_inventory_transfer_migration.py
-uv run python scripts\seed_demo_accounts.py
-```
+已有数据库升级时使用统一迁移 runner；无需单独运行调拨模块的迁移脚本。
 
 ## 14. 库存盘点接口
 
@@ -324,13 +306,7 @@ uv run python scripts\seed_demo_accounts.py
 
 差异数量为“实盘数量 - 账面数量”，盘盈和盘亏都生成 `ADJUSTMENT` 流水，数量记录绝对值，盘盈/盘亏方向写入流水备注。执行时发现账面数量已变化会返回中文业务错误并回滚，不会覆盖期间发生的库存业务。
 
-首次在已有数据库启用盘点模块时执行：
-
-```powershell
-$env:PYTHONPATH = "backend"
-uv run python scripts\apply_inventory_stocktake_migration.py
-uv run python scripts\seed_demo_accounts.py
-```
+已有数据库升级时使用统一迁移 runner；无需单独运行盘点模块的迁移脚本。
 
 ## 15. 库存冻结与解冻接口
 
@@ -342,13 +318,7 @@ uv run python scripts\seed_demo_accounts.py
 | `unfreeze_balance` | `POST /api/v1/inventory/balances/{id}/unfreeze` | 将 `FROZEN` 库存恢复为 `AVAILABLE` |
 | `list_balance_status_logs` | `GET /api/v1/inventory/balances/{id}/status-logs` | 分页查看冻结/解冻的前后状态、原因、操作人和时间 |
 
-首次在已有数据库启用冻结模块时执行：
-
-```powershell
-$env:PYTHONPATH = "backend"
-uv run python scripts\apply_inventory_freeze_migration.py
-uv run python scripts\seed_demo_accounts.py
-```
+已有数据库升级时使用统一迁移 runner；无需单独运行冻结模块的迁移脚本。
 
 ## 16. 运营异常接口
 
@@ -377,13 +347,7 @@ uv run python scripts\seed_demo_accounts.py
 
 通知代码目录：`backend/app/modules/notifications/`。通知由业务事件自动创建，用户只能读取和处理发给自己的通知。
 
-首次在已有数据库启用通知模块时执行：
-
-```powershell
-$env:PYTHONPATH = "backend"
-uv run python scripts\apply_notifications_migration.py
-uv run python scripts\seed_demo_accounts.py
-```
+已有数据库升级时使用统一迁移 runner；无需单独运行通知模块的迁移脚本。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

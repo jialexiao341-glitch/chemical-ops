@@ -1,6 +1,6 @@
 """从 MinIO 读取已抓取的 TDS/MSDS 原件，解析清洗后写入 AI 文档知识库。
 
-前置：已执行 scripts/apply_ai_documents_migration.py，且爬虫已入库原件
+前置：已执行统一迁移 runner（uv run python scripts/migrate_database.py upgrade），且爬虫已入库原件
 （scripts/crawl_tds_msds.py）。
 
 流程（幂等，可重复执行；解析规则变更后重跑即可刷新）：
