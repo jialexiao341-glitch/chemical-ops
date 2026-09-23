@@ -21,6 +21,7 @@ class IdempotencyRecord(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="IN_PROGRESS")
     response_status: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     response_body: Mapped[dict | list | str | None] = mapped_column(JSON, nullable=True)
+    response_headers: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
     updated_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3))
     expires_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False)

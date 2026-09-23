@@ -23,6 +23,7 @@ STATUS_MESSAGES = {
     415: "请求格式不支持",
     422: "请求参数校验失败",
     428: "请求条件不满足",
+    429: "请求过于频繁",
     500: "服务器内部错误",
 }
 
@@ -30,7 +31,7 @@ STATUS_MESSAGES = {
 API_ERROR_RESPONSES = {
     code: {"description": message, "model": ApiError}
     for code, message in STATUS_MESSAGES.items()
-    if code in {400, 401, 403, 404, 405, 409, 415, 422, 428, 500}
+    if code in {400, 401, 403, 404, 405, 409, 415, 422, 428, 429, 500}
 }
 
 

@@ -119,6 +119,13 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   // 请求头处理
   client.addRequestInterceptor({
     fulfilled: async (config) => {
+      const method = String(config.method ?? 'get').toUpperCase();
+      if (
+        ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
+        !config.headers['Idempotency-Key']
+      ) {
+        config.headers['Idempotency-Key'] = crypto.randomUUID();
+      }
       const accessStore = useAccessStore();
       const token = accessStore.accessToken;
       if (token) {
