@@ -65,10 +65,13 @@ class _Metric:
     count: int = 0
     total: float = 0.0
     maximum: float = 0.0
+    buckets: dict[float, int] | None = None
 
 
 class MetricsRegistry:
     """进程内指标注册表；多进程部署时由每个 worker 暴露独立指标。"""
+
+    HISTOGRAM_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
     def __init__(self) -> None:
         self._values: dict[tuple[str, tuple[tuple[str, str], ...]], _Metric] = defaultdict(_Metric)
@@ -97,13 +100,19 @@ class MetricsRegistry:
             metric.count += 1
             metric.total += value
             metric.maximum = max(metric.maximum, value)
+            if metric.buckets is None:
+                metric.buckets = dict.fromkeys(self.HISTOGRAM_BUCKETS, 0)
+            for bound in self.HISTOGRAM_BUCKETS:
+                if value <= bound:
+                    metric.buckets[bound] += 1
 
     def render_prometheus(self) -> str:
-        """渲染简单 Counter/Summary 指标，不暴露请求参数或文件内容。"""
+        """渲染低基数指标和固定桶直方图，不暴露请求参数或文件内容。"""
 
-        lines = ["# TYPE chemicalops_metric counter"]
+        lines: list[str] = []
         with self._lock:
             values = list(self._values.items())
+        rendered_histograms: set[str] = set()
         for (name, labels), metric in sorted(values):
             safe_name = "chemicalops_" + "".join(char if char.isalnum() or char == "_" else "_" for char in name)
             label_text = ""
@@ -114,6 +123,27 @@ class MetricsRegistry:
             lines.append(f"{safe_name}_total{label_text} {metric.total:.6f}")
             if metric.maximum:
                 lines.append(f"{safe_name}_max{label_text} {metric.maximum:.6f}")
+            if metric.buckets is not None:
+                histogram_name = safe_name + "_histogram"
+                if histogram_name not in rendered_histograms:
+                    lines.append(f"# TYPE {histogram_name} histogram")
+                    rendered_histograms.add(histogram_name)
+                histogram_labels = dict(labels)
+                for bound, count in metric.buckets.items():
+                    bucket_labels = {**histogram_labels, "le": str(bound)}
+                    rendered = ",".join(
+                        f'{key}="{self._escape_label(value)}"'
+                        for key, value in sorted(bucket_labels.items())
+                    )
+                    lines.append(f'{histogram_name}_bucket{{{rendered}}} {count}')
+                infinity_labels = {**histogram_labels, "le": "+Inf"}
+                rendered = ",".join(
+                    f'{key}="{self._escape_label(value)}"'
+                    for key, value in sorted(infinity_labels.items())
+                )
+                lines.append(f'{histogram_name}_bucket{{{rendered}}} {metric.count}')
+                lines.append(f"{histogram_name}_sum{label_text} {metric.total:.6f}")
+                lines.append(f"{histogram_name}_count{label_text} {metric.count}")
         return "\n".join(lines) + "\n"
 
 
@@ -166,7 +196,7 @@ class RequestContextMiddleware:
             raise
         finally:
             duration = perf_counter() - started
-            route = getattr(scope.get("route"), "path", None) or scope.get("path", "unknown")
+            route = getattr(scope.get("route"), "path", None) or "unmatched"
             metrics.increment("api_requests", labels={"method": scope.get("method", "UNKNOWN"), "path": route, "status": status_code})
             metrics.observe("api_request_duration_seconds", duration, labels={"method": scope.get("method", "UNKNOWN"), "path": route})
             logger = logging.getLogger("chemicalops.http")

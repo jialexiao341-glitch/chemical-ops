@@ -1,7 +1,10 @@
 """ChemicalOps FastAPI 应用入口。"""
 
 from contextlib import asynccontextmanager
+import hashlib
 import logging
+from pathlib import Path
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -9,12 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
 from app.core.db import engine
 from app.core.idempotency import IdempotencyMiddleware
 from app.core.observability import JsonFormatter, RequestContextMiddleware, metrics
+from app.core.production import production_config_errors
 from app.core.errors import (
     API_ERROR_RESPONSES,
     STATUS_MESSAGES,
@@ -44,6 +48,7 @@ from app.modules.inventory_cost.controller import router as inventory_cost_route
 from app.modules.jobs.controller import router as jobs_router
 from app.modules.dashboard.controller import router as dashboard_router
 from app.modules.ai.controller import router as ai_router
+from app.modules.files.scanner import scan_content
 from app.modules.system.controller import auth_router, router as system_router
 
 
@@ -85,6 +90,54 @@ def _check_database() -> bool:
         settings.mysql_port,
         settings.mysql_database,
     )
+    return True
+
+
+def _check_schema_migrations() -> bool:
+    """Reject a reachable database whose schema has not caught up to this release."""
+
+    migrations_dir = Path(__file__).resolve().parents[2] / "database" / "migrations"
+    migration_pattern = re.compile(r"^(\d{3})_.+\.sql$")
+    try:
+        migrations = {}
+        for path in sorted(migrations_dir.glob("*.sql")):
+            match = migration_pattern.fullmatch(path.name)
+            if not match:
+                raise RuntimeError(f"迁移文件命名无效：{path.name}")
+            checksum = hashlib.sha256(
+                path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            ).hexdigest()
+            migrations[match.group(1)] = checksum
+        if not migrations:
+            raise RuntimeError(f"迁移目录为空：{migrations_dir}")
+
+        with engine.connect() as connection:
+            if not inspect(connection).has_table("schema_migrations"):
+                raise RuntimeError("缺少 schema_migrations 迁移台账")
+            applied = dict(
+                connection.execute(text("SELECT version, checksum FROM schema_migrations")).all()
+            )
+
+        unknown = sorted(set(applied) - set(migrations))
+        mismatched = sorted(
+            version for version, checksum in applied.items()
+            if version in migrations and checksum != migrations[version]
+        )
+        pending = sorted(set(migrations) - set(applied))
+        if unknown or mismatched or pending:
+            details = []
+            if pending:
+                details.append("待执行=" + ",".join(pending))
+            if mismatched:
+                details.append("校验和不匹配=" + ",".join(mismatched))
+            if unknown:
+                details.append("未知台账版本=" + ",".join(unknown))
+            raise RuntimeError("数据库迁移未完成：" + "；".join(details))
+    except Exception as exc:
+        LOGGER.error("数据库结构检查失败：%s", exc)
+        return False
+
+    LOGGER.info("数据库结构检查通过 迁移版本数=%s", len(migrations))
     return True
 
 
@@ -140,6 +193,11 @@ async def lifespan(_: FastAPI):
     """Log startup progress and critical middleware availability."""
 
     _configure_logging()
+    config_errors = production_config_errors(settings)
+    if config_errors:
+        for error in config_errors:
+            LOGGER.critical("生产配置校验失败：%s", error)
+        raise RuntimeError(f"生产配置校验失败，共 {len(config_errors)} 项；请查看启动日志")
     LOGGER.info(
         "ChemicalOps 启动中 环境=%s 存储后端=%s API前缀=%s",
         settings.app_env,
@@ -147,6 +205,8 @@ async def lifespan(_: FastAPI):
         settings.api_prefix,
     )
     database_ready = _check_database()
+    if database_ready and not _check_schema_migrations():
+        raise RuntimeError("数据库结构尚未升级到当前代码版本；请先运行 scripts/migrate_database.py upgrade")
     minio_ready = _check_minio()
     if database_ready and minio_ready:
         LOGGER.info("ChemicalOps 启动检查完成 状态=就绪")
@@ -170,6 +230,8 @@ app = FastAPI(
 )
 
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+# Keep CORS outside idempotency so replay responses receive the current request's CORS headers.
+app.add_middleware(IdempotencyMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -177,7 +239,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(IdempotencyMiddleware)
 app.add_middleware(RequestContextMiddleware, slow_request_ms=settings.slow_request_ms)
 
 
@@ -319,7 +380,7 @@ def readiness(response: Response) -> dict[str, object]:
     database_ready = _check_database()
     storage_ready = _check_minio()
     ai_configured = bool(settings.openai_api_key.strip()) if settings.agent_enabled else True
-    scanner_ready = not settings.file_scan_enabled or bool(settings.file_scan_command.strip())
+    scanner_ready = not settings.file_scan_enabled or scan_content(b"ChemicalOps readiness probe\n").status == "CLEAN"
     scheduler_ready = settings.overdue_scan_interval_seconds > 0
     ready = database_ready and storage_ready and scanner_ready and scheduler_ready and ai_configured
     response.status_code = 200 if ready else 503

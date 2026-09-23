@@ -1,17 +1,58 @@
 """逾期扫描任务。"""
 
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.core.observability import metrics, observe_duration
+from app.modules.jobs.model import SchedulerJobRun
 
 from app.modules.deliveries.model import Delivery
 from app.modules.notifications.service import notify_users
 from app.modules.operation_exceptions.service import create_automatic_exception
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.system.model import User
+
+
+def list_job_runs(db: Session, *, limit: int = 50) -> list[SchedulerJobRun]:
+    """按开始时间倒序查询后台任务运行历史。"""
+
+    return list(db.scalars(select(SchedulerJobRun).order_by(desc(SchedulerJobRun.started_at), desc(SchedulerJobRun.id)).limit(limit)).all())
+
+
+def start_scheduled_run(db: Session, run_id: str) -> SchedulerJobRun:
+    """在开始业务处理前持久化一次后台执行记录。"""
+
+    run = SchedulerJobRun(run_id=run_id, task_name="overdue_scan", status="RUNNING", attempt_count=0)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def update_scheduled_run(
+    db: Session,
+    run: SchedulerJobRun,
+    *,
+    attempt_count: int | None = None,
+    result: dict[str, int] | None = None,
+    error_type: str | None = None,
+) -> None:
+    """记录尝试次数及任务成功或失败结果。"""
+
+    if attempt_count is not None:
+        run.attempt_count = attempt_count
+    if result is not None:
+        run.status = "SUCCEEDED"
+        run.result_json = result
+        run.error_type = None
+        run.finished_at = datetime.now()
+    elif error_type is not None:
+        run.status = "FAILED"
+        run.error_type = error_type[:128]
+        run.finished_at = datetime.now()
+    db.commit()
 
 
 def scan_overdue_deliveries(db: Session, actor: User) -> dict[str, int]:
