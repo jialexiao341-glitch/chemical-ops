@@ -108,6 +108,29 @@ MINIO_DOCUMENT_BUCKET=chemicalops-documents
 MINIO_RESULT_BUCKET=chemicalops-results
 ```
 
+### 数据库初始化与升级
+
+新建空数据库时运行一次；脚本会拒绝覆盖已经有表的数据，并在核心结构创建后按序应用增量迁移：
+
+```powershell
+uv run python scripts/init_database.py
+```
+
+已有数据库查看迁移状态或升级时使用统一 runner：
+
+```powershell
+uv run python scripts/migrate_database.py status
+uv run python scripts/migrate_database.py upgrade
+```
+
+升级默认先生成 MySQL 逻辑备份到 `backups/mysql/`，并确认备份文件存在且非空后才开始迁移。生产环境不能跳过备份；开发/测试环境只有在确认可丢弃数据时才可显式使用 `--no-backup`。迁移版本、文件校验和、执行结果和失败记录保存在 `schema_migrations` / `schema_migration_attempts` 表中。每次迁移前会取得数据库级互斥锁；失败时记录失败原因并停止后续版本。MySQL DDL 通常不能事务回滚，因此不要直接修改已经发布的迁移文件；修复应新增后续迁移，或按恢复预案恢复备份。
+
+生产发布流程：先在预发布环境恢复一份近期备份，确认恢复库可连接并核对关键表数据；在该恢复库执行 `status` 和 `upgrade`，检查台账中版本、校验和及执行结果；确认应用关键读写流程后，再对生产执行同一 `status` / `upgrade` 命令。恢复演练必须使用隔离数据库，禁止把生产备份导入仍在使用的数据库。发布前保存备份位置、目标版本和迁移输出；若生产升级失败，先保留现场并检查 `schema_migrations`、`schema_migration_attempts` 与实际结构，再决定继续重试或按已验证的备份恢复步骤处置。
+
+登录保护：`/auth/login` 对同一账号与来源 IP 的失败尝试按 15 分钟窗口计数，达到 5 次后锁定 15 分钟；来源 IP 的失败尝试达到 30 次也会触发 15 分钟限制。数据库只保存账号/IP 范围的哈希，不保存登录名或 IP 原文。`/auth/logout` 会撤销该账号所有设备的现有访问令牌；修改密码、管理员重置密码或停用/锁定账号也会立即使旧令牌失效。上述功能需要先通过迁移 runner 应用 `021_auth_security`。
+
+幂等策略：生产环境必须启用 `IDEMPOTENCY_REQUIRED=true`，所有 POST/PUT/PATCH/DELETE 写请求都须带 `Idempotency-Key`；登录和 AI SSE 流式对话明确豁免。中间件只缓存不超过 1 MiB 的 JSON 响应，并保存安全的语义响应头；流式、非 JSON、空响应或过大的响应会原样发送，标记为不可回放，同键重试将收到 409，避免重复执行副作用。处理中重试返回 409 和 `Retry-After`；请求异常、5xx 或缓存状态无法确认时，同键重试会被阻止并要求先核对业务状态。回放记录保留 24 小时。升级需先应用 `022_idempotency_response_headers`。
+
 ### 3. 启动 MinIO
 
 项目提供 Docker 配置：

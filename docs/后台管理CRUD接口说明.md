@@ -539,10 +539,11 @@ uv run main.py run --env=dev
 | 接口 | 说明 | 主要权限 |
 |---|---|---|
 | `POST /api/v1/jobs/overdue-scan` | 扫描逾期运输中的到货单，创建未关闭的自动异常并发送站内通知 | `operations.exceptions.write` |
+| `GET /api/v1/jobs/runs?limit=50` | 查询最近后台定时任务的状态、开始/结束时间、重试次数和数量摘要 | `operations.exceptions.read` |
 | `GET /api/v1/dashboard/overview` | 返回采购订单、逾期到货、库存数量、开放异常、已确认对账、付款金额和有效期预警汇总 | `dashboard.read` |
 | `GET /api/v1/dashboard/report` | 按日期范围聚合每日采购趋势、订单状态、供应商采购金额、产品出库成本、待办任务和库存有效期预警 | `dashboard.read` |
 
-目前已经提供手工接口、单次脚本和可持续运行的 `scripts/run_scheduler.py` 定时任务执行器。可以使用 `--once` 接入 Windows 任务计划，也可以持续运行；每轮默认最多尝试 3 次，可通过 `--max-attempts` 和 `--retry-delay-seconds` 调整，最后一次失败会记录日志并进入下一轮。统一任务状态、失败指标和监控仍待完善。
+目前提供手工接口、单次脚本和可持续运行的 `scripts/run_scheduler.py` 定时任务执行器。调度器通过 MySQL 命名锁选出唯一执行实例；其他副本等待主实例退出后接管。每轮默认最多尝试 3 次，可通过 `--max-attempts` 和 `--retry-delay-seconds` 调整；`scheduler_job_runs` 表持久记录运行状态、尝试次数、结果数量或失败类型，可通过上述只读接口查询。API `/metrics` 按进程暴露 Prometheus 指标，部署时应让 Prometheus 分别抓取每个 API 副本，并在 Prometheus 中按服务聚合；不要只抓取经过负载均衡的单一共享地址。
 
 前端 Dashboard 已使用上述接口绘制采购金额折线图、订单状态饼图、订单状态/供应商采购额/库存出库成本条形统计图，并支持手动刷新。页面会显示“数据库实时聚合”以及当前 `APP_ENV` 对应的数据环境；`development`/`test` 标识为演示环境，其他环境标识为生产环境。该标识说明数据库连接和运行环境，不等同于已经接入 ERP、WMS 或供应商外部系统。
 
