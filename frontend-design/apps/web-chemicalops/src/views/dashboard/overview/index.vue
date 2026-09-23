@@ -51,6 +51,17 @@ const inventoryText = computed(() => {
     .join(' / ');
 });
 
+const expiryAlertTone = computed<'success' | 'warning'>(() =>
+  Number(overview.value?.expiry_alerts ?? 0) > 0 ? 'warning' : 'success',
+);
+
+const paidAmountText = computed(() => {
+  const amount = overview.value?.paid_amount;
+  return amount === null || amount === undefined
+    ? '-'
+    : `¥${formatAmount(amount)}`;
+});
+
 const isDemo = computed(() => health.value?.data_mode === 'demo');
 
 async function load() {
@@ -102,17 +113,17 @@ onMounted(async () => {
   <Page auto-content-height>
     <Spin :spinning="loading">
       <div class="space-y-4">
-        <!-- 顶部说明与筛选 -->
+        <!-- 页面标题与筛选 -->
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div class="text-lg font-semibold">运营总览</div>
-            <div class="text-muted-foreground mt-1 text-xs">
-              实时聚合采购、到货、库存、质量与财务指标
-              <Tag v-if="health" class="ml-2" :color="isDemo ? 'orange' : 'green'">
-                {{ isDemo ? '演示数据环境' : '生产数据环境' }}
-                · {{ health.environment }}
-              </Tag>
-            </div>
+          <div class="flex items-center gap-3">
+            <h1 class="m-0 text-xl font-semibold tracking-normal">运营总览</h1>
+            <Tag v-if="health" class="m-0 border-0 bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+              <span
+                class="mr-1 inline-block size-1.5 rounded-full align-middle"
+                :class="isDemo ? 'bg-amber-500' : 'bg-emerald-500'"
+              />
+              {{ isDemo ? '演示数据' : '生产数据' }} · {{ health.environment }}
+            </Tag>
           </div>
           <div class="flex items-center gap-2">
             <DatePicker.RangePicker
@@ -128,27 +139,23 @@ onMounted(async () => {
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             icon="lucide:clipboard-list"
-            hint="含草稿与执行中的全部订单"
             title="采购订单总数"
             :value="overview?.purchase_orders_total ?? '-'"
           />
           <StatCard
             icon="lucide:truck"
-            hint="已下单但尚未完成的订单"
             title="进行中订单"
-            tone="warning"
+            tone="primary"
             :value="overview?.purchase_orders_in_progress ?? '-'"
           />
           <StatCard
             icon="lucide:triangle-alert"
-            hint="超过预计到货日期仍未收货"
             title="逾期到货"
             tone="danger"
             :value="overview?.deliveries_overdue ?? '-'"
           />
           <StatCard
             icon="lucide:bell-ring"
-            hint="尚未关闭的运营异常，点击查看"
             title="开放异常"
             to="/operations/exceptions"
             tone="danger"
@@ -156,24 +163,20 @@ onMounted(async () => {
           />
           <StatCard
             icon="lucide:boxes"
-            hint="按计量单位分别汇总"
-            title="库存总量"
+            title="库存概况"
             :value="inventoryText"
           >
-            <!-- 数量用统一 24px 数字字号，单位降到 base 号并弱化配色，与纯数字卡片视觉一致 -->
             <template #value>
-              <span class="block" :title="inventoryText">
+              <span class="flex flex-wrap items-baseline gap-x-2 gap-y-0" :title="inventoryText">
                 <template
-                  v-for="(unit, index) in overview?.inventory_units ?? []"
+                  v-for="unit in overview?.inventory_units ?? []"
                   :key="unit.unit_id"
                 >
-                  <span v-if="index > 0" class="text-muted-foreground">
-                    /
-                  </span>
-                  {{ formatQuantity(unit.quantity) }}<span
-                    class="ml-1 text-base font-medium text-muted-foreground"
-                  >
-                    {{ unit.unit_name }}
+                  <span class="whitespace-nowrap text-[18px] font-semibold leading-6">
+                    {{ formatQuantity(unit.quantity) }}
+                    <span class="ml-1 text-xs font-normal text-muted-foreground">
+                      {{ unit.unit_name }}
+                    </span>
                   </span>
                 </template>
                 <template v-if="(overview?.inventory_units ?? []).length === 0">
@@ -184,44 +187,41 @@ onMounted(async () => {
           </StatCard>
           <StatCard
             icon="lucide:calendar-clock"
-            hint="已过期与临期批次"
             title="有效期预警"
-            tone="warning"
+            :tone="expiryAlertTone"
             :value="overview?.expiry_alerts ?? '-'"
           />
           <StatCard
             icon="lucide:file-check-2"
-            hint="已确认的财务对账单"
             title="已确认对账"
             to="/finance/reconciliations"
             :value="overview?.confirmed_reconciliations ?? '-'"
           />
           <StatCard
             icon="lucide:wallet"
-            hint="已完成支付的金额合计"
             title="已付款金额"
             tone="success"
             to="/finance/payments"
-            :value="formatAmount(overview?.paid_amount)"
+            :value="paidAmountText"
           />
         </div>
 
         <!-- 趋势与状态 -->
         <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <Card class="xl:col-span-2" title="采购金额趋势">
+          <Card class="dashboard-panel xl:col-span-2" title="采购金额趋势">
             <TrendChart :data="report?.order_trend ?? []" />
           </Card>
-          <Card title="订单状态分布">
+          <Card class="dashboard-panel" title="订单状态分布">
             <StatusChart :data="report?.order_statuses ?? []" />
           </Card>
         </div>
 
         <!-- 供应商与待办 -->
         <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <Card class="xl:col-span-2" title="供应商采购金额（前 8 名）">
+          <Card class="dashboard-panel xl:col-span-2" title="供应商采购金额（前 8 名）">
             <SupplierChart :data="report?.supplier_performance ?? []" />
           </Card>
-          <Card title="待办事项">
+          <Card class="dashboard-panel" title="待办事项">
             <Empty
               v-if="(report?.pending_tasks ?? []).length === 0"
               description="暂无待办"
@@ -240,7 +240,7 @@ onMounted(async () => {
         </div>
 
         <!-- 有效期预警 -->
-        <Card title="库存有效期预警">
+        <Card class="dashboard-panel" title="库存有效期预警">
           <Empty
             v-if="(report?.inventory_alerts ?? []).length === 0"
             description="所选区间没有临期批次"
@@ -276,3 +276,22 @@ onMounted(async () => {
     </Spin>
   </Page>
 </template>
+
+<style scoped>
+.dashboard-panel {
+  border: 1px solid #e8ecf2;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.dashboard-panel :deep(.ant-card-head) {
+  min-height: 52px;
+  padding-inline: 20px;
+}
+
+.dashboard-panel :deep(.ant-card-head-title) {
+  color: #172033;
+  font-size: 16px;
+  font-weight: 600;
+}
+</style>

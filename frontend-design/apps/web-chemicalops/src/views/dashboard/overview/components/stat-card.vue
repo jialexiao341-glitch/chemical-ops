@@ -2,7 +2,7 @@
 /**
  * 指标卡片。
  *
- * 用于运营总览首屏的 KPI 行：图标、标题、数值和一行辅助说明。
+ * 用于运营总览首屏的 KPI 行：图标、标题和数值。
  * 图标使用 iconify 图标名（与路由菜单保持一致），通过 IconifyIcon 渲染。
  * 传 `to` 时整卡可点击跳转到对应明细页。
  */
@@ -14,19 +14,16 @@ import { Card } from 'antdv-next';
 
 withDefaults(
   defineProps<{
-    /** 辅助说明，例如「较上月 +12%」 */
-    hint?: string;
     /** iconify 图标名，例如 lucide:truck */
     icon?: string;
     /** 数值的语义色 */
-    tone?: 'danger' | 'default' | 'success' | 'warning';
+    tone?: 'danger' | 'default' | 'primary' | 'success' | 'warning';
     title: string;
     /** 点击跳转的路由路径，为空则不可点击 */
     to?: string;
     value: number | string;
   }>(),
   {
-    hint: '',
     icon: '',
     tone: 'default',
     to: '',
@@ -37,59 +34,47 @@ withDefaults(
 const router = useRouter();
 
 const TONE_CLASS: Record<string, string> = {
-  danger: 'bg-red-50 text-red-600',
-  default: 'bg-teal-50 text-teal-700',
-  success: 'bg-emerald-50 text-emerald-600',
-  warning: 'bg-amber-50 text-amber-600',
+  danger: 'bg-[#FFF1F2] text-[#EF4444]',
+  default: 'bg-[#F1F5F9] text-[#64748B]',
+  primary: 'bg-[#EEF2FF] text-[#4F6EF7]',
+  success: 'bg-[#ECFDF5] text-[#16A34A]',
+  warning: 'bg-[#FFF7ED] text-[#F59E0B]',
 };
 
 const VALUE_TONE_CLASS: Record<string, string> = {
-  danger: 'text-red-600',
-  // 显式指定前景色，保证所有「无语义色」卡片取值完全一致
-  default: 'text-foreground',
-  success: 'text-emerald-600',
-  warning: 'text-amber-600',
+  danger: 'text-[#EF4444]',
+  default: 'text-[#172033]',
+  primary: 'text-[#4F6EF7]',
+  success: 'text-[#16A34A]',
+  warning: 'text-[#F59E0B]',
 };
 </script>
 
 <template>
   <Card
-    class="h-full"
-    :class="to ? 'cursor-pointer transition-shadow hover:shadow-md' : ''"
-    :styles="{ body: { padding: '18px 20px' } }"
+    class="h-full rounded-lg border border-[#E8ECF2] shadow-none"
+    :class="to ? 'cursor-pointer transition-[box-shadow,border-color] hover:border-slate-300 hover:shadow-[0_4px_16px_rgba(15,23,42,0.06)]' : ''"
+    :styles="{ body: { padding: '10px 16px' } }"
     @click="to && router.push(to)"
   >
-    <div class="flex items-start gap-4">
-      <div
-        v-if="icon"
-        class="flex size-11 shrink-0 items-center justify-center rounded-lg"
-        :class="TONE_CLASS[tone]"
-      >
-        <IconifyIcon :icon="icon" class="size-6" />
-      </div>
-      <div class="min-w-0 flex-1">
-        <div class="text-muted-foreground flex items-center gap-1 truncate text-sm">
+    <div class="min-h-[68px]">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0 truncate text-sm font-medium text-[#64748B]">
           {{ title }}
-          <IconifyIcon
-            v-if="to"
-            icon="lucide:arrow-right"
-            class="size-3.5 shrink-0 opacity-60"
-          />
         </div>
-        <!--
-          数值区固定两行高（h-16/leading-8）：单数值卡片与多行卡片等高，
-          行与行之间的卡片高度、辅助文案基线完全对齐；
-          允许通过 #value 插槽自定义内部结构（如数量 + 小字号单位）。
-        -->
         <div
-          class="mt-1 h-16 overflow-hidden text-2xl font-semibold leading-8 tracking-tight"
-          :class="VALUE_TONE_CLASS[tone]"
+          v-if="icon"
+          class="flex size-9 shrink-0 items-center justify-center rounded-lg"
+          :class="TONE_CLASS[tone]"
         >
-          <slot name="value">{{ value }}</slot>
+          <IconifyIcon :icon="icon" class="size-[19px]" />
         </div>
-        <div v-if="hint" class="text-muted-foreground mt-1 truncate text-xs">
-          {{ hint }}
-        </div>
+      </div>
+      <div
+        class="mt-0.5 break-words text-[27px] font-semibold leading-[1.2] tabular-nums tracking-normal"
+        :class="VALUE_TONE_CLASS[tone]"
+      >
+        <slot name="value">{{ value }}</slot>
       </div>
     </div>
   </Card>
