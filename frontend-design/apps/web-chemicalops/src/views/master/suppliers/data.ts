@@ -97,7 +97,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
       component: 'Input',
       componentProps: {
         allowClear: true,
-        class: 'w-64',
+        class: 'w-72',
         placeholder: '请输入供应商名称或编码',
       },
       fieldName: 'keyword',
@@ -107,7 +107,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
       component: 'Input',
       componentProps: {
         allowClear: true,
-        class: 'w-72',
+        class: 'w-80',
         placeholder: '请输入地区',
       },
       fieldName: 'region',
@@ -117,7 +117,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
       component: 'Select',
       componentProps: {
         allowClear: true,
-        class: 'w-52',
+        class: 'w-60',
         options: SUPPLIER_STATUS_DICT.options(),
         placeholder: '全部状态',
       },
