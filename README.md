@@ -6,7 +6,7 @@ ChemicalOps 是一个面向化学品采购、到货、质量、库存和供应�
 
 ```mermaid
 flowchart LR
-    U[运营人员] --> FE[React + Vite 前端]
+    U[运营人员] --> FE[Vue 3 + Vite 前端]
     FE --> API[FastAPI 业务 API]
     API --> DB[(MySQL)]
     API --> OBJ[(MinIO 对象存储)]
@@ -165,6 +165,13 @@ corepack pnpm --dir frontend-design dev:chemicalops
 
 依赖安装与构建的注意事项见 [`docs/build-notes/前端构建环境说明.md`](docs/build-notes/前端构建环境说明.md)。
 
+## 项目文档
+
+- [项目简介与业务流程](docs/项目简介与业务流程.md)
+- [数据库设计说明](docs/数据库设计说明.md)
+- [接口文档](docs/接口文档.md)
+- [运行、体验与测试指南](docs/运行体验与测试指南.md)
+
 ## 目录结构
 
 ```text
@@ -190,7 +197,7 @@ ChemicalOps/
 | `POST /api/v1/ai/chat/stream` | AI SSE 流式对话 |
 | `GET /api/v1/ai/conversations` | 查询 AI 历史会话 |
 
-完整接口说明见 [`docs/后台管理CRUD接口说明.md`](docs/后台管理CRUD接口说明.md)。
+完整接口说明见 [`docs/接口文档.md`](docs/接口文档.md)。
 
 ## 验证命令
 
