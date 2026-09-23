@@ -1,4 +1,4 @@
-"""根据项目中的建表脚本初始化 ChemicalOps MySQL 数据库。
+"""初始化全新 ChemicalOps 数据库并应用当前增量迁移。
 
 本操作有意保持保守：schema.sql 是全新环境初始化脚本，包含 DROP TABLE。
 当目标数据库中已经存在表时，本脚本会拒绝执行。
@@ -133,6 +133,11 @@ def main() -> None:
     finally:
         app_conn.close()
 
+    # schema.sql 建立核心结构后，由统一 runner 补齐增量模块并写入迁移台账。
+    # 该数据库刚经过空库检查，跳过备份；若中途失败，可运行 migrate_database.py upgrade 续跑。
+    from migrate_database import upgrade_database
+
+    upgrade_database(no_backup=True, fresh_database_bootstrap=True)
     print(f"database_ready={database}")
     print(f"created_table_count={len(tables)}")
     print("created_tables=" + ",".join(tables))

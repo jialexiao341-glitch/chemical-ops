@@ -21,6 +21,7 @@ DROP TABLE IF EXISTS knowledge_documents;
 DROP TABLE IF EXISTS operation_task_comments;
 DROP TABLE IF EXISTS operation_tasks;
 DROP TABLE IF EXISTS operation_exceptions;
+DROP TABLE IF EXISTS scheduler_job_runs;
 DROP TABLE IF EXISTS sys_notifications;
 DROP TABLE IF EXISTS finance_settlements;
 DROP TABLE IF EXISTS finance_payments;
@@ -1298,6 +1299,22 @@ CREATE TABLE inventory_stocktake_items (
     CONSTRAINT fk_inventory_stocktake_item_unit FOREIGN KEY (unit_id) REFERENCES md_units (id),
     CONSTRAINT chk_inventory_stocktake_item_quantity CHECK (book_quantity >= 0 AND counted_quantity >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='库存盘点明细';
+
+CREATE TABLE scheduler_job_runs (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    run_id VARCHAR(32) NOT NULL COMMENT '单次执行 ID',
+    task_name VARCHAR(64) NOT NULL COMMENT '后台任务类型',
+    status VARCHAR(16) NOT NULL COMMENT 'RUNNING、SUCCEEDED、FAILED',
+    attempt_count SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '尝试次数',
+    started_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '开始时间',
+    finished_at DATETIME(3) NULL COMMENT '结束时间',
+    result_json JSON NULL COMMENT '数量等结果摘要',
+    error_type VARCHAR(128) NULL COMMENT '失败异常类型',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_scheduler_job_run_id (run_id),
+    KEY idx_scheduler_job_run_task_started (task_name, started_at),
+    KEY idx_scheduler_job_run_status_started (status, started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='后台定时任务执行历史';
 
 CREATE TABLE operation_exceptions (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',

@@ -20,9 +20,13 @@ def main() -> int:
     args = parser.parse_args()
     if args.keep < 1:
         parser.error("--keep 必须大于 0")
-    dump = shutil.which("mysqldump")
+    configured_dump = os.environ.get("MYSQLDUMP_PATH", "").strip()
+    dump = str(Path(configured_dump).expanduser()) if configured_dump else shutil.which("mysqldump")
+    if dump and not Path(dump).is_file():
+        print("MYSQLDUMP_PATH 指定的文件不存在", file=sys.stderr)
+        return 2
     if not dump:
-        print("mysqldump 未安装或不在 PATH 中", file=sys.stderr)
+        print("mysqldump 未安装或不在 PATH 中；可通过 MYSQLDUMP_PATH 指定 mysqldump.exe", file=sys.stderr)
         return 2
     settings = get_settings()
     output_dir = Path(args.output_dir).resolve()
