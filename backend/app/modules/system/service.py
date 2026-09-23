@@ -2,9 +2,11 @@
 
 import base64
 import binascii
-from datetime import datetime
+from datetime import datetime, timedelta
+import hashlib
 
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthenticationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
@@ -90,6 +92,9 @@ def update_user(db: Session, user_id: int, data: UserUpdate) -> User:
     values = data.model_dump(exclude_unset=True, exclude={"password", "role_ids"})
     if data.password is not None:
         values["password_hash"] = hash_password(data.password)
+        values["token_version"] = user.token_version + 1
+    if "status" in values and values["status"] != user.status:
+        values["token_version"] = user.token_version + 1
     _require_department(db, data.department_id)
     if data.role_ids is not None:
         _require_roles(db, data.role_ids)
@@ -100,7 +105,9 @@ def update_user(db: Session, user_id: int, data: UserUpdate) -> User:
 def delete_user(db: Session, user_id: int) -> User:
     """软删除用户并保留历史操作记录。"""
 
-    return crud.disable_entity(db, _require_user(db, user_id))
+    user = _require_user(db, user_id)
+    user.token_version += 1
+    return crud.disable_entity(db, user)
 
 
 def list_departments(db: Session, keyword: str | None, status: str | None, page: int, page_size: int):
@@ -237,18 +244,136 @@ def delete_permission(db: Session, permission_id: int) -> Permission:
     return permission
 
 
-def login(db: Session, data: LoginRequest) -> tuple[str, int]:
-    """校验登录凭据并生成访问令牌。"""
+LOGIN_WINDOW = timedelta(minutes=15)
+LOGIN_LOCKOUT = timedelta(minutes=15)
+LOGIN_LIMITS = {"account_ip": 5, "ip": 30}
+DUMMY_PASSWORD_HASH = (
+    "pbkdf2_sha256$310000$MDEyMzQ1Njc4OWFiY2RlZg=="
+    "$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+)
+
+
+def _login_scope_key(scope: str, value: str) -> str:
+    return hashlib.sha256(f"{scope}:{value}".encode("utf-8")).hexdigest()
+
+
+def _lock_login_scopes(db: Session, username: str, client_ip: str, now: datetime):
+    """创建并按固定顺序锁定限速行，避免并发请求绕过失败计数。"""
+
+    account_ip = f"{username.strip().casefold()}\0{client_ip}"
+    scopes = {
+        _login_scope_key("account_ip", account_ip): LOGIN_LIMITS["account_ip"],
+        _login_scope_key("ip", client_ip): LOGIN_LIMITS["ip"],
+    }
+    for key in sorted(scopes):
+        db.execute(
+            text(
+                "INSERT IGNORE INTO sys_login_attempts "
+                "(scope_key, failure_count, window_started_at) VALUES (:key, 0, :now)"
+            ),
+            {"key": key, "now": now},
+        )
+    rows = {}
+    for key in sorted(scopes):
+        row = db.execute(
+            text(
+                "SELECT failure_count, window_started_at, locked_until "
+                "FROM sys_login_attempts WHERE scope_key=:key FOR UPDATE"
+            ),
+            {"key": key},
+        ).mappings().one()
+        rows[key] = dict(row)
+    return scopes, rows
+
+
+def login(db: Session, data: LoginRequest, client_ip: str = "unknown") -> tuple[str, int]:
+    """检查登录限速、校验凭据并生成带会话版本的访问令牌。"""
+
+    now = datetime.now()
+    scopes, attempts = _lock_login_scopes(db, data.username, client_ip, now)
+    active_locks = [
+        row["locked_until"]
+        for row in attempts.values()
+        if row["locked_until"] is not None and row["locked_until"] > now
+    ]
+    if active_locks:
+        retry_after = max(1, int((max(active_locks) - now).total_seconds()))
+        db.rollback()
+        raise HTTPException(
+            status_code=429,
+            detail="登录失败次数过多，请稍后重试",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    for key, row in attempts.items():
+        if now - row["window_started_at"] >= LOGIN_WINDOW:
+            row["failure_count"] = 0
+            row["window_started_at"] = now
+            row["locked_until"] = None
 
     user = crud.get_user_by_username(db, data.username)
-    if user is None or user.status != "ACTIVE" or not verify_password(data.password, user.password_hash):
+    password_matches = verify_password(
+        data.password,
+        user.password_hash if user is not None else DUMMY_PASSWORD_HASH,
+    )
+    password_valid = (
+        user is not None
+        and user.status == "ACTIVE"
+        and password_matches
+    )
+    if not password_valid:
+        lock_triggered = False
+        for key, row in attempts.items():
+            failures = row["failure_count"] + 1
+            locked_until = now + LOGIN_LOCKOUT if failures >= scopes[key] else None
+            lock_triggered = lock_triggered or locked_until is not None
+            db.execute(
+                text(
+                    "UPDATE sys_login_attempts SET failure_count=:failures, "
+                    "window_started_at=:window_started_at, locked_until=:locked_until "
+                    "WHERE scope_key=:key"
+                ),
+                {
+                    "failures": failures,
+                    "window_started_at": row["window_started_at"],
+                    "locked_until": locked_until,
+                    "key": key,
+                },
+            )
+        db.execute(
+            text("DELETE FROM sys_login_attempts WHERE updated_at < :cutoff LIMIT 100"),
+            {"cutoff": now - timedelta(days=1)},
+        )
+        db.commit()
+        if lock_triggered:
+            raise HTTPException(
+                status_code=429,
+                detail="登录失败次数过多，请稍后重试",
+                headers={"Retry-After": str(int(LOGIN_LOCKOUT.total_seconds()))},
+            )
         raise AuthenticationError("用户名或密码错误")
+
+    for key in scopes:
+        db.execute(
+            text(
+                "UPDATE sys_login_attempts SET failure_count=0, window_started_at=:now, "
+                "locked_until=NULL WHERE scope_key=:key"
+            ),
+            {"now": now, "key": key},
+        )
     user.last_login_at = datetime.now()
     db.commit()
     from app.core.config import get_settings
 
     settings = get_settings()
-    return create_access_token(user.id), settings.access_token_expire_minutes * 60
+    return create_access_token(user.id, user.token_version), settings.access_token_expire_minutes * 60
+
+
+def revoke_sessions(db: Session, user: User) -> None:
+    """递增会话版本，使该用户已有的所有访问令牌立即失效。"""
+
+    user.token_version += 1
+    db.commit()
 
 
 AVATAR_MAX_BYTES = 512 * 1024
@@ -315,6 +440,7 @@ def change_password(db: Session, user: User, data: PasswordChange) -> None:
     if data.old_password == data.new_password:
         raise BusinessValidationError("新密码不能与原密码相同")
     user.password_hash = hash_password(data.new_password)
+    user.token_version += 1
     add_audit_log(
         db,
         actor_id=user.id,

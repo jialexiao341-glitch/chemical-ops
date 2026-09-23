@@ -22,6 +22,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
+    token_version: Mapped[int] = mapped_column(default=0, nullable=False, server_default="0")
     # 个人中心头像原图（客户端已压缩）；列表接口的 UserRead 不声明该字段，不会外泄
     avatar: Mapped[bytes | None] = mapped_column(MEDIUMBLOB, nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)

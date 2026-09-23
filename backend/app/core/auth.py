@@ -8,7 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token_claims
 from app.modules.system import crud
 from app.modules.system.model import User
 
@@ -25,12 +25,12 @@ def get_current_user(
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     try:
-        user_id = decode_access_token(credentials.credentials)
+        user_id, token_version = decode_access_token_claims(credentials.credentials)
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录令牌无效或已过期") from None
     user = crud.get_user(db, user_id)
-    if user is None or user.status != "ACTIVE":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已停用")
+    if user is None or user.status != "ACTIVE" or user.token_version != token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录令牌已撤销或用户已停用")
     return user
 
 

@@ -100,11 +100,13 @@ export const useAuthStore = defineStore('auth', () => {
     };
   }
 
-  async function logout(redirect: boolean = true) {
-    try {
-      await logoutApi();
-    } catch {
-      // JWT 无状态，退出接口失败不影响本地清理
+  async function logout(redirect: boolean = true, revokeRemote: boolean = true) {
+    if (revokeRemote && accessStore.accessToken) {
+      try {
+        await logoutApi();
+      } catch {
+        // 服务端不可用或令牌已撤销时，仍需清理本地登录状态。
+      }
     }
     resetAllStores();
     accessStore.setLoginExpired(false);

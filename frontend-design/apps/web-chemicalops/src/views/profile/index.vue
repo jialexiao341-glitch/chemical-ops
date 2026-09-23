@@ -188,7 +188,8 @@ async function onChangePassword() {
       old_password: oldPassword.value,
     });
     passwordVisible.value = false;
-    message.success('密码已修改，旧令牌到期前仍有效，建议退出重新登录', 5);
+    message.success('密码已修改，请使用新密码重新登录', 5);
+    await authStore.logout(true, false);
   } catch {
     // 原密码错误等由请求层提示，弹窗保持打开
   } finally {

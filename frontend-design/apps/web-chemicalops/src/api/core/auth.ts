@@ -81,7 +81,7 @@ export async function updateProfileApi(data: AuthApi.ProfileParams) {
 /**
  * 修改个人登录密码（校验原密码）。
  *
- * JWT 无状态：修改成功后旧令牌在到期前仍有效，界面应提示重新登录。
+ * 修改成功后后端撤销该账号所有已签发令牌，界面需要重新登录。
  */
 export async function changePasswordApi(data: AuthApi.ChangePasswordParams) {
   return requestClient.request<{ changed: boolean }>('/auth/me/password', {
@@ -93,8 +93,10 @@ export async function changePasswordApi(data: AuthApi.ChangePasswordParams) {
 /**
  * 退出登录。
  *
- * 后端未提供 logout 接口，令牌由前端清除即可（JWT 无状态）。
+ * 撤销该账号所有设备的现有访问令牌，再清理本地登录状态。
  */
 export async function logoutApi() {
-  return Promise.resolve();
+  return requestClient.request<{ revoked: boolean }>('/auth/logout', {
+    method: 'POST',
+  });
 }

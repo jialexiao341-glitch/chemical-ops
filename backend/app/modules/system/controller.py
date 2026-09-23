@@ -1,6 +1,6 @@
 """系统管理和认证相关的 HTTP 接口。"""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user, require_permission
@@ -69,10 +69,11 @@ def _current_user_response(db: Session, user: User) -> CurrentUserRead:
 
 
 @auth_router.post("/login", response_model=TokenResponse, summary="用户登录")
-def login(data: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
     """校验用户名和密码，返回 Bearer JWT 访问令牌。"""
 
-    token, expires_in = service.login(db, data)
+    client_ip = request.client.host if request.client is not None else "unknown"
+    token, expires_in = service.login(db, data, client_ip)
     return TokenResponse(access_token=token, expires_in=expires_in)
 
 
@@ -101,10 +102,18 @@ def change_current_password(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, bool]:
-    """校验原密码后修改自己的登录密码；JWT 无状态，旧令牌到期前仍有效。"""
+    """校验原密码后修改密码并撤销该用户所有已签发令牌。"""
 
     service.change_password(db, user, data)
     return {"changed": True}
+
+
+@auth_router.post("/logout", summary="退出并撤销当前用户的所有会话")
+def logout(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """递增令牌版本，使当前用户所有设备上的既有访问令牌立即失效。"""
+
+    service.revoke_sessions(db, user)
+    return {"revoked": True}
 
 
 @router.post("/system/users", response_model=UserRead, status_code=status.HTTP_201_CREATED, summary="新增用户")
