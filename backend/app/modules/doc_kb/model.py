@@ -37,7 +37,7 @@ class AiDocument(Base):
 
 
 class AiDocumentSection(Base):
-    """文档章节：SDS 按 SECTION 切、物性页按 h2/h3 切、TDS PDF 按页切。"""
+    """文档章节：MSDS 按 SECTION 切、物性页按 h2/h3 切、TDS PDF 按页切。"""
 
     __tablename__ = "ai_document_sections"
 

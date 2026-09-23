@@ -3,8 +3,8 @@
 设计要点：
 - 原件在 MinIO 不回写；本模块只产出结构化章节与质检状态，可重复执行（幂等 upsert）。
 - HTML 用标准库 html.parser 提取正文（跳过 script/style/footer/导航与推荐位），
-  SDS 按 SECTION 1–16 切节，物性页按 h2/h3 切节，TDS PDF 按页切（pypdf）。
-- 质检门禁：正文长度 + SDS 核心节完整性 + 标题含 CAS；不达标标 THIN/REJECTED，
+  MSDS 按 SECTION 1–16 切节，物性页按 h2/h3 切节，TDS PDF 按页切（pypdf）。
+- 质检门禁：正文长度 + MSDS 核心节完整性 + 标题含 CAS；不达标标 THIN/REJECTED，
   章节清空，避免薄壳页污染检索。
 - 元数据补全：英文名、同义词、分子式/分子量、信号词、H/P 危险声明码、UN 号、
   运输类项，外加按 CAS 关联出的中文名（英文文档 ↔ 中文提问的桥）。
@@ -33,7 +33,7 @@ _BLOCK_TAGS = frozenset(
     {"p", "div", "li", "br", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "section", "dd", "dt"}
 )
 
-# SDS 章节切分（h2 id="N" SECTION N: ...）
+# MSDS 章节切分（h2 id="N" SECTION N: ...）
 _MSDS_HEADING_RE = re.compile(r'<h2[^>]*>\s*SECTION\s*(\d+)\s*[:：]?', re.IGNORECASE)
 # 物性页 h2/h3 标题
 _PROPERTY_HEADING_RE = re.compile(r"<h([23])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
@@ -248,11 +248,11 @@ def extract_title(html: str, doc_type: str, cas: str) -> str | None:
     return head or None
 
 
-# ---------- SDS（MSDS HTML） ----------
+# ---------- MSDS HTML ----------
 
 
 def extract_msds(cas: str, html: str) -> ParsedDoc:
-    """SDS：按 h2 SECTION 切 16 节，抽 GHS/运输元数据，截尾部样板。"""
+    """MSDS：按 h2 SECTION 切 16 节，抽 GHS/运输元数据，截尾部样板。"""
 
     title = extract_title(html, "msds", cas)
     doc = ParsedDoc(cas=cas, doc_type="msds", title=title)
@@ -291,7 +291,7 @@ def extract_msds(cas: str, html: str) -> ParsedDoc:
 
 
 def qc_msds(doc: ParsedDoc) -> list[str]:
-    """SDS 质检：核心节完整性 + 正文长度。"""
+    """MSDS 质检：核心节完整性 + 正文长度。"""
 
     reasons: list[str] = []
     if not doc.sections:

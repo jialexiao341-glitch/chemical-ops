@@ -1,7 +1,7 @@
 """按 CAS 号从 ChemicalBook 抓取 TDS / MSDS 文档并分桶存入 MinIO。
 
 数据源（已实测可用，robots.txt 未禁用这些路径）：
-    MSDS 页   GET https://www.chemicalbook.com/MSDS/{cas}.htm   → 完整 SDS 的 HTML
+    MSDS 页   GET https://www.chemicalbook.com/MSDS/{cas}.htm   → 完整 MSDS 的 HTML
     MSDS PDF  GET https://www.chemicalbook.com/msds/{cas}.pdf   → 站点多数返回 404，成功才存
     TDS  PDF  从 MSDS 页 title 取英文名 → slug → GET /tds-coa/{slug}.pdf
     物性页    从 MSDS 页提取本物质 CB 号（keyword=CBxxx）→ GET
@@ -137,7 +137,7 @@ def extract_msds_title(html: bytes) -> str | None:
 
 
 def validate_msds_html(content: bytes) -> bool:
-    """MSDS HTML 必须包含 SDS 标识，避免把 404 页当文档存。"""
+    """MSDS HTML 必须包含安全数据表标识，避免把 404 页当文档存。"""
 
     lowered = content.lower()
     return b"safety data sheet" in lowered and b"<html" in lowered

@@ -225,7 +225,7 @@ def load_master_data(
                 "parameter_json": {
                     "storage_temperature": "15-25°C",
                     "certificate_required": True,
-                    "hazard_label": "按化学品 SDS 执行",
+                    "hazard_label": "按化学品 MSDS 执行",
                     "shelf_life_months": 12 + index % 25,
                 },
                 "version_no": 1,
@@ -331,7 +331,7 @@ def load_procurement(
         rfq = ensure(db, RFQ, {"rfq_no": f"RFQ-270{index:03d}"}, {
             "source_request_id": request.id, "requester_id": users["buyer"].id,
             "quote_deadline": dt(3 - index % 20), "requested_delivery_date": TODAY + timedelta(days=10 + index % 35),
-            "delivery_requirements": "送货至指定仓库，随货提供 COA、SDS 和批次信息", "status": rfq_status,
+            "delivery_requirements": "送货至指定仓库，随货提供 COA、MSDS 和批次信息", "status": rfq_status,
             "sent_at": dt(15 + index % 50) if rfq_status != "DRAFT" else None,
             "closed_at": dt(4) if rfq_status == "CLOSED" else None,
         }, counts)
@@ -664,7 +664,7 @@ def load_knowledge_market_ai(
     for index in range(1, 96 * scale + 1):
         product = products[(index - 1) % len(products)]
         supplier = suppliers[(index * 2) % len(suppliers)]
-        category = ("SDS", "TDS", "COA", "QUOTE", "QUALIFICATION")[index % 5]
+        category = ("MSDS", "TDS", "COA", "QUOTE", "QUALIFICATION")[index % 5]
         file = get_or_create_file(db, f"DOC-270{index:03d}", users["buyer"].id, category, counts)
         document_id = raw_ensure(db, "knowledge_documents", {"file_id": file.id}, {
             "file_id": file.id, "title": f"{product.product_name}-{category}资料", "document_type": category,
