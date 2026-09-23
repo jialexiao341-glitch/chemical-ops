@@ -124,7 +124,7 @@ class PaymentReject(BaseModel):
 
 
 class PaymentPaid(BaseModel):
-    """登记实际付款时提交的外部流水号。"""
+    """人工登记付款结果时提交的外部流水号或凭证号。"""
 
     transaction_ref: str = Field(min_length=1, max_length=128)
     note: str | None = Field(default=None, max_length=1000)

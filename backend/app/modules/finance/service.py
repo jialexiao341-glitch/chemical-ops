@@ -234,7 +234,7 @@ def submit_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
 
 
 def verify_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
-    """核验发票，核验通过后才可用于付款。"""
+    """记录内部人工复核；当前不调用税务平台。"""
 
     invoice = _require_invoice(db, invoice_id, for_update=True)
     if invoice.status != "SUBMITTED":
@@ -242,7 +242,7 @@ def verify_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
     invoice.status = "VERIFIED"
     invoice.verified_by = user.id
     invoice.verified_at = _now()
-    add_audit_log(db, actor_id=user.id, action_type="VERIFY", resource_type="FINANCE_INVOICE", resource_id=invoice.id, request_summary="核验发票通过", result_status="SUCCESS")
+    add_audit_log(db, actor_id=user.id, action_type="VERIFY", resource_type="FINANCE_INVOICE", resource_id=invoice.id, request_summary="人工复核发票通过", result_status="SUCCESS")
     db.commit()
     return _require_invoice(db, invoice.id)
 
@@ -275,7 +275,7 @@ def create_payment(db: Session, user: User, data: PaymentCreate) -> FinancePayme
     if _sum_payments(db, reconciliation.id) + data.amount > reconciliation.total_amount:
         raise BusinessValidationError("付款累计金额不能超过对账应付总额")
     if _sum_invoices(db, reconciliation.id, verified_only=True) < data.amount:
-        raise BusinessValidationError("已核验发票金额不足，不能发起本次付款")
+        raise BusinessValidationError("人工复核通过的发票金额不足，不能发起本次付款")
     payment = FinancePayment(
         payment_no=f"TEMP-FP-{uuid4().hex[:12]}",
         reconciliation_id=reconciliation.id,
@@ -313,7 +313,7 @@ def approve_payment(db: Session, user: User, payment_id: int) -> FinancePayment:
     if reconciliation.status != "CONFIRMED":
         raise BusinessValidationError("对账单未确认，不能审批付款")
     if _sum_invoices(db, reconciliation.id, verified_only=True) < payment.amount:
-        raise BusinessValidationError("已核验发票金额不足，不能审批付款")
+        raise BusinessValidationError("人工复核通过的发票金额不足，不能审批付款")
     payment.status = "APPROVED"
     payment.approved_by = user.id
     payment.approved_at = _now()
@@ -336,7 +336,7 @@ def reject_payment(db: Session, user: User, payment_id: int, reason: str) -> Fin
 
 
 def mark_payment_paid(db: Session, user: User, payment_id: int, transaction_ref: str, note: str | None) -> FinancePayment:
-    """登记实际付款结果；状态检查保证重复请求不会重复记账。"""
+    """登记人工核对的付款结果；不表示银行已与系统直连。"""
 
     payment = _require_payment(db, payment_id, for_update=True)
     if payment.status != "APPROVED":
@@ -350,7 +350,7 @@ def mark_payment_paid(db: Session, user: User, payment_id: int, transaction_ref:
     payment.transaction_ref = transaction_ref
     if note:
         payment.note = note
-    add_audit_log(db, actor_id=user.id, action_type="PAY", resource_type="FINANCE_PAYMENT", resource_id=payment.id, request_summary="登记实际付款", result_status="SUCCESS")
+    add_audit_log(db, actor_id=user.id, action_type="PAY", resource_type="FINANCE_PAYMENT", resource_id=payment.id, request_summary="人工登记付款结果", result_status="SUCCESS")
     try:
         db.commit()
     except IntegrityError as exc:

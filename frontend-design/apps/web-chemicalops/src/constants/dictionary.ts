@@ -227,7 +227,7 @@ export const RECONCILIATION_STATUS_DICT = buildDict([
 export const INVOICE_STATUS_DICT = buildDict([
   { color: 'default', label: '草稿', value: 'DRAFT' },
   { color: 'processing', label: '待核验', value: 'SUBMITTED' },
-  { color: 'success', label: '已核验', value: 'VERIFIED' },
+  { color: 'success', label: '人工已复核', value: 'VERIFIED' },
   { color: 'error', label: '已驳回', value: 'REJECTED' },
   { color: 'default', label: '已作废', value: 'VOIDED' },
 ]);
@@ -236,7 +236,7 @@ export const INVOICE_STATUS_DICT = buildDict([
 export const PAYMENT_STATUS_DICT = buildDict([
   { color: 'processing', label: '待审批', value: 'REQUESTED' },
   { color: 'cyan', label: '已批准', value: 'APPROVED' },
-  { color: 'success', label: '已付款', value: 'PAID' },
+  { color: 'success', label: '已登记付款', value: 'PAID' },
   { color: 'error', label: '已驳回', value: 'REJECTED' },
   { color: 'default', label: '已取消', value: 'CANCELLED' },
 ]);

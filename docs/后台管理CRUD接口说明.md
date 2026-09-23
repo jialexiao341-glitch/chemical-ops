@@ -423,21 +423,21 @@ uv run main.py run --env=dev
 | `GET /api/v1/finance/invoices` | 分页查询发票 | `finance.invoices.read` |
 | `GET /api/v1/finance/invoices/{id}` | 查询发票详情 | `finance.invoices.read` |
 | `POST /api/v1/finance/invoices/{id}/submit` | 提交发票核验 | `finance.invoices.write` |
-| `POST /api/v1/finance/invoices/{id}/verify` | 核验发票 | `finance.invoices.verify` |
+| `POST /api/v1/finance/invoices/{id}/verify` | 人工复核发票；当前不连接税务平台 | `finance.invoices.verify` |
 | `POST /api/v1/finance/invoices/{id}/reject` | 驳回发票并记录原因 | `finance.invoices.verify` |
-| `POST /api/v1/finance/payments` | 发起付款申请，不能超过剩余应付额且必须有足额核验发票 | `finance.payments.write` |
+| `POST /api/v1/finance/payments` | 发起付款申请，不能超过剩余应付额且必须有足额人工复核发票 | `finance.payments.write` |
 | `GET /api/v1/finance/payments` | 分页查询付款记录 | `finance.payments.read` |
 | `GET /api/v1/finance/payments/{id}` | 查询付款详情 | `finance.payments.read` |
 | `POST /api/v1/finance/payments/{id}/approve` | 审批付款申请 | `finance.payments.approve` |
 | `POST /api/v1/finance/payments/{id}/reject` | 驳回付款申请并记录原因 | `finance.payments.approve` |
-| `POST /api/v1/finance/payments/{id}/paid` | 登记银行流水并完成付款 | `finance.payments.write` |
+| `POST /api/v1/finance/payments/{id}/paid` | 人工核对银行流水后登记付款；当前不连接银行 | `finance.payments.write` |
 | `POST /api/v1/finance/settlements` | 为已足额付款的对账单创建结算单 | `finance.settlements.write` |
 | `GET /api/v1/finance/settlements` | 按状态、供应商分页查询结算单 | `finance.settlements.read` |
 | `GET /api/v1/finance/settlements/{id}` | 查询结算单详情 | `finance.settlements.read` |
 | `POST /api/v1/finance/settlements/{id}/confirm` | 确认结算并关闭对账单 | `finance.settlements.approve` |
 | `POST /api/v1/finance/settlements/{id}/cancel` | 取消草稿结算单 | `finance.settlements.write` |
 
-金额、订单、供应商和币种由服务层从关联订单校验或带入；系统通过对账单、付款和结算的行锁避免并发超额付款，银行流水号使用数据库唯一索引防止并发重复登记，并通过状态机阻止重复确认、重复付款和重复结算。
+金额、订单、供应商和币种由服务层从关联订单校验或带入；系统通过对账单、付款和结算的行锁避免并发超额付款，银行流水号使用数据库唯一索引防止并发重复登记，并通过状态机阻止重复确认、重复付款和重复结算。当前 `VERIFIED` 表示内部人工复核通过，不代表税务验真；`PAID` 表示授权人员依据外部凭证登记，不代表系统收到银行回执或发起过银行支付。
 
 ## 20. 退货和补货接口
 

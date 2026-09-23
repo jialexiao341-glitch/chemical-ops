@@ -93,7 +93,7 @@ const [Modal, modalApi] = useVbenModal({
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert
-          message="只有已确认的对账单可以发起付款；付款金额受应付总额与已核验发票金额双重限制，审批通过后才能登记实际付款。"
+          message="只有已确认的对账单可以发起付款；付款金额受应付总额与人工复核通过的发票金额双重限制，审批通过后由授权人员根据外部凭证登记付款。"
           type="info"
           show-icon
         />

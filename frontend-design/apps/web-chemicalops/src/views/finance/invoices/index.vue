@@ -80,14 +80,14 @@ function runSubmit(row: FinanceApi.Invoice) {
 
 function runVerify(row: FinanceApi.Invoice) {
   Modal.confirm({
-    content: `确认核验通过发票 ${row.invoice_no}？核验后的发票金额可被付款引用。`,
-    okText: '核验通过',
+    content: `确认对发票 ${row.invoice_no} 完成人工复核？复核后的发票金额可被付款引用；此操作不代表已向税务平台验真。`,
+    okText: '确认人工复核',
     onOk: async () => {
       await verifyInvoiceApi(row.id);
-      message.success('发票已核验');
+      message.success('发票已完成人工复核');
       gridApi.query();
     },
-    title: '核验发票',
+    title: '人工复核发票',
   });
 }
 

@@ -204,7 +204,7 @@ export async function submitInvoiceApi(id: number) {
   );
 }
 
-/** 核验发票（SUBMITTED → VERIFIED，需 invoices.verify 权限） */
+/** 人工复核发票（SUBMITTED → VERIFIED；不代表税务平台验真） */
 export async function verifyInvoiceApi(id: number) {
   return requestClient.post<FinanceApi.Invoice>(
     `/finance/invoices/${id}/verify`,
@@ -251,7 +251,7 @@ export async function rejectPaymentApi(id: number, reason: string) {
   );
 }
 
-/** 登记实际付款（APPROVED → PAID，流水号必填） */
+/** 登记人工核对的付款结果（APPROVED → PAID；不代表银行回执） */
 export async function markPaymentPaidApi(
   id: number,
   data: FinanceApi.PaymentPaidPayload,

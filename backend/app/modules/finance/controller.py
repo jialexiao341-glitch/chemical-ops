@@ -99,9 +99,9 @@ def submit_invoice(invoice_id: int, db: Session = Depends(get_db), user: User = 
     return service.submit_invoice(db, user, invoice_id)
 
 
-@router.post("/invoices/{invoice_id}/verify", response_model=InvoiceRead, summary="核验发票")
+@router.post("/invoices/{invoice_id}/verify", response_model=InvoiceRead, summary="人工复核发票")
 def verify_invoice(invoice_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.invoices.verify"))) -> InvoiceRead:
-    """核验发票，核验通过的金额才能用于付款。"""
+    """记录内部人工复核结果；不调用税务平台，也不代表已完成税务验真。"""
 
     return service.verify_invoice(db, user, invoice_id)
 
@@ -149,9 +149,9 @@ def reject_payment(payment_id: int, data: PaymentReject, db: Session = Depends(g
     return service.reject_payment(db, user, payment_id, data.reason)
 
 
-@router.post("/payments/{payment_id}/paid", response_model=PaymentRead, summary="登记实际付款")
+@router.post("/payments/{payment_id}/paid", response_model=PaymentRead, summary="登记人工核对的付款结果")
 def mark_payment_paid(payment_id: int, data: PaymentPaid, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.payments.write"))) -> PaymentRead:
-    """登记银行流水号并将付款置为已支付。"""
+    """记录人工核对的外部流水；此接口不会向银行查询或发送支付指令。"""
 
     return service.mark_payment_paid(db, user, payment_id, data.transaction_ref, data.note)
 

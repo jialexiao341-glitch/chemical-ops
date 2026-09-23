@@ -218,11 +218,14 @@ onMounted(async () => {
     <Modal
       v-model:open="paidVisible"
       cancel-text="取消"
-      ok-text="确认付款"
-      title="登记实际付款"
+      ok-text="确认登记"
+      title="登记人工核对的付款结果"
       @ok="onPaidConfirm"
     >
       <div class="space-y-3 py-2">
+        <div class="text-sm text-amber-700">
+          此操作只记录人工核对的流水信息，不会连接银行或发送支付指令；未取得银行回执前不要登记为已付款。
+        </div>
         <div>
           <div class="mb-1 text-sm">
             外部流水号 <span class="text-red-500">*</span>
