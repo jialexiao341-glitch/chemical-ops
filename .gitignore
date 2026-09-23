@@ -24,6 +24,7 @@ logs/
 tmp/
 uploads/
 coverage/
+backups/mysql/
 
 # Local uploaded files and generated parse results
 storage/

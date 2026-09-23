@@ -528,7 +528,8 @@ AI 助手只允许已登录用户调用；后端保存当前用户的会话和�
 
 | 接口 | 说明 |
 |---|---|
-| `GET /health` | 返回 API 存活状态、服务名、`environment`、`data_source` 和 `data_mode`；`data_source=database` 表示业务指标从当前数据库聚合，`data_mode=demo/production` 由 `APP_ENV` 推导 |
+| `GET /health/live` (`/health` 兼容) | 轻量存活检查，不访问外部依赖；返回服务名、`environment`、`data_source` 和 `data_mode` |
+| `GET /health/ready` | 检查数据库、迁移版本和启用的对象存储；未就绪时返回 `503` |
 
 前端用该接口展示看板数据环境，避免把本地演示数据库中的数据误认为生产业务数据。
 

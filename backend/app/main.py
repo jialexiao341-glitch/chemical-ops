@@ -48,7 +48,6 @@ from app.modules.inventory_cost.controller import router as inventory_cost_route
 from app.modules.jobs.controller import router as jobs_router
 from app.modules.dashboard.controller import router as dashboard_router
 from app.modules.ai.controller import router as ai_router
-from app.modules.files.scanner import scan_content
 from app.modules.system.controller import auth_router, router as system_router
 
 
@@ -358,7 +357,8 @@ def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
     return _error_response(500, "服务器暂时无法处理该请求")
 
 
-@app.get("/health", tags=["系统"], summary="存活检查")
+@app.get("/health/live", tags=["系统"], summary="存活检查")
+@app.get("/health", tags=["系统"], summary="存活检查", include_in_schema=False)
 def health() -> dict[str, str]:
     """轻量存活探针，不访问外部依赖，供负载均衡器使用。"""
 
@@ -378,20 +378,16 @@ def readiness(response: Response) -> dict[str, object]:
     """检查数据库、对象存储和关键运行配置，供发布平台决定是否接流量。"""
 
     database_ready = _check_database()
+    schema_ready = database_ready and _check_schema_migrations()
     storage_ready = _check_minio()
-    ai_configured = bool(settings.openai_api_key.strip()) if settings.agent_enabled else True
-    scanner_ready = not settings.file_scan_enabled or scan_content(b"ChemicalOps readiness probe\n").status == "CLEAN"
-    scheduler_ready = settings.overdue_scan_interval_seconds > 0
-    ready = database_ready and storage_ready and scanner_ready and scheduler_ready and ai_configured
+    ready = database_ready and schema_ready and storage_ready
     response.status_code = 200 if ready else 503
     return {
         "status": "ready" if ready else "not_ready",
         "checks": {
             "database": "ok" if database_ready else "failed",
+            "schema_migrations": "ok" if schema_ready else "failed",
             "object_storage": "ok" if storage_ready else "failed",
-            "ai_configuration": "ok" if ai_configured else "not_configured",
-            "file_scanner_configuration": "ok" if scanner_ready else "invalid",
-            "scheduler_configuration": "ok" if scheduler_ready else "invalid",
         },
         "metrics": {"api_requests": "GET /metrics"},
     }
