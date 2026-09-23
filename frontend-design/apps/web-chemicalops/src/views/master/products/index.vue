@@ -26,7 +26,7 @@ const [FormDrawer, formDrawerApi] = useVbenDrawer({
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
     actionLayout: 'inline',
-    actionWrapperClass: 'shrink-0',
+    actionWrapperClass: 'ml-auto shrink-0',
     layout: 'inline',
     schema: useGridFormSchema(),
     wrapperClass: 'flex-nowrap items-center overflow-x-auto',
