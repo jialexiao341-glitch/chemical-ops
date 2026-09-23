@@ -196,7 +196,7 @@ ChemicalOps/
 
 ```powershell
 corepack pnpm --dir frontend-design build:chemicalops
-uv run pytest -q
+uv run pytest --strict-config --strict-markers -q -rs
 ```
 
 `.env`、上传文件、解析结果和前端构建产物均已加入 Git 忽略规则，不应提交到仓库。

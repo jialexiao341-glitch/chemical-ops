@@ -6,6 +6,7 @@ from scripts import run_scheduler
 def test_run_once_with_retry_succeeds_after_transient_failure(monkeypatch):
     attempts = []
     delays = []
+    recorded_attempts = []
 
     def fake_run_once():
         attempts.append(1)
@@ -16,10 +17,15 @@ def test_run_once_with_retry_succeeds_after_transient_failure(monkeypatch):
     monkeypatch.setattr(run_scheduler, "run_once", fake_run_once)
     monkeypatch.setattr(run_scheduler.time, "sleep", delays.append)
 
-    result = run_scheduler.run_once_with_retry(max_attempts=3, retry_delay_seconds=1.5)
+    result = run_scheduler.run_once_with_retry(
+        max_attempts=3,
+        retry_delay_seconds=1.5,
+        on_attempt=recorded_attempts.append,
+    )
 
     assert result == {"scanned_count": 2, "created_count": 1}
     assert len(attempts) == 3
+    assert recorded_attempts == [1, 2, 3]
     assert delays == [1.5, 1.5]
 
 

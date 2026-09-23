@@ -23,13 +23,17 @@ jobs:
           --health-timeout=5s
           --health-retries=20
     env:
+      CI: "true"
+      APP_ENV: test
       MYSQL_HOST: 127.0.0.1
       MYSQL_PORT: 3306
       MYSQL_DATABASE: chemicalops
       MYSQL_USER: chemicalops
       MYSQL_PASSWORD: chemicalops
+      MYSQL_ROOT_PASSWORD: root
       DEMO_DEFAULT_PASSWORD: ChemicalOps@2026
-      JWT_SECRET_KEY: ci-only-secret
+      JWT_SECRET_KEY: ci-only-secret-key-with-enough-length-for-tests
+      PYTHONPATH: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,23 +41,50 @@ jobs:
           python-version: "3.11"
       - name: Install backend dependencies
         run: python -m pip install -r backend/requirements.txt
-      - name: Initialize database
-        run: mysql -h127.0.0.1 -P3306 -uchemicalops -pchemicalops chemicalops < database/schema.sql
-      - name: Seed demo accounts
-        run: PYTHONPATH=backend python scripts/seed_demo_accounts.py
-      - name: Compile backend
-        run: PYTHONPATH=backend python -m compileall -q backend/app scripts
-      - name: Validate migration and production guard
+      - name: Prepare isolated test configuration
         run: |
-          PYTHONPATH=backend python scripts/apply_task2_consistency_migration.py
-          APP_ENV=ci PYTHONPATH=backend python scripts/check_production_config.py
+          cat > .env <<'EOF'
+          APP_ENV=test
+          MYSQL_HOST=127.0.0.1
+          MYSQL_PORT=3306
+          MYSQL_DATABASE=chemicalops
+          MYSQL_USER=chemicalops
+          MYSQL_PASSWORD=chemicalops
+          MYSQL_ROOT_PASSWORD=root
+          DEMO_DEFAULT_PASSWORD=ChemicalOps@2026
+          JWT_SECRET_KEY=ci-only-secret-key-with-enough-length-for-tests
+          FILE_STORAGE_BACKEND=local
+          FILE_STORAGE_ROOT=tmp/test-storage
+          EOF
+      - name: Initialize blank MySQL database and apply all migrations
+        run: python scripts/init_database.py
+      - name: Seed isolated test master data and accounts
+        run: |
+          python scripts/seed_demo_master_data.py
+          python scripts/seed_demo_accounts.py
+      - name: Verify migration ledger and repeat upgrade
+        run: |
+          python scripts/migrate_database.py status
+          python scripts/migrate_database.py upgrade --no-backup
+          python scripts/migrate_database.py status
+      - name: Verify upgrade from the previous release and interrupted DDL recovery
+        run: |
+          mysql -h127.0.0.1 -P3306 -uroot -proot -e "CREATE DATABASE chemicalops_upgrade CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+          mysql -h127.0.0.1 -P3306 -uroot -proot chemicalops_upgrade < database/schema.sql
+          MYSQL_DATABASE=chemicalops_upgrade MYSQL_USER=root MYSQL_PASSWORD=root python scripts/migrate_database.py upgrade --target 020 --no-backup
+          MYSQL_DATABASE=chemicalops_upgrade MYSQL_USER=root MYSQL_PASSWORD=root python scripts/migrate_database.py upgrade --target 021 --no-backup
+          mysql -h127.0.0.1 -P3306 -uroot -proot chemicalops_upgrade -e "ALTER TABLE sys_idempotency_records ADD COLUMN response_headers JSON NULL"
+          MYSQL_DATABASE=chemicalops_upgrade MYSQL_USER=root MYSQL_PASSWORD=root python scripts/migrate_database.py upgrade --target 022 --no-backup
+          MYSQL_DATABASE=chemicalops_upgrade MYSQL_USER=root MYSQL_PASSWORD=root python scripts/migrate_database.py upgrade --no-backup
+      - name: Compile backend
+        run: python -m compileall -q backend/app scripts tests
       - name: Dependency and code security scan
         run: |
           python -m pip install pip-audit bandit
           pip-audit -r backend/requirements.txt
           bandit -q -r backend/app scripts
       - name: Run tests
-        run: PYTHONPATH=backend python -m pytest -q
+        run: python -m pytest --strict-config --strict-markers -q -rs
       - name: Start API for smoke load test
         run: |
           PYTHONPATH=backend python -m uvicorn app.main:app --host 127.0.0.1 --port 8888 > /tmp/chemicalops-api.log 2>&1 &
@@ -103,9 +134,6 @@ jobs:
       - name: Build frontend
         working-directory: frontend-design
         run: pnpm build:chemicalops
-      # vben monorepo 依赖量大，上游依赖的告警不应阻塞业务构建；
-      # 这里只输出报告，实际处理另行跟进。
       - name: Frontend dependency security audit
-        continue-on-error: true
         working-directory: frontend-design
         run: pnpm audit --audit-level high

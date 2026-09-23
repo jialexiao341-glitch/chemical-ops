@@ -1,5 +1,6 @@
 """接口测试公共夹具。"""
 
+import os
 import sys
 from collections.abc import Generator
 from pathlib import Path
@@ -36,6 +37,8 @@ def db_engine():
         connection = engine.connect()
         connection.close()
     except SQLAlchemyError as exc:
+        if os.environ.get("CI", "").strip().lower() == "true":
+            pytest.fail(f"CI 测试数据库不可用，拒绝跳过集成测试：{exc}")
         pytest.skip(f"测试数据库不可用：{exc}")
     return engine
 
