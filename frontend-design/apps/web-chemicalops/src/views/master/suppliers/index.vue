@@ -5,6 +5,9 @@ import type {
 } from '#/adapter/vxe-table';
 import type { SupplierApi } from '#/api';
 
+import { onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
+
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -12,11 +15,13 @@ import { Button, message } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { deleteSupplierApi, getSupplierListApi } from '#/api';
+import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'SupplierList' });
+const route = useRoute();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -95,6 +100,20 @@ function onDelete(row: SupplierApi.Supplier) {
 function onRefresh() {
   gridApi.query();
 }
+
+onMounted(async () => {
+  await applyAiFiltersToList('suppliers', route.query.ai_filters, gridApi.formApi);
+  gridApi.query();
+});
+
+watch(
+  () => route.query.ai_filters,
+  async (rawQuery) => {
+    if (await applyAiFiltersToList('suppliers', rawQuery, gridApi.formApi)) {
+      gridApi.query();
+    }
+  },
+);
 </script>
 
 <template>

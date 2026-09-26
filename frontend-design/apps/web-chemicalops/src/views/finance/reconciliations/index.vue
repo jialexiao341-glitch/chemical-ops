@@ -2,7 +2,8 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FinanceApi } from '#/api';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
@@ -16,11 +17,13 @@ import {
   getReconciliationListApi,
 } from '#/api';
 import { getSupplierNameMap } from '#/utils/lookup';
+import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
 
 defineOptions({ name: 'ReconciliationList' });
+const route = useRoute();
 
 const [Create, createApi] = useVbenModal({
   connectedComponent: CreateModal,
@@ -113,8 +116,28 @@ onMounted(async () => {
   } catch {
     resolveSupplier.value = (id) => (id ? `#${id}` : '-');
   }
+  await applyAiFiltersToList(
+    'finance_reconciliations',
+    route.query.ai_filters,
+    gridApi.formApi,
+  );
   gridApi.query();
 });
+
+watch(
+  () => route.query.ai_filters,
+  async (rawQuery) => {
+    if (
+      await applyAiFiltersToList(
+        'finance_reconciliations',
+        rawQuery,
+        gridApi.formApi,
+      )
+    ) {
+      gridApi.query();
+    }
+  },
+);
 </script>
 
 <template>

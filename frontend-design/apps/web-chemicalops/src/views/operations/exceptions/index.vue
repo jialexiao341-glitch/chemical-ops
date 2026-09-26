@@ -5,7 +5,8 @@ import type {
 } from '#/adapter/vxe-table';
 import type { OperationExceptionApi } from '#/api';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { Page, useVbenDrawer } from '@vben/common-ui';
 
@@ -13,11 +14,13 @@ import { Button } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getExceptionListApi, getUserListApi } from '#/api';
+import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import DetailDrawer from './modules/detail.vue';
 
 defineOptions({ name: 'OperationExceptionList' });
+const route = useRoute();
 
 const [Detail, detailApi] = useVbenDrawer({
   connectedComponent: DetailDrawer,
@@ -76,8 +79,22 @@ onMounted(async () => {
   } catch {
     resolveOwner.value = (id) => (id ? `#${id}` : '-');
   }
+  await applyAiFiltersToList(
+    'exceptions',
+    route.query.ai_filters,
+    gridApi.formApi,
+  );
   gridApi.query();
 });
+
+watch(
+  () => route.query.ai_filters,
+  async (rawQuery) => {
+    if (await applyAiFiltersToList('exceptions', rawQuery, gridApi.formApi)) {
+      gridApi.query();
+    }
+  },
+);
 </script>
 
 <template>

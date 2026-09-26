@@ -5,8 +5,8 @@ import type {
 } from '#/adapter/vxe-table';
 import type { PurchaseOrderApi } from '#/api';
 
-import { onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 
@@ -19,12 +19,14 @@ import {
   submitPurchaseOrderApi,
 } from '#/api';
 import { getSupplierNameMap } from '#/utils/lookup';
+import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import ApproveModal from './modules/approve.vue';
 import CancelModal from './modules/cancel.vue';
 
 defineOptions({ name: 'PurchaseOrderList' });
+const route = useRoute();
 
 const router = useRouter();
 
@@ -141,8 +143,22 @@ onMounted(async () => {
     }
     return suppliers.get(id) ?? `#${id}`;
   };
+  await applyAiFiltersToList(
+    'purchase_orders',
+    route.query.ai_filters,
+    gridApi.formApi,
+  );
   gridApi.query();
 });
+
+watch(
+  () => route.query.ai_filters,
+  async (rawQuery) => {
+    if (await applyAiFiltersToList('purchase_orders', rawQuery, gridApi.formApi)) {
+      gridApi.query();
+    }
+  },
+);
 </script>
 
 <template>

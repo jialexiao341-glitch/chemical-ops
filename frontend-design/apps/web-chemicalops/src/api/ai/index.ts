@@ -61,6 +61,19 @@ export namespace AiApi {
     pushed: boolean;
     snapshot: Record<string, unknown>;
   }
+
+  export interface NLFilterResult {
+    dataset: string;
+    dataset_label: string;
+    dropped: string[];
+    filters: Record<string, string>;
+    keywords?: null | string;
+    time_range?: null | {
+      date_from?: null | string;
+      date_to?: null | string;
+      field: string;
+    };
+  }
 }
 
 /** 生成运营晨报；推送时由调用方先向用户确认接收角色。 */
@@ -68,6 +81,14 @@ export async function generateBriefingApi(push = false) {
   return requestClient.post<AiApi.BriefingResult>('/ai/briefing', {
     notify_role_codes: ['SYS_ADMIN', 'PROCUREMENT_MANAGER'],
     push,
+  });
+}
+
+/** 将自然语言解析为目标业务列表可检查的筛选条件，不执行查询。 */
+export async function parseNaturalFiltersApi(dataset: string, question: string) {
+  return requestClient.post<AiApi.NLFilterResult>('/ai/parse-filters', {
+    dataset,
+    question,
   });
 }
 

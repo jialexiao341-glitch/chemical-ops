@@ -5,7 +5,8 @@ import type {
 } from '#/adapter/vxe-table';
 import type { DeliveryApi } from '#/api';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
@@ -15,12 +16,14 @@ import { Button } from 'antdv-next';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getDeliveryListApi } from '#/api';
 import { getSupplierNameMap } from '#/utils/lookup';
+import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
 import ReceiveModal from './modules/receive.vue';
 
 defineOptions({ name: 'DeliveryList' });
+const route = useRoute();
 
 const [Create, createApi] = useVbenModal({
   connectedComponent: CreateModal,
@@ -81,8 +84,22 @@ onMounted(async () => {
     }
     return suppliers.get(id) ?? `#${id}`;
   };
+  await applyAiFiltersToList(
+    'deliveries',
+    route.query.ai_filters,
+    gridApi.formApi,
+  );
   gridApi.query();
 });
+
+watch(
+  () => route.query.ai_filters,
+  async (rawQuery) => {
+    if (await applyAiFiltersToList('deliveries', rawQuery, gridApi.formApi)) {
+      gridApi.query();
+    }
+  },
+);
 </script>
 
 <template>

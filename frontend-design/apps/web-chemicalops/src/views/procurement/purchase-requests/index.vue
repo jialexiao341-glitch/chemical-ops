@@ -5,6 +5,9 @@ import type {
 } from '#/adapter/vxe-table';
 import type { PurchaseRequestApi } from '#/api';
 
+import { onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
+
 import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -12,6 +15,7 @@ import { Button, message, Modal } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getPurchaseRequestListApi, submitPurchaseRequestApi } from '#/api';
+import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import ApproveModal from './modules/approve.vue';
@@ -20,6 +24,7 @@ import DetailDrawer from './modules/detail.vue';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'PurchaseRequestList' });
+const route = useRoute();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -116,6 +121,24 @@ function onSubmit(row: PurchaseRequestApi.PurchaseRequest) {
     title: '提交采购申请',
   });
 }
+
+onMounted(async () => {
+  await applyAiFiltersToList(
+    'purchase_requests',
+    route.query.ai_filters,
+    gridApi.formApi,
+  );
+  gridApi.query();
+});
+
+watch(
+  () => route.query.ai_filters,
+  async (rawQuery) => {
+    if (await applyAiFiltersToList('purchase_requests', rawQuery, gridApi.formApi)) {
+      gridApi.query();
+    }
+  },
+);
 </script>
 
 <template>

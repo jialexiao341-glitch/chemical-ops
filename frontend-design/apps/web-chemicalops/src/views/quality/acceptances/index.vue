@@ -5,6 +5,9 @@ import type {
 } from '#/adapter/vxe-table';
 import type { QualityAcceptanceApi } from '#/api';
 
+import { onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
+
 import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -12,12 +15,14 @@ import { Button } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getAcceptanceListApi } from '#/api';
+import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
 import ResultDrawer from './modules/result.vue';
 
 defineOptions({ name: 'AcceptanceList' });
+const route = useRoute();
 
 const [Create, createApi] = useVbenModal({
   connectedComponent: CreateModal,
@@ -67,6 +72,24 @@ function onActionClick({
     resultApi.setData(row).open();
   }
 }
+
+onMounted(async () => {
+  await applyAiFiltersToList(
+    'quality_acceptances',
+    route.query.ai_filters,
+    gridApi.formApi,
+  );
+  gridApi.query();
+});
+
+watch(
+  () => route.query.ai_filters,
+  async (rawQuery) => {
+    if (await applyAiFiltersToList('quality_acceptances', rawQuery, gridApi.formApi)) {
+      gridApi.query();
+    }
+  },
+);
 </script>
 
 <template>

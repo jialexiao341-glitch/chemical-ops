@@ -1,20 +1,22 @@
 <script lang="ts" setup>
 import type { AiApi } from '#/api';
 
-import { nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
-import { Button, Empty, Input, message, Modal, Spin, Tag } from 'antdv-next';
+import { Button, Empty, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
 
 import {
   deleteConversationApi,
   generateBriefingApi,
   getAIMessagesApi,
   getConversationListApi,
+  parseNaturalFiltersApi,
   streamChatApi,
 } from '#/api';
+import { AI_FILTER_TARGETS } from '#/utils/ai-list-filters';
 import { formatDateTime } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
 
@@ -45,6 +47,32 @@ const inputText = ref('');
 const sending = ref(false);
 const historyLoading = ref(false);
 const messagesRef = ref<HTMLElement>();
+const filterPanelOpen = ref(false);
+const filterDataset = ref('purchase_requests');
+const filterQuestion = ref('');
+const filterResult = ref<AiApi.NLFilterResult>();
+const filterDraft = ref<Record<string, string>>({});
+const filterKeyword = ref('');
+const filterRange = ref<AiApi.NLFilterResult['time_range']>();
+const filterRangeFrom = ref('');
+const filterRangeTo = ref('');
+const filterParsing = ref(false);
+const filterFieldNames = computed(() => Object.keys(filterDraft.value));
+const canApplyFilters = computed(() => {
+  const target = AI_FILTER_TARGETS.find(
+    (item) => item.dataset === filterResult.value?.dataset,
+  );
+  if (!target) return false;
+  return (
+    Object.entries(filterDraft.value).some(
+      ([key, value]) => Boolean(target.fields[key] && value.trim()),
+    ) || Boolean(target.keyword && filterKeyword.value.trim())
+  );
+});
+const filterDatasetOptions = AI_FILTER_TARGETS.map(({ dataset, label }) => ({
+  label,
+  value: dataset,
+}));
 
 let messageSeed = 0;
 function nextId() {
@@ -251,6 +279,65 @@ function confirmBriefingPush() {
   });
 }
 
+async function parseListFilters() {
+  if (!filterQuestion.value.trim() || filterParsing.value) return;
+  filterParsing.value = true;
+  filterResult.value = undefined;
+  try {
+    const result = await parseNaturalFiltersApi(
+      filterDataset.value,
+      filterQuestion.value.trim(),
+    );
+    filterResult.value = result;
+    filterDraft.value = { ...result.filters };
+    filterKeyword.value = result.keywords || '';
+    filterRange.value = result.time_range ? { ...result.time_range } : null;
+    filterRangeFrom.value = result.time_range?.date_from || '';
+    filterRangeTo.value = result.time_range?.date_to || '';
+  } catch (error: any) {
+    message.error(error?.message || '筛选条件解析失败');
+  } finally {
+    filterParsing.value = false;
+  }
+}
+
+function removeFilterField(name: string) {
+  const next = { ...filterDraft.value };
+  delete next[name];
+  filterDraft.value = next;
+}
+
+function applyListFilters() {
+  const target = AI_FILTER_TARGETS.find(
+    (item) => item.dataset === filterResult.value?.dataset,
+  );
+  if (!target || !filterResult.value) return;
+
+  const filters: Record<string, string> = {};
+  const unsupported: string[] = [];
+  for (const [name, value] of Object.entries(filterDraft.value)) {
+    if (!value.trim()) continue;
+    if (target.fields[name]) filters[name] = value.trim();
+    else unsupported.push(name);
+  }
+  if (filterRange.value) unsupported.push('时间范围');
+  const keywords = target.keyword ? filterKeyword.value.trim() : '';
+  if (filterKeyword.value.trim() && !target.keyword) unsupported.push('关键字');
+  if (unsupported.length) {
+    message.warning(`目标列表暂不支持：${unsupported.join('、')}；这些条件不会应用`);
+  }
+  void router.push({
+    path: target.path,
+    query: {
+      ai_filters: JSON.stringify({
+        dataset: target.dataset,
+        filters,
+        keywords: keywords || null,
+      }),
+    },
+  });
+}
+
 function onTextKeydown(event: KeyboardEvent) {
   // Enter 发送，Shift+Enter 换行
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -323,6 +410,7 @@ onMounted(loadConversations);
               </span>
             </div>
             <div class="flex gap-2">
+              <Button @click="filterPanelOpen = !filterPanelOpen">自然语言筛选</Button>
               <Button @click="generateBriefing(false)">生成运营晨报</Button>
               <Button type="primary" @click="confirmBriefingPush">生成并推送</Button>
             </div>
@@ -337,6 +425,38 @@ onMounted(loadConversations);
               <p>可尝试：“本季度各供应商采购订单金额”“目前在途到货单”“各仓库库存余额”。</p>
             </div>
           </details>
+          <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
+            <div class="grid gap-2 sm:grid-cols-[180px_1fr_auto]">
+              <Select v-model:value="filterDataset" :options="filterDatasetOptions" />
+              <Input v-model:value="filterQuestion" placeholder="例如：只看本月已批准的采购申请" @press-enter="parseListFilters" />
+              <Button :loading="filterParsing" :disabled="!filterQuestion.trim()" type="primary" @click="parseListFilters">解析条件</Button>
+            </div>
+            <div v-if="filterResult" class="mt-3 space-y-2">
+              <div class="text-muted-foreground text-xs">检查并编辑条件；确认后会带入所选业务列表的筛选栏。</div>
+              <div v-for="name in filterFieldNames" :key="name" class="flex items-center gap-2">
+                <Tag class="!mr-0">{{ name }}</Tag>
+                <Input v-model:value="filterDraft[name]" size="small" />
+                <Button size="small" type="text" danger @click="removeFilterField(name)">移除</Button>
+              </div>
+              <div v-if="filterKeyword" class="flex items-center gap-2">
+                <Tag class="!mr-0">关键字</Tag>
+                <Input v-model:value="filterKeyword" size="small" />
+              </div>
+              <div v-if="filterRange" class="flex flex-wrap items-center gap-2">
+                <Tag class="!mr-0">时间范围（目标列表暂不支持）</Tag>
+                <Input v-model:value="filterRangeFrom" type="date" size="small" />
+                <span>至</span>
+                <Input v-model:value="filterRangeTo" type="date" size="small" />
+                <Button size="small" type="text" danger @click="filterRange = null">移除</Button>
+              </div>
+              <ul v-if="filterResult.dropped.length" class="text-amber-700 list-disc pl-5 text-xs">
+                <li v-for="item in filterResult.dropped" :key="item">未识别：{{ item }}</li>
+              </ul>
+              <div class="flex justify-end">
+                <Button :disabled="!canApplyFilters" type="primary" @click="applyListFilters">确认并打开业务列表</Button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
