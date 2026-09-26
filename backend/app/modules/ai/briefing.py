@@ -12,6 +12,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.errors import AuthorizationError
 from app.modules.ai.schema import (
     AIChatMessage,
     AIChatRequest,
@@ -23,6 +24,7 @@ from app.modules.dashboard.service import get_overview, get_report
 from app.modules.notifications.service import notify_users
 from app.modules.system.audit import add_audit_log
 from app.modules.system.model import User
+from app.modules.system.crud import get_user_role_codes
 
 DEFAULT_NOTIFY_ROLES = ("SYS_ADMIN", "PROCUREMENT_MANAGER")
 
@@ -79,6 +81,12 @@ async def generate_briefing(
     db: Session, user: User, request: BriefingRequest
 ) -> BriefingResponse:
     """生成运营晨报；request.push=True 时同时发送站内通知。"""
+
+    can_push = {"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(
+        get_user_role_codes(db, user.id)
+    )
+    if request.push and not can_push:
+        raise AuthorizationError("只有系统管理员或采购经理可以推送运营晨报")
 
     snapshot = build_snapshot(db)
     result = await chat(

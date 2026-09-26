@@ -2,6 +2,7 @@
 import type { AiApi } from '#/api';
 
 import { nextTick, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
@@ -9,6 +10,7 @@ import { Button, Empty, Input, message, Modal, Spin, Tag } from 'antdv-next';
 
 import {
   deleteConversationApi,
+  generateBriefingApi,
   getAIMessagesApi,
   getConversationListApi,
   streamChatApi,
@@ -17,15 +19,18 @@ import { formatDateTime } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
 
 defineOptions({ name: 'AiWorkspace' });
+const router = useRouter();
 
 /** 聊天界面的一条消息 */
 interface UiMessage {
   content: string;
+  citations?: any[];
   id: string;
   /** 后端 Text2SQL 查询链路，仅助手消息可能携带 */
   queryTrace?: any;
   /** 查询链路详情是否展开（默认收起，点击查看） */
   traceOpen?: boolean;
+  openCitationIds?: number[];
   role: 'assistant' | 'user';
   /** 流式回复是否仍在输出 */
   streaming?: boolean;
@@ -78,6 +83,7 @@ async function openConversation(conversation: AiApi.Conversation) {
     const res = await getAIMessagesApi(conversation.id);
     messages.value = res.items.map((item) => ({
       content: item.content,
+      citations: Array.isArray(item.citations) ? item.citations : [],
       id: String(item.id),
       queryTrace: (item.citations as any)?.[0]?.query_trace,
       role: item.role === 'user' ? 'user' : 'assistant',
@@ -165,6 +171,7 @@ async function onSend() {
       onDone(payloadDone) {
         updateLast({
           content: payloadDone.answer ?? '',
+          citations: Array.isArray(payloadDone.citations) ? payloadDone.citations : [],
           queryTrace: payloadDone.query_trace,
           streaming: false,
         });
@@ -189,6 +196,59 @@ function toggleTrace(id: string) {
   messages.value = messages.value.map((item) =>
     item.id === id ? { ...item, traceOpen: !item.traceOpen } : item,
   );
+}
+
+function toggleCitation(messageId: string, sectionId: number) {
+  messages.value = messages.value.map((item) => {
+    if (item.id !== messageId) return item;
+    const open = item.openCitationIds ?? [];
+    return {
+      ...item,
+      openCitationIds: open.includes(sectionId)
+        ? open.filter((id) => id !== sectionId)
+        : [...open, sectionId],
+    };
+  });
+}
+
+function openDataset(dataset: string) {
+  const paths: Record<string, string> = {
+    deliveries: '/warehouse/deliveries',
+    exceptions: '/operations/exceptions',
+    finance_reconciliations: '/finance/reconciliations',
+    inventory: '/warehouse/inventory',
+    purchase_orders: '/procurement/orders',
+    purchase_requests: '/procurement/requests',
+    quality_acceptances: '/quality/acceptances',
+    suppliers: '/master/suppliers',
+  };
+  const path = paths[dataset];
+  if (path) void router.push(path);
+}
+
+async function generateBriefing(push: boolean) {
+  try {
+    const result = await generateBriefingApi(push);
+    if (result.pushed) {
+      message.success(`晨报已推送给 ${result.notified_count} 位接收人`);
+    }
+    Modal.info({
+      content: result.content,
+      title: `运营晨报 · ${formatDateTime(result.generated_at)}`,
+      width: 560,
+    });
+  } catch (error: any) {
+    message.error(error?.message || '晨报生成失败');
+  }
+}
+
+function confirmBriefingPush() {
+  Modal.confirm({
+    content: '晨报将发送给系统管理员和采购经理，是否继续？',
+    okText: '确认推送',
+    onOk: () => generateBriefing(true),
+    title: '确认晨报接收对象',
+  });
 }
 
 function onTextKeydown(event: KeyboardEvent) {
@@ -254,13 +314,29 @@ onMounted(loadConversations);
 
       <!-- 右侧对话区 -->
       <div class="flex min-w-0 flex-1 flex-col rounded-lg border bg-card">
-        <div
-          class="border-b px-4 py-3 text-sm font-medium"
-        >
-          AI 助手
-          <span class="text-muted-foreground ml-2 text-xs font-normal">
-            支持自然语言查询与分析，仅查询不执行业务操作
-          </span>
+        <div class="border-b px-4 py-3 text-sm font-medium">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              AI 助手
+              <span class="text-muted-foreground ml-2 text-xs font-normal">
+                支持自然语言查询与分析，仅查询不执行业务操作
+              </span>
+            </div>
+            <div class="flex gap-2">
+              <Button @click="generateBriefing(false)">生成运营晨报</Button>
+              <Button type="primary" @click="confirmBriefingPush">生成并推送</Button>
+            </div>
+          </div>
+          <details class="mt-2 text-xs font-normal">
+            <summary class="text-muted-foreground cursor-pointer select-none">
+              当前支持范围
+            </summary>
+            <div class="text-muted-foreground mt-2 space-y-1 leading-5">
+              <p>业务查询：采购申请、采购订单、到货、库存、质量验收、运营异常、财务对账、供应商。</p>
+              <p>库存流水、领用、调拨、盘点、询价报价、退货、发票和付款明细暂未接入。金额按币种分别核算，库存数量按单位分别展示。</p>
+              <p>可尝试：“本季度各供应商采购订单金额”“目前在途到货单”“各仓库库存余额”。</p>
+            </div>
+          </details>
         </div>
 
         <div
@@ -302,6 +378,26 @@ onMounted(loadConversations);
                   v-if="item.queryTrace"
                   class="border-border/50 mt-2 border-t pt-2 text-xs opacity-80"
                 >
+                  <div class="mb-2 rounded-md border border-border/70 bg-background/70 p-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span class="font-medium">数据来源：</span>
+                        {{ item.queryTrace.dataset_label || item.queryTrace.dataset || '业务数据' }}
+                        <span v-if="item.queryTrace.executed_at" class="text-muted-foreground ml-2">
+                          查询于 {{ formatDateTime(item.queryTrace.executed_at) }}
+                        </span>
+                      </div>
+                      <Button
+                        v-if="item.queryTrace.dataset"
+                        size="small"
+                        type="link"
+                        @click="openDataset(item.queryTrace.dataset)"
+                      >打开对应业务列表</Button>
+                    </div>
+                    <div v-if="item.queryTrace.unit_note" class="text-muted-foreground mt-1">
+                      口径：{{ item.queryTrace.unit_note }}
+                    </div>
+                  </div>
                   <!-- 默认收起：标题行常驻摘要，点击展开槽位与 SQL -->
                   <button
                     class="flex w-full cursor-pointer items-center gap-1 text-left select-none"
@@ -342,6 +438,42 @@ onMounted(loadConversations);
                     >{{ item.queryTrace.sql }}</pre>
                   </template>
                 </div>
+                <details v-if="item.citations?.some((citation) => citation.type === 'doc_kb')" class="mt-3 border-t border-border/50 pt-2">
+                  <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">
+                    资料来源（{{ item.citations.filter((citation) => citation.type === 'doc_kb').length }}）
+                  </summary>
+                  <div class="mt-2 space-y-2">
+                    <article
+                      v-for="citation in item.citations.filter((value) => value.type === 'doc_kb')"
+                      :key="citation.section_id ?? `${citation.cas_no}-${citation.section_key}`"
+                      class="rounded-md border border-border/70 bg-background/70 p-2 text-xs"
+                    >
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-medium">{{ citation.document_title || citation.title || citation.name_zh || citation.cas_no }}</span>
+                        <Tag v-if="citation.source_status === 'missing' || (citation.source_status !== 'unverified' && citation.parse_status && citation.parse_status !== 'PARSED')" color="red" class="!mr-0">来源已不存在或不可用</Tag>
+                        <Tag v-else-if="citation.source_status === 'unverified'" color="orange" class="!mr-0">历史来源信息不完整，无法核验</Tag>
+                        <Tag v-else color="green" class="!mr-0">来源有效</Tag>
+                      </div>
+                      <div class="text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                        <span>CAS {{ citation.cas_no || '—' }}</span>
+                        <span>{{ citation.doc_type || '资料' }}{{ citation.section_no ? ` · SECTION ${citation.section_no}` : '' }}</span>
+                        <span>{{ citation.section_key || citation.title || '章节' }}</span>
+                        <span v-if="citation.updated_at">更新于 {{ formatDateTime(citation.updated_at) }}</span>
+                      </div>
+                      <button
+                        v-if="citation.content"
+                        class="mt-2 cursor-pointer text-blue-600 hover:underline"
+                        type="button"
+                        @click="toggleCitation(item.id, citation.section_id ?? -1)"
+                      >
+                        {{ (item.openCitationIds ?? []).includes(citation.section_id ?? -1) ? '收起章节摘录' : '预览章节摘录' }}
+                      </button>
+                      <p v-if="(item.openCitationIds ?? []).includes(citation.section_id ?? -1)" class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-border/60 pt-2 leading-5">
+                        {{ citation.content }}
+                      </p>
+                    </article>
+                  </div>
+                </details>
               </div>
             </div>
           </Spin>

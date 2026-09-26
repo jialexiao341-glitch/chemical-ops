@@ -44,6 +44,10 @@ class DocSectionHit:
     content: str
     score: float
     source: str  # vector | bridge
+    document_id: int | None = None
+    document_title: str | None = None
+    parse_status: str | None = None
+    updated_at: str | None = None
 
 
 async def resolve_doc_targets(db: Session, question: str) -> list[str]:
@@ -118,7 +122,14 @@ async def retrieve_sections(
         from app.modules.doc_kb.model import AiDocument
 
         statement = (
-            select(AiDocumentSection, AiDocument.name_zh)
+            select(
+                AiDocumentSection,
+                AiDocument.name_zh,
+                AiDocument.id,
+                AiDocument.title,
+                AiDocument.parse_status,
+                AiDocument.updated_at,
+            )
             .join(AiDocument, AiDocument.id == AiDocumentSection.document_id)
             .where(
                 AiDocument.parse_status == "PARSED",
@@ -127,7 +138,7 @@ async def retrieve_sections(
             .order_by(AiDocumentSection.cas_no, AiDocumentSection.doc_type, AiDocumentSection.section_no)
         )
         per_cas_seen: dict[str, int] = {}
-        for section, name_zh in db.execute(statement).all():
+        for section, name_zh, document_id, document_title, parse_status, updated_at in db.execute(statement).all():
             seen = per_cas_seen.get(section.cas_no, 0)
             if seen >= BRIDGE_SECTIONS_PER_CAS:
                 continue
@@ -145,7 +156,36 @@ async def retrieve_sections(
                 content=section.content,
                 score=0.5,  # 桥接命中给中性分：弱于向量命中、强于未命中
                 source="bridge",
+                document_id=document_id,
+                document_title=document_title,
+                parse_status=parse_status,
+                updated_at=updated_at.isoformat() if updated_at else None,
             )
+
+    # 向量命中也通过数据库补齐可核验的文档元数据，不信任向量 payload 中的来源状态。
+    if merged:
+        from app.modules.doc_kb.model import AiDocument
+
+        metadata = db.execute(
+            select(
+                AiDocumentSection.id,
+                AiDocument.id,
+                AiDocument.title,
+                AiDocument.name_zh,
+                AiDocument.parse_status,
+                AiDocument.updated_at,
+            )
+            .join(AiDocument, AiDocument.id == AiDocumentSection.document_id)
+            .where(AiDocumentSection.id.in_(merged))
+        ).all()
+        for section_id, document_id, document_title, name_zh, parse_status, updated_at in metadata:
+            hit = merged.get(section_id)
+            if hit:
+                hit.document_id = document_id
+                hit.document_title = document_title
+                hit.name_zh = hit.name_zh or name_zh
+                hit.parse_status = parse_status
+                hit.updated_at = updated_at.isoformat() if updated_at else None
 
     ordered = sorted(merged.values(), key=lambda item: -item.score)
     return ordered[:top_k]
@@ -174,6 +214,9 @@ def build_doc_context(hits: list[DocSectionHit], *, max_chars: int = CONTEXT_MAX
         citations.append(
             {
                 "type": "doc_kb",
+                "document_id": hit.document_id,
+                "section_id": hit.id,
+                "document_title": hit.document_title,
                 "cas_no": hit.cas_no,
                 "doc_type": hit.doc_type,
                 "section_no": hit.section_no,
@@ -181,6 +224,9 @@ def build_doc_context(hits: list[DocSectionHit], *, max_chars: int = CONTEXT_MAX
                 "title": hit.title,
                 "name_zh": hit.name_zh,
                 "score": round(hit.score, 4),
+                "parse_status": hit.parse_status,
+                "updated_at": hit.updated_at,
+                "content": hit.content[:SECTION_CONTENT_MAX_CHARS],
             }
         )
     return header + "\n\n".join(parts), citations

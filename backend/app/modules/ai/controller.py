@@ -5,6 +5,7 @@ from time import perf_counter
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -27,6 +28,7 @@ from app.modules.ai.schema import (
     NLFilterRequest,
     NLFilterResult,
 )
+from app.modules.doc_kb.model import AiDocument, AiDocumentSection
 from app.modules.system.model import User
 
 
@@ -106,7 +108,41 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
 
     items, total = service.list_messages(db, user, conversation_id, limit=limit)
     LOGGER.info("AI HTTP 历史消息 user_id=%s conversation_id=%s count=%s", user.id, conversation_id, total)
-    result = [AIMessageRead(id=item.id, conversation_id=item.conversation_id, role=item.message_role.lower(), content=item.content, citations=item.citations, created_at=item.created_at) for item in items]
+    result = []
+    for item in items:
+        citations = item.citations
+        if isinstance(citations, list):
+            normalized = []
+            for citation in citations:
+                if not isinstance(citation, dict) or citation.get("type") != "doc_kb":
+                    normalized.append(citation)
+                    continue
+                section_id = citation.get("section_id")
+                document_id = citation.get("document_id")
+                current = None
+                if isinstance(section_id, int) and isinstance(document_id, int):
+                    current = db.execute(
+                        select(AiDocument.parse_status)
+                        .join(AiDocumentSection, AiDocumentSection.document_id == AiDocument.id)
+                        .where(AiDocument.id == document_id, AiDocumentSection.id == section_id)
+                    ).scalar_one_or_none()
+                source_status = (
+                    "unverified"
+                    if not isinstance(section_id, int) or not isinstance(document_id, int)
+                    else "available" if current == "PARSED" else "missing"
+                )
+                normalized.append({**citation, "source_status": source_status})
+            citations = normalized
+        result.append(
+            AIMessageRead(
+                id=item.id,
+                conversation_id=item.conversation_id,
+                role=item.message_role.lower(),
+                content=item.content,
+                citations=citations,
+                created_at=item.created_at,
+            )
+        )
     return AIMessagePage(items=result, total=total)
 
 

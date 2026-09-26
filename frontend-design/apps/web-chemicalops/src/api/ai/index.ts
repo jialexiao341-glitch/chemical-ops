@@ -52,6 +52,23 @@ export namespace AiApi {
     /** 业务错误（后端 event: error） */
     onError?: (message: string) => void;
   }
+
+  export interface BriefingResult {
+    content: string;
+    generated_at: string;
+    model: string;
+    notified_count: number;
+    pushed: boolean;
+    snapshot: Record<string, unknown>;
+  }
+}
+
+/** 生成运营晨报；推送时由调用方先向用户确认接收角色。 */
+export async function generateBriefingApi(push = false) {
+  return requestClient.post<AiApi.BriefingResult>('/ai/briefing', {
+    notify_role_codes: ['SYS_ADMIN', 'PROCUREMENT_MANAGER'],
+    push,
+  });
 }
 
 /** 查询当前用户的 AI 会话列表 */
