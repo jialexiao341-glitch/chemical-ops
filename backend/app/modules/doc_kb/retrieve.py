@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -59,12 +60,16 @@ async def resolve_doc_targets(db: Session, question: str) -> list[str]:
     lowered = question.lower()
     rows = db.execute(
         select(Chemical.cas_no, Chemical.chemical_name, Chemical.english_name, Chemical.alias_text)
+        .where(Chemical.status == "ACTIVE")
     ).all()
     name_hits: list[tuple[int, str]] = []
     for cas_no, chemical_name, english_name, alias_text in rows:
         if not cas_no:
             continue
-        for name in (chemical_name, english_name, alias_text):
+        names = [chemical_name, english_name]
+        if alias_text:
+            names.extend(re.split(r"[,;，；、|/]+", str(alias_text)))
+        for name in names:
             if not name:
                 continue
             cleaned = str(name).strip()

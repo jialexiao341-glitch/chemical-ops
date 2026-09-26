@@ -25,7 +25,7 @@ from app.modules.ai.agent_prompt import (
     greeting_reply,
     result_rewrite_prompt,
 )
-from app.modules.ai.intent import Intent, classify_intent
+from app.modules.ai.intent import Intent, IntentResult, classify_intent
 from app.modules.ai.model import AIConversation, AIConversationState, AIMessage, AIQueryLog
 from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse, AIQueryTrace
 from app.modules.files import service as file_service
@@ -42,6 +42,7 @@ STREAM_CHUNK_SIZE = 4
 STREAM_CHUNK_DELAY_SECONDS = 0.03
 MAX_ATTACHMENT_CONTEXT_CHARS = 48_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
+UNRESOLVED_CHEMICAL_REPLY = "我没有匹配到已登记化学品的名称或有效 CAS 号，因此无法核对对应资料。请补充准确名称或 CAS 号后再问。"
 READ_ONLY_WRITE_MARKERS = (
     "帮我创建", "帮我修改", "帮我删除", "帮我提交", "帮我审批", "帮我驳回",
     "帮我下单", "帮我入库", "帮我出库", "帮我付款", "帮我执行",
@@ -99,6 +100,96 @@ def _query_log_fields(user: User, query: str) -> dict[str, object]:
         "query_length": len(query),
         "query_hash": _text_fingerprint(query),
     }
+
+
+CHEMICAL_REFERENCE_MARKERS = (
+    "产品",
+    "化学品",
+    "化合物",
+    "了解",
+    "介绍",
+    "什么是",
+    "是什么",
+    "基本信息",
+    "用途",
+    "特性",
+    "性质",
+    "物性",
+    "特点",
+    "溶解度",
+    "蒸气压",
+    "自燃温度",
+    "密度",
+    "外观",
+    "粘度",
+    "黏度",
+)
+CHEMICAL_SPECIFIC_DOC_MARKERS = (
+    "特性",
+    "性质",
+    "物性",
+    "特点",
+    "溶解度",
+    "蒸气压",
+    "自燃温度",
+    "密度",
+    "外观",
+    "粘度",
+    "黏度",
+    "闪点",
+    "沸点",
+    "熔点",
+    "分子式",
+    "分子量",
+    "危险性",
+    "危险类别",
+    "危险声明",
+    "信号词",
+    "ghs",
+    "msds",
+    "sds",
+    "安全数据表",
+    "急救",
+    "消防",
+    "灭火",
+    "泄漏处置",
+    "职业接触",
+    "毒性",
+    "储存条件",
+    "存储条件",
+    "相容性",
+    "不相容",
+    "tlv",
+    "ld50",
+    "lc50",
+)
+
+
+async def _classify_chat_intent(db: Session, question: str) -> IntentResult:
+    """将已登记化学品名称纳入意图判断；命中后仍通过知识库章节提供事实。"""
+
+    result = classify_intent(question)
+    lowered = question.lower()
+    asks_for_specific_properties = any(marker in lowered for marker in CHEMICAL_SPECIFIC_DOC_MARKERS)
+    should_resolve_chemical = (
+        result.intent is Intent.UNSUPPORTED
+        and result.reason == "no_supported_marker"
+        and any(marker in lowered for marker in CHEMICAL_REFERENCE_MARKERS)
+    ) or (result.intent is Intent.DOC and asks_for_specific_properties)
+    if not should_resolve_chemical:
+        return result
+    try:
+        from app.modules.doc_kb.retrieve import resolve_doc_targets
+
+        targets = await resolve_doc_targets(db, question)
+    except Exception as exc:
+        LOGGER.warning("化学品意图实体识别失败 error_type=%s", exc.__class__.__name__)
+        return IntentResult(Intent.DOC, "chemical_target_unresolved") if asks_for_specific_properties else result
+    if targets:
+        return result if result.intent is Intent.DOC else IntentResult(Intent.DOC, "registered_chemical_reference")
+    if asks_for_specific_properties or result.intent is Intent.UNSUPPORTED:
+        return IntentResult(Intent.DOC, "chemical_target_unresolved")
+    return result
 
 
 def _retryable_status(status_code: int) -> bool:
@@ -361,6 +452,9 @@ async def _run_text2sql_for_chat(
 
     executed_at = datetime.now()
     dataset_spec = CATALOG[result.plan.dataset]
+    permission = dataset_spec.permission
+    if result.plan.dataset == "weekly_order_risks":
+        permission = "procurement.orders.read + warehouse.deliveries.read"
     data_scope = {
         "date_from": result.plan.date_from.isoformat() if result.plan.date_from else None,
         "date_to": result.plan.date_to.isoformat() if result.plan.date_to else None,
@@ -381,7 +475,7 @@ async def _run_text2sql_for_chat(
         slots=result.slots,
         dataset=result.plan.dataset,
         dataset_label=dataset_spec.label,
-        permission=dataset_spec.permission,
+        permission=permission,
         thread_id=thread_id,
         executed_at=executed_at,
         data_scope=data_scope,
@@ -420,7 +514,7 @@ async def _run_text2sql_for_chat(
         "source": "实时数据库只读查询",
         "dataset": result.plan.dataset,
         "dataset_label": dataset_spec.label,
-        "permission": dataset_spec.permission,
+        "permission": permission,
         "thread_id": thread_id,
         "executed_at": executed_at.isoformat(),
         "data_scope": data_scope,
@@ -677,14 +771,14 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
     if user_message is None:
         raise BusinessValidationError("至少需要一条用户消息")
     LOGGER.info("AI 请求进入 mode=sync user_id=%s query_length=%s", user.id, len(user_message.content))
-    intent_result = classify_intent(user_message.content)
+    intent_result = await _classify_chat_intent(db, user_message.content)
     LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
     if intent_result.intent is Intent.DOC and not data.attachment_file_ids:
         from app.modules.doc_kb.retrieve import build_doc_context, retrieve_sections
 
-        hits = await retrieve_sections(db, user_message.content)
+        hits = [] if intent_result.reason == "chemical_target_unresolved" else await retrieve_sections(db, user_message.content)
         if not hits:
-            fixed_content = (
+            fixed_content = UNRESOLVED_CHEMICAL_REPLY if intent_result.reason == "chemical_target_unresolved" else (
                 "没有在化学品知识库中匹配到相关文档。"
                 "请改用 CAS 号（例如 64-17-5）或准确的中英文名称（例如 乙醇 / Ethanol）再试。"
             )
@@ -799,12 +893,12 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         yield f"event: error\ndata: {json.dumps({'message': '至少需要一条用户消息'}, ensure_ascii=False)}\n\n"
         return
     LOGGER.info("AI 请求进入 mode=stream %s", _query_log_fields(user, user_message.content))
-    stream_intent_result = classify_intent(user_message.content)
+    stream_intent_result = await _classify_chat_intent(db, user_message.content)
     LOGGER.info("AI 意图识别 mode=stream user_id=%s intent=%s reason=%s", user.id, stream_intent_result.intent, stream_intent_result.reason)
     if stream_intent_result.intent is Intent.DOC and not data.attachment_file_ids:
         from app.modules.doc_kb.retrieve import build_doc_context, retrieve_sections
 
-        hits = await retrieve_sections(db, user_message.content)
+        hits = [] if stream_intent_result.reason == "chemical_target_unresolved" else await retrieve_sections(db, user_message.content)
         doc_citations: list | None = None
         doc_model = "rule-based"
         if hits:
@@ -824,7 +918,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
             doc_model = result.model
             LOGGER.info("AI 流式文档问答完成 user_id=%s hits=%s answer_length=%s", user.id, len(hits), len(doc_content))
         else:
-            doc_content = (
+            doc_content = UNRESOLVED_CHEMICAL_REPLY if stream_intent_result.reason == "chemical_target_unresolved" else (
                 "没有在化学品知识库中匹配到相关文档。"
                 "请改用 CAS 号（例如 64-17-5）或准确的中英文名称（例如 乙醇 / Ethanol）再试。"
             )

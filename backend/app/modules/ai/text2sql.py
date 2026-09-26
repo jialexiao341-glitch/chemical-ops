@@ -18,18 +18,19 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import Select, and_, desc, func, or_, select
+from sqlalchemy import Select, and_, case, desc, exists, func, not_, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
-from app.modules.deliveries.model import Delivery
+from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance.model import FinanceReconciliation
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.operation_exceptions.model import OperationException
 from app.modules.products.model import Product
-from app.modules.purchase_orders.model import PurchaseOrder
-from app.modules.purchase_requests.model import PurchaseRequest
+from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
+from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem, Unit
+from app.modules.rfqs.model import RFQ, RFQItem
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.suppliers.model import Supplier
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
@@ -145,10 +146,87 @@ def _field(model: Any, name: str) -> Any:
     return value
 
 
-def build_statement(plan: QueryPlan) -> Select[Any]:
+def build_statement(plan: QueryPlan, db: Session | None = None, user: User | None = None) -> Select[Any]:
     spec = CATALOG.get(plan.dataset)
     if spec is None:
         raise BusinessValidationError("未授权的数据集")
+    if plan.dataset == "approved_requests_without_rfq":
+        direct_rfq = exists(select(1).where(RFQ.source_request_id == PurchaseRequest.id))
+        item_rfq = exists(
+            select(1)
+            .select_from(PurchaseRequestItem)
+            .join(RFQItem, RFQItem.source_request_item_id == PurchaseRequestItem.id)
+            .join(RFQ, RFQ.id == RFQItem.rfq_id)
+            .where(PurchaseRequestItem.request_id == PurchaseRequest.id)
+        )
+        return (
+            select(
+                PurchaseRequest.request_no.label("request_no"),
+                PurchaseRequest.purpose.label("purpose"),
+                PurchaseRequest.priority.label("priority"),
+                PurchaseRequest.approved_at.label("approved_at"),
+                PurchaseRequest.expected_date.label("expected_date"),
+            )
+            .where(PurchaseRequest.status == "APPROVED", not_(or_(direct_rfq, item_rfq)))
+            .order_by(PurchaseRequest.approved_at.desc(), PurchaseRequest.id.desc())
+            .limit(plan.limit + 1)
+        )
+    if plan.dataset == "weekly_order_risks":
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        next_week = week_start + timedelta(days=7)
+        week_start_at = datetime.combine(week_start, datetime.min.time())
+        week_end_at = datetime.combine(next_week, datetime.min.time())
+        overdue = and_(
+            Delivery.status == "IN_TRANSIT",
+            Delivery.expected_arrival_date >= week_start,
+            Delivery.expected_arrival_date < today,
+            PurchaseOrder.status.in_(("ORDERED", "PARTIAL")),
+        )
+        short_delivery = and_(
+            Delivery.status == "RECEIVED",
+            Delivery.actual_arrival_date >= week_start,
+            Delivery.actual_arrival_date <= today,
+            DeliveryItem.short_quantity > 0,
+        )
+        missing_documents = and_(
+            Delivery.status.in_(("IN_TRANSIT", "RECEIVED")),
+            Delivery.created_at >= week_start_at,
+            Delivery.created_at < week_end_at,
+            DeliveryItem.document_complete == 0,
+        )
+        statement = (
+            select(
+                PurchaseOrder.po_no.label("po_no"),
+                Supplier.supplier_name.label("supplier"),
+                Delivery.delivery_no.label("delivery_no"),
+                PurchaseOrderItem.product_name_snapshot.label("product"),
+                Unit.unit_name.label("unit"),
+                Delivery.expected_arrival_date.label("expected_arrival_date"),
+                Delivery.actual_arrival_date.label("actual_arrival_date"),
+                case((overdue, 1), else_=0).label("overdue_this_week"),
+                case((short_delivery, DeliveryItem.short_quantity), else_=0).label("short_quantity"),
+                case((missing_documents, 1), else_=0).label("documents_missing"),
+            )
+            .select_from(PurchaseOrder)
+            .join(Supplier, Supplier.id == PurchaseOrder.supplier_id)
+            .join(Delivery, Delivery.po_id == PurchaseOrder.id)
+            .join(DeliveryItem, DeliveryItem.delivery_id == Delivery.id)
+            .join(PurchaseOrderItem, PurchaseOrderItem.id == DeliveryItem.po_item_id)
+            .join(Unit, Unit.id == PurchaseOrderItem.unit_id)
+            .where(or_(overdue, short_delivery, missing_documents))
+            .order_by(PurchaseOrder.po_no, Delivery.delivery_no, DeliveryItem.line_no)
+            .limit(plan.limit + 1)
+        )
+        if user is not None:
+            role_codes = set(get_user_role_codes(db, user.id)) if db is not None else set()
+            if role_codes.intersection({"SYS_ADMIN", "PROCUREMENT_MANAGER"}):
+                pass
+            elif user.department_id is not None:
+                statement = statement.where(PurchaseOrder.department_id == user.department_id)
+            else:
+                statement = statement.where(PurchaseOrder.buyer_id == user.id)
+        return statement
     stmt, model, aliases = _base_statement(plan)
     metric = func.count(model.id) if plan.metric in {"count", "amount"} else func.sum(_field(model, "quantity"))
     if plan.metric == "amount":
@@ -192,6 +270,8 @@ def _serialize(value: Any) -> Any:
 
 
 DATASET_LABELS = {
+    "approved_requests_without_rfq": "已审批未建立询价单的采购申请",
+    "weekly_order_risks": "本周订单履约风险",
     "purchase_requests": "采购申请",
     "purchase_orders": "采购订单",
     "deliveries": "到货单",
@@ -201,19 +281,30 @@ DATASET_LABELS = {
     "finance_reconciliations": "财务对账",
     "suppliers": "供应商",
 }
-METRIC_LABELS = {"count": "数量", "amount": "金额", "sum_quantity": "数量合计"}
+METRIC_LABELS = {"count": "数量", "records": "业务明细", "amount": "金额", "sum_quantity": "数量合计"}
 DIMENSION_LABELS = {"supplier": "供应商", "region": "区域", "status": "状态", "priority": "优先级", "currency": "币种", "product": "产品", "warehouse": "仓库", "result": "验收结果", "severity": "严重程度", "type": "异常类型"}
-FIELD_LABELS = {"metric_value": "指标值", **DIMENSION_LABELS}
+FIELD_LABELS = {"metric_value": "指标值", "request_no": "申请编号", "purpose": "申请用途", "approved_at": "审批时间", "expected_date": "期望到货日期", "po_no": "订单编号", "delivery_no": "到货单号", "expected_arrival_date": "预计到货日", "actual_arrival_date": "实际到货日", "overdue_this_week": "本周逾期（1是）", "short_quantity": "本周短交数量", "documents_missing": "本周单证未齐（1是）", "unit": "单位", **DIMENSION_LABELS}
 
 
 def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
     """把 QueryPlan 转为用户可读的已抽取槽位。"""
 
+    time_field_value: Any = plan.time_field
+    time_field_display = plan.time_field or "不限时间"
+    date_range_value: Any = {"from": plan.date_from, "to": plan.date_to}
+    date_range_display = f"{plan.date_from or '不限'} 至 {plan.date_to or '不限'}"
+    if plan.dataset == "weekly_order_risks":
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        time_field_value = "按风险类型取预计到货日、实际到货日或登记时间"
+        time_field_display = "按风险类型取对应业务日期"
+        date_range_value = {"from": week_start.isoformat(), "to": today.isoformat()}
+        date_range_display = f"自然周 {week_start.isoformat()} 至 {today.isoformat()}"
     values: list[tuple[str, str, Any, str]] = [
         ("dataset", "数据集", plan.dataset, DATASET_LABELS.get(plan.dataset, plan.dataset)),
         ("metric", "指标", plan.metric, METRIC_LABELS.get(plan.metric, plan.metric)),
-        ("time_field", "时间字段", plan.time_field, plan.time_field or "不限时间"),
-        ("date_range", "时间范围", {"from": plan.date_from, "to": plan.date_to}, f"{plan.date_from or '不限'} 至 {plan.date_to or '不限'}"),
+        ("time_field", "时间字段", time_field_value, time_field_display),
+        ("date_range", "时间范围", date_range_value, date_range_display),
         ("group_by", "分组维度", plan.group_by, DIMENSION_LABELS.get(plan.group_by, plan.group_by or "不分组")),
         ("filters", "筛选条件", [item.model_dump(mode="json") for item in plan.filters], f"{len(plan.filters)} 项"),
         ("order", "排序", plan.order, "降序" if plan.order == "desc" else "升序"),
@@ -223,6 +314,10 @@ def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
 
 
 def _build_query_template(plan: QueryPlan) -> str:
+    if plan.dataset == "weekly_order_risks":
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        return f"自然周 {week_start.isoformat()} 至 {today.isoformat()} · 预计本周逾期未到货 · 本周确认短交 · 本周登记且单证未齐"
     metric = "SUM(order_amount)" if plan.metric == "amount" and plan.dataset == "purchase_orders" else plan.metric.upper()
     group = DIMENSION_LABELS.get(plan.group_by, plan.group_by or "整体")
     time_range = f"{plan.date_from or '起始时间'} 至 {plan.date_to or '结束时间'}" if plan.date_from or plan.date_to else "不限时间"
@@ -261,6 +356,10 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
     spec = CATALOG.get(plan.dataset)
     if spec is None or plan.metric not in spec.metrics:
         raise BusinessValidationError("查询指标不在允许范围内")
+    if plan.dataset == "approved_requests_without_rfq" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or plan.filters):
+        raise BusinessValidationError("该申请关联查询不支持额外筛选条件")
+    if plan.dataset == "weekly_order_risks" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or plan.filters):
+        raise BusinessValidationError("该订单风险查询按固定自然周口径执行，不支持额外筛选条件")
     if plan.group_by and plan.group_by not in spec.dimensions:
         raise BusinessValidationError("分组字段不在允许范围内")
     if plan.time_field and plan.time_field not in spec.times:
@@ -271,6 +370,10 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
     permission_codes = set(get_user_permission_codes(db, user.id))
     if "SYS_ADMIN" not in role_codes and spec.permission not in permission_codes:
         raise BusinessValidationError("当前用户没有执行该数据集查询的权限")
+    if plan.dataset == "weekly_order_risks" and "SYS_ADMIN" not in role_codes:
+        required_permissions = {"procurement.orders.read", "warehouse.deliveries.read"}
+        if not required_permissions.issubset(permission_codes):
+            raise BusinessValidationError("当前用户需要同时具备采购订单和到货单读取权限")
 
 
 _QUERY_PLAN_FIELDS = frozenset({"dataset", "metric", "time_field", "date_from", "date_to", "group_by", "filters", "order", "limit"})
@@ -329,9 +432,25 @@ def _normalize_query_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fallback_query_plan(question: str) -> QueryPlan | None:
-    """为高频供应商采购金额查询提供不依赖模型格式的安全兜底。"""
+    """为高频、口径固定的采购查询提供不依赖模型格式的安全兜底。"""
 
     normalized = question.lower()
+    is_request_without_rfq = (
+        "申请" in normalized
+        and "询价" in normalized
+        and any(marker in normalized for marker in ("已审批", "审批通过", "批准"))
+        and any(marker in normalized for marker in ("没有", "未", "还没", "尚未", "没建", "没询价", "无询价"))
+    )
+    if is_request_without_rfq:
+        return QueryPlan(dataset="approved_requests_without_rfq", metric="records", time_field=None, order="asc", limit=20)
+    is_weekly_order_risk = (
+        "订单" in normalized
+        and "本周" in normalized
+        and "逾期" in normalized
+        and any(marker in normalized for marker in ("短交", "单证", "文件"))
+    )
+    if is_weekly_order_risk:
+        return QueryPlan(dataset="weekly_order_risks", metric="records", time_field=None, order="asc", limit=20)
     is_overdue_delivery = "逾期" in normalized and any(marker in normalized for marker in ("到货", "收货", "入库"))
     if is_overdue_delivery:
         today = date.today()
@@ -391,6 +510,9 @@ def _merge_follow_up_plan(question: str, previous_plan: QueryPlan) -> QueryPlan:
 
 async def _understand_question(question: str, settings: Settings, previous_plan: QueryPlan | None = None) -> QueryPlan:
     fallback = _fallback_query_plan(question)
+    if fallback is not None and fallback.dataset in {"approved_requests_without_rfq", "weekly_order_risks"}:
+        LOGGER.info("AI 查询计划使用固定关联查询 question_hash=%s dataset=%s", _query_hash(question), fallback.dataset)
+        return fallback
     if fallback is not None and "逾期" in question and any(marker in question for marker in ("到货", "收货", "入库")):
         LOGGER.info("AI 查询计划使用安全兜底 question_hash=%s dataset=%s metric=%s", _query_hash(question), fallback.dataset, fallback.metric)
         return fallback
@@ -471,7 +593,7 @@ async def run_text2sql(
 
     def generate_sql(state: Text2SQLState) -> dict[str, Any]:
         # ORM 语句由白名单映射生成；模型返回值只作为 QueryPlan，不进入执行器。
-        statement = build_statement(state["plan"])
+        statement = build_statement(state["plan"], db, user)
         tables = CATALOG[state["plan"].dataset].tables
         parameterized_sql = validate_sql(_compile_statement(statement, db, literal_binds=False), tables)
         sql = validate_sql(_compile_statement(statement, db, literal_binds=True), tables)
@@ -481,11 +603,18 @@ async def run_text2sql(
         return {"sql": validate_sql(state["sql"], CATALOG[state["plan"].dataset].tables), "stages": [*state.get("stages", []), "sql_validation"]}
 
     def execute(state: Text2SQLState) -> dict[str, Any]:
-        result = db.execute(build_statement(state["plan"])).mappings().all()
+        result = db.execute(build_statement(state["plan"], db, user)).mappings().all()
         truncated = len(result) > state["plan"].limit
         result = result[: state["plan"].limit]
         rows = [{str(key): _serialize(value) for key, value in row.items()} for row in result]
-        columns = list(rows[0].keys()) if rows else (["metric_value"] if not state["plan"].group_by else [state["plan"].group_by, "metric_value"])
+        if rows:
+            columns = list(rows[0].keys())
+        elif state["plan"].dataset == "approved_requests_without_rfq":
+            columns = ["request_no", "purpose", "priority", "approved_at", "expected_date"]
+        elif state["plan"].dataset == "weekly_order_risks":
+            columns = ["po_no", "supplier", "delivery_no", "product", "unit", "expected_arrival_date", "actual_arrival_date", "overdue_this_week", "short_quantity", "documents_missing"]
+        else:
+            columns = ["metric_value"] if not state["plan"].group_by else [state["plan"].group_by, "metric_value"]
         render_columns = _build_render_columns(state["plan"], columns)
         unit, unit_note = _unit_metadata(state["plan"], rows)
         visualization = None
