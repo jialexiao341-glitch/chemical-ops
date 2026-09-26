@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.modules.inventory.model import InventoryBalance
+from app.modules.inventory.model import InventoryBalance, InventoryBatch
 from app.modules.purchase_orders.model import PurchaseOrder
 
 from .conftest import login
@@ -18,10 +18,12 @@ def test_return_repeat_execute_is_rejected(client: TestClient, db_session, demo_
 
     balance = db_session.scalar(select(InventoryBalance).where(InventoryBalance.quantity > 0).order_by(InventoryBalance.id).limit(1))
     assert balance is not None
+    batch = db_session.get(InventoryBatch, balance.batch_id)
+    assert batch is not None and batch.supplier_id is not None
     warehouse = login(client, "warehouse_receiver", demo_password)
     manager = login(client, "procurement_manager", demo_password)
     body = {
-        "supplier_id": 1,
+        "supplier_id": batch.supplier_id,
         "reason": "自动化测试退货",
         "items": [{
             "product_id": balance.product_id,

@@ -65,7 +65,7 @@ const logoSrc = computed(() => {
     <!-- 左侧认证面板 -->
     <AuthenticationFormView
       v-if="authPanelLeft"
-      class="min-h-full w-2/5 flex-1"
+      class="auth-form-panel min-h-full w-2/5 flex-1"
       data-side="left"
     >
       <template v-if="copyright" #copyright>
@@ -82,7 +82,7 @@ const logoSrc = computed(() => {
       <!-- 头部 Logo 和应用名称 -->
       <div
         v-if="logoSrc || appName"
-        class="absolute top-0 left-0 z-10 flex flex-1"
+        class="auth-brand absolute top-0 left-0 z-10 flex flex-1"
         @click="clickLogo"
       >
         <div
@@ -104,7 +104,11 @@ const logoSrc = computed(() => {
     </slot>
 
     <!-- 系统介绍 -->
-    <div v-if="!authPanelCenter" class="relative hidden w-0 flex-1 lg:block">
+    <div
+      v-if="!authPanelCenter"
+      class="auth-hero relative hidden w-0 flex-1 lg:block"
+    >
+      <slot name="hero">
       <div
         class="absolute inset-0 size-full bg-background-deep dark:bg-[#070709]"
       >
@@ -133,13 +137,14 @@ const logoSrc = computed(() => {
           </div>
         </div>
       </div>
+      </slot>
     </div>
 
     <!-- 中心认证面板 -->
     <div v-if="authPanelCenter" class="relative flex-center w-full">
       <div class="login-background absolute top-0 left-0 size-full"></div>
       <AuthenticationFormView
-        class="w-full rounded-3xl pb-20 shadow-float shadow-primary/5 md:w-2/3 md:bg-background lg:w-1/2 xl:w-[36%]"
+        class="auth-form-panel w-full rounded-3xl pb-20 shadow-float shadow-primary/5 md:w-2/3 md:bg-background lg:w-1/2 xl:w-[36%]"
         data-side="bottom"
       >
         <template v-if="copyright" #copyright>
@@ -156,7 +161,7 @@ const logoSrc = computed(() => {
     <!-- 右侧认证面板 -->
     <AuthenticationFormView
       v-if="authPanelRight"
-      class="min-h-full w-2/5 flex-1"
+      class="auth-form-panel min-h-full w-2/5 flex-1"
       data-side="right"
     >
       <template v-if="copyright" #copyright>

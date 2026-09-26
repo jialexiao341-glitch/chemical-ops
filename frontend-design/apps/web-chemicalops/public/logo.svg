@@ -1,40 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="9.6 -1.4 514.9 514.9" width="512" height="512" role="img" aria-label="ChemicalOps logo">
-  <!--
-    取自 docs/ui-reference/ChemicalOps-logo.svg，图形与配色保持原样。
-
-    仅修正 viewBox：原文件为 "0 0 512 512"，但蓝色环圆心在 x=380.4、
-    外半径 143，右边缘实际到 523.4，超出右边界 11.4，渲染时右侧会被裁成直线。
-    这里把 viewBox 扩到刚好容纳全部图形（含 1 单位余量）并保持正方形，
-    使标识在方形容器内自动水平撑满、垂直居中。
-  -->
-  <defs>
-    <linearGradient id="navyGrad" x1="80" y1="80" x2="360" y2="420" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0A3A78"/>
-      <stop offset="1" stop-color="#052D64"/>
-    </linearGradient>
-    <linearGradient id="blueGrad" x1="250" y1="140" x2="450" y2="380" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1676FF"/>
-      <stop offset="1" stop-color="#0157E8"/>
-    </linearGradient>
-    <linearGradient id="orangeGrad" x1="350" y1="210" x2="430" y2="300" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FF9A2E"/>
-      <stop offset="1" stop-color="#F47A16"/>
-    </linearGradient>
-  </defs>
-
-  <!-- Chemical / C -->
-  <path d="M 320 92 A 184 184 0 1 0 320 420"
-        fill="none" stroke="url(#navyGrad)" stroke-width="84" stroke-linecap="round"/>
-
-  <!-- Ops / O as open ring -->
-  <path d="M 323 161 A 111 111 0 1 1 323 351"
-        fill="none" stroke="url(#blueGrad)" stroke-width="64" stroke-linecap="butt"/>
-
-  <!-- Data / process connector -->
-  <line x1="202" y1="256" x2="385" y2="256"
-        stroke="url(#blueGrad)" stroke-width="38" stroke-linecap="round"/>
-  <circle cx="198" cy="256" r="50" fill="url(#blueGrad)"/>
-
-  <!-- Core node -->
-  <circle cx="389" cy="256" r="53" fill="url(#orangeGrad)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ChemicalOps">
+  <title>ChemicalOps</title>
+  <!-- 实心六边形在照片、导航栏和小尺寸标签中保持清晰。 -->
+  <path d="M32 4 55 17v30L32 60 9 47V17L32 4Z" fill="#1769D8"/>
+  <path d="M18 39h12l7-14h9" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="18" cy="39" r="4" fill="#fff"/>
+  <circle cx="46" cy="25" r="5" fill="#F7AA49"/>
 </svg>

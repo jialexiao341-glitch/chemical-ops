@@ -18,6 +18,7 @@ import ThirdPartyLogin from './third-party-login.vue';
 
 interface Props extends AuthenticationProps {
   formSchema?: VbenFormSchema[];
+  showFormLabels?: boolean;
 }
 
 defineOptions({
@@ -33,6 +34,7 @@ const props = withDefaults(defineProps<Props>(), {
   registerPath: '/auth/register',
   showCodeLogin: true,
   showForgetPassword: true,
+  showFormLabels: false,
   showQrcodeLogin: true,
   showRegister: true,
   showRememberMe: true,
@@ -49,9 +51,10 @@ const emit = defineEmits<{
 const [Form, formApi] = useVbenForm(
   reactive({
     commonConfig: {
-      hideLabel: true,
+      hideLabel: !props.showFormLabels,
       hideRequiredMark: true,
     },
+    layout: 'vertical',
     schema: computed(() => props.formSchema),
     showDefaultActions: false,
   }),

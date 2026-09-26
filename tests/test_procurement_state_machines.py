@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.modules.products.model import Product
 from app.modules.purchase_requests.model import Unit
 from app.modules.suppliers.model import Supplier
+from app.modules.rfqs.model import SupplierQuote
 from .conftest import login
 
 
@@ -106,8 +107,12 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
         },
     )
     assert quoted.status_code == 200, quoted.text
-    quote_id = quoted.json()["quotes"][0]["id"]
+    quote_id = db_session.scalar(select(SupplierQuote.id).where(SupplierQuote.rfq_id == rfq_id, SupplierQuote.supplier_id == supplier.id).order_by(SupplierQuote.id.desc()))
+    assert quote_id is not None
     assert quoted.json()["status"] == "RESPONDING"
+    # All API calls share one rollback-only test session; refresh relationships
+    # that a prior request loaded before the quote existed.
+    db_session.expire_all()
 
     compared = client.post(f"/api/v1/rfqs/{rfq_id}/comparison", headers=manager)
     assert compared.status_code == 200, compared.text
@@ -171,7 +176,7 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     unchanged_delivery = client.get(f"/api/v1/deliveries/{delivery['id']}", headers=warehouse)
     assert unchanged_delivery.status_code == 200
     assert unchanged_delivery.json()["status"] == "IN_TRANSIT"
-    assert unchanged_delivery.json()["items"][0]["actual_quantity"] == "0.000000"
+    assert Decimal(unchanged_delivery.json()["items"][0]["actual_quantity"]) == 0
     received = client.post(
         f"/api/v1/deliveries/{delivery['id']}/receive",
         headers=warehouse,

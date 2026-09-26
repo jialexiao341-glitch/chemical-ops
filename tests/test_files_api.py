@@ -6,16 +6,19 @@ from sqlalchemy import select
 
 from app.modules.files import service
 from app.modules.system.model import User
+from app.modules.purchase_orders.model import PurchaseOrder
 from .conftest import login
 
 
 pytestmark = pytest.mark.integration
 
 
-def test_upload_download_and_attach_file(client: TestClient, demo_password: str) -> None:
+def test_upload_download_and_attach_file(client: TestClient, db_session, demo_password: str) -> None:
     """验证文件元数据、下载和业务附件去重。"""
 
     manager = login(client, "procurement_manager", demo_password)
+    order_id = db_session.scalar(select(PurchaseOrder.id).order_by(PurchaseOrder.id))
+    assert order_id is not None
     uploaded = client.post(
         "/api/v1/files",
         headers=manager,
@@ -31,11 +34,11 @@ def test_upload_download_and_attach_file(client: TestClient, demo_password: str)
     assert downloaded.status_code == 200
     assert downloaded.content == b"ChemicalOps test"
 
-    attached = client.post(f"/api/v1/files/{file_id}/attachments", headers=manager, json={"resource_type": "PURCHASE_ORDER", "resource_id": 1})
+    attached = client.post(f"/api/v1/files/{file_id}/attachments", headers=manager, json={"resource_type": "PURCHASE_ORDER", "resource_id": order_id})
     assert attached.status_code == 201, attached.text
-    duplicate = client.post(f"/api/v1/files/{file_id}/attachments", headers=manager, json={"resource_type": "PURCHASE_ORDER", "resource_id": 1})
+    duplicate = client.post(f"/api/v1/files/{file_id}/attachments", headers=manager, json={"resource_type": "PURCHASE_ORDER", "resource_id": order_id})
     assert duplicate.status_code == 409
-    listed = client.get("/api/v1/files/attachments/PURCHASE_ORDER/1", headers=manager)
+    listed = client.get(f"/api/v1/files/attachments/PURCHASE_ORDER/{order_id}", headers=manager)
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
 
@@ -49,18 +52,20 @@ def test_upload_download_and_attach_file(client: TestClient, demo_password: str)
     finance_manager = login(client, "finance_manager", demo_password)
     private_download = client.get(f"/api/v1/files/{private_upload.json()['id']}/download", headers=finance_manager)
     assert private_download.status_code == 404
-    private_attach = client.post(f"/api/v1/files/{private_upload.json()['id']}/attachments", headers=finance_manager, json={"resource_type": "PURCHASE_ORDER", "resource_id": 1})
+    private_attach = client.post(f"/api/v1/files/{private_upload.json()['id']}/attachments", headers=finance_manager, json={"resource_type": "PURCHASE_ORDER", "resource_id": order_id})
     assert private_attach.status_code == 404
-    private_listing = client.get("/api/v1/files/attachments/PURCHASE_ORDER/1", headers=finance_manager)
+    private_listing = client.get(f"/api/v1/files/attachments/PURCHASE_ORDER/{order_id}", headers=finance_manager)
     assert private_listing.status_code == 200
     assert private_listing.json()["total"] == 1
     assert private_listing.json()["items"][0]["file_id"] != private_upload.json()["id"]
 
 
-def test_linked_file_requires_business_resource_permission(client: TestClient, demo_password: str) -> None:
+def test_linked_file_requires_business_resource_permission(client: TestClient, db_session, demo_password: str) -> None:
     """具备通用文件权限但没有采购订单权限的用户不能通过文件 ID 绕过资源权限。"""
 
     procurement_manager = login(client, "procurement_manager", demo_password)
+    order_id = db_session.scalar(select(PurchaseOrder.id).order_by(PurchaseOrder.id))
+    assert order_id is not None
     uploaded = client.post(
         "/api/v1/files",
         headers=procurement_manager,
@@ -72,14 +77,14 @@ def test_linked_file_requires_business_resource_permission(client: TestClient, d
     attached = client.post(
         f"/api/v1/files/{file_id}/attachments",
         headers=procurement_manager,
-        json={"resource_type": "PURCHASE_ORDER", "resource_id": 1},
+        json={"resource_type": "PURCHASE_ORDER", "resource_id": order_id},
     )
     assert attached.status_code == 201, attached.text
 
     warehouse_receiver = login(client, "warehouse_receiver", demo_password)
     assert client.get(f"/api/v1/files/{file_id}", headers=warehouse_receiver).status_code == 404
     assert client.get(f"/api/v1/files/{file_id}/download", headers=warehouse_receiver).status_code == 404
-    assert client.get("/api/v1/files/attachments/PURCHASE_ORDER/1", headers=warehouse_receiver).status_code == 404
+    assert client.get(f"/api/v1/files/attachments/PURCHASE_ORDER/{order_id}", headers=warehouse_receiver).status_code == 404
 
 
 def test_minio_storage_adapter_round_trip(db_session) -> None:

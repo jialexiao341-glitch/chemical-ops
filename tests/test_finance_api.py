@@ -1,7 +1,15 @@
 """财务对账、发票、付款和结算闭环测试。"""
 
 import pytest
+from decimal import Decimal
+from uuid import uuid4
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from app.modules.deliveries.model import Delivery
+from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.suppliers.model import Supplier
+from app.modules.system.model import User
 
 from .conftest import login
 
@@ -18,16 +26,28 @@ def test_finance_viewer_cannot_write(client: TestClient, demo_password: str) -> 
     assert response.json()["message"] == "无权访问"
 
 
-def test_finance_full_settlement_flow(client: TestClient, demo_password: str) -> None:
+def test_finance_full_settlement_flow(client: TestClient, db_session, demo_password: str) -> None:
     """验证对账、发票核验、付款审批和结算关闭可以顺序完成。"""
 
     clerk = login(client, "finance_clerk", demo_password)
     manager = login(client, "finance_manager", demo_password)
 
-    created = client.post("/api/v1/finance/reconciliations", headers=clerk, json={"po_id": 1, "note": "接口测试对账"})
+    supplier_id = db_session.scalar(select(Supplier.id).where(Supplier.status == "ACTIVE").limit(1))
+    buyer_id = db_session.scalar(select(User.id).where(User.username == "buyer"))
+    assert supplier_id is not None and buyer_id is not None
+    suffix = uuid4().hex[:10]
+    order = PurchaseOrder(po_no=f"TEST-FIN-{suffix}", supplier_id=supplier_id,
+        buyer_id=buyer_id, order_amount=Decimal("1000"), currency_code="CNY", status="COMPLETED")
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(Delivery(delivery_no=f"TEST-DLV-{suffix}", po_id=order.id,
+        supplier_id=supplier_id, status="ACCEPTED"))
+    db_session.flush()
+
+    created = client.post("/api/v1/finance/reconciliations", headers=clerk, json={"po_id": order.id, "note": "接口测试对账"})
     assert created.status_code == 201, created.text
     reconciliation_id = created.json()["id"]
-    duplicate = client.post("/api/v1/finance/reconciliations", headers=clerk, json={"po_id": 1})
+    duplicate = client.post("/api/v1/finance/reconciliations", headers=clerk, json={"po_id": order.id})
     assert duplicate.status_code == 409
 
     invoice = client.post(

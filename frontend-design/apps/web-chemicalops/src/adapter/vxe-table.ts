@@ -5,6 +5,7 @@ import type { Recordable } from '@vben/types';
 import type { ComponentPropsMap, ComponentType } from './component';
 
 import { defineComponent, h } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { VbenTableAction as VbenTableActionCore } from '@vben/common-ui';
@@ -20,6 +21,7 @@ import { objectOmit } from '@vueuse/core';
 import { Button, Dropdown, Image, Popconfirm, Switch, Tag } from 'antdv-next';
 
 import { $t } from '#/locales';
+import BatchActions from '#/components/batch/batch-actions.vue';
 
 import { useVbenForm } from './form';
 
@@ -403,6 +405,39 @@ setupVbenVxeTable({
   useVbenForm,
 });
 
+type BatchConfig = {
+  deleteMode: 'draft' | 'master' | 'permission' | 'readonly';
+  importable?: boolean;
+  resource: string;
+  writePermission?: string;
+};
+
+/** 主列表页与后端批量操作白名单的对应关系。派生报表不属于可删除数据。 */
+const BATCH_LISTS: Record<string, BatchConfig> = {
+  '/master/chemicals': { resource: 'master.chemicals', deleteMode: 'master', importable: true, writePermission: 'master.chemicals.write' },
+  '/master/products': { resource: 'master.products', deleteMode: 'master', importable: true, writePermission: 'master.products.write' },
+  '/master/suppliers': { resource: 'master.suppliers', deleteMode: 'master', importable: true, writePermission: 'master.suppliers.write' },
+  '/system/users': { resource: 'system.users', deleteMode: 'master', writePermission: 'system.users.write' },
+  '/system/departments': { resource: 'system.departments', deleteMode: 'master', writePermission: 'system.departments.write' },
+  '/system/roles': { resource: 'system.roles', deleteMode: 'master', writePermission: 'system.roles.write' },
+  '/system/permissions': { resource: 'system.permissions', deleteMode: 'permission', writePermission: 'system.permissions.write' },
+  '/procurement/requests': { resource: 'procurement.requests', deleteMode: 'draft', writePermission: 'procurement.requests.write' },
+  '/procurement/rfqs': { resource: 'procurement.rfqs', deleteMode: 'draft', writePermission: 'procurement.rfqs.write' },
+  '/procurement/orders': { resource: 'procurement.orders', deleteMode: 'draft', writePermission: 'procurement.orders.write' },
+  '/warehouse/deliveries': { resource: 'warehouse.deliveries', deleteMode: 'readonly', writePermission: 'warehouse.deliveries.write' },
+  '/warehouse/inventory': { resource: 'warehouse.inventory.balances', deleteMode: 'readonly' },
+  '/warehouse/transactions': { resource: 'warehouse.inventory.transactions', deleteMode: 'readonly' },
+  '/warehouse/issue-requests': { resource: 'warehouse.inventory.issues', deleteMode: 'draft', writePermission: 'warehouse.inventory.issue.write' },
+  '/warehouse/transfers': { resource: 'warehouse.inventory.transfers', deleteMode: 'draft', writePermission: 'warehouse.inventory.transfer.write' },
+  '/warehouse/stocktakes': { resource: 'warehouse.inventory.stocktakes', deleteMode: 'draft', writePermission: 'warehouse.inventory.stocktake.write' },
+  '/quality/acceptances': { resource: 'quality.acceptances', deleteMode: 'readonly' },
+  '/finance/reconciliations': { resource: 'finance.reconciliations', deleteMode: 'draft', writePermission: 'finance.reconciliations.write' },
+  '/finance/invoices': { resource: 'finance.invoices', deleteMode: 'draft', writePermission: 'finance.invoices.write' },
+  '/finance/payments': { resource: 'finance.payments', deleteMode: 'readonly' },
+  '/finance/settlements': { resource: 'finance.settlements', deleteMode: 'draft', writePermission: 'finance.settlements.write' },
+  '/operations/exceptions': { resource: 'operations.exceptions', deleteMode: 'readonly' },
+};
+
 export const useVbenVxeGrid = <
   T extends Record<string, any>,
   TFormValues extends FormValues = FormValues,
@@ -417,10 +452,45 @@ export const useVbenVxeGrid = <
       TSubmitValues
     >
   >
-) =>
-  useGrid<T, ComponentType, ComponentPropsMap, TFormValues, TSubmitValues>(
-    ...rest,
+) => {
+  const route = useRoute();
+  const batch = BATCH_LISTS[route.path];
+  if (batch) {
+    const columns = (rest[0] as any).gridOptions?.columns;
+    if (Array.isArray(columns) && !columns.some((column) => column.type === 'checkbox')) {
+      (rest[0] as any).gridOptions.columns = [
+        { type: 'checkbox', width: 48, align: 'center' },
+        ...columns,
+      ];
+    }
+  }
+  const [BaseGrid, api] = useGrid<
+    T,
+    ComponentType,
+    ComponentPropsMap,
+    TFormValues,
+    TSubmitValues
+  >(...rest);
+  if (!batch) return [BaseGrid, api] as const;
+
+  const Grid = defineComponent((props, { attrs, slots }) => () =>
+    h(BaseGrid as any, { ...props, ...attrs }, {
+      ...slots,
+      'toolbar-tools': (params: unknown) =>
+        h('div', { class: 'flex items-center gap-2' }, [
+          h(BatchActions, {
+            deleteMode: batch.deleteMode,
+            gridApi: api,
+            importable: batch.importable,
+            resource: batch.resource,
+            writePermission: batch.writePermission,
+          }),
+          slots['toolbar-tools']?.(params as any),
+        ]),
+    }),
   );
+  return [Grid, api] as const;
+};
 
 /**
  * 表格操作按钮组件

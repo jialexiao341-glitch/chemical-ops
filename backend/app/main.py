@@ -29,6 +29,7 @@ from app.core.errors import (
     ResourceNotFoundError,
 )
 from app.modules.chemicals.controller import router as chemicals_router
+from app.modules.batch.controller import router as batch_router
 from app.modules.products.controller import router as products_router
 from app.modules.purchase_requests.controller import router as purchase_requests_router
 from app.modules.purchase_orders.controller import router as purchase_orders_router
@@ -401,6 +402,7 @@ def metrics_endpoint() -> PlainTextResponse:
 
 
 app.include_router(chemicals_router, prefix=settings.api_prefix)
+app.include_router(batch_router, prefix=settings.api_prefix)
 app.include_router(products_router, prefix=settings.api_prefix)
 app.include_router(purchase_requests_router, prefix=settings.api_prefix)
 app.include_router(purchase_orders_router, prefix=settings.api_prefix)

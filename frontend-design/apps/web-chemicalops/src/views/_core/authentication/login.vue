@@ -42,11 +42,19 @@ const formSchema = computed((): VbenFormSchema[] => {
   <AuthenticationLogin
     :form-schema="formSchema"
     :loading="authStore.loginLoading"
+    :show-form-labels="true"
     :show-code-login="false"
     :show-forget-password="false"
     :show-qrcode-login="false"
     :show-register="false"
     :show-third-party-login="false"
     @submit="authStore.authLogin"
-  />
+  >
+    <template #title>
+      <div class="chemicalops-login-heading">
+        <h1>{{ $t('authentication.welcomeBack') }}</h1>
+        <p>{{ $t('authentication.loginSubtitle') }}</p>
+      </div>
+    </template>
+  </AuthenticationLogin>
 </template>

@@ -113,6 +113,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
         options: ENABLE_STATUS_DICT.options(),
         placeholder: '全部状态',
       },
+      defaultValue: 'ACTIVE',
       fieldName: 'status',
       label: '状态',
     },
