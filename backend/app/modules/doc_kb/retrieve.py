@@ -47,6 +47,7 @@ class DocSectionHit:
     source: str  # vector | bridge
     document_id: int | None = None
     document_title: str | None = None
+    source_url: str | None = None
     parse_status: str | None = None
     updated_at: str | None = None
 
@@ -132,6 +133,7 @@ async def retrieve_sections(
                 AiDocument.name_zh,
                 AiDocument.id,
                 AiDocument.title,
+                AiDocument.source_url,
                 AiDocument.parse_status,
                 AiDocument.updated_at,
             )
@@ -143,7 +145,7 @@ async def retrieve_sections(
             .order_by(AiDocumentSection.cas_no, AiDocumentSection.doc_type, AiDocumentSection.section_no)
         )
         per_cas_seen: dict[str, int] = {}
-        for section, name_zh, document_id, document_title, parse_status, updated_at in db.execute(statement).all():
+        for section, name_zh, document_id, document_title, source_url, parse_status, updated_at in db.execute(statement).all():
             seen = per_cas_seen.get(section.cas_no, 0)
             if seen >= BRIDGE_SECTIONS_PER_CAS:
                 continue
@@ -163,6 +165,7 @@ async def retrieve_sections(
                 source="bridge",
                 document_id=document_id,
                 document_title=document_title,
+                source_url=source_url,
                 parse_status=parse_status,
                 updated_at=updated_at.isoformat() if updated_at else None,
             )
@@ -177,17 +180,19 @@ async def retrieve_sections(
                 AiDocument.id,
                 AiDocument.title,
                 AiDocument.name_zh,
+                AiDocument.source_url,
                 AiDocument.parse_status,
                 AiDocument.updated_at,
             )
             .join(AiDocument, AiDocument.id == AiDocumentSection.document_id)
             .where(AiDocumentSection.id.in_(merged))
         ).all()
-        for section_id, document_id, document_title, name_zh, parse_status, updated_at in metadata:
+        for section_id, document_id, document_title, name_zh, source_url, parse_status, updated_at in metadata:
             hit = merged.get(section_id)
             if hit:
                 hit.document_id = document_id
                 hit.document_title = document_title
+                hit.source_url = source_url
                 hit.name_zh = hit.name_zh or name_zh
                 hit.parse_status = parse_status
                 hit.updated_at = updated_at.isoformat() if updated_at else None
@@ -222,6 +227,7 @@ def build_doc_context(hits: list[DocSectionHit], *, max_chars: int = CONTEXT_MAX
                 "document_id": hit.document_id,
                 "section_id": hit.id,
                 "document_title": hit.document_title,
+                "source_url": hit.source_url,
                 "cas_no": hit.cas_no,
                 "doc_type": hit.doc_type,
                 "section_no": hit.section_no,

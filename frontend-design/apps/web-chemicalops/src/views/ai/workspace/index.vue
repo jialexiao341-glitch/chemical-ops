@@ -54,8 +54,6 @@ const filterResult = ref<AiApi.NLFilterResult>();
 const filterDraft = ref<Record<string, string>>({});
 const filterKeyword = ref('');
 const filterRange = ref<AiApi.NLFilterResult['time_range']>();
-const filterRangeFrom = ref('');
-const filterRangeTo = ref('');
 const filterParsing = ref(false);
 const filterFieldNames = computed(() => Object.keys(filterDraft.value));
 const canApplyFilters = computed(() => {
@@ -239,16 +237,34 @@ function toggleCitation(messageId: string, sectionId: number) {
   });
 }
 
+function safeCitationUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:'
+      ? url.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function openDataset(dataset: string) {
   const paths: Record<string, string> = {
+    accepted_orders_finance_gaps: '/finance/reconciliations',
+    approved_requests_without_rfq: '/procurement/requests',
     deliveries: '/warehouse/deliveries',
     exceptions: '/operations/exceptions',
     finance_reconciliations: '/finance/reconciliations',
     inventory: '/warehouse/inventory',
+    inventory_by_batch: '/warehouse/inventory',
+    inventory_movement_trace: '/warehouse/inventory',
     purchase_orders: '/procurement/orders',
     purchase_requests: '/procurement/requests',
     quality_acceptances: '/quality/acceptances',
     suppliers: '/master/suppliers',
+    supplier_quote_delivery_profile: '/master/suppliers',
+    weekly_order_risks: '/procurement/orders',
   };
   const path = paths[dataset];
   if (path) void router.push(path);
@@ -292,8 +308,6 @@ async function parseListFilters() {
     filterDraft.value = { ...result.filters };
     filterKeyword.value = result.keywords || '';
     filterRange.value = result.time_range ? { ...result.time_range } : null;
-    filterRangeFrom.value = result.time_range?.date_from || '';
-    filterRangeTo.value = result.time_range?.date_to || '';
   } catch (error: any) {
     message.error(error?.message || '筛选条件解析失败');
   } finally {
@@ -420,9 +434,9 @@ onMounted(loadConversations);
               当前支持范围
             </summary>
             <div class="text-muted-foreground mt-2 space-y-1 leading-5">
-              <p>业务查询：采购申请、采购订单、到货、库存、质量验收、运营异常、财务对账、供应商。</p>
-              <p>库存流水、领用、调拨、盘点、询价报价、退货、发票和付款明细暂未接入。金额按币种分别核算，库存数量按单位分别展示。</p>
-              <p>可尝试：“本季度各供应商采购订单金额”“目前在途到货单”“各仓库库存余额”。</p>
+              <p>业务查询：采购申请及询价缺口、订单履约风险、产品批次库存、库存变动追溯、已验收订单财务进度、供应商报价与交期，以及采购订单、到货、质量验收、运营异常、对账和供应商。</p>
+              <p>其他领用/盘点分析、退货补货和跨模块单据全链路追溯尚未接入。金额按币种分别展示，库存数量按单位分别展示；本地开发数据为模拟样本。</p>
+              <p>可尝试：“本周哪些订单逾期或短交”“乙醇各仓库批次可用库存”“这批库存为什么被扣减”。</p>
             </div>
           </details>
           <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
@@ -443,10 +457,10 @@ onMounted(loadConversations);
                 <Input v-model:value="filterKeyword" size="small" />
               </div>
               <div v-if="filterRange" class="flex flex-wrap items-center gap-2">
-                <Tag class="!mr-0">时间范围（目标列表暂不支持）</Tag>
-                <Input v-model:value="filterRangeFrom" type="date" size="small" />
-                <span>至</span>
-                <Input v-model:value="filterRangeTo" type="date" size="small" />
+                <Tag color="orange" class="!mr-0">列表暂不支持时间范围</Tag>
+                <span class="text-muted-foreground text-xs">
+                  {{ filterRange.date_from || '不限' }} 至 {{ filterRange.date_to || '不限' }}；该条件不会带入列表。可在 AI 对话中直接查询相同时间范围。
+                </span>
                 <Button size="small" type="text" danger @click="filterRange = null">移除</Button>
               </div>
               <ul v-if="filterResult.dropped.length" class="text-amber-700 list-disc pl-5 text-xs">
@@ -578,8 +592,16 @@ onMounted(loadConversations);
                         <span>CAS {{ citation.cas_no || '—' }}</span>
                         <span>{{ citation.doc_type || '资料' }}{{ citation.section_no ? ` · SECTION ${citation.section_no}` : '' }}</span>
                         <span>{{ citation.section_key || citation.title || '章节' }}</span>
+                        <span v-if="citation.document_id">文档 #{{ citation.document_id }}</span>
                         <span v-if="citation.updated_at">更新于 {{ formatDateTime(citation.updated_at) }}</span>
                       </div>
+                      <a
+                        v-if="safeCitationUrl(citation.source_url)"
+                        class="mt-2 inline-flex text-blue-600 hover:underline"
+                        :href="safeCitationUrl(citation.source_url)"
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >打开原始来源</a>
                       <button
                         v-if="citation.content"
                         class="mt-2 cursor-pointer text-blue-600 hover:underline"
