@@ -443,10 +443,68 @@ async def _run_text2sql_for_chat(
 ) -> tuple[str, dict[str, object], AIQueryTrace]:
     """聊天入口的业务查询路由；Text2SQL 结果不再经过通用聊天上下文。"""
 
+    from app.modules.ai.order_trace import extract_order_trace_no, trace_purchase_order
     from app.modules.ai.text2sql import Text2SQLRequest, run_text2sql
 
     query_fields = _query_log_fields(user, question)
     LOGGER.info("AI 查询开始 %s", query_fields)
+    order_no = extract_order_trace_no(question)
+    if order_no:
+        result = trace_purchase_order(db, user, order_no)
+        executed_at = datetime.now()
+        rows = [
+            {
+                "stage": item["stage"],
+                "status": item["status"],
+                "summary": item["summary"],
+                "records": item["records"],
+                "truncated": item.get("truncated", False),
+            }
+            for item in result["stages"]
+        ]
+        trace = AIQueryTrace(
+            query=question,
+            answer=result["answer"],
+            dataset="purchase_order_trace",
+            dataset_label="采购订单跨模块追溯",
+            permission="采购订单读取权限为入口；其余环节按各自读取权限独立核验",
+            thread_id=thread_id,
+            executed_at=executed_at,
+            data_scope={"po_no": order_no, "module_permissions_applied": True},
+            slots=[],
+            template="fixed_purchase_order_trace_v1",
+            sql="固定服务端只读 ORM 查询；逐环节按模块权限取数，未使用模型生成 SQL。",
+            columns=[
+                {"key": "stage", "label": "业务环节"},
+                {"key": "status", "label": "可见状态"},
+                {"key": "summary", "label": "说明"},
+            ],
+            rows=rows,
+            row_count=len(rows),
+            truncated=any(item.get("truncated", False) for item in result["stages"]),
+            stages=["order_anchor", "module_permission_checks", "read_only_relation_queries"],
+            render={"type": "table", "title": f"订单 {order_no} 追溯", "columns": ["stage", "status", "summary"]},
+        )
+        state = db.scalar(select(AIConversationState).where(AIConversationState.thread_id == thread_id)) if thread_id else None
+        if state is not None:
+            state.query_plan = None
+            state.query_trace = trace.model_dump(mode="json", exclude={"sql", "parameterized_sql", "rows"})
+            state.permission_snapshot = _permission_snapshot(db, user)
+        citation: dict[str, object] = {
+            "type": "order_trace",
+            "source": "关联业务模块的只读追溯",
+            "dataset": "purchase_order_trace",
+            "dataset_label": "采购订单跨模块追溯",
+            "permission": trace.permission,
+            "executed_at": executed_at.isoformat(),
+            "po_no": order_no,
+            "source_records": result["source_records"],
+            "order_trace": result,
+            "query_trace": trace.model_dump(mode="json"),
+        }
+        LOGGER.info("AI 订单追溯完成 %s stage_count=%s", query_fields, len(rows))
+        return result["answer"], citation, trace
+
     result = await run_text2sql(db, user, Text2SQLRequest(question=question), settings, previous_plan=previous_plan, thread_id=thread_id)
     from app.modules.ai.catalog import CATALOG
 
