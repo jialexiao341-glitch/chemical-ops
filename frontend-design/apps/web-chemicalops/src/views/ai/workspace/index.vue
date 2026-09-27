@@ -1,8 +1,8 @@
 <script lang="ts" setup>
 import type { AiApi } from '#/api';
 
-import { computed, nextTick, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
@@ -24,6 +24,7 @@ import { renderMarkdown } from '#/utils/markdown';
 
 defineOptions({ name: 'AiWorkspace' });
 const router = useRouter();
+const route = useRoute();
 
 /** 聊天界面的一条消息 */
 interface UiMessage {
@@ -487,6 +488,21 @@ function onTextKeydown(event: KeyboardEvent) {
     onSend();
   }
 }
+
+watch(
+  () => route.query.draft_context,
+  (rawContext) => {
+    if (typeof rawContext !== 'string' || !rawContext.trim()) return;
+    newConversation();
+    draftMode.value = true;
+    inputText.value = rawContext.trim().slice(0, 1500);
+    message.info('已带入提醒背景。请补充真实采购物料、数量、单位和用途，再生成草稿预览。');
+    const query = { ...route.query };
+    delete query.draft_context;
+    void router.replace({ path: route.path, query });
+  },
+  { immediate: true },
+);
 
 onMounted(loadConversations);
 </script>

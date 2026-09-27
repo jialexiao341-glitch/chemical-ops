@@ -83,6 +83,22 @@ function openInventoryBatch() {
   });
 }
 
+function openPurchaseDraftFromAlert() {
+  const exception = detail.value;
+  if (
+    exception?.exception_type !== 'INVENTORY_EXPIRY' ||
+    exception.source_type !== 'INVENTORY_BATCH'
+  ) return;
+  const context = [
+    '我从库存临期提醒进入采购申请草稿。以下仅是提醒背景，不代表需要采购；请勿据此推断物料、数量或用途。',
+    `异常编号：${exception.exception_no}`,
+    `库存批次编号：${exception.source_id}`,
+    `提醒内容：${exception.description}`,
+    '请由我补充实际采购物料、数量、单位和采购用途后，再整理草稿。',
+  ].join('\n');
+  void router.push({ path: '/ai/workspace', query: { draft_context: context } });
+}
+
 const [TaskFormModal, taskFormApi] = useVbenModal({
   connectedComponent: TaskForm,
   destroyOnClose: true,
@@ -429,6 +445,14 @@ defineExpose({ drawerApi });
               @click="openInventoryBatch"
             >
               查看批次库存
+            </Button>
+            <Button
+              v-if="detail.exception_type === 'INVENTORY_EXPIRY' && detail.source_type === 'INVENTORY_BATCH'"
+              size="small"
+              type="link"
+              @click="openPurchaseDraftFromAlert"
+            >
+              基于提醒准备采购草稿
             </Button>
           </DescriptionsItem>
           <DescriptionsItem label="截止时间">
