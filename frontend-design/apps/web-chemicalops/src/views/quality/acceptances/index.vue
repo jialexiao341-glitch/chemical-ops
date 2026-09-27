@@ -14,7 +14,7 @@ import { Plus } from '@vben/icons';
 import { Button } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getAcceptanceListApi } from '#/api';
+import { getAcceptanceApi, getAcceptanceListApi } from '#/api';
 import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
@@ -80,7 +80,19 @@ onMounted(async () => {
     gridApi.formApi,
   );
   gridApi.query();
+  await openAiRecord(route.query.ai_record_id);
 });
+
+async function openAiRecord(rawId: unknown) {
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return;
+  try {
+    const record = await getAcceptanceApi(id);
+    resultApi.setData(record).open();
+  } catch {
+    // API 层会展示权限或查询错误；不再打开一个不匹配的记录。
+  }
+}
 
 watch(
   () => route.query.ai_filters,
@@ -88,6 +100,13 @@ watch(
     if (await applyAiFiltersToList('quality_acceptances', rawQuery, gridApi.formApi)) {
       gridApi.query();
     }
+  },
+);
+
+watch(
+  () => route.query.ai_record_id,
+  (rawId) => {
+    void openAiRecord(rawId);
   },
 );
 </script>
