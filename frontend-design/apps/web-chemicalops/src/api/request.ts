@@ -33,6 +33,21 @@ interface ChemicalOpsErrorBody {
   message?: string;
 }
 
+function createIdempotencyKey(): string {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /**
  * 从后端错误响应中提取可以直接展示给用户的中文提示。
  *
@@ -124,7 +139,7 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
         ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
         !config.headers['Idempotency-Key']
       ) {
-        config.headers['Idempotency-Key'] = crypto.randomUUID();
+        config.headers['Idempotency-Key'] = createIdempotencyKey();
       }
       const accessStore = useAccessStore();
       const token = accessStore.accessToken;
