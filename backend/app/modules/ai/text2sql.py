@@ -242,7 +242,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         statement = (
             select(
                 Product.product_code.label("product_code"),
-                func.coalesce(Product.product_name, RFQItem.requested_name).label("product"),
+                Product.product_name.label("product"),
                 Warehouse.warehouse_name.label("warehouse"),
                 InventoryBatch.batch_no.label("batch_no"),
                 InventoryBatch.expiry_date.label("expiry_date"),
@@ -288,7 +288,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         source_labels = case(
             (InventoryTransaction.source_type == "DELIVERY", "到货单入库"),
             (InventoryTransaction.source_type == "ISSUE_REQUEST", "库存领用"),
-            (InventoryTransaction.source_type == "INVENTORY_TRANSFER", "库存调拨"),
+            (InventoryTransaction.source_type.in_(("INVENTORY_TRANSFER", "TRANSFER_REQUEST")), "库存调拨"),
             (InventoryTransaction.source_type == "INVENTORY_STOCKTAKE", "库存盘点"),
             (InventoryTransaction.source_type == "INVENTORY_RETURN", "供应商退货"),
             (InventoryTransaction.source_type == "FIFO_OUTBOUND", "FIFO 出库"),
@@ -297,12 +297,15 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         event_labels = case(
             (InventoryTransaction.transaction_type == "INBOUND", "入库"),
             (InventoryTransaction.transaction_type == "OUTBOUND", "出库"),
+            (InventoryTransaction.transaction_type == "TRANSFER_IN", "调拨入库"),
+            (InventoryTransaction.transaction_type == "TRANSFER_OUT", "调拨出库"),
             (and_(InventoryTransaction.transaction_type == "ADJUSTMENT", InventoryTransaction.note.like("%盘亏%")), "盘亏调整"),
             (InventoryTransaction.transaction_type == "ADJUSTMENT", "盘盈/其他调整"),
             else_=InventoryTransaction.transaction_type,
         )
         signed_quantity = case(
             (InventoryTransaction.transaction_type == "OUTBOUND", -InventoryTransaction.quantity),
+            (InventoryTransaction.transaction_type == "TRANSFER_OUT", -InventoryTransaction.quantity),
             (and_(InventoryTransaction.transaction_type == "ADJUSTMENT", InventoryTransaction.note.like("%盘亏%")), -InventoryTransaction.quantity),
             else_=InventoryTransaction.quantity,
         )
