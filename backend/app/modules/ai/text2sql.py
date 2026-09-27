@@ -130,8 +130,8 @@ def _base_statement(plan: QueryPlan) -> tuple[Select[Any], Any, dict[str, Any]]:
     if plan.dataset == "deliveries":
         return select(Delivery).join(Supplier, Delivery.supplier_id == Supplier.id), Delivery, {"supplier": Supplier.supplier_name, "status": Delivery.status, "supplier_name": Supplier.supplier_name}
     if plan.dataset == "inventory":
-        stmt = select(InventoryBalance).join(Product, InventoryBalance.product_id == Product.id).join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id).join(Warehouse, InventoryBalance.warehouse_id == Warehouse.id)
-        return stmt, InventoryBalance, {"product": Product.product_name, "warehouse": Warehouse.warehouse_name, "status": InventoryBalance.status, "product_name": Product.product_name, "warehouse_name": Warehouse.warehouse_name, "expiry_date": InventoryBatch.expiry_date}
+        stmt = select(InventoryBalance).join(Product, InventoryBalance.product_id == Product.id).join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id).join(Warehouse, InventoryBalance.warehouse_id == Warehouse.id).join(Unit, InventoryBalance.unit_id == Unit.id)
+        return stmt, InventoryBalance, {"product": Product.product_name, "warehouse": Warehouse.warehouse_name, "status": InventoryBalance.status, "product_name": Product.product_name, "warehouse_name": Warehouse.warehouse_name, "expiry_date": InventoryBatch.expiry_date, "unit": Unit.unit_name}
     if plan.dataset == "quality_acceptances":
         return select(QualityAcceptance).join(Delivery, QualityAcceptance.delivery_id == Delivery.id), QualityAcceptance, {"result": QualityAcceptance.result, "certificate_complete": QualityAcceptance.certificate_complete}
     if plan.dataset == "exceptions":
@@ -597,6 +597,8 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
     # 金额必须按币种分组，避免把 CNY、USD 等不同币种直接相加。
     if plan.metric == "amount" and "currency" in aliases and plan.group_by != "currency":
         group_keys.append("currency")
+    if plan.metric == "sum_quantity" and "unit" in aliases:
+        group_keys.append("unit")
     expressions: list[Any] = [metric.label("metric_value")]
     for group_key in reversed(group_keys):
         expressions.insert(0, aliases[group_key].label(group_key))
@@ -723,7 +725,7 @@ def _unit_metadata(plan: QueryPlan, rows: list[dict[str, Any]]) -> tuple[str | N
     if plan.dataset == "inventory_movement_trace":
         return "各行所示单位", "数量变化保留原计量单位；流水与冻结日志按事件分行展示"
     if plan.metric == "sum_quantity":
-        return "原计量单位", "库存数量的计量单位未进入当前聚合结果"
+        return "各行所示单位", "库存数量按计量单位分别汇总，不合并不同单位"
     return None, None
 
 

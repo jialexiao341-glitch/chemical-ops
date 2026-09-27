@@ -57,6 +57,14 @@ def test_text2sql_supports_purchase_request_budget_and_region_filters():
     assert "priority" in compiled
 
 
+def test_inventory_quantity_is_grouped_by_unit_for_safe_charting():
+    statement = build_statement(QueryPlan(dataset="inventory", metric="sum_quantity", group_by="warehouse"))
+    compiled = str(statement.compile())
+    assert "unit_name" in compiled
+    assert "GROUP BY" in compiled
+    assert text2sql._unit_metadata(QueryPlan(dataset="inventory", metric="sum_quantity"), [])[0] == "各行所示单位"
+
+
 def test_follow_up_plan_inherits_safe_fields_and_updates_explicit_conditions():
     previous = QueryPlan(dataset="purchase_orders", metric="amount", group_by="supplier", limit=20)
     merged = text2sql._merge_follow_up_plan("只看华东供应商，前5名，按正序", previous)

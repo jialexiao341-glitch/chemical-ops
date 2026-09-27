@@ -22,6 +22,8 @@ import { AI_FILTER_TARGETS } from '#/utils/ai-list-filters';
 import { formatDateTime } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
 
+import QueryCharts from './query-charts.vue';
+
 defineOptions({ name: 'AiWorkspace' });
 const router = useRouter();
 const route = useRoute();
@@ -621,7 +623,7 @@ onMounted(loadConversations);
             </summary>
             <div class="text-muted-foreground mt-2 space-y-1 leading-5">
               <p>业务查询：采购申请及询价缺口、订单履约风险、产品批次库存、库存变动追溯、已验收订单财务进度、供应商报价与交期，以及采购订单、到货、质量验收、运营异常、对账和供应商。</p>
-              <p>其他领用/盘点分析、退货补货和跨模块单据全链路追溯尚未接入。金额按币种分别展示，库存数量按单位分别展示；本地开发数据为模拟样本。</p>
+              <p>其他领用/盘点分析、退货补货尚未接入。常规汇总支持按业务维度分组，暂不支持按日期聚合的采购趋势；金额按币种、库存数量按单位分别展示。本地开发数据为模拟样本。</p>
               <p>可尝试：“本周哪些订单逾期或短交”“乙醇各仓库批次可用库存”“这批库存为什么被扣减”。</p>
             </div>
           </details>
@@ -667,7 +669,7 @@ onMounted(loadConversations);
             <Empty
               v-if="messages.length === 0"
               class="mt-16"
-              description="试着问：本周采购订单金额趋势如何？"
+              description="试着问：本月各供应商的采购订单金额排名"
             />
             <div
               v-for="item in messages"
@@ -684,7 +686,8 @@ onMounted(loadConversations);
               </div>
               <div
                 v-else
-                class="bg-accent max-w-[75%] rounded-lg px-3 py-2 text-sm"
+                class="bg-accent min-w-0 rounded-lg px-3 py-2 text-sm"
+                :class="item.queryTrace?.rows?.length ? 'w-full max-w-[1100px]' : 'max-w-[75%]'"
               >
                 <div
                   v-if="item.content"
@@ -694,6 +697,7 @@ onMounted(loadConversations);
                 <span v-else-if="item.streaming" class="animate-pulse">
                   正在思考…
                 </span>
+                <QueryCharts v-if="item.queryTrace?.rows?.length" :trace="item.queryTrace" />
                 <div v-if="item.draftProposal" class="mt-3 space-y-2 rounded-md border border-border/70 bg-background/70 p-3 text-xs">
                   <div class="font-medium">采购申请草稿预览 · 尚未保存</div>
                   <div>用途：{{ item.draftProposal.draft.purpose }}</div>
