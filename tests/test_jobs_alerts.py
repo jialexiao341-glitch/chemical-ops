@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
+from app.core.config import Settings
 from app.modules.jobs import service
 from app.modules.operation_exceptions.schema import OperationExceptionCreate
 
@@ -18,6 +19,10 @@ def test_inventory_expiry_exception_schema_accepts_batch_source() -> None:
     )
 
     assert exception.source_type == "INVENTORY_BATCH"
+
+
+def test_scheduled_alerts_require_explicit_rollout_enablement() -> None:
+    assert Settings().business_alerts_scheduler_enabled is False
 
 
 def test_expiring_inventory_creates_one_linked_exception_and_notification(monkeypatch) -> None:

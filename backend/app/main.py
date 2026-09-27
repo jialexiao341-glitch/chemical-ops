@@ -230,7 +230,11 @@ async def lifespan(_: FastAPI):
             database_ready,
             minio_ready,
         )
-    scheduler_task = asyncio.create_task(_business_alert_scheduler()) if database_ready else None
+    scheduler_task = (
+        asyncio.create_task(_business_alert_scheduler())
+        if database_ready and settings.business_alerts_scheduler_enabled
+        else None
+    )
     try:
         yield
     finally:
