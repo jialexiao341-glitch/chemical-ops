@@ -419,6 +419,13 @@ function openSourceRecord(record: NonNullable<UiMessage['sourceRecords']>[number
     });
     return;
   }
+  if (record.dataset === 'rfqs' && record.record_id) {
+    void router.push({
+      path: '/procurement/rfqs',
+      query: { ai_record_id: String(record.record_id) },
+    });
+    return;
+  }
   const recordFilters = record.filters ?? {};
   const { keywords, ...filters } = recordFilters;
   void router.push({

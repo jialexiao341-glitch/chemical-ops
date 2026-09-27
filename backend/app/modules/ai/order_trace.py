@@ -136,6 +136,8 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
         rfq = db.get(RFQ, quote.rfq_id) if quote else None
         quote_records = [_record(quote.quote_no, quote.status, quote.updated_at, rfq_no=rfq.rfq_no if rfq else None)] if quote else []
         stages.append(_stage("询价与报价", True, quote_records, summary=(f"关联询价单 {rfq.rfq_no}，报价 {quote.quote_no}（{quote.status}）" if quote and rfq else None)))
+        if quote and rfq:
+            source_records.append({"dataset": "rfqs", "label": f"询价单 {rfq.rfq_no} · 中选报价 {quote.quote_no}", "record_id": rfq.id, "filters": {"keywords": rfq.rfq_no}})
     else:
         stages.append(_stage("询价与报价", False))
 

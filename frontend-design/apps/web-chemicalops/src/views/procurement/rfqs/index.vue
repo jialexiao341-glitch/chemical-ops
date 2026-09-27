@@ -5,6 +5,9 @@ import type {
 } from '#/adapter/vxe-table';
 import type { RfqApi } from '#/api';
 
+import { onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
+
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -18,6 +21,7 @@ import DetailDrawer from './modules/detail.vue';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'RfqList' });
+const route = useRoute();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -88,6 +92,19 @@ function onSend(row: RfqApi.Rfq) {
     title: '发送询价单',
   });
 }
+
+function openAiRfq(rawId: unknown) {
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return;
+  detailApi.setData({ id } as RfqApi.Rfq).open();
+}
+
+onMounted(() => openAiRfq(route.query.ai_record_id));
+
+watch(
+  () => route.query.ai_record_id,
+  (rawId) => openAiRfq(rawId),
+);
 </script>
 
 <template>
