@@ -18,14 +18,14 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import Select, and_, case, desc, exists, func, not_, or_, select
+from sqlalchemy import Select, and_, case, desc, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
+from app.modules.inventory.model import InventoryBalance, InventoryBalanceStatusLog, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
 from app.modules.chemicals.model import Chemical
 from app.modules.operation_exceptions.model import OperationException
 from app.modules.products.model import Product
@@ -279,6 +279,112 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             if warehouse_ids is not None:
                 statement = statement.where(Warehouse.id.in_(warehouse_ids))
         return statement
+    if plan.dataset == "inventory_movement_trace":
+        product_ids = next((item.value for item in plan.filters if item.field == "product_id" and item.operator == "in"), [])
+        batch_ids = next((item.value for item in plan.filters if item.field == "batch_id" and item.operator == "in"), [])
+        from app.modules.inventory.service import accessible_warehouse_ids
+
+        warehouse_ids = accessible_warehouse_ids(db, user) if user is not None and db is not None else None
+        source_labels = case(
+            (InventoryTransaction.source_type == "DELIVERY", "到货单入库"),
+            (InventoryTransaction.source_type == "ISSUE_REQUEST", "库存领用"),
+            (InventoryTransaction.source_type == "INVENTORY_TRANSFER", "库存调拨"),
+            (InventoryTransaction.source_type == "INVENTORY_STOCKTAKE", "库存盘点"),
+            (InventoryTransaction.source_type == "INVENTORY_RETURN", "供应商退货"),
+            (InventoryTransaction.source_type == "FIFO_OUTBOUND", "FIFO 出库"),
+            else_="未识别来源",
+        )
+        event_labels = case(
+            (InventoryTransaction.transaction_type == "INBOUND", "入库"),
+            (InventoryTransaction.transaction_type == "OUTBOUND", "出库"),
+            (and_(InventoryTransaction.transaction_type == "ADJUSTMENT", InventoryTransaction.note.like("%盘亏%")), "盘亏调整"),
+            (InventoryTransaction.transaction_type == "ADJUSTMENT", "盘盈/其他调整"),
+            else_=InventoryTransaction.transaction_type,
+        )
+        signed_quantity = case(
+            (InventoryTransaction.transaction_type == "OUTBOUND", -InventoryTransaction.quantity),
+            (and_(InventoryTransaction.transaction_type == "ADJUSTMENT", InventoryTransaction.note.like("%盘亏%")), -InventoryTransaction.quantity),
+            else_=InventoryTransaction.quantity,
+        )
+        transaction_events = (
+            select(
+                InventoryTransaction.created_at.label("event_time"),
+                event_labels.label("event_type"),
+                InventoryTransaction.transaction_no.label("transaction_no"),
+                source_labels.label("source_type_label"),
+                InventoryTransaction.source_id.label("source_id"),
+                InventoryTransaction.product_id.label("product_id"),
+                InventoryTransaction.batch_id.label("batch_id"),
+                Product.product_code.label("product_code"),
+                Product.product_name.label("product"),
+                InventoryBatch.batch_no.label("batch_no"),
+                Warehouse.warehouse_name.label("warehouse"),
+                WarehouseLocation.location_name.label("location"),
+                Unit.unit_name.label("unit"),
+                signed_quantity.label("quantity_change"),
+                func.coalesce(InventoryBalance.status, "UNKNOWN").label("balance_status"),
+                func.coalesce(InventoryBalance.locked_quantity, 0).label("locked_quantity"),
+                InventoryTransaction.note.label("reason"),
+            )
+            .select_from(InventoryTransaction)
+            .join(Product, Product.id == InventoryTransaction.product_id)
+            .join(InventoryBatch, InventoryBatch.id == InventoryTransaction.batch_id)
+            .join(Warehouse, Warehouse.id == InventoryTransaction.warehouse_id)
+            .join(WarehouseLocation, WarehouseLocation.id == InventoryTransaction.location_id)
+            .join(Unit, Unit.id == InventoryTransaction.unit_id)
+            .outerjoin(
+                InventoryBalance,
+                and_(
+                    InventoryBalance.warehouse_id == InventoryTransaction.warehouse_id,
+                    InventoryBalance.location_id == InventoryTransaction.location_id,
+                    InventoryBalance.product_id == InventoryTransaction.product_id,
+                    InventoryBalance.batch_id == InventoryTransaction.batch_id,
+                    InventoryBalance.unit_id == InventoryTransaction.unit_id,
+                ),
+            )
+        )
+        status_events = (
+            select(
+                InventoryBalanceStatusLog.created_at.label("event_time"),
+                case(
+                    (InventoryBalanceStatusLog.new_status == "FROZEN", "库存冻结"),
+                    (InventoryBalanceStatusLog.previous_status == "FROZEN", "解除冻结"),
+                    else_="库存状态变更",
+                ).label("event_type"),
+                literal(None).label("transaction_no"),
+                literal("库存余额状态日志").label("source_type_label"),
+                InventoryBalance.id.label("source_id"),
+                InventoryBalance.product_id.label("product_id"),
+                InventoryBalance.batch_id.label("batch_id"),
+                Product.product_code.label("product_code"),
+                Product.product_name.label("product"),
+                InventoryBatch.batch_no.label("batch_no"),
+                Warehouse.warehouse_name.label("warehouse"),
+                WarehouseLocation.location_name.label("location"),
+                Unit.unit_name.label("unit"),
+                literal(0).label("quantity_change"),
+                InventoryBalance.status.label("balance_status"),
+                InventoryBalance.locked_quantity.label("locked_quantity"),
+                InventoryBalanceStatusLog.reason.label("reason"),
+            )
+            .select_from(InventoryBalanceStatusLog)
+            .join(InventoryBalance, InventoryBalance.id == InventoryBalanceStatusLog.balance_id)
+            .join(Product, Product.id == InventoryBalance.product_id)
+            .join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id)
+            .join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id)
+            .join(WarehouseLocation, WarehouseLocation.id == InventoryBalance.location_id)
+            .join(Unit, Unit.id == InventoryBalance.unit_id)
+        )
+        if warehouse_ids is not None:
+            transaction_events = transaction_events.where(InventoryTransaction.warehouse_id.in_(warehouse_ids))
+            status_events = status_events.where(InventoryBalance.warehouse_id.in_(warehouse_ids))
+        event_rows = union_all(transaction_events, status_events).subquery()
+        statement = select(event_rows).order_by(event_rows.c.event_time.desc(), event_rows.c.transaction_no.desc()).limit(plan.limit + 1)
+        if product_ids:
+            statement = statement.where(event_rows.c.product_id.in_(product_ids))
+        if batch_ids:
+            statement = statement.where(event_rows.c.batch_id.in_(batch_ids))
+        return statement
     if plan.dataset == "accepted_orders_finance_gaps":
         invoice_totals = (
             select(
@@ -514,6 +620,7 @@ DATASET_LABELS = {
     "inventory_by_batch": "产品批次可用库存",
     "accepted_orders_finance_gaps": "已验收订单财务进度",
     "supplier_quote_delivery_profile": "供应商报价、交期与异常表现",
+    "inventory_movement_trace": "库存变动与冻结原因追溯",
     "purchase_requests": "采购申请",
     "purchase_orders": "采购订单",
     "deliveries": "到货单",
@@ -525,7 +632,7 @@ DATASET_LABELS = {
 }
 METRIC_LABELS = {"count": "数量", "records": "业务明细", "amount": "金额", "sum_quantity": "数量合计"}
 DIMENSION_LABELS = {"supplier": "供应商", "region": "区域", "status": "状态", "priority": "优先级", "currency": "币种", "product": "产品", "warehouse": "仓库", "result": "验收结果", "severity": "严重程度", "type": "异常类型"}
-FIELD_LABELS = {"metric_value": "指标值", "request_no": "申请编号", "purpose": "申请用途", "approved_at": "审批时间", "expected_date": "期望到货日期", "po_no": "订单编号", "delivery_no": "到货单号", "expected_arrival_date": "预计到货日", "actual_arrival_date": "实际到货日", "overdue_this_week": "本周逾期（1是）", "short_quantity": "本周短交数量", "documents_missing": "本周单证未齐（1是）", "product_code": "产品编码", "product": "产品", "warehouse": "仓库", "batch_no": "批次", "expiry_date": "有效期至", "quantity": "账面数量", "locked_quantity": "锁定数量", "available_quantity": "可用数量", "order_currency": "订单币种", "finance_currency": "财务币种", "order_amount": "订单金额", "reconciliation_no": "对账单号", "reconciliation_status": "对账状态", "reconciliation_amount": "对账金额", "verified_invoice_amount": "已核验发票金额", "paid_amount": "已付款金额", "settlement_no": "结算单号", "settlement_status": "结算状态", "reconciliation_progress": "对账进度", "invoice_progress": "开票进度", "payment_progress": "付款进度", "settlement_progress": "结算进度", "unit": "单位", "supplier": "供应商", "quote_no": "报价单号", "quote_date": "报价日期", "quote_status": "报价状态", "currency": "报价币种", "quoted_unit_price": "报价单价", "quote_unit": "报价单位", "quoted_lead_days": "报价交期（天）", "actual_delivery_count": "实际到货批次数", "avg_actual_lead_days": "平均实际到货周期（天）", "supplier_exception_count": "供应商关联异常数", "supplier_open_exception_count": "供应商未关闭异常数", **DIMENSION_LABELS}
+FIELD_LABELS = {"metric_value": "指标值", "request_no": "申请编号", "purpose": "申请用途", "approved_at": "审批时间", "expected_date": "期望到货日期", "po_no": "订单编号", "delivery_no": "到货单号", "expected_arrival_date": "预计到货日", "actual_arrival_date": "实际到货日", "overdue_this_week": "本周逾期（1是）", "short_quantity": "本周短交数量", "documents_missing": "本周单证未齐（1是）", "product_code": "产品编码", "product": "产品", "warehouse": "仓库", "batch_no": "批次", "expiry_date": "有效期至", "quantity": "账面数量", "locked_quantity": "锁定数量", "available_quantity": "可用数量", "order_currency": "订单币种", "finance_currency": "财务币种", "order_amount": "订单金额", "reconciliation_no": "对账单号", "reconciliation_status": "对账状态", "reconciliation_amount": "对账金额", "verified_invoice_amount": "已核验发票金额", "paid_amount": "已付款金额", "settlement_no": "结算单号", "settlement_status": "结算状态", "reconciliation_progress": "对账进度", "invoice_progress": "开票进度", "payment_progress": "付款进度", "settlement_progress": "结算进度", "unit": "单位", "supplier": "供应商", "quote_no": "报价单号", "quote_date": "报价日期", "quote_status": "报价状态", "currency": "报价币种", "quoted_unit_price": "报价单价", "quote_unit": "报价单位", "quoted_lead_days": "报价交期（天）", "actual_delivery_count": "实际到货批次数", "avg_actual_lead_days": "平均实际到货周期（天）", "supplier_exception_count": "供应商关联异常数", "supplier_open_exception_count": "供应商未关闭异常数", "event_time": "发生时间", "event_type": "变动类型", "transaction_no": "流水编号", "source_type_label": "来源单据类型", "source_id": "来源单据编号", "location": "库位", "quantity_change": "数量变化（出库为负）", "balance_status": "当前库存状态", "reason": "原因/备注", **DIMENSION_LABELS}
 
 
 def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
@@ -556,6 +663,8 @@ def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
 
 
 def _build_query_template(plan: QueryPlan) -> str:
+    if plan.dataset == "inventory_movement_trace":
+        return "按已登记产品或批次查询库存入库、出库、盘点调整流水及库存冻结/解冻日志；出库和盘亏显示为负数，来源编号取自库存流水 source_id；冻结原因只按状态日志中实际登记的原因展示"
     if plan.dataset == "supplier_quote_delivery_profile":
         return "按已登记供应商查询已提交或中选报价历史；同时展示订单关联产品的实际到货周期均值和供应商级异常数量。实际交期按订单日期至实际到货日期的自然日计算；异常仅按供应商汇总，不归因到单个产品"
     if plan.dataset == "inventory_by_batch":
@@ -595,6 +704,8 @@ def _unit_metadata(plan: QueryPlan, rows: list[dict[str, Any]]) -> tuple[str | N
         return "条", "数量指标的固定单位"
     if plan.dataset == "inventory_by_batch":
         return "各行所示单位", "数量和单位逐行来自库存余额记录；可用量按库存状态与锁定数量规则计算"
+    if plan.dataset == "inventory_movement_trace":
+        return "各行所示单位", "数量变化保留原计量单位；流水与冻结日志按事件分行展示"
     if plan.metric == "sum_quantity":
         return "原计量单位", "库存数量的计量单位未进入当前聚合结果"
     return None, None
@@ -616,6 +727,12 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
         raise BusinessValidationError("该订单风险查询按固定自然周口径执行，不支持额外筛选条件")
     if plan.dataset == "inventory_by_batch" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or any(item.field != "product_id" or item.operator != "in" for item in plan.filters)):
         raise BusinessValidationError("该库存查询仅支持按已登记产品查询批次明细")
+    if plan.dataset == "inventory_movement_trace" and (
+        plan.time_field or plan.date_from or plan.date_to or plan.group_by
+        or not plan.filters
+        or any(item.field not in {"product_id", "batch_id"} or item.operator != "in" for item in plan.filters)
+    ):
+        raise BusinessValidationError("库存变动追溯仅支持按已登记产品或批次定位查询")
     if plan.dataset == "accepted_orders_finance_gaps" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or plan.filters):
         raise BusinessValidationError("该财务进度查询按固定业务口径执行，不支持额外筛选条件")
     if plan.dataset == "supplier_quote_delivery_profile" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or any(item.field not in {"supplier_id", "product_id"} or item.operator != "in" for item in plan.filters)):
@@ -739,6 +856,70 @@ def _inventory_by_batch_plan(db: Session, question: str) -> QueryPlan | None:
         order="asc",
         limit=20,
     )
+
+
+def _inventory_movement_trace_plan(db: Session, user: User, question: str, previous_plan: QueryPlan | None = None) -> QueryPlan | None:
+    normalized = question.lower()
+    asks_trace = (
+        any(marker in normalized for marker in ("库存流水", "库存变动", "库存", "批次", "扣减", "锁定", "冻结"))
+        and any(marker in normalized for marker in ("为什么", "原因", "来源", "追溯", "流水", "扣减", "锁定", "冻结", "变动"))
+    )
+    if not asks_trace:
+        return None
+    role_codes = set(get_user_role_codes(db, user.id))
+    permission_codes = set(get_user_permission_codes(db, user.id))
+    if "SYS_ADMIN" not in role_codes and "warehouse.inventory.read" not in permission_codes:
+        raise BusinessValidationError("当前用户没有查询库存流水和状态变更记录的权限")
+
+    products = db.execute(
+        select(Product.id, Product.product_name, Product.product_code, Chemical.chemical_name, Chemical.english_name, Chemical.alias_text, Chemical.cas_no)
+        .join(Chemical, Chemical.id == Product.chemical_id)
+        .where(Product.status == "ACTIVE", Chemical.status == "ACTIVE")
+    ).all()
+    product_candidates: list[tuple[str, int]] = []
+    for product_id, product_name, product_code, chemical_name, english_name, alias_text, cas_no in products:
+        names = [product_name, product_code, chemical_name, english_name, cas_no]
+        if alias_text:
+            names.extend(re.split(r"[,;，；、|/]+", str(alias_text)))
+        product_candidates.extend((str(name).strip(), product_id) for name in names if name and len(str(name).strip()) >= 2)
+    product_matches = [(len(name), product_id) for name, product_id in product_candidates if name.lower() in normalized]
+    product_ids: list[int] = []
+    if product_matches:
+        longest = max(length for length, _ in product_matches)
+        product_ids = sorted({product_id for length, product_id in product_matches if length == longest})
+
+    batches = db.execute(select(InventoryBatch.id, InventoryBatch.batch_no)).all()
+    batch_candidates = [(str(batch_no).strip(), batch_id) for batch_id, batch_no in batches if batch_no and len(str(batch_no).strip()) >= 3]
+    batch_matches = [(len(number), batch_id) for number, batch_id in batch_candidates if number.lower() in normalized]
+    batch_ids: list[int] = []
+    if batch_matches:
+        longest = max(length for length, _ in batch_matches)
+        batch_ids = sorted({batch_id for length, batch_id in batch_matches if length == longest})
+
+    if not product_ids and not batch_ids and previous_plan is not None:
+        if previous_plan.dataset == "inventory_by_batch":
+            product_ids = next(
+                (item.value for item in previous_plan.filters if item.field == "product_id" and item.operator == "in"),
+                [],
+            )
+        elif previous_plan.dataset == "inventory_movement_trace":
+            product_ids = next(
+                (item.value for item in previous_plan.filters if item.field == "product_id" and item.operator == "in"),
+                [],
+            )
+            batch_ids = next(
+                (item.value for item in previous_plan.filters if item.field == "batch_id" and item.operator == "in"),
+                [],
+            )
+    if not product_ids and not batch_ids:
+        raise BusinessValidationError("请在库存追溯问题中提供已登记产品名称或准确批次号，我才能定位对应流水。")
+
+    filters = []
+    if product_ids:
+        filters.append(QueryFilter(field="product_id", operator="in", value=product_ids))
+    if batch_ids:
+        filters.append(QueryFilter(field="batch_id", operator="in", value=batch_ids))
+    return QueryPlan(dataset="inventory_movement_trace", metric="records", time_field=None, filters=filters, order="desc", limit=20)
 
 
 def _supplier_profile_plan(db: Session, user: User, question: str) -> QueryPlan | None:
@@ -877,6 +1058,10 @@ def _merge_follow_up_plan(question: str, previous_plan: QueryPlan) -> QueryPlan:
 
 
 async def _understand_question(question: str, settings: Settings, db: Session, user: User, previous_plan: QueryPlan | None = None) -> QueryPlan:
+    movement_trace = _inventory_movement_trace_plan(db, user, question, previous_plan)
+    if movement_trace is not None:
+        LOGGER.info("AI 查询计划使用库存变动追溯固定查询 question_hash=%s", _query_hash(question))
+        return movement_trace
     supplier_profile = _supplier_profile_plan(db, user, question)
     if supplier_profile is not None:
         LOGGER.info("AI 查询计划使用供应商固定关联查询 question_hash=%s", _query_hash(question))
@@ -947,6 +1132,15 @@ async def run_text2sql(
     runtime = settings or get_settings()
 
     async def understand(state: Text2SQLState) -> dict[str, Any]:
+        movement_plan = _inventory_movement_trace_plan(db, user, state["question"], state.get("previous_plan"))
+        if movement_plan is not None:
+            LOGGER.info("AI 查询计划使用库存变动追溯固定查询 question_hash=%s", _query_hash(state["question"]))
+            return {
+                "plan": movement_plan,
+                "slots": _build_slots(movement_plan),
+                "template": _build_query_template(movement_plan),
+                "stages": [*state.get("stages", []), "query_understanding"],
+            }
         supplier_plan = _supplier_profile_plan(db, user, state["question"])
         if supplier_plan is not None:
             LOGGER.info("AI 查询计划使用供应商固定关联查询 question_hash=%s", _query_hash(state["question"]))
@@ -1000,6 +1194,8 @@ async def run_text2sql(
             columns = ["po_no", "supplier", "delivery_no", "product", "unit", "expected_arrival_date", "actual_arrival_date", "overdue_this_week", "short_quantity", "documents_missing"]
         elif state["plan"].dataset == "inventory_by_batch":
             columns = ["product_code", "product", "warehouse", "batch_no", "expiry_date", "unit", "quantity", "locked_quantity", "available_quantity"]
+        elif state["plan"].dataset == "inventory_movement_trace":
+            columns = ["event_time", "event_type", "transaction_no", "source_type_label", "source_id", "product_code", "product", "batch_no", "warehouse", "location", "unit", "quantity_change", "balance_status", "locked_quantity", "reason"]
         elif state["plan"].dataset == "accepted_orders_finance_gaps":
             columns = ["po_no", "supplier", "order_currency", "finance_currency", "order_amount", "reconciliation_no", "reconciliation_status", "reconciliation_amount", "verified_invoice_amount", "paid_amount", "settlement_no", "settlement_status", "reconciliation_progress", "invoice_progress", "payment_progress", "settlement_progress"]
         elif state["plan"].dataset == "supplier_quote_delivery_profile":
