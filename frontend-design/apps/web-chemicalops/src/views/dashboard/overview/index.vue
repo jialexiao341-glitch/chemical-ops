@@ -64,6 +64,18 @@ const paidAmountText = computed(() => {
 
 const isDemo = computed(() => health.value?.data_mode === 'demo');
 
+const pendingTaskLabels: Record<string, string> = {
+  PURCHASE_ORDER_APPROVAL: '采购订单待审批',
+  QUALITY_ACCEPTANCE: '到货质量待验收',
+  DELIVERY_CONFIRMATION: '到货待确认',
+  OPEN_EXCEPTION: '待处理异常',
+  INVENTORY_EXPIRY: '库存临期预警',
+};
+
+function pendingTaskLabel(taskType: string) {
+  return pendingTaskLabels[taskType] ?? '其他待办';
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -232,7 +244,7 @@ onMounted(async () => {
                 :key="task.task_type"
                 class="flex items-center justify-between border-b border-dashed pb-2 last:border-0"
               >
-                <span class="text-sm">{{ task.task_type }}</span>
+                <span class="text-sm">{{ pendingTaskLabel(task.task_type) }}</span>
                 <span class="text-lg font-semibold">{{ task.task_count }}</span>
               </li>
             </ul>
