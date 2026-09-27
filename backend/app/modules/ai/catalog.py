@@ -24,6 +24,8 @@ CATALOG: dict[str, DatasetSpec] = {
     "approved_requests_without_rfq": DatasetSpec("已审批未建立询价单的采购申请", "procurement.requests.read", frozenset({"purchase_requests", "purchase_request_items", "rfq_items", "rfqs"}), frozenset({"records"}), frozenset(), frozenset(), frozenset()),
     "weekly_order_risks": DatasetSpec("本周订单履约风险", "procurement.orders.read", frozenset({"purchase_orders", "purchase_order_items", "suppliers", "deliveries", "delivery_items", "md_units"}), frozenset({"records"}), frozenset(), frozenset(), frozenset()),
     "inventory_by_batch": DatasetSpec("产品批次可用库存", "warehouse.inventory.read", frozenset({"inventory_balances", "inventory_batches", "md_products", "warehouses", "md_units"}), frozenset({"records"}), frozenset(), frozenset({"product_id"}), frozenset()),
+    "accepted_orders_finance_gaps": DatasetSpec("已验收订单财务进度", "finance.reconciliations.read", frozenset({"purchase_orders", "suppliers", "deliveries", "finance_reconciliations", "finance_invoices", "finance_payments", "finance_settlements"}), frozenset({"records"}), frozenset(), frozenset(), frozenset()),
+    "supplier_quote_delivery_profile": DatasetSpec("供应商报价、交期与异常表现", "master.suppliers.read", frozenset({"suppliers", "supplier_products", "md_products", "md_units", "chemicals", "rfqs", "rfq_items", "supplier_quotes", "supplier_quote_items", "purchase_orders", "purchase_order_items", "deliveries", "delivery_items", "operation_exceptions"}), frozenset({"records"}), frozenset(), frozenset({"supplier_id", "product_id"}), frozenset()),
     "purchase_requests": DatasetSpec("采购申请", "procurement.requests.read", frozenset({"purchase_requests"}), frozenset({"count", "amount"}), frozenset({"status", "priority", "currency"}), frozenset({"status", "priority", "currency_code"}), frozenset({"created_at", "expected_date", "submitted_at", "approved_at"})),
     "purchase_orders": DatasetSpec("采购订单", "procurement.orders.read", frozenset({"purchase_orders", "suppliers"}), frozenset({"count", "amount"}), frozenset({"supplier", "region", "status", "currency"}), frozenset({"status", "supplier_name", "region", "currency_code"}), frozenset({"created_at", "order_date", "expected_arrival_date"})),
     "deliveries": DatasetSpec("入库单", "warehouse.deliveries.read", frozenset({"deliveries", "suppliers"}), frozenset({"count"}), frozenset({"supplier", "status"}), frozenset({"status", "supplier_name"}), frozenset({"created_at", "expected_arrival_date", "actual_arrival_date"})),
@@ -48,7 +50,7 @@ def catalog_prompt() -> str:
                 "times": sorted(spec.times),
             }
             for key, spec in CATALOG.items()
-            if key not in {"approved_requests_without_rfq", "weekly_order_risks", "inventory_by_batch"}
+            if key not in {"approved_requests_without_rfq", "weekly_order_risks", "inventory_by_batch", "accepted_orders_finance_gaps", "supplier_quote_delivery_profile"}
         },
         ensure_ascii=False,
     )

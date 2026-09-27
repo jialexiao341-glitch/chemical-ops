@@ -455,6 +455,10 @@ async def _run_text2sql_for_chat(
     permission = dataset_spec.permission
     if result.plan.dataset == "weekly_order_risks":
         permission = "procurement.orders.read + warehouse.deliveries.read"
+    elif result.plan.dataset == "accepted_orders_finance_gaps":
+        permission = "procurement.orders.read + warehouse.deliveries.read + quality.acceptances.read + finance.reconciliations.read + finance.invoices.read + finance.payments.read + finance.settlements.read"
+    elif result.plan.dataset == "supplier_quote_delivery_profile":
+        permission = "master.suppliers.read + procurement.rfqs.read + procurement.orders.read + warehouse.deliveries.read + operations.exceptions.read"
     data_scope = {
         "date_from": result.plan.date_from.isoformat() if result.plan.date_from else None,
         "date_to": result.plan.date_to.isoformat() if result.plan.date_to else None,

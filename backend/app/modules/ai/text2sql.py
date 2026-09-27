@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
 from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.finance.model import FinanceReconciliation
+from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.chemicals.model import Chemical
 from app.modules.operation_exceptions.model import OperationException
@@ -32,6 +32,8 @@ from app.modules.products.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem, Unit
 from app.modules.rfqs.model import RFQ, RFQItem
+from app.modules.rfqs.model import SupplierQuote, SupplierQuoteItem
+from app.modules.suppliers.product_model import SupplierProduct
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.suppliers.model import Supplier
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
@@ -240,7 +242,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         statement = (
             select(
                 Product.product_code.label("product_code"),
-                Product.product_name.label("product"),
+                func.coalesce(Product.product_name, RFQItem.requested_name).label("product"),
                 Warehouse.warehouse_name.label("warehouse"),
                 InventoryBatch.batch_no.label("batch_no"),
                 InventoryBatch.expiry_date.label("expiry_date"),
@@ -276,6 +278,193 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             warehouse_ids = accessible_warehouse_ids(db, user)
             if warehouse_ids is not None:
                 statement = statement.where(Warehouse.id.in_(warehouse_ids))
+        return statement
+    if plan.dataset == "accepted_orders_finance_gaps":
+        invoice_totals = (
+            select(
+                FinanceInvoice.reconciliation_id.label("reconciliation_id"),
+                func.sum(FinanceInvoice.amount_incl_tax).label("verified_invoice_amount"),
+            )
+            .where(FinanceInvoice.status == "VERIFIED")
+            .group_by(FinanceInvoice.reconciliation_id)
+            .subquery()
+        )
+        payment_totals = (
+            select(
+                FinancePayment.reconciliation_id.label("reconciliation_id"),
+                func.sum(FinancePayment.amount).label("paid_amount"),
+            )
+            .where(FinancePayment.status == "PAID")
+            .group_by(FinancePayment.reconciliation_id)
+            .subquery()
+        )
+        has_accepted_delivery = exists(
+            select(1).where(Delivery.po_id == PurchaseOrder.id, Delivery.status == "ACCEPTED")
+        )
+        has_unaccepted_delivery = exists(
+            select(1).where(Delivery.po_id == PurchaseOrder.id, Delivery.status != "ACCEPTED")
+        )
+        expected_amount = func.coalesce(FinanceReconciliation.total_amount, PurchaseOrder.order_amount)
+        verified_invoice_amount = func.coalesce(invoice_totals.c.verified_invoice_amount, 0)
+        paid_amount = func.coalesce(payment_totals.c.paid_amount, 0)
+        reconciliation_incomplete = or_(
+            FinanceReconciliation.id.is_(None),
+            FinanceReconciliation.status.not_in(("CONFIRMED", "CLOSED")),
+        )
+        invoice_incomplete = verified_invoice_amount < expected_amount
+        payment_incomplete = paid_amount < expected_amount
+        statement = (
+            select(
+                PurchaseOrder.po_no.label("po_no"),
+                Supplier.supplier_name.label("supplier"),
+                PurchaseOrder.currency_code.label("order_currency"),
+                func.coalesce(FinanceReconciliation.currency_code, PurchaseOrder.currency_code).label("finance_currency"),
+                PurchaseOrder.order_amount.label("order_amount"),
+                FinanceReconciliation.reconciliation_no.label("reconciliation_no"),
+                FinanceReconciliation.status.label("reconciliation_status"),
+                expected_amount.label("reconciliation_amount"),
+                verified_invoice_amount.label("verified_invoice_amount"),
+                paid_amount.label("paid_amount"),
+                FinanceSettlement.settlement_no.label("settlement_no"),
+                FinanceSettlement.status.label("settlement_status"),
+                case((reconciliation_incomplete, "未完成"), else_="已完成").label("reconciliation_progress"),
+                case((invoice_incomplete, "未完成"), else_="已完成").label("invoice_progress"),
+                case((payment_incomplete, "未完成"), else_="已完成").label("payment_progress"),
+                case((or_(FinanceSettlement.id.is_(None), FinanceSettlement.status != "CONFIRMED"), "未完成"), else_="已完成").label("settlement_progress"),
+            )
+            .select_from(PurchaseOrder)
+            .join(Supplier, Supplier.id == PurchaseOrder.supplier_id)
+            .outerjoin(FinanceReconciliation, FinanceReconciliation.po_id == PurchaseOrder.id)
+            .outerjoin(invoice_totals, invoice_totals.c.reconciliation_id == FinanceReconciliation.id)
+            .outerjoin(payment_totals, payment_totals.c.reconciliation_id == FinanceReconciliation.id)
+            .outerjoin(FinanceSettlement, FinanceSettlement.reconciliation_id == FinanceReconciliation.id)
+            .where(
+                PurchaseOrder.status == "COMPLETED",
+                has_accepted_delivery,
+                not_(has_unaccepted_delivery),
+                or_(
+                    reconciliation_incomplete,
+                    invoice_incomplete,
+                    payment_incomplete,
+                ),
+            )
+            .order_by(PurchaseOrder.po_no)
+            .limit(plan.limit + 1)
+        )
+        if user is not None and db is not None:
+            role_codes = set(get_user_role_codes(db, user.id))
+            if not role_codes.intersection({"SYS_ADMIN", "PROCUREMENT_MANAGER"}):
+                if user.department_id is not None:
+                    statement = statement.where(PurchaseOrder.department_id == user.department_id)
+                else:
+                    statement = statement.where(PurchaseOrder.buyer_id == user.id)
+        return statement
+    if plan.dataset == "supplier_quote_delivery_profile":
+        supplier_ids = next((item.value for item in plan.filters if item.field == "supplier_id" and item.operator == "in"), [])
+        product_ids = next((item.value for item in plan.filters if item.field == "product_id" and item.operator == "in"), [])
+        role_codes = set(get_user_role_codes(db, user.id)) if user is not None and db is not None else set()
+        can_manage_all = bool(role_codes.intersection({"SYS_ADMIN", "PROCUREMENT_MANAGER"}))
+
+        delivery_observations = (
+            select(
+                Delivery.supplier_id.label("supplier_id"),
+                DeliveryItem.product_id.label("product_id"),
+                Delivery.id.label("delivery_id"),
+                func.datediff(Delivery.actual_arrival_date, PurchaseOrder.order_date).label("actual_lead_days"),
+            )
+            .select_from(DeliveryItem)
+            .join(Delivery, Delivery.id == DeliveryItem.delivery_id)
+            .join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id)
+            .where(
+                Delivery.actual_arrival_date.is_not(None),
+                PurchaseOrder.order_date.is_not(None),
+                PurchaseOrder.status != "CANCELLED",
+            )
+            .distinct()
+        )
+        if user is not None and db is not None and not can_manage_all:
+            if user.department_id is not None:
+                delivery_observations = delivery_observations.where(PurchaseOrder.department_id == user.department_id)
+            else:
+                delivery_observations = delivery_observations.where(PurchaseOrder.buyer_id == user.id)
+        delivery_observations = delivery_observations.subquery()
+        actual_delivery = (
+            select(
+                delivery_observations.c.supplier_id,
+                delivery_observations.c.product_id,
+                func.count(delivery_observations.c.delivery_id).label("actual_delivery_count"),
+                func.avg(delivery_observations.c.actual_lead_days).label("avg_actual_lead_days"),
+            )
+            .group_by(delivery_observations.c.supplier_id, delivery_observations.c.product_id)
+            .subquery()
+        )
+
+        exception_by_po = exists(
+            select(1).where(PurchaseOrder.id == OperationException.po_id, PurchaseOrder.supplier_id == Supplier.id).correlate(Supplier)
+        )
+        exception_by_delivery = exists(
+            select(1).where(Delivery.id == OperationException.delivery_id, Delivery.supplier_id == Supplier.id).correlate(Supplier)
+        )
+        exception_by_item = exists(
+            select(1)
+            .select_from(DeliveryItem)
+            .join(Delivery, Delivery.id == DeliveryItem.delivery_id)
+            .where(DeliveryItem.id == OperationException.delivery_item_id, Delivery.supplier_id == Supplier.id)
+            .correlate(Supplier)
+        )
+        supplier_exceptions = select(func.count(OperationException.id)).where(
+            or_(exception_by_po, exception_by_delivery, exception_by_item)
+        )
+        open_supplier_exceptions = supplier_exceptions.where(OperationException.status.in_(("OPEN", "PROCESSING")))
+        if user is not None and db is not None and not bool(role_codes.intersection({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY"})):
+            supplier_exceptions = supplier_exceptions.where(OperationException.owner_id == user.id)
+            open_supplier_exceptions = open_supplier_exceptions.where(OperationException.owner_id == user.id)
+
+        product_id_expr = func.coalesce(SupplierProduct.product_id, RFQItem.product_id)
+        statement = (
+            select(
+                Supplier.supplier_name.label("supplier"),
+                Product.product_code.label("product_code"),
+                Product.product_name.label("product"),
+                SupplierQuote.quote_no.label("quote_no"),
+                SupplierQuote.quote_date.label("quote_date"),
+                SupplierQuote.status.label("quote_status"),
+                SupplierQuote.currency_code.label("currency"),
+                SupplierQuoteItem.unit_price.label("quoted_unit_price"),
+                Unit.unit_name.label("quote_unit"),
+                SupplierQuoteItem.lead_days.label("quoted_lead_days"),
+                actual_delivery.c.actual_delivery_count.label("actual_delivery_count"),
+                func.round(actual_delivery.c.avg_actual_lead_days, 1).label("avg_actual_lead_days"),
+                supplier_exceptions.scalar_subquery().label("supplier_exception_count"),
+                open_supplier_exceptions.scalar_subquery().label("supplier_open_exception_count"),
+            )
+            .select_from(SupplierQuote)
+            .join(Supplier, Supplier.id == SupplierQuote.supplier_id)
+            .join(SupplierQuoteItem, SupplierQuoteItem.quote_id == SupplierQuote.id)
+            .join(RFQ, RFQ.id == SupplierQuote.rfq_id)
+            .join(RFQItem, RFQItem.id == SupplierQuoteItem.rfq_item_id)
+            .outerjoin(
+                SupplierProduct,
+                and_(SupplierProduct.id == SupplierQuoteItem.supplier_product_id, SupplierProduct.supplier_id == Supplier.id),
+            )
+            .outerjoin(Product, Product.id == product_id_expr)
+            .outerjoin(Unit, Unit.id == SupplierQuoteItem.unit_id)
+            .outerjoin(
+                actual_delivery,
+                and_(actual_delivery.c.supplier_id == Supplier.id, actual_delivery.c.product_id == Product.id),
+            )
+            .where(
+                Supplier.id.in_(supplier_ids),
+                SupplierQuote.status.in_(("SUBMITTED", "SELECTED")),
+                Supplier.status == "ACTIVE",
+            )
+            .order_by(SupplierQuote.quote_date.desc(), SupplierQuote.id.desc(), Product.product_name)
+            .limit(plan.limit + 1)
+        )
+        if product_ids:
+            statement = statement.where(Product.id.in_(product_ids))
+        if user is not None and db is not None and not can_manage_all:
+            statement = statement.where(RFQ.requester_id == user.id)
         return statement
     stmt, model, aliases = _base_statement(plan)
     metric = func.count(model.id) if plan.metric in {"count", "amount"} else func.sum(_field(model, "quantity"))
@@ -323,6 +512,8 @@ DATASET_LABELS = {
     "approved_requests_without_rfq": "已审批未建立询价单的采购申请",
     "weekly_order_risks": "本周订单履约风险",
     "inventory_by_batch": "产品批次可用库存",
+    "accepted_orders_finance_gaps": "已验收订单财务进度",
+    "supplier_quote_delivery_profile": "供应商报价、交期与异常表现",
     "purchase_requests": "采购申请",
     "purchase_orders": "采购订单",
     "deliveries": "到货单",
@@ -334,7 +525,7 @@ DATASET_LABELS = {
 }
 METRIC_LABELS = {"count": "数量", "records": "业务明细", "amount": "金额", "sum_quantity": "数量合计"}
 DIMENSION_LABELS = {"supplier": "供应商", "region": "区域", "status": "状态", "priority": "优先级", "currency": "币种", "product": "产品", "warehouse": "仓库", "result": "验收结果", "severity": "严重程度", "type": "异常类型"}
-FIELD_LABELS = {"metric_value": "指标值", "request_no": "申请编号", "purpose": "申请用途", "approved_at": "审批时间", "expected_date": "期望到货日期", "po_no": "订单编号", "delivery_no": "到货单号", "expected_arrival_date": "预计到货日", "actual_arrival_date": "实际到货日", "overdue_this_week": "本周逾期（1是）", "short_quantity": "本周短交数量", "documents_missing": "本周单证未齐（1是）", "product_code": "产品编码", "product": "产品", "warehouse": "仓库", "batch_no": "批次", "expiry_date": "有效期至", "quantity": "账面数量", "locked_quantity": "锁定数量", "available_quantity": "可用数量", "unit": "单位", **DIMENSION_LABELS}
+FIELD_LABELS = {"metric_value": "指标值", "request_no": "申请编号", "purpose": "申请用途", "approved_at": "审批时间", "expected_date": "期望到货日期", "po_no": "订单编号", "delivery_no": "到货单号", "expected_arrival_date": "预计到货日", "actual_arrival_date": "实际到货日", "overdue_this_week": "本周逾期（1是）", "short_quantity": "本周短交数量", "documents_missing": "本周单证未齐（1是）", "product_code": "产品编码", "product": "产品", "warehouse": "仓库", "batch_no": "批次", "expiry_date": "有效期至", "quantity": "账面数量", "locked_quantity": "锁定数量", "available_quantity": "可用数量", "order_currency": "订单币种", "finance_currency": "财务币种", "order_amount": "订单金额", "reconciliation_no": "对账单号", "reconciliation_status": "对账状态", "reconciliation_amount": "对账金额", "verified_invoice_amount": "已核验发票金额", "paid_amount": "已付款金额", "settlement_no": "结算单号", "settlement_status": "结算状态", "reconciliation_progress": "对账进度", "invoice_progress": "开票进度", "payment_progress": "付款进度", "settlement_progress": "结算进度", "unit": "单位", "supplier": "供应商", "quote_no": "报价单号", "quote_date": "报价日期", "quote_status": "报价状态", "currency": "报价币种", "quoted_unit_price": "报价单价", "quote_unit": "报价单位", "quoted_lead_days": "报价交期（天）", "actual_delivery_count": "实际到货批次数", "avg_actual_lead_days": "平均实际到货周期（天）", "supplier_exception_count": "供应商关联异常数", "supplier_open_exception_count": "供应商未关闭异常数", **DIMENSION_LABELS}
 
 
 def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
@@ -365,8 +556,12 @@ def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
 
 
 def _build_query_template(plan: QueryPlan) -> str:
+    if plan.dataset == "supplier_quote_delivery_profile":
+        return "按已登记供应商查询已提交或中选报价历史；同时展示订单关联产品的实际到货周期均值和供应商级异常数量。实际交期按订单日期至实际到货日期的自然日计算；异常仅按供应商汇总，不归因到单个产品"
     if plan.dataset == "inventory_by_batch":
         return "按已登记产品查询各仓库、批次的账面、锁定与可用数量；可用数量=可用状态余额的账面数量-锁定数量"
+    if plan.dataset == "accepted_orders_finance_gaps":
+        return "筛选已完成收货且所有到货单均已验收的订单；对账以 CONFIRMED/CLOSED 为完成，核验通过发票与 PAID 付款分别对比对账金额；无对账单时以订单金额作为对照额；另展示结算状态，金额按订单/财务币种展示，不跨币种合计"
     if plan.dataset == "weekly_order_risks":
         today = date.today()
         week_start = today - timedelta(days=today.weekday())
@@ -384,6 +579,10 @@ def _build_render_columns(plan: QueryPlan, columns: list[str]) -> list[dict[str,
 
 def _unit_metadata(plan: QueryPlan, rows: list[dict[str, Any]]) -> tuple[str | None, str | None]:
     """只从查询结果或固定指标语义推导单位，不让模型猜单位。"""
+    if plan.dataset == "accepted_orders_finance_gaps":
+        return "各订单原币", "每笔金额保留其订单/财务币种，不合并不同币种"
+    if plan.dataset == "supplier_quote_delivery_profile":
+        return "报价按行所示币种和单位；交期为天", "报价币种和单位来自历史报价；实际周期为订单日期至关联到货单实际日期的自然日平均值，异常按供应商汇总"
 
     if plan.metric == "amount":
         currencies = sorted({str(row.get("currency")).strip().upper() for row in rows if row.get("currency")})
@@ -417,6 +616,10 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
         raise BusinessValidationError("该订单风险查询按固定自然周口径执行，不支持额外筛选条件")
     if plan.dataset == "inventory_by_batch" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or any(item.field != "product_id" or item.operator != "in" for item in plan.filters)):
         raise BusinessValidationError("该库存查询仅支持按已登记产品查询批次明细")
+    if plan.dataset == "accepted_orders_finance_gaps" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or plan.filters):
+        raise BusinessValidationError("该财务进度查询按固定业务口径执行，不支持额外筛选条件")
+    if plan.dataset == "supplier_quote_delivery_profile" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or any(item.field not in {"supplier_id", "product_id"} or item.operator != "in" for item in plan.filters)):
+        raise BusinessValidationError("供应商报价查询只支持按已登记供应商和产品筛选")
     if plan.group_by and plan.group_by not in spec.dimensions:
         raise BusinessValidationError("分组字段不在允许范围内")
     if plan.time_field and plan.time_field not in spec.times:
@@ -431,6 +634,22 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
         required_permissions = {"procurement.orders.read", "warehouse.deliveries.read"}
         if not required_permissions.issubset(permission_codes):
             raise BusinessValidationError("当前用户需要同时具备采购订单和到货单读取权限")
+    if plan.dataset == "accepted_orders_finance_gaps" and "SYS_ADMIN" not in role_codes:
+        required_permissions = {
+            "procurement.orders.read",
+            "warehouse.deliveries.read",
+            "quality.acceptances.read",
+            "finance.reconciliations.read",
+            "finance.invoices.read",
+            "finance.payments.read",
+            "finance.settlements.read",
+        }
+        if not required_permissions.issubset(permission_codes):
+            raise BusinessValidationError("当前用户需要同时具备采购订单、到货单、质量验收和财务对账、发票、付款、结算读取权限")
+    if plan.dataset == "supplier_quote_delivery_profile" and "SYS_ADMIN" not in role_codes:
+        required_permissions = {"master.suppliers.read", "procurement.rfqs.read", "procurement.orders.read", "warehouse.deliveries.read", "operations.exceptions.read"}
+        if not required_permissions.issubset(permission_codes):
+            raise BusinessValidationError("当前用户需要同时具备供应商、询价、采购订单、到货单和运营异常读取权限")
 
 
 _QUERY_PLAN_FIELDS = frozenset({"dataset", "metric", "time_field", "date_from", "date_to", "group_by", "filters", "order", "limit"})
@@ -522,6 +741,56 @@ def _inventory_by_batch_plan(db: Session, question: str) -> QueryPlan | None:
     )
 
 
+def _supplier_profile_plan(db: Session, user: User, question: str) -> QueryPlan | None:
+    normalized = question.lower()
+    asks_supplier_profile = (
+        any(marker in normalized for marker in ("供应商", "报价", "报价单"))
+        and any(marker in normalized for marker in ("报价", "价格", "交期", "供货周期", "异常", "表现", "准时", "履约"))
+    )
+    if not asks_supplier_profile:
+        return None
+
+    role_codes = set(get_user_role_codes(db, user.id))
+    permission_codes = set(get_user_permission_codes(db, user.id))
+    required_permissions = {"master.suppliers.read", "procurement.rfqs.read", "procurement.orders.read", "warehouse.deliveries.read", "operations.exceptions.read"}
+    if "SYS_ADMIN" not in role_codes and not required_permissions.issubset(permission_codes):
+        raise BusinessValidationError("当前用户需要同时具备供应商、询价、采购订单、到货单和运营异常读取权限")
+
+    suppliers = db.execute(select(Supplier.id, Supplier.supplier_name, Supplier.supplier_code).where(Supplier.status == "ACTIVE")).all()
+    supplier_candidates = [(str(name).strip(), supplier_id) for supplier_id, name, code in suppliers for name in (name, code) if name and len(str(name).strip()) >= 2]
+    matches = [(len(name), supplier_id) for name, supplier_id in supplier_candidates if name.lower() in normalized]
+    supplier_ids: list[int] = []
+    if matches:
+        longest = max(length for length, _ in matches)
+        supplier_ids = sorted({supplier_id for length, supplier_id in matches if length == longest})
+    if not supplier_ids:
+        raise BusinessValidationError("没有识别到已登记的供应商名称，请将占位文字替换为系统中的实际供应商名称后重试。")
+
+    product_markers = any(marker in normalized for marker in ("报价", "价格", "交期", "供货周期", "履约"))
+    product_ids: list[int] = []
+    if product_markers:
+        products = db.execute(
+            select(Product.id, Product.product_name, Product.product_code, Chemical.chemical_name, Chemical.english_name, Chemical.alias_text, Chemical.cas_no)
+            .join(Chemical, Chemical.id == Product.chemical_id)
+            .where(Product.status == "ACTIVE", Chemical.status == "ACTIVE")
+        ).all()
+        product_candidates: list[tuple[str, int]] = []
+        for product_id, product_name, product_code, chemical_name, english_name, alias_text, cas_no in products:
+            names = [product_name, product_code, chemical_name, english_name, cas_no]
+            if alias_text:
+                names.extend(re.split(r"[,;，；、|/]+", str(alias_text)))
+            product_candidates.extend((str(name).strip(), product_id) for name in names if name and len(str(name).strip()) >= 2)
+        product_matches = [(len(name), product_id) for name, product_id in product_candidates if name.lower() in normalized]
+        if product_matches:
+            longest = max(length for length, _ in product_matches)
+            product_ids = sorted({product_id for length, product_id in product_matches if length == longest})
+
+    filters = [QueryFilter(field="supplier_id", operator="in", value=supplier_ids)]
+    if product_ids:
+        filters.append(QueryFilter(field="product_id", operator="in", value=product_ids))
+    return QueryPlan(dataset="supplier_quote_delivery_profile", metric="records", time_field=None, filters=filters, order="desc", limit=20)
+
+
 def _fallback_query_plan(question: str) -> QueryPlan | None:
     """为高频、口径固定的采购查询提供不依赖模型格式的安全兜底。"""
 
@@ -542,6 +811,14 @@ def _fallback_query_plan(question: str) -> QueryPlan | None:
     )
     if is_weekly_order_risk:
         return QueryPlan(dataset="weekly_order_risks", metric="records", time_field=None, order="asc", limit=20)
+    is_accepted_order_finance_gap = (
+        "订单" in normalized
+        and any(marker in normalized for marker in ("已验收", "验收通过", "完成验收", "已经验收"))
+        and any(marker in normalized for marker in ("对账", "开票", "发票", "付款"))
+        and any(marker in normalized for marker in ("未", "还没", "没有", "尚未", "哪些", "查询", "查一下", "状态"))
+    )
+    if is_accepted_order_finance_gap:
+        return QueryPlan(dataset="accepted_orders_finance_gaps", metric="records", time_field=None, order="asc", limit=20)
     is_overdue_delivery = "逾期" in normalized and any(marker in normalized for marker in ("到货", "收货", "入库"))
     if is_overdue_delivery:
         today = date.today()
@@ -599,9 +876,13 @@ def _merge_follow_up_plan(question: str, previous_plan: QueryPlan) -> QueryPlan:
     return previous_plan.model_copy(update=updates)
 
 
-async def _understand_question(question: str, settings: Settings, previous_plan: QueryPlan | None = None) -> QueryPlan:
+async def _understand_question(question: str, settings: Settings, db: Session, user: User, previous_plan: QueryPlan | None = None) -> QueryPlan:
+    supplier_profile = _supplier_profile_plan(db, user, question)
+    if supplier_profile is not None:
+        LOGGER.info("AI 查询计划使用供应商固定关联查询 question_hash=%s", _query_hash(question))
+        return supplier_profile
     fallback = _fallback_query_plan(question)
-    if fallback is not None and fallback.dataset in {"approved_requests_without_rfq", "weekly_order_risks"}:
+    if fallback is not None and fallback.dataset in {"approved_requests_without_rfq", "weekly_order_risks", "accepted_orders_finance_gaps"}:
         LOGGER.info("AI 查询计划使用固定关联查询 question_hash=%s dataset=%s", _query_hash(question), fallback.dataset)
         return fallback
     if fallback is not None and "逾期" in question and any(marker in question for marker in ("到货", "收货", "入库")):
@@ -666,14 +947,23 @@ async def run_text2sql(
     runtime = settings or get_settings()
 
     async def understand(state: Text2SQLState) -> dict[str, Any]:
+        supplier_plan = _supplier_profile_plan(db, user, state["question"])
+        if supplier_plan is not None:
+            LOGGER.info("AI 查询计划使用供应商固定关联查询 question_hash=%s", _query_hash(state["question"]))
+            return {
+                "plan": supplier_plan,
+                "slots": _build_slots(supplier_plan),
+                "template": _build_query_template(supplier_plan),
+                "stages": [*state.get("stages", []), "query_understanding"],
+            }
         inventory_plan = _inventory_by_batch_plan(db, state["question"])
         if inventory_plan is not None:
             plan = inventory_plan
             LOGGER.info("AI 查询计划使用产品批次库存固定查询 question_hash=%s product_count=%s", _query_hash(state["question"]), len(inventory_plan.filters[0].value))
         elif state.get("previous_plan") is None:
-            plan = await _understand_question(state["question"], runtime)
+            plan = await _understand_question(state["question"], runtime, db, user)
         else:
-            plan = await _understand_question(state["question"], runtime, state["previous_plan"])
+            plan = await _understand_question(state["question"], runtime, db, user, state["previous_plan"])
         return {
             "plan": plan,
             "slots": _build_slots(plan),
@@ -710,6 +1000,10 @@ async def run_text2sql(
             columns = ["po_no", "supplier", "delivery_no", "product", "unit", "expected_arrival_date", "actual_arrival_date", "overdue_this_week", "short_quantity", "documents_missing"]
         elif state["plan"].dataset == "inventory_by_batch":
             columns = ["product_code", "product", "warehouse", "batch_no", "expiry_date", "unit", "quantity", "locked_quantity", "available_quantity"]
+        elif state["plan"].dataset == "accepted_orders_finance_gaps":
+            columns = ["po_no", "supplier", "order_currency", "finance_currency", "order_amount", "reconciliation_no", "reconciliation_status", "reconciliation_amount", "verified_invoice_amount", "paid_amount", "settlement_no", "settlement_status", "reconciliation_progress", "invoice_progress", "payment_progress", "settlement_progress"]
+        elif state["plan"].dataset == "supplier_quote_delivery_profile":
+            columns = ["supplier", "product_code", "product", "quote_no", "quote_date", "quote_status", "currency", "quoted_unit_price", "quote_unit", "quoted_lead_days", "actual_delivery_count", "avg_actual_lead_days", "supplier_exception_count", "supplier_open_exception_count"]
         else:
             columns = ["metric_value"] if not state["plan"].group_by else [state["plan"].group_by, "metric_value"]
         render_columns = _build_render_columns(state["plan"], columns)
