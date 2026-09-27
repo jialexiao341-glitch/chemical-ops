@@ -129,7 +129,14 @@ onMounted(async () => {
     gridApi.formApi,
   );
   gridApi.query();
+  openAiRecord(route.query.ai_record_id);
 });
+
+function openAiRecord(rawId: unknown) {
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return;
+  detailApi.setData({ id } as PurchaseRequestApi.PurchaseRequest).open();
+}
 
 watch(
   () => route.query.ai_filters,
@@ -138,6 +145,11 @@ watch(
       gridApi.query();
     }
   },
+);
+
+watch(
+  () => route.query.ai_record_id,
+  (rawId) => openAiRecord(rawId),
 );
 </script>
 

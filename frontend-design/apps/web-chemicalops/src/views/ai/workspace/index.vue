@@ -392,6 +392,16 @@ function openSourceRecord(record: NonNullable<UiMessage['sourceRecords']>[number
     });
     return;
   }
+  if (
+    (record.dataset === 'purchase_requests' || record.dataset === 'deliveries') &&
+    record.record_id
+  ) {
+    void router.push({
+      path: target.path,
+      query: { ai_record_id: String(record.record_id) },
+    });
+    return;
+  }
   const recordFilters = record.filters ?? {};
   const { keywords, ...filters } = recordFilters;
   void router.push({

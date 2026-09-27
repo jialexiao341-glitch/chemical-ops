@@ -20,6 +20,7 @@ import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
+import DetailDrawer from './modules/detail.vue';
 import ReceiveModal from './modules/receive.vue';
 
 defineOptions({ name: 'DeliveryList' });
@@ -32,6 +33,11 @@ const [Create, createApi] = useVbenModal({
 
 const [Receive, receiveApi] = useVbenModal({
   connectedComponent: ReceiveModal,
+  destroyOnClose: true,
+});
+
+const [Detail, detailApi] = useVbenDrawer({
+  connectedComponent: DetailDrawer,
   destroyOnClose: true,
 });
 
@@ -90,7 +96,14 @@ onMounted(async () => {
     gridApi.formApi,
   );
   gridApi.query();
+  openAiRecord(route.query.ai_record_id);
 });
+
+function openAiRecord(rawId: unknown) {
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return;
+  detailApi.setData({ id } as DeliveryApi.Delivery).open();
+}
 
 watch(
   () => route.query.ai_filters,
@@ -100,11 +113,17 @@ watch(
     }
   },
 );
+
+watch(
+  () => route.query.ai_record_id,
+  (rawId) => openAiRecord(rawId),
+);
 </script>
 
 <template>
   <Page auto-content-height>
     <Create @success="gridApi.query()" />
+    <Detail />
     <Receive @success="gridApi.query()" />
     <Grid table-title="到货与收货">
       <template #toolbar-tools>
