@@ -121,8 +121,8 @@ def create_automatic_exception(
         OperationException.source_type == source_type,
         OperationException.source_id == source_id,
     ]
-    # 定时临期提醒会重复扫描仍存在的事实；关闭后也不能每个周期重新通知。
-    if exception_type != "INVENTORY_EXPIRY":
+    # 定时库存临期和待验收提醒会重复扫描同一业务事实；关闭后不应每周期重新通知。
+    if exception_type not in {"INVENTORY_EXPIRY", "QUALITY_PENDING"}:
         duplicate_conditions.append(OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED")))
     existing = db.scalar(select(OperationException).where(*duplicate_conditions).with_for_update())
     if existing is not None:

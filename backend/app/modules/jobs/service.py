@@ -6,6 +6,7 @@ from uuid import uuid4
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.observability import metrics, observe_duration
 from app.modules.jobs.model import SchedulerJobRun
@@ -16,6 +17,7 @@ from app.modules.notifications.service import notify_users
 from app.modules.operation_exceptions.service import create_automatic_exception
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.products.model import Product
+from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.system.model import Role, User, UserRole
 
 
@@ -134,16 +136,84 @@ def scan_expiring_inventory(db: Session, actor: User) -> dict[str, int]:
     return result
 
 
+def scan_pending_quality_acceptances(
+    db: Session,
+    actor: User,
+    *,
+    threshold_hours: int = 24,
+) -> dict[str, int]:
+    """提醒已收货且超过配置时限仍未完成的质量验收。"""
+
+    now = datetime.now()
+    threshold = max(1, threshold_hours)
+    cutoff = now - timedelta(hours=threshold)
+    with observe_duration("scheduler_job_duration_seconds", labels={"job": "quality_pending_scan"}):
+        rows = db.execute(
+            select(QualityAcceptance, Delivery.delivery_no, PurchaseOrder.id, PurchaseOrder.po_no)
+            .join(Delivery, Delivery.id == QualityAcceptance.delivery_id)
+            .join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id)
+            .where(
+                QualityAcceptance.result == "PENDING",
+                QualityAcceptance.created_at <= cutoff,
+                Delivery.status == "INSPECTING",
+            )
+            .order_by(QualityAcceptance.created_at, QualityAcceptance.id)
+        ).all()
+    created_count = 0
+    for acceptance, delivery_no, po_id, po_no in rows:
+        waiting_hours = max(0, int((now - acceptance.created_at).total_seconds() // 3600))
+        severity = "HIGH" if waiting_hours >= threshold * 3 else "MEDIUM"
+        description = (
+            f"质量验收 {acceptance.acceptance_no} 已等待约 {waiting_hours} 小时仍未完成；"
+            f"关联到货单 {delivery_no}、采购订单 {po_no}。请质量人员核实验收进度。"
+        )
+        exception = create_automatic_exception(
+            db,
+            actor,
+            exception_type="QUALITY_PENDING",
+            source_type="QUALITY_ACCEPTANCE",
+            source_id=acceptance.id,
+            po_id=po_id,
+            delivery_id=acceptance.delivery_id,
+            owner_id=acceptance.inspector_id,
+            severity=severity,
+            description=description,
+        )
+        if exception is not None:
+            created_count += 1
+            notify_users(
+                db,
+                recipient_ids=[acceptance.inspector_id],
+                role_codes=["QUALITY", "PROCUREMENT_MANAGER"],
+                notification_type="QUALITY_PENDING_CREATED",
+                title="质量验收等待时间较长",
+                content=description,
+                related_type="OPERATION_EXCEPTION",
+                related_id=exception.id,
+            )
+    db.commit()
+    result = {"scanned_count": len(rows), "created_count": created_count}
+    metrics.increment("scheduler_jobs", labels={"job": "quality_pending_scan", "status": "success"})
+    return result
+
+
 def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
-    """运行当前有明确业务口径的到货逾期与库存临期扫描。"""
+    """运行到货逾期、库存临期和超时待验收扫描。"""
 
     overdue = scan_overdue_deliveries(db, actor)
     expiry = scan_expiring_inventory(db, actor)
+    pending_quality = scan_pending_quality_acceptances(
+        db,
+        actor,
+        threshold_hours=get_settings().quality_pending_alert_hours,
+    )
     return {
         "overdue_scanned_count": overdue["scanned_count"],
         "overdue_created_count": overdue["created_count"],
         "inventory_expiry_scanned_count": expiry["scanned_count"],
         "inventory_expiry_created_count": expiry["created_count"],
+        "quality_pending_scanned_count": pending_quality["scanned_count"],
+        "quality_pending_created_count": pending_quality["created_count"],
     }
 
 

@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     file_scan_command: str = "clamdscan"
     file_scan_timeout_seconds: int = 30
     overdue_scan_interval_seconds: int = 900
+    quality_pending_alert_hours: int = 24
     business_alerts_scheduler_enabled: bool = False
     idempotency_required: bool = False
 

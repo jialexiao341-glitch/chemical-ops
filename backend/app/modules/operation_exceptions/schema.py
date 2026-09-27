@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class OperationExceptionCreate(BaseModel):
     """创建异常时提交的字段。"""
 
-    exception_type: str = Field(pattern="^(SHORT_DELIVERY|QUALITY|DOCUMENT|OVERDUE|INVENTORY_EXPIRY|OTHER)$")
+    exception_type: str = Field(pattern="^(SHORT_DELIVERY|QUALITY|QUALITY_PENDING|DOCUMENT|OVERDUE|INVENTORY_EXPIRY|OTHER)$")
     source_type: str = Field(pattern="^(PURCHASE_ORDER|DELIVERY|DELIVERY_ITEM|QUALITY_ACCEPTANCE|INVENTORY_BATCH|OTHER)$")
     source_id: int = Field(gt=0)
     po_id: int | None = Field(default=None, gt=0)
