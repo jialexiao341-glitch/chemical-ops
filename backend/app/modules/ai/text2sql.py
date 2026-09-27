@@ -26,6 +26,7 @@ from app.core.errors import BusinessValidationError
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance.model import FinanceReconciliation
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
+from app.modules.chemicals.model import Chemical
 from app.modules.operation_exceptions.model import OperationException
 from app.modules.products.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
@@ -227,6 +228,55 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             else:
                 statement = statement.where(PurchaseOrder.buyer_id == user.id)
         return statement
+    if plan.dataset == "inventory_by_batch":
+        product_ids = next(
+            (item.value for item in plan.filters if item.field == "product_id" and item.operator == "in"),
+            [],
+        )
+        available_quantity = case(
+            (InventoryBalance.status == "AVAILABLE", InventoryBalance.quantity - InventoryBalance.locked_quantity),
+            else_=0,
+        )
+        statement = (
+            select(
+                Product.product_code.label("product_code"),
+                Product.product_name.label("product"),
+                Warehouse.warehouse_name.label("warehouse"),
+                InventoryBatch.batch_no.label("batch_no"),
+                InventoryBatch.expiry_date.label("expiry_date"),
+                Unit.unit_name.label("unit"),
+                func.sum(InventoryBalance.quantity).label("quantity"),
+                func.sum(InventoryBalance.locked_quantity).label("locked_quantity"),
+                func.sum(available_quantity).label("available_quantity"),
+            )
+            .select_from(InventoryBalance)
+            .join(Product, Product.id == InventoryBalance.product_id)
+            .join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id)
+            .join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id)
+            .join(Unit, Unit.id == InventoryBalance.unit_id)
+            .where(InventoryBalance.product_id.in_(product_ids))
+            .group_by(
+                Product.id,
+                Product.product_code,
+                Product.product_name,
+                Warehouse.id,
+                Warehouse.warehouse_name,
+                InventoryBatch.id,
+                InventoryBatch.batch_no,
+                InventoryBatch.expiry_date,
+                Unit.id,
+                Unit.unit_name,
+            )
+            .order_by(Product.product_name, Warehouse.warehouse_name, InventoryBatch.batch_no)
+            .limit(plan.limit + 1)
+        )
+        if user is not None and db is not None:
+            from app.modules.inventory.service import accessible_warehouse_ids
+
+            warehouse_ids = accessible_warehouse_ids(db, user)
+            if warehouse_ids is not None:
+                statement = statement.where(Warehouse.id.in_(warehouse_ids))
+        return statement
     stmt, model, aliases = _base_statement(plan)
     metric = func.count(model.id) if plan.metric in {"count", "amount"} else func.sum(_field(model, "quantity"))
     if plan.metric == "amount":
@@ -272,6 +322,7 @@ def _serialize(value: Any) -> Any:
 DATASET_LABELS = {
     "approved_requests_without_rfq": "已审批未建立询价单的采购申请",
     "weekly_order_risks": "本周订单履约风险",
+    "inventory_by_batch": "产品批次可用库存",
     "purchase_requests": "采购申请",
     "purchase_orders": "采购订单",
     "deliveries": "到货单",
@@ -283,7 +334,7 @@ DATASET_LABELS = {
 }
 METRIC_LABELS = {"count": "数量", "records": "业务明细", "amount": "金额", "sum_quantity": "数量合计"}
 DIMENSION_LABELS = {"supplier": "供应商", "region": "区域", "status": "状态", "priority": "优先级", "currency": "币种", "product": "产品", "warehouse": "仓库", "result": "验收结果", "severity": "严重程度", "type": "异常类型"}
-FIELD_LABELS = {"metric_value": "指标值", "request_no": "申请编号", "purpose": "申请用途", "approved_at": "审批时间", "expected_date": "期望到货日期", "po_no": "订单编号", "delivery_no": "到货单号", "expected_arrival_date": "预计到货日", "actual_arrival_date": "实际到货日", "overdue_this_week": "本周逾期（1是）", "short_quantity": "本周短交数量", "documents_missing": "本周单证未齐（1是）", "unit": "单位", **DIMENSION_LABELS}
+FIELD_LABELS = {"metric_value": "指标值", "request_no": "申请编号", "purpose": "申请用途", "approved_at": "审批时间", "expected_date": "期望到货日期", "po_no": "订单编号", "delivery_no": "到货单号", "expected_arrival_date": "预计到货日", "actual_arrival_date": "实际到货日", "overdue_this_week": "本周逾期（1是）", "short_quantity": "本周短交数量", "documents_missing": "本周单证未齐（1是）", "product_code": "产品编码", "product": "产品", "warehouse": "仓库", "batch_no": "批次", "expiry_date": "有效期至", "quantity": "账面数量", "locked_quantity": "锁定数量", "available_quantity": "可用数量", "unit": "单位", **DIMENSION_LABELS}
 
 
 def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
@@ -314,6 +365,8 @@ def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
 
 
 def _build_query_template(plan: QueryPlan) -> str:
+    if plan.dataset == "inventory_by_batch":
+        return "按已登记产品查询各仓库、批次的账面、锁定与可用数量；可用数量=可用状态余额的账面数量-锁定数量"
     if plan.dataset == "weekly_order_risks":
         today = date.today()
         week_start = today - timedelta(days=today.weekday())
@@ -341,6 +394,8 @@ def _unit_metadata(plan: QueryPlan, rows: list[dict[str, Any]]) -> tuple[str | N
         return None, "查询结果未返回币种，不能安全补充金额单位"
     if plan.metric == "count":
         return "条", "数量指标的固定单位"
+    if plan.dataset == "inventory_by_batch":
+        return "各行所示单位", "数量和单位逐行来自库存余额记录；可用量按库存状态与锁定数量规则计算"
     if plan.metric == "sum_quantity":
         return "原计量单位", "库存数量的计量单位未进入当前聚合结果"
     return None, None
@@ -360,6 +415,8 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
         raise BusinessValidationError("该申请关联查询不支持额外筛选条件")
     if plan.dataset == "weekly_order_risks" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or plan.filters):
         raise BusinessValidationError("该订单风险查询按固定自然周口径执行，不支持额外筛选条件")
+    if plan.dataset == "inventory_by_batch" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or any(item.field != "product_id" or item.operator != "in" for item in plan.filters)):
+        raise BusinessValidationError("该库存查询仅支持按已登记产品查询批次明细")
     if plan.group_by and plan.group_by not in spec.dimensions:
         raise BusinessValidationError("分组字段不在允许范围内")
     if plan.time_field and plan.time_field not in spec.times:
@@ -429,6 +486,40 @@ def _normalize_query_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if normalized.get(field) in {"", "null", "None"}:
             normalized[field] = None
     return normalized
+
+
+def _inventory_by_batch_plan(db: Session, question: str) -> QueryPlan | None:
+    lowered = question.lower()
+    asks_inventory = any(marker in lowered for marker in ("库存", "现存", "可用量", "可用库存", "可用", "现有"))
+    asks_batch_or_warehouse = any(marker in lowered for marker in ("批次", "仓库"))
+    if not asks_inventory or not asks_batch_or_warehouse:
+        return None
+
+    records = db.execute(
+        select(Product.id, Product.product_name, Product.product_code, Chemical.chemical_name, Chemical.english_name, Chemical.alias_text, Chemical.cas_no)
+        .join(Chemical, Chemical.id == Product.chemical_id)
+        .where(Product.status == "ACTIVE", Chemical.status == "ACTIVE")
+    ).all()
+    candidates: list[tuple[str, int]] = []
+    for product_id, product_name, product_code, chemical_name, english_name, alias_text, cas_no in records:
+        names = [product_name, product_code, chemical_name, english_name, cas_no]
+        if alias_text:
+            names.extend(re.split(r"[,;，；、|/]+", str(alias_text)))
+        candidates.extend((str(name).strip(), product_id) for name in names if name and len(str(name).strip()) >= 2)
+
+    matches = [(len(name), product_id) for name, product_id in candidates if name.lower() in lowered]
+    product_ids: list[int] = []
+    if matches:
+        longest_match = max(length for length, _ in matches)
+        product_ids = sorted({product_id for length, product_id in matches if length == longest_match})
+    return QueryPlan(
+        dataset="inventory_by_batch",
+        metric="records",
+        time_field=None,
+        filters=[QueryFilter(field="product_id", operator="in", value=product_ids)],
+        order="asc",
+        limit=20,
+    )
 
 
 def _fallback_query_plan(question: str) -> QueryPlan | None:
@@ -575,7 +666,11 @@ async def run_text2sql(
     runtime = settings or get_settings()
 
     async def understand(state: Text2SQLState) -> dict[str, Any]:
-        if state.get("previous_plan") is None:
+        inventory_plan = _inventory_by_batch_plan(db, state["question"])
+        if inventory_plan is not None:
+            plan = inventory_plan
+            LOGGER.info("AI 查询计划使用产品批次库存固定查询 question_hash=%s product_count=%s", _query_hash(state["question"]), len(inventory_plan.filters[0].value))
+        elif state.get("previous_plan") is None:
             plan = await _understand_question(state["question"], runtime)
         else:
             plan = await _understand_question(state["question"], runtime, state["previous_plan"])
@@ -613,6 +708,8 @@ async def run_text2sql(
             columns = ["request_no", "purpose", "priority", "approved_at", "expected_date"]
         elif state["plan"].dataset == "weekly_order_risks":
             columns = ["po_no", "supplier", "delivery_no", "product", "unit", "expected_arrival_date", "actual_arrival_date", "overdue_this_week", "short_quantity", "documents_missing"]
+        elif state["plan"].dataset == "inventory_by_batch":
+            columns = ["product_code", "product", "warehouse", "batch_no", "expiry_date", "unit", "quantity", "locked_quantity", "available_quantity"]
         else:
             columns = ["metric_value"] if not state["plan"].group_by else [state["plan"].group_by, "metric_value"]
         render_columns = _build_render_columns(state["plan"], columns)
