@@ -70,14 +70,18 @@ const noteKind = ref<'close-exception' | 'complete-task'>('close-exception');
 const noteText = ref('');
 const noteTargetTask = ref<OperationExceptionApi.Task>();
 
-function openInventoryBatch() {
-  if (detail.value?.source_type !== 'INVENTORY_BATCH') return;
+function openInventorySource() {
+  const exception = detail.value;
+  if (!exception || !['INVENTORY_BATCH', 'PRODUCT'].includes(exception.source_type)) return;
+  const filters = exception.source_type === 'INVENTORY_BATCH'
+    ? { batch_id: exception.source_id }
+    : { product_id: exception.source_id };
   void router.push({
     path: '/warehouse/inventory',
     query: {
       ai_filters: JSON.stringify({
         dataset: 'inventory',
-        filters: { batch_id: detail.value.source_id },
+        filters,
       }),
     },
   });
@@ -439,12 +443,12 @@ defineExpose({ drawerApi });
           <DescriptionsItem label="来源">
             {{ detail.source_type }} #{{ detail.source_id }}
             <Button
-              v-if="detail.source_type === 'INVENTORY_BATCH'"
+              v-if="['INVENTORY_BATCH', 'PRODUCT'].includes(detail.source_type)"
               size="small"
               type="link"
-              @click="openInventoryBatch"
+              @click="openInventorySource"
             >
-              查看批次库存
+              {{ detail.source_type === 'INVENTORY_BATCH' ? '查看批次库存' : '查看产品库存' }}
             </Button>
             <Button
               v-if="detail.exception_type === 'INVENTORY_EXPIRY' && detail.source_type === 'INVENTORY_BATCH'"

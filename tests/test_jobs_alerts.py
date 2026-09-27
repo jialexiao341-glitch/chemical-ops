@@ -91,3 +91,60 @@ def test_pending_quality_scan_creates_a_deduplicated_alert(monkeypatch) -> None:
     assert "30 小时" in exception["description"]
     assert notifications[0]["recipient_ids"] == [7]
     assert notifications[0]["role_codes"] == ["QUALITY", "PROCUREMENT_MANAGER"]
+
+
+def test_low_inventory_scan_uses_threshold_unit_and_creates_alert(monkeypatch) -> None:
+    product = SimpleNamespace(
+        id=45,
+        product_name="乙醇",
+        safety_stock_quantity=Decimal("10"),
+    )
+    db = SimpleNamespace(
+        execute=lambda _query: SimpleNamespace(all=lambda: [(product, "升", Decimal("4.5"), 0)]),
+        scalars=lambda _query: SimpleNamespace(all=lambda: []),
+        commit=lambda: None,
+    )
+    created = []
+    notifications = []
+
+    def create_exception(_db, actor, **kwargs):
+        created.append((actor, kwargs))
+        return SimpleNamespace(id=104)
+
+    monkeypatch.setattr(service, "create_automatic_exception", create_exception)
+    monkeypatch.setattr(service, "notify_users", lambda _db, **kwargs: notifications.append(kwargs))
+
+    result = service.scan_low_inventory(db, SimpleNamespace(id=4))
+
+    assert result == {
+        "scanned_count": 1,
+        "created_count": 1,
+        "recovered_count": 0,
+        "skipped_unit_mismatch_count": 0,
+    }
+    actor, exception = created[0]
+    assert actor.id == 4
+    assert exception["exception_type"] == "LOW_STOCK"
+    assert exception["source_type"] == "PRODUCT"
+    assert exception["source_id"] == product.id
+    assert "4.5 升" in exception["description"]
+    assert "10 升" in exception["description"]
+    assert notifications[0]["role_codes"] == ["WAREHOUSE", "PROCUREMENT_MANAGER"]
+
+
+def test_low_inventory_scan_skips_unconvertible_units(monkeypatch) -> None:
+    product = SimpleNamespace(id=46, product_name="溶剂", safety_stock_quantity=Decimal("5"))
+    db = SimpleNamespace(
+        execute=lambda _query: SimpleNamespace(all=lambda: [(product, "升", Decimal("1"), 1)]),
+        scalars=lambda _query: SimpleNamespace(all=lambda: []),
+        commit=lambda: None,
+    )
+
+    def unexpected_exception(*_args, **_kwargs):
+        raise AssertionError("单位不一致时不应生成低库存结论")
+
+    monkeypatch.setattr(service, "create_automatic_exception", unexpected_exception)
+    result = service.scan_low_inventory(db, SimpleNamespace(id=4))
+
+    assert result["created_count"] == 0
+    assert result["skipped_unit_mismatch_count"] == 1

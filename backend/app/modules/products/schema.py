@@ -31,6 +31,7 @@ class ProductCreate(BaseModel):
     purity_unit: str | None = Field(default="%", max_length=20)
     packaging_spec: str | None = Field(default=None, max_length=255)
     unit_id: int = Field(gt=0)
+    safety_stock_quantity: Decimal | None = Field(default=None, ge=0)
     parameter_json: dict[str, Any] | None = None
 
 
@@ -45,6 +46,7 @@ class ProductUpdate(BaseModel):
     purity_unit: str | None = Field(default=None, max_length=20)
     packaging_spec: str | None = Field(default=None, max_length=255)
     unit_id: int | None = Field(default=None, gt=0)
+    safety_stock_quantity: Decimal | None = Field(default=None, ge=0)
     parameter_json: dict[str, Any] | None = None
     status: str | None = Field(default=None, pattern="^(ACTIVE|INACTIVE|PENDING_CONFIRMATION)$")
 

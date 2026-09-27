@@ -1,9 +1,10 @@
 """逾期扫描任务。"""
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, case, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -14,10 +15,12 @@ from app.modules.jobs.model import SchedulerJobRun
 from app.modules.deliveries.model import Delivery
 from app.modules.inventory.model import InventoryBalance, InventoryBatch
 from app.modules.notifications.service import notify_users
-from app.modules.operation_exceptions.service import create_automatic_exception
+from app.modules.operation_exceptions.model import OperationException
+from app.modules.operation_exceptions.service import close_recovered_low_stock_alert, create_automatic_exception
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.products.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance
+from app.modules.purchase_requests.model import Unit
 from app.modules.system.model import Role, User, UserRole
 
 
@@ -197,6 +200,128 @@ def scan_pending_quality_acceptances(
     return result
 
 
+def scan_low_inventory(db: Session, actor: User) -> dict[str, int]:
+    """Compare available stock with product thresholds in the same configured unit."""
+
+    available_expression = func.coalesce(
+        func.sum(
+            case(
+                (
+                    and_(InventoryBalance.unit_id == Product.unit_id, InventoryBalance.status == "AVAILABLE"),
+                    case(
+                        (
+                            InventoryBalance.quantity > InventoryBalance.locked_quantity,
+                            InventoryBalance.quantity - InventoryBalance.locked_quantity,
+                        ),
+                        else_=0,
+                    ),
+                ),
+                else_=0,
+            )
+        ),
+        0,
+    )
+    mismatched_unit_count = func.coalesce(
+        func.sum(case((and_(InventoryBalance.quantity > 0, InventoryBalance.unit_id != Product.unit_id), 1), else_=0)),
+        0,
+    )
+    with observe_duration("scheduler_job_duration_seconds", labels={"job": "low_inventory_scan"}):
+        rows = db.execute(
+            select(Product, Unit.unit_name, available_expression, mismatched_unit_count)
+            .join(Unit, Unit.id == Product.unit_id)
+            .outerjoin(InventoryBalance, InventoryBalance.product_id == Product.id)
+            .where(
+                Product.status == "ACTIVE",
+                Product.safety_stock_quantity.is_not(None),
+                Product.safety_stock_quantity > 0,
+            )
+            .group_by(Product.id, Unit.unit_name)
+            .order_by(Product.product_name, Product.id)
+        ).all()
+
+    states: dict[int, tuple[Product, str, Decimal, int]] = {}
+    for product, unit_name, available, mismatch_count in rows:
+        states[product.id] = (product, unit_name, Decimal(str(available or 0)), int(mismatch_count or 0))
+
+    existing = list(
+        db.scalars(
+            select(OperationException)
+            .where(
+                OperationException.exception_type == "LOW_STOCK",
+                OperationException.source_type == "PRODUCT",
+                OperationException.source_id.in_(states.keys()) if states else False,
+            )
+            .order_by(OperationException.created_at.desc(), OperationException.id.desc())
+        ).all()
+    )
+    latest_by_product: dict[int, OperationException] = {}
+    for exception in existing:
+        latest_by_product.setdefault(exception.source_id, exception)
+
+    # Close untouched alerts on recovery, preserving the normal state transitions and audit entries.
+    recovered_count = 0
+    for product_id, exception in latest_by_product.items():
+        product_state = states.get(product_id)
+        if product_state is None:
+            continue
+        product, _unit_name, available, mismatch_count = product_state
+        if (
+            mismatch_count == 0
+            and available >= Decimal(str(product.safety_stock_quantity))
+            and close_recovered_low_stock_alert(db, actor, exception.id)
+        ):
+            recovered_count += 1
+
+    created_count = 0
+    skipped_unit_mismatch_count = 0
+    for product, unit_name, available, mismatch_count in states.values():
+        if mismatch_count:
+            skipped_unit_mismatch_count += 1
+            continue
+        threshold = Decimal(str(product.safety_stock_quantity))
+        if available >= threshold:
+            continue
+        previous = latest_by_product.get(product.id)
+        if previous is not None and not (
+            previous.status == "CLOSED"
+            and (previous.closing_note or "").startswith("系统自动关闭：可用库存已恢复")
+        ):
+            continue
+        description = (
+            f"产品 {product.product_name} 当前可用库存 {available} {unit_name}，"
+            f"低于已登记安全库存阈值 {threshold} {unit_name}；请核实库存及在途采购后再决定是否补货。"
+        )
+        exception = create_automatic_exception(
+            db,
+            actor,
+            exception_type="LOW_STOCK",
+            source_type="PRODUCT",
+            source_id=product.id,
+            severity="HIGH" if available == 0 else "MEDIUM",
+            description=description,
+        )
+        if exception is not None:
+            created_count += 1
+            notify_users(
+                db,
+                role_codes=["WAREHOUSE", "PROCUREMENT_MANAGER"],
+                notification_type="LOW_STOCK_CREATED",
+                title="发现低库存产品",
+                content=description,
+                related_type="OPERATION_EXCEPTION",
+                related_id=exception.id,
+            )
+    db.commit()
+    result = {
+        "scanned_count": len(states),
+        "created_count": created_count,
+        "recovered_count": recovered_count,
+        "skipped_unit_mismatch_count": skipped_unit_mismatch_count,
+    }
+    metrics.increment("scheduler_jobs", labels={"job": "low_inventory_scan", "status": "success"})
+    return result
+
+
 def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
     """运行到货逾期、库存临期和超时待验收扫描。"""
 
@@ -207,6 +332,7 @@ def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
         actor,
         threshold_hours=get_settings().quality_pending_alert_hours,
     )
+    low_inventory = scan_low_inventory(db, actor)
     return {
         "overdue_scanned_count": overdue["scanned_count"],
         "overdue_created_count": overdue["created_count"],
@@ -214,6 +340,10 @@ def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
         "inventory_expiry_created_count": expiry["created_count"],
         "quality_pending_scanned_count": pending_quality["scanned_count"],
         "quality_pending_created_count": pending_quality["created_count"],
+        "low_inventory_scanned_count": low_inventory["scanned_count"],
+        "low_inventory_created_count": low_inventory["created_count"],
+        "low_inventory_recovered_count": low_inventory["recovered_count"],
+        "low_inventory_skipped_unit_mismatch_count": low_inventory["skipped_unit_mismatch_count"],
     }
 
 

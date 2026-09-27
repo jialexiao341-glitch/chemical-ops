@@ -1,6 +1,7 @@
 """md_products 产品表的数据库模型。"""
 
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import ForeignKey, Integer, JSON, Numeric, String, func
 from sqlalchemy.dialects.mysql import DATETIME
@@ -24,6 +25,7 @@ class Product(Base):
     purity_unit: Mapped[str | None] = mapped_column(String(20), nullable=True, default="%")
     packaging_spec: Mapped[str | None] = mapped_column(String(255), nullable=True)
     unit_id: Mapped[int] = mapped_column(ForeignKey("md_units.id"), nullable=False)
+    safety_stock_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     parameter_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     version_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")

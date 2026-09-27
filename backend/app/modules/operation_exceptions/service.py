@@ -19,6 +19,7 @@ from app.modules.operation_exceptions.schema import (
     OperationTaskUpdate,
 )
 from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.products.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_role_codes
@@ -62,6 +63,8 @@ def _validate_source(db: Session, data: OperationExceptionCreate) -> None:
         raise BusinessValidationError("质量验收异常的 source_id 必须指向已存在的验收记录")
     if data.source_type == "INVENTORY_BATCH" and db.get(InventoryBatch, data.source_id) is None:
         raise BusinessValidationError("库存批次异常的 source_id 必须指向已存在的库存批次")
+    if data.source_type == "PRODUCT" and db.get(Product, data.source_id) is None:
+        raise BusinessValidationError("产品异常的 source_id 必须指向已存在的产品")
     if data.source_type == "OTHER" and data.source_id <= 0:
         raise BusinessValidationError("异常来源 ID 无效")
     if data.owner_id is not None:
@@ -110,7 +113,7 @@ def create_automatic_exception(
 ) -> OperationException | None:
     """为业务事件创建异常；已有未关闭同类异常时不重复创建。"""
 
-    source_model = {"DELIVERY": Delivery, "QUALITY_ACCEPTANCE": QualityAcceptance, "INVENTORY_BATCH": InventoryBatch}.get(source_type)
+    source_model = {"DELIVERY": Delivery, "QUALITY_ACCEPTANCE": QualityAcceptance, "INVENTORY_BATCH": InventoryBatch, "PRODUCT": Product}.get(source_type)
     if source_model is not None:
         source = db.scalar(select(source_model).where(source_model.id == source_id).with_for_update())
         if source is None:
@@ -202,6 +205,33 @@ def update_exception(db: Session, user: User, exception_id: int, data: Operation
     add_audit_log(db, actor_id=user.id, action_type="UPDATE", resource_type="OPERATION_EXCEPTION", resource_id=exception.id, request_summary=f"更新异常状态 {exception.status}", result_status="SUCCESS")
     db.commit()
     return _require_exception(db, exception.id)
+
+
+def close_recovered_low_stock_alert(db: Session, user: User, exception_id: int) -> bool:
+    """Close an untouched low-stock alert after its available stock recovers."""
+
+    exception = _require_exception(db, exception_id, for_update=True)
+    if (
+        exception.exception_type != "LOW_STOCK"
+        or exception.source_type != "PRODUCT"
+        or exception.status != "OPEN"
+    ):
+        return False
+    has_tasks = db.scalar(select(OperationTask.id).where(OperationTask.exception_id == exception.id).limit(1))
+    if has_tasks is not None:
+        return False
+    update_exception(db, user, exception.id, OperationExceptionUpdate(status="PROCESSING"))
+    update_exception(db, user, exception.id, OperationExceptionUpdate(status="RESOLVED"))
+    update_exception(
+        db,
+        user,
+        exception.id,
+        OperationExceptionUpdate(
+            status="CLOSED",
+            closing_note="系统自动关闭：可用库存已恢复到安全库存阈值。",
+        ),
+    )
+    return True
 
 
 def _can_access_task(db: Session, user: User, task: OperationTask) -> bool:

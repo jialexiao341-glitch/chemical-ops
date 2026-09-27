@@ -87,6 +87,12 @@ export function useFormSchema(): VbenFormSchema[] {
       rules: 'selectRequired',
     },
     {
+      component: 'InputNumber',
+      componentProps: { class: 'w-full', min: 0, precision: 6, placeholder: '留空表示不监控低库存' },
+      fieldName: 'safety_stock_quantity',
+      label: '安全库存阈值（产品单位）',
+    },
+    {
       component: 'RadioGroup',
       componentProps: {
         buttonStyle: 'solid',
@@ -161,6 +167,13 @@ export function useColumns(
       width: 90,
     },
     { field: 'packaging_spec', width: 140, title: '包装规格' },
+    {
+      field: 'safety_stock_quantity',
+      formatter: ({ cellValue }: { cellValue: any }) =>
+        cellValue == null ? '未设置' : trimDecimal(cellValue),
+      title: '安全库存阈值',
+      width: 130,
+    },
     { field: 'version_no', title: '版本', width: 70 },
     {
       cellRender: {

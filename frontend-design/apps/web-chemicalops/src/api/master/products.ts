@@ -16,6 +16,7 @@ export namespace ProductApi {
     product_name: string;
     purity_unit?: null | string;
     purity_value?: null | string;
+    safety_stock_quantity?: null | string;
     status: string;
     unit_id: number;
     updated_at?: string;
@@ -41,6 +42,7 @@ export namespace ProductApi {
     product_name: string;
     purity_unit?: string;
     purity_value?: null | number | string;
+    safety_stock_quantity?: null | number | string;
     status?: string;
     unit_id: number;
   }

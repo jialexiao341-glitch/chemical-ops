@@ -35,7 +35,7 @@ def create_exception(data: OperationExceptionCreate, db: Session = Depends(get_d
 
 @router.get("", response_model=OperationExceptionPage, summary="分页查询运营异常")
 def list_exceptions(
-    exception_type: str | None = Query(default=None, pattern="^(SHORT_DELIVERY|QUALITY|QUALITY_PENDING|DOCUMENT|OVERDUE|INVENTORY_EXPIRY|OTHER)$"),
+    exception_type: str | None = Query(default=None, pattern="^(SHORT_DELIVERY|QUALITY|QUALITY_PENDING|LOW_STOCK|DOCUMENT|OVERDUE|INVENTORY_EXPIRY|OTHER)$"),
     exception_status: str | None = Query(default=None, alias="status", pattern="^(OPEN|PROCESSING|RESOLVED|CLOSED|CANCELLED)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
