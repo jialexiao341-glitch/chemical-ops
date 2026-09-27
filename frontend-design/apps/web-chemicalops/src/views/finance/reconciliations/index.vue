@@ -21,9 +21,11 @@ import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
+import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-detail.vue';
 
 defineOptions({ name: 'ReconciliationList' });
 const route = useRoute();
+const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
 const [Create, createApi] = useVbenModal({
   connectedComponent: CreateModal,
@@ -122,7 +124,14 @@ onMounted(async () => {
     gridApi.formApi,
   );
   gridApi.query();
+  openAiFinanceRecord(route.query.ai_record_id, route.query.ai_record_type);
 });
+
+function openAiFinanceRecord(rawId: unknown, rawType: unknown) {
+  const id = Number(rawId);
+  if (rawType !== 'reconciliations' || !Number.isInteger(id) || id <= 0) return;
+  financeSourceDetail.value?.open({ id, kind: 'reconciliations' });
+}
 
 watch(
   () => route.query.ai_filters,
@@ -138,10 +147,16 @@ watch(
     }
   },
 );
+
+watch(
+  () => [route.query.ai_record_id, route.query.ai_record_type],
+  ([id, kind]) => openAiFinanceRecord(id, kind),
+);
 </script>
 
-<template>
+  <template>
   <Page auto-content-height>
+    <FinanceSourceDetail ref="financeSourceDetail" />
     <Create @success="gridApi.query()" />
     <Grid table-title="财务对账">
       <template #toolbar-tools>

@@ -2,7 +2,8 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FinanceApi } from '#/api';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
@@ -20,8 +21,11 @@ import { getSupplierNameMap } from '#/utils/lookup';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
+import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-detail.vue';
 
 defineOptions({ name: 'InvoiceList' });
+const route = useRoute();
+const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
 const [Create, createApi] = useVbenModal({
   connectedComponent: CreateModal,
@@ -128,11 +132,24 @@ onMounted(async () => {
     resolveSupplier.value = (id) => (id ? `#${id}` : '-');
   }
   gridApi.query();
+  openAiInvoice(route.query.ai_record_id, route.query.ai_record_type);
 });
+
+function openAiInvoice(rawId: unknown, rawType: unknown) {
+  const id = Number(rawId);
+  if (rawType !== 'invoices' || !Number.isInteger(id) || id <= 0) return;
+  financeSourceDetail.value?.open({ id, kind: 'invoices' });
+}
+
+watch(
+  () => [route.query.ai_record_id, route.query.ai_record_type],
+  ([id, kind]) => openAiInvoice(id, kind),
+);
 </script>
 
 <template>
   <Page auto-content-height>
+    <FinanceSourceDetail ref="financeSourceDetail" />
     <Create @success="gridApi.query()" />
     <Grid table-title="供应商发票">
       <template #toolbar-tools>

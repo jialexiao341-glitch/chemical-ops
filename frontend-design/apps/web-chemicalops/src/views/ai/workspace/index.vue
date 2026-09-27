@@ -383,6 +383,23 @@ function openSourceRecord(record: NonNullable<UiMessage['sourceRecords']>[number
     });
     return;
   }
+  const financeTypes: Record<string, { kind: string; path: string }> = {
+    finance_invoices: { kind: 'invoices', path: '/finance/invoices' },
+    finance_payments: { kind: 'payments', path: '/finance/payments' },
+    finance_reconciliations: { kind: 'reconciliations', path: '/finance/reconciliations' },
+    finance_settlements: { kind: 'settlements', path: '/finance/settlements' },
+  };
+  const financeTarget = financeTypes[record.dataset];
+  if (financeTarget && record.record_id) {
+    void router.push({
+      path: financeTarget.path,
+      query: {
+        ai_record_id: String(record.record_id),
+        ai_record_type: financeTarget.kind,
+      },
+    });
+    return;
+  }
   const target = AI_FILTER_TARGETS.find((item) => item.dataset === record.dataset);
   if (!target) return;
   if (record.dataset === 'quality_acceptances' && record.record_id) {

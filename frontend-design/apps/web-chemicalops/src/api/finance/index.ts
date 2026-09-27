@@ -189,6 +189,11 @@ export async function getInvoiceListApi(params?: FinanceApi.ListParams) {
   );
 }
 
+/** 查询供应商发票详情 */
+export async function getInvoiceApi(id: number) {
+  return requestClient.get<FinanceApi.Invoice>(`/finance/invoices/${id}`);
+}
+
 /** 录入供应商发票（价税合计 = 不含税 + 税额） */
 export async function createInvoiceApi(data: FinanceApi.InvoiceCreatePayload) {
   return requestClient.post<FinanceApi.Invoice>(
@@ -227,6 +232,11 @@ export async function getPaymentListApi(params?: FinanceApi.ListParams) {
     '/finance/payments',
     { params },
   );
+}
+
+/** 查询付款详情 */
+export async function getPaymentApi(id: number) {
+  return requestClient.get<FinanceApi.Payment>(`/finance/payments/${id}`);
 }
 
 /** 发起付款申请（仅 CONFIRMED 对账单，REQUESTED） */
@@ -270,6 +280,11 @@ export async function getSettlementListApi(params?: FinanceApi.ListParams) {
     '/finance/settlements',
     { params },
   );
+}
+
+/** 查询采购结算详情 */
+export async function getSettlementApi(id: number) {
+  return requestClient.get<FinanceApi.Settlement>(`/finance/settlements/${id}`);
 }
 
 /** 创建采购结算单（仅已确认且足额付款的对账单） */

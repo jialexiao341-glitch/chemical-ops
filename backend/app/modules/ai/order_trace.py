@@ -212,18 +212,24 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
     invoices_truncated = len(invoice_rows) > 50
     invoices = invoice_rows[:50]
     stages.append(_stage("发票", invoice_allowed, [_record(item.invoice_no, item.status, item.updated_at, amount=_amount(item.amount_incl_tax), currency=item.currency_code) for item in invoices], truncated=invoices_truncated))
+    for item in invoices:
+        source_records.append({"dataset": "finance_invoices", "label": f"供应商发票 {item.invoice_no}", "record_id": item.id, "filters": {"keywords": item.invoice_no}})
 
     payment_allowed = _can_read("付款", permissions, roles)
     payment_rows = list(db.scalars(select(FinancePayment).where(FinancePayment.po_id == order.id).order_by(FinancePayment.id).limit(51)).all()) if payment_allowed else []
     payments_truncated = len(payment_rows) > 50
     payments = payment_rows[:50]
     stages.append(_stage("付款", payment_allowed, [_record(item.payment_no, item.status, item.updated_at, amount=_amount(item.amount), currency=item.currency_code) for item in payments], truncated=payments_truncated))
+    for item in payments:
+        source_records.append({"dataset": "finance_payments", "label": f"付款记录 {item.payment_no}", "record_id": item.id, "filters": {"keywords": item.payment_no}})
 
     settlement_allowed = _can_read("结算", permissions, roles)
     settlement_rows = list(db.scalars(select(FinanceSettlement).where(FinanceSettlement.po_id == order.id).order_by(FinanceSettlement.id).limit(51)).all()) if settlement_allowed else []
     settlements_truncated = len(settlement_rows) > 50
     settlements = settlement_rows[:50]
     stages.append(_stage("结算", settlement_allowed, [_record(item.settlement_no, item.status, item.updated_at, amount=_amount(item.settlement_amount), currency=item.currency_code) for item in settlements], truncated=settlements_truncated))
+    for item in settlements:
+        source_records.append({"dataset": "finance_settlements", "label": f"采购结算单 {item.settlement_no}", "record_id": item.id, "filters": {"keywords": item.settlement_no}})
 
     conclusion: list[str] = []
     expected = reconciliation.total_amount if reconciliation and reconciliation.status in {"CONFIRMED", "CLOSED"} else None
