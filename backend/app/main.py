@@ -1,6 +1,7 @@
 """ChemicalOps FastAPI 应用入口。"""
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 import hashlib
 import logging
 from pathlib import Path
@@ -47,6 +48,7 @@ from app.modules.supplier_portal.controller import router as supplier_portal_rou
 from app.modules.files.controller import router as files_router
 from app.modules.inventory_cost.controller import router as inventory_cost_router
 from app.modules.jobs.controller import router as jobs_router
+from app.modules.jobs.service import run_scheduled_alert_scan
 from app.modules.dashboard.controller import router as dashboard_router
 from app.modules.ai.controller import router as ai_router
 from app.modules.system.controller import auth_router, router as system_router
@@ -54,6 +56,18 @@ from app.modules.system.controller import auth_router, router as system_router
 
 settings = get_settings()
 LOGGER = logging.getLogger("chemicalops.api")
+
+
+async def _business_alert_scheduler() -> None:
+    """按配置间隔运行确定性业务提醒；首次扫描也等待完整间隔。"""
+
+    interval = max(1, settings.overdue_scan_interval_seconds)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(run_scheduled_alert_scan)
+        except Exception:
+            LOGGER.exception("定时业务提醒扫描失败")
 
 
 def _configure_logging() -> None:
@@ -216,8 +230,15 @@ async def lifespan(_: FastAPI):
             database_ready,
             minio_ready,
         )
-    yield
-    LOGGER.info("ChemicalOps 正在关闭")
+    scheduler_task = asyncio.create_task(_business_alert_scheduler()) if database_ready else None
+    try:
+        yield
+    finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await scheduler_task
+        LOGGER.info("ChemicalOps 正在关闭")
 
 
 _configure_logging()

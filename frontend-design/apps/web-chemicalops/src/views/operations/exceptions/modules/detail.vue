@@ -2,6 +2,7 @@
 import type { OperationExceptionApi } from '#/api';
 
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { useVbenDrawer, useVbenModal } from '@vben/common-ui';
 
@@ -41,6 +42,7 @@ import { formatDateTime } from '#/utils/format';
 import TaskForm from './task-form.vue';
 
 const emit = defineEmits(['success']);
+const router = useRouter();
 
 /**
  * 运营异常详情：基本信息 + 状态推进 + 指派 + 处理任务与处理记录。
@@ -67,6 +69,19 @@ const noteVisible = ref(false);
 const noteKind = ref<'close-exception' | 'complete-task'>('close-exception');
 const noteText = ref('');
 const noteTargetTask = ref<OperationExceptionApi.Task>();
+
+function openInventoryBatch() {
+  if (detail.value?.source_type !== 'INVENTORY_BATCH') return;
+  void router.push({
+    path: '/warehouse/inventory',
+    query: {
+      ai_filters: JSON.stringify({
+        dataset: 'inventory',
+        filters: { batch_id: detail.value.source_id },
+      }),
+    },
+  });
+}
 
 const [TaskFormModal, taskFormApi] = useVbenModal({
   connectedComponent: TaskForm,
@@ -407,6 +422,14 @@ defineExpose({ drawerApi });
           </DescriptionsItem>
           <DescriptionsItem label="来源">
             {{ detail.source_type }} #{{ detail.source_id }}
+            <Button
+              v-if="detail.source_type === 'INVENTORY_BATCH'"
+              size="small"
+              type="link"
+              @click="openInventoryBatch"
+            >
+              查看批次库存
+            </Button>
           </DescriptionsItem>
           <DescriptionsItem label="截止时间">
             {{ formatDateTime(detail.due_at) }}

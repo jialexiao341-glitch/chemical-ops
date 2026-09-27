@@ -186,6 +186,7 @@ export const EXCEPTION_TYPE_DICT = buildDict([
   { color: 'error', label: '质量异常', value: 'QUALITY' },
   { color: 'warning', label: '单证缺失', value: 'DOCUMENT' },
   { color: 'volcano', label: '逾期到货', value: 'OVERDUE' },
+  { color: 'purple', label: '库存临期', value: 'INVENTORY_EXPIRY' },
   { color: 'default', label: '其他', value: 'OTHER' },
 ]);
 

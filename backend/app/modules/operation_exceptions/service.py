@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery, DeliveryItem
+from app.modules.inventory.model import InventoryBatch
 from app.modules.operation_exceptions import crud
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment
 from app.modules.operation_exceptions.schema import (
@@ -59,6 +60,8 @@ def _validate_source(db: Session, data: OperationExceptionCreate) -> None:
             raise BusinessValidationError("到货明细异常的 source_id 和 delivery_item_id 必须指向同一明细")
     if data.source_type == "QUALITY_ACCEPTANCE" and db.get(QualityAcceptance, data.source_id) is None:
         raise BusinessValidationError("质量验收异常的 source_id 必须指向已存在的验收记录")
+    if data.source_type == "INVENTORY_BATCH" and db.get(InventoryBatch, data.source_id) is None:
+        raise BusinessValidationError("库存批次异常的 source_id 必须指向已存在的库存批次")
     if data.source_type == "OTHER" and data.source_id <= 0:
         raise BusinessValidationError("异常来源 ID 无效")
     if data.owner_id is not None:
@@ -107,20 +110,21 @@ def create_automatic_exception(
 ) -> OperationException | None:
     """为业务事件创建异常；已有未关闭同类异常时不重复创建。"""
 
-    source_model = {"DELIVERY": Delivery, "QUALITY_ACCEPTANCE": QualityAcceptance}.get(source_type)
+    source_model = {"DELIVERY": Delivery, "QUALITY_ACCEPTANCE": QualityAcceptance, "INVENTORY_BATCH": InventoryBatch}.get(source_type)
     if source_model is not None:
         source = db.scalar(select(source_model).where(source_model.id == source_id).with_for_update())
         if source is None:
             raise ResourceNotFoundError(f"自动异常来源 {source_type}:{source_id} 不存在")
 
-    existing = db.scalar(
-        select(OperationException).where(
-            OperationException.exception_type == exception_type,
-            OperationException.source_type == source_type,
-            OperationException.source_id == source_id,
-            OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED")),
-        ).with_for_update()
-    )
+    duplicate_conditions = [
+        OperationException.exception_type == exception_type,
+        OperationException.source_type == source_type,
+        OperationException.source_id == source_id,
+    ]
+    # 定时临期提醒会重复扫描仍存在的事实；关闭后也不能每个周期重新通知。
+    if exception_type != "INVENTORY_EXPIRY":
+        duplicate_conditions.append(OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED")))
+    existing = db.scalar(select(OperationException).where(*duplicate_conditions).with_for_update())
     if existing is not None:
         return None
     exception = OperationException(
@@ -143,7 +147,7 @@ def create_automatic_exception(
             exception.exception_no = f"EX{_now():%Y%m%d}{exception.id:06d}"
             add_audit_log(db, actor_id=user.id, action_type="AUTO_CREATE", resource_type="OPERATION_EXCEPTION", resource_id=exception.id, request_summary="业务事件自动生成运营异常", result_status="SUCCESS")
     except IntegrityError:
-        existing = db.scalar(select(OperationException).where(OperationException.exception_type == exception_type, OperationException.source_type == source_type, OperationException.source_id == source_id, OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED"))).order_by(OperationException.id).limit(1))
+        existing = db.scalar(select(OperationException).where(*duplicate_conditions).order_by(OperationException.id).limit(1))
         if existing is not None:
             return None
         raise

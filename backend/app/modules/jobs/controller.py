@@ -19,12 +19,26 @@ def overdue_scan(db: Session = Depends(get_db), user: User = Depends(require_per
     return service.scan_overdue_deliveries(db, user)
 
 
+@router.post("/inventory-expiry-scan", response_model=dict[str, int], summary="扫描临期库存批次")
+def inventory_expiry_scan(db: Session = Depends(get_db), user: User = Depends(require_permission("operations.exceptions.write"))) -> dict[str, int]:
+    """手工触发一次临期库存扫描。"""
+
+    return service.scan_expiring_inventory(db, user)
+
+
+@router.post("/alert-scan", response_model=dict[str, int], summary="扫描业务主动提醒")
+def alert_scan(db: Session = Depends(get_db), user: User = Depends(require_permission("operations.exceptions.write"))) -> dict[str, int]:
+    """手工运行所有已配置的确定性业务提醒规则。"""
+
+    return service.scan_active_alerts(db, user)
+
+
 @router.get("/runs", response_model=list[SchedulerJobRunRead], summary="查询后台任务运行历史")
 def list_job_runs(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
     _: User = Depends(require_permission("operations.exceptions.read")),
 ) -> list[SchedulerJobRunRead]:
-    """返回最近的逾期扫描运行结果，不包含单据正文或个人数据。"""
+    """返回最近的后台扫描运行结果，不包含单据正文或个人数据。"""
 
     return service.list_job_runs(db, limit=limit)
