@@ -10,10 +10,12 @@ import { Button, Empty, Input, message, Modal, Select, Spin, Tag } from 'antdv-n
 
 import {
   deleteConversationApi,
+  createPurchaseRequestApi,
   generateBriefingApi,
   getAIMessagesApi,
   getConversationListApi,
   parseNaturalFiltersApi,
+  proposePurchaseRequestDraftApi,
   streamChatApi,
 } from '#/api';
 import { AI_FILTER_TARGETS } from '#/utils/ai-list-filters';
@@ -30,6 +32,9 @@ interface UiMessage {
   id: string;
   /** 后端 Text2SQL 查询链路，仅助手消息可能携带 */
   queryTrace?: any;
+  draftProposal?: AiApi.PurchaseDraftPreview;
+  draftCreatedRequestNo?: string;
+  draftInteraction?: boolean;
   /** 查询链路详情是否展开（默认收起，点击查看） */
   traceOpen?: boolean;
   sourceRecords?: Array<{
@@ -61,6 +66,8 @@ const filterDraft = ref<Record<string, string>>({});
 const filterKeyword = ref('');
 const filterRange = ref<AiApi.NLFilterResult['time_range']>();
 const filterParsing = ref(false);
+const draftMode = ref(false);
+const creatingDraftMessageId = ref<string>();
 const filterFieldNames = computed(() => Object.keys(filterDraft.value));
 const canApplyFilters = computed(() => {
   const target = AI_FILTER_TARGETS.find(
@@ -112,6 +119,7 @@ async function openConversation(conversation: AiApi.Conversation) {
     return;
   }
   activeConversationId.value = conversation.id;
+  draftMode.value = false;
   historyLoading.value = true;
   try {
     const res = await getAIMessagesApi(conversation.id);
@@ -137,6 +145,7 @@ function newConversation() {
     return;
   }
   activeConversationId.value = undefined;
+  draftMode.value = false;
   messages.value = [];
   inputText.value = '';
 }
@@ -164,6 +173,10 @@ async function onSend() {
   if (!text || sending.value) {
     return;
   }
+  if (draftMode.value) {
+    await previewPurchaseRequestDraft(text);
+    return;
+  }
   inputText.value = '';
   const history = [...messages.value];
   messages.value = [
@@ -176,7 +189,7 @@ async function onSend() {
 
   // 后端要求 OpenAI 兼容格式：只传 user/assistant 文本历史
   const payload = history
-    .filter((item) => !item.streaming)
+    .filter((item) => !item.streaming && !item.draftInteraction)
     .map((item) => ({
       content: item.content,
       role: item.role as 'assistant' | 'user',
@@ -229,6 +242,83 @@ async function onSend() {
     sending.value = false;
     scrollToBottom();
   }
+}
+
+async function previewPurchaseRequestDraft(text: string) {
+  inputText.value = '';
+  draftMode.value = false;
+  const history = [...messages.value];
+  const userId = nextId();
+  const assistantId = nextId();
+  messages.value = [
+    ...history,
+    { content: text, draftInteraction: true, id: userId, role: 'user' },
+    { content: '', draftInteraction: true, id: assistantId, role: 'assistant', streaming: true },
+  ];
+  sending.value = true;
+  scrollToBottom();
+  try {
+    const result = await proposePurchaseRequestDraftApi(text);
+    messages.value = messages.value.map((item) =>
+      item.id === assistantId
+        ? {
+            ...item,
+            content: '以下是根据你提供的信息整理的采购申请草稿预览。请核对物料、数量、单位、用途和预算；确认后只创建草稿，不会提交审批。',
+            draftProposal: result,
+            streaming: false,
+          }
+        : item,
+    );
+  } catch (error: any) {
+    messages.value = messages.value.map((item) =>
+      item.id === assistantId
+        ? { ...item, content: `⚠ ${error?.message || '草稿建议生成失败'}`, streaming: false }
+        : item,
+    );
+  } finally {
+    sending.value = false;
+    scrollToBottom();
+  }
+}
+
+function confirmCreatePurchaseDraft(item: UiMessage) {
+  const proposal = item.draftProposal;
+  if (!proposal || item.draftCreatedRequestNo) return;
+  const itemSummary = proposal.display_items
+    .map((line) => `${line.requested_name} ${line.quantity} ${line.unit_name}`)
+    .join('；');
+  Modal.confirm({
+    content: `用途：${proposal.draft.purpose}。明细：${itemSummary}。确认后会创建状态为“草稿”的采购申请，不会提交审批。`,
+    okText: '确认创建草稿',
+    onOk: async () => {
+      creatingDraftMessageId.value = item.id;
+      try {
+        const created = await createPurchaseRequestApi(proposal.draft);
+        const requestNo = created.request_no || String(created.id);
+        messages.value = messages.value.map((messageItem) =>
+          messageItem.id === item.id
+            ? {
+                ...messageItem,
+                content: `${messageItem.content}\n\n已创建草稿 ${requestNo}，当前状态：草稿。你可以在采购申请列表中继续检查和编辑。`,
+                draftProposal: undefined,
+                draftCreatedRequestNo: requestNo,
+                sourceRecords: [
+                  {
+                    dataset: 'purchase_requests',
+                    filters: { keywords: requestNo },
+                    label: `采购申请 ${requestNo}`,
+                  },
+                ],
+              }
+            : messageItem,
+        );
+        message.success(`已创建采购申请草稿 ${requestNo}`);
+      } finally {
+        creatingDraftMessageId.value = undefined;
+      }
+    },
+    title: '确认创建采购申请草稿',
+  });
 }
 
 /** 展开/收起某条消息的查询链路详情 */
@@ -458,11 +548,12 @@ onMounted(loadConversations);
             <div>
               AI 助手
               <span class="text-muted-foreground ml-2 text-xs font-normal">
-                支持自然语言查询与分析，仅查询不执行业务操作
+                常规对话仅查询；采购申请草稿需核对预览并单独确认创建
               </span>
             </div>
             <div class="flex gap-2">
               <Button @click="filterPanelOpen = !filterPanelOpen">自然语言筛选</Button>
+              <Button :type="draftMode ? 'primary' : 'default'" @click="draftMode = !draftMode">采购申请草稿</Button>
               <Button @click="generateBriefing(false)">生成运营晨报</Button>
               <Button type="primary" @click="confirmBriefingPush">生成并推送</Button>
             </div>
@@ -546,6 +637,33 @@ onMounted(loadConversations);
                 <span v-else-if="item.streaming" class="animate-pulse">
                   正在思考…
                 </span>
+                <div v-if="item.draftProposal" class="mt-3 space-y-2 rounded-md border border-border/70 bg-background/70 p-3 text-xs">
+                  <div class="font-medium">采购申请草稿预览 · 尚未保存</div>
+                  <div>用途：{{ item.draftProposal.draft.purpose }}</div>
+                  <div>优先级：{{ item.draftProposal.draft.priority || 'NORMAL' }} · 币种：{{ item.draftProposal.draft.currency_code || 'CNY' }}</div>
+                  <div v-if="item.draftProposal.draft.budget_amount">预算：{{ item.draftProposal.draft.budget_amount }}</div>
+                  <ul class="list-disc space-y-1 pl-5">
+                    <li v-for="(line, index) in item.draftProposal.display_items" :key="`${line.requested_name}-${index}`">
+                      {{ line.requested_name }}：{{ line.quantity }} {{ line.unit_name }}
+                      <span v-if="line.product_name" class="text-muted-foreground">（关联产品：{{ line.product_name }}）</span>
+                      <span v-if="line.budget_price" class="text-muted-foreground">· 单价 {{ line.budget_price }}</span>
+                    </li>
+                  </ul>
+                  <ul v-if="item.draftProposal.warnings.length" class="list-disc pl-5 text-amber-700">
+                    <li v-for="warning in item.draftProposal.warnings" :key="warning">{{ warning }}</li>
+                  </ul>
+                  <div class="text-muted-foreground">确认后仅创建状态为“草稿”的采购申请；仍需你在业务模块中检查并自行提交审批。</div>
+                  <div class="flex justify-end">
+                    <Button
+                      :disabled="Boolean(item.draftCreatedRequestNo) || Boolean(creatingDraftMessageId)"
+                      :loading="creatingDraftMessageId === item.id"
+                      type="primary"
+                      @click="confirmCreatePurchaseDraft(item)"
+                    >
+                      {{ item.draftCreatedRequestNo ? `已创建 ${item.draftCreatedRequestNo}` : '确认创建草稿' }}
+                    </Button>
+                  </div>
+                </div>
                 <div
                   v-if="item.queryTrace"
                   class="border-border/50 mt-2 border-t pt-2 text-xs opacity-80"
@@ -680,7 +798,7 @@ onMounted(loadConversations);
               v-model:value="inputText"
               :maxlength="2000"
               :rows="2"
-              placeholder="输入问题，Enter 发送，Shift+Enter 换行"
+              :placeholder="draftMode ? '写明采购用途、物料、数量和单位；不会推测缺失信息' : '输入问题，Enter 发送，Shift+Enter 换行'"
               @keydown="onTextKeydown"
             />
             <Button
@@ -689,7 +807,7 @@ onMounted(loadConversations);
               type="primary"
               @click="onSend"
             >
-              发送
+              {{ draftMode ? '生成预览' : '发送' }}
             </Button>
           </div>
         </div>

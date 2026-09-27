@@ -8,10 +8,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
 from app.core.observability import get_request_id, metrics, observe_duration
 from app.modules.ai import briefing as briefing_service
+from app.modules.ai import drafts as drafts_service
 from app.modules.ai import nl_filters as nl_filters_service
 from app.modules.ai import service
 from app.modules.ai import text2sql as text2sql_service
@@ -19,6 +20,8 @@ from app.modules.ai.text2sql import Text2SQLRequest, Text2SQLResponse
 from app.modules.ai.schema import (
     AIChatRequest,
     AIChatResponse,
+    AIPurchaseDraftPreview,
+    AIPurchaseDraftRequest,
     AIConversationPage,
     AIConversationRead,
     AIMessagePage,
@@ -48,6 +51,17 @@ async def briefing(data: BriefingRequest | None = None, db: Session = Depends(ge
     """聚合 dashboard 指标生成中文晨报；push=true 时同时站内通知（默认 SYS_ADMIN 与 PROCUREMENT_MANAGER）。"""
 
     return await briefing_service.generate_briefing(db, user, data or BriefingRequest())
+
+
+@router.post("/purchase-request-draft/preview", response_model=AIPurchaseDraftPreview, summary="生成需人工确认的采购申请草稿建议")
+async def purchase_request_draft_preview(
+    data: AIPurchaseDraftRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("procurement.requests.write")),
+) -> AIPurchaseDraftPreview:
+    """只返回候选字段；不写入申请、不提交审批。"""
+
+    return await drafts_service.propose_purchase_request_draft(db, user, data.question)
 
 
 @router.post("/parse-filters", response_model=NLFilterResult, summary="自然语言解析列表筛选条件")

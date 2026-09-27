@@ -74,6 +74,20 @@ export namespace AiApi {
       field: string;
     };
   }
+
+  export interface PurchaseDraftPreview {
+    display_items: Array<{
+      budget_price?: null | string;
+      product_name?: null | string;
+      quantity: string;
+      requested_name: string;
+      technical_requirements?: null | string;
+      unit_name: string;
+    }>;
+    draft: import('../procurement/purchase-requests').PurchaseRequestApi.RequestPayload;
+    requires_user_confirmation: boolean;
+    warnings: string[];
+  }
 }
 
 /** 生成运营晨报；推送时由调用方先向用户确认接收角色。 */
@@ -90,6 +104,14 @@ export async function parseNaturalFiltersApi(dataset: string, question: string) 
     dataset,
     question,
   });
+}
+
+/** 将明确需求整理成候选采购申请表单，不写入或提交业务单据。 */
+export async function proposePurchaseRequestDraftApi(question: string) {
+  return requestClient.post<AiApi.PurchaseDraftPreview>(
+    '/ai/purchase-request-draft/preview',
+    { question },
+  );
 }
 
 /** 查询当前用户的 AI 会话列表 */

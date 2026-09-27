@@ -150,3 +150,29 @@ class NLFilterResult(BaseModel):
     keywords: str | None = None
     dropped: list[str] = Field(default_factory=list, description="被白名单或格式校验剔除的条件说明")
     raw: str = Field(default="", description="模型原始输出，便于排查")
+
+
+class AIPurchaseDraftPreviewItem(BaseModel):
+    """供用户核对的采购申请候选明细，不代表已创建业务单据。"""
+
+    requested_name: str
+    product_name: str | None = None
+    quantity: str
+    unit_name: str
+    technical_requirements: str | None = None
+    budget_price: str | None = None
+
+
+class AIPurchaseDraftPreview(BaseModel):
+    """AI 提出的采购草稿候选值；用户确认后才会调用采购申请接口。"""
+
+    draft: dict[str, Any]
+    display_items: list[AIPurchaseDraftPreviewItem]
+    warnings: list[str] = Field(default_factory=list)
+    requires_user_confirmation: bool = True
+
+
+class AIPurchaseDraftRequest(BaseModel):
+    """待整理成采购申请表单候选值的自然语言需求。"""
+
+    question: str = Field(min_length=1, max_length=2000)
