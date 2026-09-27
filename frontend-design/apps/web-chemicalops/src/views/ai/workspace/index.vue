@@ -32,6 +32,12 @@ interface UiMessage {
   queryTrace?: any;
   /** 查询链路详情是否展开（默认收起，点击查看） */
   traceOpen?: boolean;
+  sourceRecords?: Array<{
+    dataset: string;
+    filters?: Record<string, string | number>;
+    label: string;
+    record_id?: null | number;
+  }>;
   openCitationIds?: number[];
   role: 'assistant' | 'user';
   /** 流式回复是否仍在输出 */
@@ -67,7 +73,9 @@ const canApplyFilters = computed(() => {
     ) || Boolean(target.keyword && filterKeyword.value.trim())
   );
 });
-const filterDatasetOptions = AI_FILTER_TARGETS.map(({ dataset, label }) => ({
+const filterDatasetOptions = AI_FILTER_TARGETS.filter(
+  (item) => item.dataset !== 'inventory',
+).map(({ dataset, label }) => ({
   label,
   value: dataset,
 }));
@@ -112,6 +120,9 @@ async function openConversation(conversation: AiApi.Conversation) {
       citations: Array.isArray(item.citations) ? item.citations : [],
       id: String(item.id),
       queryTrace: (item.citations as any)?.[0]?.query_trace,
+      sourceRecords: Array.isArray((item.citations as any)?.[0]?.source_records)
+        ? (item.citations as any)[0].source_records
+        : [],
       role: item.role === 'user' ? 'user' : 'assistant',
     }));
     scrollToBottom();
@@ -199,6 +210,9 @@ async function onSend() {
           content: payloadDone.answer ?? '',
           citations: Array.isArray(payloadDone.citations) ? payloadDone.citations : [],
           queryTrace: payloadDone.query_trace,
+          sourceRecords: Array.isArray(payloadDone.citations?.[0]?.source_records)
+            ? payloadDone.citations[0].source_records
+            : [],
           streaming: false,
         });
         activeConversationId.value = payloadDone.conversation_id;
@@ -268,6 +282,30 @@ function openDataset(dataset: string) {
   };
   const path = paths[dataset];
   if (path) void router.push(path);
+}
+
+function openSourceRecord(record: NonNullable<UiMessage['sourceRecords']>[number]) {
+  if (record.dataset === 'purchase_orders' && record.record_id) {
+    void router.push({
+      name: 'PurchaseOrderDetail',
+      params: { id: record.record_id },
+    });
+    return;
+  }
+  const target = AI_FILTER_TARGETS.find((item) => item.dataset === record.dataset);
+  if (!target) return;
+  const recordFilters = record.filters ?? {};
+  const { keywords, ...filters } = recordFilters;
+  void router.push({
+    path: target.path,
+    query: {
+      ai_filters: JSON.stringify({
+        dataset: target.dataset,
+        filters,
+        keywords: typeof keywords === 'string' ? keywords : null,
+      }),
+    },
+  });
 }
 
 async function generateBriefing(push: boolean) {
@@ -572,6 +610,21 @@ onMounted(loadConversations);
                     >{{ item.queryTrace.sql }}</pre>
                   </template>
                 </div>
+                <details v-if="item.sourceRecords?.length" class="mt-2 border-t border-border/50 pt-2">
+                  <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">
+                    来源记录（{{ item.sourceRecords.length }}）
+                  </summary>
+                  <div class="mt-2 space-y-1">
+                    <div
+                      v-for="(record, index) in item.sourceRecords"
+                      :key="`${record.dataset}-${record.record_id ?? index}`"
+                      class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-xs"
+                    >
+                      <span>{{ record.label }}</span>
+                      <Button size="small" type="link" @click="openSourceRecord(record)">定位业务记录</Button>
+                    </div>
+                  </div>
+                </details>
                 <details v-if="item.citations?.some((citation) => citation.type === 'doc_kb')" class="mt-3 border-t border-border/50 pt-2">
                   <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">
                     资料来源（{{ item.citations.filter((citation) => citation.type === 'doc_kb').length }}）

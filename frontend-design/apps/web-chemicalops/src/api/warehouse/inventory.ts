@@ -123,6 +123,7 @@ export namespace InventoryApi {
   }
 
   export interface BalanceListParams extends PageQuery {
+    batch_id?: number;
     product_id?: number;
     warehouse_id?: number;
   }

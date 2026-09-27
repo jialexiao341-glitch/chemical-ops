@@ -31,6 +31,13 @@ export const AI_FILTER_TARGETS: AiFilterTarget[] = [
     path: '/warehouse/deliveries',
   },
   {
+    dataset: 'inventory',
+    fields: { product_id: 'product_id', warehouse_id: 'warehouse_id' },
+    keyword: false,
+    label: '库存余额',
+    path: '/warehouse/inventory',
+  },
+  {
     dataset: 'quality_acceptances',
     fields: { result: 'result' },
     keyword: false,

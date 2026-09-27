@@ -524,6 +524,7 @@ async def _run_text2sql_for_chat(
         "data_scope": data_scope,
         "query_plan": result.plan.model_dump(mode="json"),
         "row_count": result.row_count,
+        "source_records": result.source_records,
         "stages": result.stages,
         "query_trace": trace.model_dump(mode="json"),
     }

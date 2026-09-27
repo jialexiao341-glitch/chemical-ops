@@ -88,6 +88,7 @@ class Text2SQLResponse(BaseModel):
     template: str
     render_columns: list[dict[str, str]]
     rows: list[dict[str, Any]]
+    source_records: list[dict[str, Any]] = Field(default_factory=list)
     row_count: int
     truncated: bool
     stages: list[str]
@@ -164,6 +165,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         )
         return (
             select(
+                PurchaseRequest.id.label("_source_record_id"),
                 PurchaseRequest.request_no.label("request_no"),
                 PurchaseRequest.purpose.label("purpose"),
                 PurchaseRequest.priority.label("priority"),
@@ -200,6 +202,8 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         )
         statement = (
             select(
+                Delivery.id.label("_source_record_id"),
+                PurchaseOrder.id.label("_source_order_id"),
                 PurchaseOrder.po_no.label("po_no"),
                 Supplier.supplier_name.label("supplier"),
                 Delivery.delivery_no.label("delivery_no"),
@@ -241,6 +245,9 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         )
         statement = (
             select(
+                Product.id.label("_source_product_id"),
+                Warehouse.id.label("_source_warehouse_id"),
+                InventoryBatch.id.label("_source_batch_id"),
                 Product.product_code.label("product_code"),
                 Product.product_name.label("product"),
                 Warehouse.warehouse_name.label("warehouse"),
@@ -316,8 +323,10 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
                 InventoryTransaction.transaction_no.label("transaction_no"),
                 source_labels.label("source_type_label"),
                 InventoryTransaction.source_id.label("source_id"),
+                InventoryBalance.id.label("_source_balance_id"),
                 InventoryTransaction.product_id.label("product_id"),
                 InventoryTransaction.batch_id.label("batch_id"),
+                InventoryTransaction.warehouse_id.label("_source_warehouse_id"),
                 Product.product_code.label("product_code"),
                 Product.product_name.label("product"),
                 InventoryBatch.batch_no.label("batch_no"),
@@ -357,8 +366,10 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
                 literal(None).label("transaction_no"),
                 literal("库存余额状态日志").label("source_type_label"),
                 InventoryBalance.id.label("source_id"),
+                InventoryBalance.id.label("_source_balance_id"),
                 InventoryBalance.product_id.label("product_id"),
                 InventoryBalance.batch_id.label("batch_id"),
+                InventoryBalance.warehouse_id.label("_source_warehouse_id"),
                 Product.product_code.label("product_code"),
                 Product.product_name.label("product"),
                 InventoryBatch.batch_no.label("batch_no"),
@@ -424,6 +435,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         payment_incomplete = paid_amount < expected_amount
         statement = (
             select(
+                PurchaseOrder.id.label("_source_record_id"),
                 PurchaseOrder.po_no.label("po_no"),
                 Supplier.supplier_name.label("supplier"),
                 PurchaseOrder.currency_code.label("order_currency"),
@@ -532,6 +544,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         product_id_expr = func.coalesce(SupplierProduct.product_id, RFQItem.product_id)
         statement = (
             select(
+                Supplier.id.label("_source_record_id"),
                 Supplier.supplier_name.label("supplier"),
                 Product.product_code.label("product_code"),
                 Product.product_name.label("product"),
@@ -1107,6 +1120,7 @@ class Text2SQLState(TypedDict, total=False):
     template: str
     render_columns: list[dict[str, str]]
     rows: list[dict[str, Any]]
+    source_records: list[dict[str, Any]]
     columns: list[str]
     row_count: int
     truncated: bool
@@ -1115,6 +1129,63 @@ class Text2SQLState(TypedDict, total=False):
     unit: str | None
     unit_note: str | None
     previous_plan: QueryPlan | None
+
+
+def _source_records(dataset: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build safe navigation hints from IDs selected by fixed read-only templates."""
+
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, object]] = set()
+    for row in rows:
+        target: str | None = None
+        label = ""
+        filters: dict[str, str | int] = {}
+        record_id = row.get("_source_record_id")
+        if dataset == "approved_requests_without_rfq":
+            target = "purchase_requests"
+            label = f"采购申请 {row.get('request_no') or ''}".strip()
+            filters = {"keywords": str(row.get("request_no") or "")}
+        elif dataset == "weekly_order_risks":
+            target = "deliveries"
+            label = f"到货单 {row.get('delivery_no') or ''}".strip()
+            filters = {"keywords": str(row.get("delivery_no") or "")}
+        elif dataset == "inventory_by_batch":
+            target = "inventory"
+            label = f"{row.get('product') or '库存'} · 批次 {row.get('batch_no') or '—'}"
+            filters = {
+                "product_id": int(row["_source_product_id"]),
+                "warehouse_id": int(row["_source_warehouse_id"]),
+                "batch_id": int(row["_source_batch_id"]),
+            }
+        elif dataset == "accepted_orders_finance_gaps":
+            target = "purchase_orders"
+            label = f"采购订单 {row.get('po_no') or ''}".strip()
+            filters = {"keywords": str(row.get("po_no") or "")}
+            record_id = row.get("_source_record_id")
+        elif dataset == "supplier_quote_delivery_profile":
+            target = "suppliers"
+            label = f"供应商 {row.get('supplier') or ''}".strip()
+            filters = {"keywords": str(row.get("supplier") or "")}
+        elif dataset == "inventory_movement_trace":
+            target = "inventory"
+            label = f"{row.get('event_type') or '库存变动'} · {row.get('transaction_no') or row.get('source_type_label') or ''}".strip()
+            filters = {
+                "product_id": int(row["product_id"]),
+                "warehouse_id": int(row["_source_warehouse_id"]),
+                "batch_id": int(row["batch_id"]),
+            }
+            record_id = row.get("_source_balance_id")
+        if target is None:
+            continue
+        if dataset == "inventory_by_batch":
+            identity = (target, tuple(sorted(filters.items())))
+        else:
+            identity = (target, record_id if record_id is not None else tuple(sorted(filters.items())))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        records.append({"dataset": target, "label": label, "record_id": record_id, "filters": filters})
+    return records
 
 
 async def run_text2sql(
@@ -1188,7 +1259,12 @@ async def run_text2sql(
         result = db.execute(build_statement(state["plan"], db, user)).mappings().all()
         truncated = len(result) > state["plan"].limit
         result = result[: state["plan"].limit]
-        rows = [{str(key): _serialize(value) for key, value in row.items()} for row in result]
+        raw_rows = [{str(key): _serialize(value) for key, value in row.items()} for row in result]
+        source_records = _source_records(state["plan"].dataset, raw_rows)
+        rows = [
+            {key: value for key, value in row.items() if not key.startswith("_source_")}
+            for row in raw_rows
+        ]
         if rows:
             columns = list(rows[0].keys())
         elif state["plan"].dataset == "approved_requests_without_rfq":
@@ -1212,6 +1288,7 @@ async def run_text2sql(
             visualization = {"type": "bar", "category": state["plan"].group_by, "value": "metric_value", "title": "分组结果对比"}
         return {
             "rows": rows,
+            "source_records": source_records,
             "columns": [column for column in columns if column],
             "render_columns": render_columns,
             "unit": unit,
@@ -1257,6 +1334,7 @@ async def run_text2sql(
         template=state["template"],
         render_columns=state["render_columns"],
         rows=state["rows"],
+        source_records=state.get("source_records", []),
         row_count=state["row_count"],
         truncated=state["truncated"],
         stages=state["stages"],

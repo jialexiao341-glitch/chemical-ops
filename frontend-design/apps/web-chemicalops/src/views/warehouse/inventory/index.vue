@@ -5,7 +5,8 @@ import type {
 } from '#/adapter/vxe-table';
 import type { InventoryApi } from '#/api';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
@@ -14,6 +15,7 @@ import { Button } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getBalanceListApi } from '#/api';
+import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 import {
   getProductNameMap,
   getUnitNameMap,
@@ -26,6 +28,28 @@ import InboundModal from './modules/inbound.vue';
 import LogsDrawer from './modules/logs.vue';
 
 defineOptions({ name: 'InventoryList' });
+const route = useRoute();
+
+function getAiInventoryFilters() {
+  const raw = route.query.ai_filters;
+  if (typeof raw !== 'string') return {};
+  try {
+    const payload = JSON.parse(raw);
+    if (payload.dataset !== 'inventory') return {};
+    const filters = payload.filters ?? {};
+    const positiveId = (value: unknown) => {
+      const id = Number(value);
+      return Number.isInteger(id) && id > 0 ? id : undefined;
+    };
+    return {
+      batch_id: positiveId(filters.batch_id),
+      product_id: positiveId(filters.product_id),
+      warehouse_id: positiveId(filters.warehouse_id),
+    };
+  } catch {
+    return {};
+  }
+}
 
 const [Freeze, freezeApi] = useVbenModal({
   connectedComponent: FreezeModal,
@@ -65,6 +89,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
           return await getBalanceListApi({
             page: page.currentPage,
             page_size: page.pageSize,
+            batch_id: getAiInventoryFilters().batch_id,
             ...formValues,
           });
         },
@@ -125,8 +150,28 @@ onMounted(async () => {
   resolveProduct.value = buildResolver(products);
   resolveWarehouse.value = buildResolver(warehouses);
   resolveUnit.value = buildResolver(units);
+  await applyAiFiltersToList('inventory', route.query.ai_filters, gridApi.formApi);
+  const sourceFilters = getAiInventoryFilters();
+  await gridApi.formApi.setValues({
+    ...(sourceFilters.product_id ? { product_id: sourceFilters.product_id } : {}),
+    ...(sourceFilters.warehouse_id ? { warehouse_id: sourceFilters.warehouse_id } : {}),
+  });
   gridApi.query();
 });
+
+watch(
+  () => route.query.ai_filters,
+  async (rawQuery) => {
+    if (await applyAiFiltersToList('inventory', rawQuery, gridApi.formApi)) {
+      const sourceFilters = getAiInventoryFilters();
+      await gridApi.formApi.setValues({
+        ...(sourceFilters.product_id ? { product_id: sourceFilters.product_id } : {}),
+        ...(sourceFilters.warehouse_id ? { warehouse_id: sourceFilters.warehouse_id } : {}),
+      });
+      gridApi.query();
+    }
+  },
+);
 </script>
 
 <template>

@@ -77,13 +77,13 @@ def create_inbound(data: InboundCreate, db: Session = Depends(get_db), user: Use
 
 
 @router.get("/balances", response_model=InventoryBalancePage, summary="查询库存余额")
-def list_balances(product_id: int | None = Query(default=None, gt=0), warehouse_id: int | None = Query(default=None, gt=0), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryBalancePage:
-    """按产品和仓库查询库存余额。"""
+def list_balances(product_id: int | None = Query(default=None, gt=0), warehouse_id: int | None = Query(default=None, gt=0), batch_id: int | None = Query(default=None, gt=0), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryBalancePage:
+    """按产品、仓库和批次查询库存余额。"""
 
     warehouse_ids = service.accessible_warehouse_ids(db, user)
     if warehouse_id is not None and warehouse_ids is not None and warehouse_id not in warehouse_ids:
         raise service.ResourceNotFoundError(f"仓库 {warehouse_id} 不存在")
-    items, total = crud.list_balances(db, product_id=product_id, warehouse_id=warehouse_id, warehouse_ids=warehouse_ids, page=page, page_size=page_size)
+    items, total = crud.list_balances(db, product_id=product_id, warehouse_id=warehouse_id, batch_id=batch_id, warehouse_ids=warehouse_ids, page=page, page_size=page_size)
     return InventoryBalancePage(items=items, total=total, page=page, page_size=page_size)
 
 

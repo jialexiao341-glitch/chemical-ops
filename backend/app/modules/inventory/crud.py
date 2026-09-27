@@ -120,7 +120,7 @@ def get_transaction_by_delivery_item(db: Session, delivery_item_id: int) -> Inve
     return db.scalar(select(InventoryTransaction).where(InventoryTransaction.delivery_item_id == delivery_item_id))
 
 
-def list_balances(db: Session, *, product_id: int | None, warehouse_id: int | None, warehouse_ids: set[int] | None = None, page: int, page_size: int) -> tuple[list[InventoryBalance], int]:
+def list_balances(db: Session, *, product_id: int | None, warehouse_id: int | None, batch_id: int | None = None, warehouse_ids: set[int] | None = None, page: int, page_size: int) -> tuple[list[InventoryBalance], int]:
     """分页查询库存余额。"""
 
     conditions = []
@@ -128,6 +128,8 @@ def list_balances(db: Session, *, product_id: int | None, warehouse_id: int | No
         conditions.append(InventoryBalance.product_id == product_id)
     if warehouse_id is not None:
         conditions.append(InventoryBalance.warehouse_id == warehouse_id)
+    if batch_id is not None:
+        conditions.append(InventoryBalance.batch_id == batch_id)
     if warehouse_ids is not None:
         conditions.append(InventoryBalance.warehouse_id.in_(warehouse_ids))
     total = db.scalar(select(func.count(InventoryBalance.id)).where(*conditions)) or 0
