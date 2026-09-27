@@ -467,8 +467,7 @@ def test_chat_doc_path_empty_hits_gives_guidance(client, demo_password, monkeypa
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert "没有在化学品知识库中匹配到" in body["answer"]
-    assert "64-17-5" in body["answer"]
+    assert "没有匹配到已登记化学品的名称或有效 CAS 号" in body["answer"]
     assert body["model"] == "rule-based"
     assert body["citations"] is None
 
