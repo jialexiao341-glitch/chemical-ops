@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.deliveries.model import Delivery
 from app.modules.finance.model import FinancePayment, FinanceReconciliation
-from app.modules.inventory.model import InventoryBalance, InventoryBatch
+from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse, WarehouseLocation
 from app.modules.inventory.model import InventoryTransaction
 from app.modules.inventory_cost.model import InventoryCostAllocation
 from app.modules.inventory_cost.service import list_expiry_alerts
@@ -136,13 +136,19 @@ def get_report(db: Session, *, date_from: date | None, date_to: date | None) -> 
     expiry_deadline = date.fromordinal(today.toordinal() + 30)
     expiry_rows = db.execute(
         select(
+            InventoryBalance.id,
             Product.product_name,
+            InventoryBatch.batch_no,
+            Warehouse.warehouse_name,
+            WarehouseLocation.location_name,
             InventoryBalance.quantity,
             Unit.unit_name,
             InventoryBatch.expiry_date,
         )
         .join(InventoryBatch, InventoryBatch.product_id == Product.id)
         .join(InventoryBalance, InventoryBalance.batch_id == InventoryBatch.id)
+        .join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id)
+        .join(WarehouseLocation, WarehouseLocation.id == InventoryBalance.location_id)
         .join(Unit, Unit.id == InventoryBalance.unit_id)
         .where(
             InventoryBatch.expiry_date.is_not(None),
@@ -199,13 +205,17 @@ def get_report(db: Session, *, date_from: date | None, date_to: date | None) -> 
         "pending_tasks": pending_tasks,
         "inventory_alerts": [
             {
+                "balance_id": balance_id,
                 "product_name": product_name,
+                "batch_no": batch_no,
+                "warehouse_name": warehouse_name,
+                "location_name": location_name,
                 "quantity": Decimal(quantity),
                 "unit_name": unit_name,
                 "expiry_date": expiry_date,
                 "days_remaining": (expiry_date - today).days,
                 "level": "EXPIRED" if (expiry_date - today).days < 0 else "URGENT" if (expiry_date - today).days <= 7 else "WARNING",
             }
-            for product_name, quantity, unit_name, expiry_date in expiry_rows
+            for balance_id, product_name, batch_no, warehouse_name, location_name, quantity, unit_name, expiry_date in expiry_rows
         ],
     }

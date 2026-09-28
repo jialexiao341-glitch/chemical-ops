@@ -61,12 +61,16 @@ export namespace DashboardApi {
 
   /** 库存有效期预警行 */
   export interface InventoryAlertRow {
+    balance_id: number;
+    batch_no: string;
     days_remaining: number;
     expiry_date: string;
     level: string;
+    location_name: string;
     product_name: string;
     quantity: string;
     unit_name: string;
+    warehouse_name: string;
   }
 
   /** 统计报表，对应后端 DashboardReport */

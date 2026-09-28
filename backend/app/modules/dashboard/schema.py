@@ -70,7 +70,11 @@ class DashboardTaskRow(BaseModel):
 class DashboardInventoryAlertRow(BaseModel):
     """首页库存有效期预警行。"""
 
+    balance_id: int
     product_name: str
+    batch_no: str
+    warehouse_name: str
+    location_name: str
     quantity: Decimal
     unit_name: str
     expiry_date: date

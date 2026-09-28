@@ -5,7 +5,7 @@ import { computed, onMounted, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
 
-import { Button, Card, DatePicker, Empty, Spin, Table, Tag } from 'antdv-next';
+import { Button, Card, DatePicker, Empty, Spin, Tag } from 'antdv-next';
 
 import {
   getDashboardOverviewApi,
@@ -98,14 +98,22 @@ function onRangeChange() {
   load();
 }
 
-const alertColumns = [
-  { key: 'product_name', title: '产品', minWidth: 160 },
-  { key: 'quantity', title: '数量', width: 120, align: 'right' as const },
-  { key: 'unit_name', title: '单位', width: 90 },
-  { key: 'expiry_date', title: '有效期至', width: 120 },
-  { key: 'days_remaining', title: '剩余天数', width: 110 },
-  { key: 'level', title: '预警级别', width: 130 },
-];
+const expiryAlerts = computed(() => report.value?.inventory_alerts ?? []);
+const expiryBands = computed(() => {
+  const rows = expiryAlerts.value;
+  return [
+    { label: '已过期', count: rows.filter((row) => row.days_remaining < 0).length, tone: 'expired' },
+    { label: '7 天内', count: rows.filter((row) => row.days_remaining >= 0 && row.days_remaining <= 7).length, tone: 'urgent' },
+    { label: '8–30 天', count: rows.filter((row) => row.days_remaining > 7).length, tone: 'warning' },
+  ];
+});
+const expiryChartStep = computed(() =>
+  Math.max(1, Math.ceil(Math.max(...expiryBands.value.map((band) => band.count)) / 5)),
+);
+const expiryChartMax = computed(() => expiryChartStep.value * 5);
+const expiryChartTicks = computed(() =>
+  Array.from({ length: 6 }, (_, index) => (5 - index) * expiryChartStep.value),
+);
 
 onMounted(async () => {
   range.value = defaultRange();
@@ -252,37 +260,74 @@ onMounted(async () => {
         </div>
 
         <!-- 有效期预警 -->
-        <Card class="dashboard-panel" title="库存有效期预警">
+        <Card class="dashboard-panel expiry-panel" title="库存有效期预警">
+          <template #extra>
+            <span class="expiry-panel-count">
+              {{ report?.inventory_alerts?.length ?? 0 }} 条预警
+            </span>
+          </template>
           <Empty
-            v-if="(report?.inventory_alerts ?? []).length === 0"
-            description="所选区间没有临期批次"
+            v-if="expiryAlerts.length === 0"
+            description="当前没有需要关注的临期批次"
           />
-          <Table
-            v-else
-            :columns="alertColumns"
-            :data-source="report?.inventory_alerts ?? []"
-            :pagination="false"
-            :scroll="{ x: 820 }"
-            row-key="expiry_date"
-            size="small"
-          >
-            <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'quantity'">
-                {{ formatQuantity(record.quantity) }}
-              </template>
-              <template v-else-if="column.key === 'expiry_date'">
-                {{ formatDate(record.expiry_date) }}
-              </template>
-              <template v-else-if="column.key === 'days_remaining'">
-                {{ record.days_remaining }} 天
-              </template>
-              <template v-else-if="column.key === 'level'">
-                <Tag :color="EXPIRY_ALERT_LEVEL_DICT.color(record.level)">
-                  {{ EXPIRY_ALERT_LEVEL_DICT.label(record.level) }}
-                </Tag>
-              </template>
-            </template>
-          </Table>
+          <div v-else class="expiry-layout">
+            <section class="expiry-summary" aria-label="到期时间分布">
+              <div class="expiry-section-label">到期分布</div>
+              <p class="expiry-summary-intro">按当前库存记录统计，预警窗口为未来 30 天。</p>
+              <div class="expiry-chart" role="img" :aria-label="`已过期 ${expiryBands[0]?.count ?? 0} 条，7 天内 ${expiryBands[1]?.count ?? 0} 条，8 到 30 天 ${expiryBands[2]?.count ?? 0} 条`">
+                <div class="expiry-y-title">预警记录数（条）</div>
+                <div class="expiry-chart-body">
+                  <div class="expiry-y-ticks" aria-hidden="true">
+                    <span v-for="tick in expiryChartTicks" :key="tick">{{ tick }}</span>
+                  </div>
+                  <div class="expiry-plot">
+                    <div class="expiry-gridlines" aria-hidden="true">
+                      <span v-for="tick in expiryChartTicks" :key="tick" />
+                    </div>
+                    <div class="expiry-columns">
+                      <div v-for="band in expiryBands" :key="band.label" class="expiry-column-group">
+                        <strong class="expiry-column-value">{{ band.count }}</strong>
+                        <div
+                          class="expiry-column"
+                          :class="`expiry-column--${band.tone}`"
+                          :style="{ height: `${(band.count / expiryChartMax) * 150}px` }"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="expiry-x-labels" aria-hidden="true">
+                  <span v-for="band in expiryBands" :key="band.label">{{ band.label }}</span>
+                </div>
+                <div class="expiry-x-title">到期区间</div>
+              </div>
+            </section>
+
+            <section class="expiry-details" aria-label="临期批次明细">
+              <div class="expiry-section-label">临期批次</div>
+              <div class="expiry-list">
+                <div v-for="alert in expiryAlerts" :key="alert.balance_id" class="expiry-list-row">
+                  <div class="expiry-list-main">
+                    <div class="expiry-product-name">{{ alert.product_name }}</div>
+                    <div class="expiry-product-meta">
+                      {{ alert.batch_no }} · {{ alert.warehouse_name }} / {{ alert.location_name }}
+                    </div>
+                  </div>
+                  <div class="expiry-list-amount">
+                    <strong>{{ formatQuantity(alert.quantity) }} {{ alert.unit_name }}</strong>
+                    <span>在库数量</span>
+                  </div>
+                  <div class="expiry-list-date">
+                    <strong>{{ formatDate(alert.expiry_date) }}</strong>
+                    <span>{{ alert.days_remaining < 0 ? `已过期 ${-alert.days_remaining} 天` : `剩余 ${alert.days_remaining} 天` }}</span>
+                  </div>
+                  <Tag class="expiry-status" :color="EXPIRY_ALERT_LEVEL_DICT.color(alert.level)">
+                    {{ EXPIRY_ALERT_LEVEL_DICT.label(alert.level) }}
+                  </Tag>
+                </div>
+              </div>
+            </section>
+          </div>
         </Card>
       </div>
     </Spin>
@@ -291,7 +336,7 @@ onMounted(async () => {
 
 <style scoped>
 .dashboard-panel {
-  border: 1px solid #e8ecf2;
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
   box-shadow: none;
 }
@@ -302,8 +347,231 @@ onMounted(async () => {
 }
 
 .dashboard-panel :deep(.ant-card-head-title) {
-  color: #172033;
+  color: hsl(var(--foreground));
   font-size: 16px;
   font-weight: 600;
+}
+
+.expiry-panel-count {
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.expiry-layout {
+  display: grid;
+  gap: 28px;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+}
+
+.expiry-summary {
+  padding: 8px 24px 8px 4px;
+  border-right: 1px solid hsl(var(--border));
+}
+
+.expiry-section-label {
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.expiry-summary-intro {
+  margin: 6px 0 24px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.expiry-chart {
+  margin-top: 38px;
+  padding-right: 6px;
+}
+
+.expiry-y-title,
+.expiry-x-title {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.expiry-y-title {
+  margin: 0 0 14px 36px;
+}
+
+.expiry-chart-body {
+  display: flex;
+  height: 180px;
+}
+
+.expiry-y-ticks {
+  display: flex;
+  flex: 0 0 36px;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-right: 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+}
+
+.expiry-y-ticks span {
+  transform: translateY(50%);
+}
+
+.expiry-plot {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  border-left: 1px solid hsl(var(--border));
+}
+
+.expiry-gridlines {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.expiry-gridlines span {
+  border-top: 1px dashed hsl(var(--border) / 70%);
+}
+
+.expiry-columns {
+  position: absolute;
+  inset: 0 0 1px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.expiry-column-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  padding-inline: 6px;
+}
+
+.expiry-column-value {
+  margin-bottom: 6px;
+  color: hsl(var(--foreground));
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.expiry-column {
+  width: min(72px, 72%);
+  flex: none;
+  border-radius: 6px 6px 0 0;
+}
+
+.expiry-column--expired { background: #dc2626; }
+.expiry-column--urgent { background: #f97316; }
+.expiry-column--warning { background: #eab308; }
+
+.expiry-x-labels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 10px 0 0 36px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  text-align: center;
+}
+
+.expiry-x-title {
+  margin: 12px 0 0 36px;
+  text-align: center;
+}
+
+.expiry-details {
+  min-width: 0;
+}
+
+.expiry-list {
+  max-height: 460px;
+  margin-top: 8px;
+  overflow-y: auto;
+}
+
+.expiry-list-row {
+  display: grid;
+  align-items: center;
+  gap: 16px;
+  grid-template-columns: minmax(180px, 1fr) 100px 104px 88px;
+  min-height: 66px;
+  padding: 10px 4px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.expiry-list-row:last-child {
+  border-bottom: 0;
+}
+
+.expiry-list-main {
+  min-width: 0;
+}
+
+.expiry-product-name,
+.expiry-list-amount strong,
+.expiry-list-date strong {
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.expiry-product-meta,
+.expiry-list-amount span,
+.expiry-list-date span {
+  display: block;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.expiry-product-meta {
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expiry-list-amount,
+.expiry-list-date {
+  font-variant-numeric: tabular-nums;
+}
+
+.expiry-status {
+  margin-inline-end: 0;
+}
+
+@media (max-width: 1100px) {
+  .expiry-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .expiry-summary {
+    padding: 0 0 24px;
+    border-right: 0;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+}
+
+@media (max-width: 640px) {
+  .expiry-list-row {
+    gap: 4px 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .expiry-list-main { grid-column: 1 / -1; }
+  .expiry-list-date { grid-column: 1; }
+  .expiry-list-amount { grid-column: 2; grid-row: 2; text-align: right; }
+  .expiry-status { grid-column: 2; grid-row: 3; justify-self: end; }
 }
 </style>
