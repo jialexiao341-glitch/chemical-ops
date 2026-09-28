@@ -57,7 +57,6 @@ interface UiMessage {
 const conversations = ref<AiApi.Conversation[]>([]);
 const conversationsLoading = ref(false);
 const conversationSearch = ref('');
-const searchOpen = ref(false);
 const sidebarExpanded = ref(false);
 const sidebarCollapsed = ref(false);
 const menuConversationId = ref<number>();
@@ -636,14 +635,14 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
       <aside class="ai-sidebar flex shrink-0 flex-col" :class="{ 'is-collapsed': sidebarCollapsed, 'is-expanded': sidebarExpanded }">
         <div class="ai-brand-row">
           <div class="ai-brand"><img :src="assistantLogo" alt="" /> <span>化运 AI</span></div>
-          <button class="ai-icon-button ai-search-toggle" type="button" aria-label="搜索会话" @click="searchOpen = !searchOpen">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
-          </button>
           <button class="ai-icon-button ai-sidebar-toggle" type="button" aria-label="切换会话侧栏" title="收起或展开会话侧栏" @click="toggleSidebar">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
           </button>
         </div>
-        <Input v-if="searchOpen" v-model:value="conversationSearch" class="ai-search" allow-clear autofocus placeholder="搜索会话" />
+        <div class="ai-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
+          <input v-model="conversationSearch" type="search" aria-label="搜索会话" placeholder="搜索对话" />
+        </div>
         <button class="ai-new-chat" type="button" @click="newConversation">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 20a8 8 0 1 0-8-8v7l3-2"/><path d="M12 8v8M8 12h8"/></svg>
           开启新对话
@@ -990,8 +989,8 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
 }
 .ai-sidebar.is-collapsed { flex-basis: 68px; width: 68px; align-items: center; padding-inline: 8px; }
 .ai-sidebar.is-collapsed .ai-brand-row { flex-direction: column; gap: 12px; padding: 0; }
+.ai-sidebar.is-collapsed .ai-sidebar-toggle { position: static; }
 .ai-sidebar.is-collapsed .ai-brand span,
-.ai-sidebar.is-collapsed .ai-search-toggle,
 .ai-sidebar.is-collapsed .ai-search,
 .ai-sidebar.is-collapsed .ai-history-label,
 .ai-sidebar.is-collapsed .ai-history { display: none; }
@@ -1007,8 +1006,8 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
   align-items: center;
 }
 
-.ai-brand-row { justify-content: space-between; padding: 0 7px; }
-.ai-brand { gap: 9px; color: var(--ai-blue); font-size: 19px; font-weight: 700; letter-spacing: -.04em; }
+.ai-brand-row { position: relative; justify-content: center; min-height: 32px; padding: 0 34px; }
+.ai-brand { justify-content: center; gap: 9px; white-space: nowrap; color: var(--ai-blue); font-size: 19px; font-weight: 700; letter-spacing: -.04em; }
 .ai-brand img { width: 29px; height: 29px; }
 .ai-icon-button,
 .ai-history-delete {
@@ -1024,14 +1023,18 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
 }
 .ai-icon-button svg, .ai-history-delete svg { width: 18px; height: 18px; }
 .ai-icon-button:hover, .ai-history-delete:hover { background: #e9edf4; color: var(--ai-ink); }
-.ai-sidebar-toggle { display: grid; }
-.ai-search { margin-top: 18px; }
+.ai-sidebar-toggle { position: absolute; top: 1px; right: 0; display: grid; }
+.ai-search { display: flex; width: 100%; min-width: 0; height: 38px; align-items: center; gap: 9px; margin-top: 20px; padding: 0 11px; border: 1px solid #e2e7ef; border-radius: 10px; background: #fff; color: #8792a4; transition: border-color .18s, box-shadow .18s; }
+.ai-search:focus-within { border-color: #9db0ff; box-shadow: 0 0 0 3px rgb(69 104 245 / 9%); }
+.ai-search svg { width: 17px; height: 17px; flex: none; }
+.ai-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ai-ink); font: inherit; font-size: 13px; }
+.ai-search input::placeholder { color: #9aa4b5; }
 .ai-new-chat {
   justify-content: center;
   gap: 8px;
   width: 100%;
   min-height: 46px;
-  margin: 24px 0 28px;
+  margin: 14px 0 28px;
   border: 1px solid #e7eaf0;
   border-radius: 999px;
   background: #fff;
@@ -1104,9 +1107,12 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
   .ai-sidebar { flex-basis: 68px; width: 68px; align-items: center; padding-inline: 8px; }
   .ai-sidebar.is-expanded { position: absolute; inset: 0 auto 0 0; z-index: 2; width: min(280px, 82vw); align-items: stretch; box-shadow: 12px 0 30px rgb(24 38 67 / 12%); }
   .ai-brand-row { flex-direction: column; gap: 14px; padding: 0; }
-  .ai-sidebar.is-expanded .ai-brand-row { flex-direction: row; }
-  .ai-brand span, .ai-history, .ai-history-label, .ai-search-toggle, .ai-search { display: none; }
-  .ai-sidebar.is-expanded .ai-brand span, .ai-sidebar.is-expanded .ai-history, .ai-sidebar.is-expanded .ai-history-label, .ai-sidebar.is-expanded .ai-search-toggle, .ai-sidebar.is-expanded .ai-search { display: block; }
+  .ai-sidebar-toggle { position: static; }
+  .ai-sidebar.is-expanded .ai-brand-row { flex-direction: row; padding: 0 34px; }
+  .ai-sidebar.is-expanded .ai-sidebar-toggle { position: absolute; }
+  .ai-brand span, .ai-history, .ai-history-label, .ai-search { display: none; }
+  .ai-sidebar.is-expanded .ai-brand span, .ai-sidebar.is-expanded .ai-history, .ai-sidebar.is-expanded .ai-history-label { display: block; }
+  .ai-sidebar.is-expanded .ai-search { display: flex; }
   .ai-new-chat { width: 48px; overflow: hidden; font-size: 0; }
   .ai-sidebar.is-expanded .ai-new-chat { width: 100%; font-size: 14px; }
   .ai-new-chat svg { flex: none; }
