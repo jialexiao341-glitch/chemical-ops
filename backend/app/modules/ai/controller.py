@@ -24,6 +24,7 @@ from app.modules.ai.schema import (
     AIPurchaseDraftRequest,
     AIConversationPage,
     AIConversationRead,
+    AIConversationUpdate,
     AIMessagePage,
     AIMessageRead,
     BriefingRequest,
@@ -114,6 +115,13 @@ def conversations(limit: int = Query(default=50, ge=1, le=100), db: Session = De
     items, total = service.list_conversations(db, user, limit=limit)
     LOGGER.info("AI HTTP 历史会话 user_id=%s count=%s", user.id, total)
     return AIConversationPage(items=[AIConversationRead.model_validate(item) for item in items], total=total)
+
+
+@router.patch("/conversations/{conversation_id}", response_model=AIConversationRead, summary="管理 AI 会话")
+def update_conversation(conversation_id: int, data: AIConversationUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> AIConversationRead:
+    """重命名或置顶当前用户自己的会话。"""
+    updated = service.update_conversation(db, user, conversation_id, title=data.title, pinned=data.pinned)
+    return AIConversationRead.model_validate(updated)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=AIMessagePage, summary="查询 AI 会话消息")

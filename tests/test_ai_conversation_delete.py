@@ -25,3 +25,27 @@ def test_delete_own_ai_conversation_removes_messages(client: TestClient, db_sess
     assert response.json()["deleted"] is True
     assert db_session.get(AIConversation, conversation.id) is None
     assert db_session.query(AIMessage).filter(AIMessage.conversation_id == conversation.id).count() == 0
+
+
+def test_manage_own_ai_conversation(client: TestClient, db_session, demo_password: str) -> None:
+    user = get_user_by_username(db_session, "system_admin")
+    assert user is not None
+    conversation = AIConversation(user_id=user.id, title="原会话", business_scene="GENERAL", permission_snapshot={}, status="ACTIVE")
+    db_session.add(conversation)
+    db_session.flush()
+    headers = _login(client, demo_password)
+
+    response = client.patch(f"/api/v1/ai/conversations/{conversation.id}", json={"title": "  库存追溯  ", "pinned": True}, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["title"] == "库存追溯"
+    assert response.json()["pinned"] is True
+
+    listed = client.get("/api/v1/ai/conversations?limit=100", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert any(item["id"] == conversation.id and item["pinned"] for item in listed.json()["items"])
+
+    invalid = client.patch(f"/api/v1/ai/conversations/{conversation.id}", json={"title": "  "}, headers=headers)
+    assert invalid.status_code == 400
+
+    missing = client.patch("/api/v1/ai/conversations/999999999", json={"pinned": True}, headers=headers)
+    assert missing.status_code == 400

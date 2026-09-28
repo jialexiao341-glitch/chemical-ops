@@ -794,6 +794,21 @@ def list_conversations(db: Session, user: User, *, limit: int = 50) -> tuple[lis
     return items, total
 
 
+def update_conversation(db: Session, user: User, conversation_id: int, *, title: str | None = None, pinned: bool | None = None) -> AIConversation:
+    """只更新当前用户自己的会话管理字段。"""
+    conversation = _get_owned_conversation(db, user, conversation_id)
+    if title is not None:
+        normalized = title.strip()
+        if not normalized or len(normalized) > 255:
+            raise BusinessValidationError("会话标题长度需为 1 至 255 个字符")
+        conversation.title = normalized
+    if pinned is not None:
+        conversation.pinned = pinned
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
 def list_messages(db: Session, user: User, conversation_id: int, *, limit: int = 100) -> tuple[list[AIMessage], int]:
     """读取当前用户会话消息。"""
 

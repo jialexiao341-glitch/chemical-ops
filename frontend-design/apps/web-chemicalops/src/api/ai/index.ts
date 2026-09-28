@@ -21,6 +21,7 @@ export namespace AiApi {
     created_at?: string;
     id: number;
     last_message_at?: null | string;
+    pinned: boolean;
     status: string;
     title?: null | string;
     updated_at?: string;
@@ -134,6 +135,17 @@ export async function getAIMessagesApi(conversationId: number, limit = 100) {
 export async function deleteConversationApi(conversationId: number) {
   return requestClient.delete<{ conversation_id: number; deleted: boolean }>(
     `/ai/conversations/${conversationId}`,
+  );
+}
+
+/** 重命名或置顶当前用户的会话。 */
+export async function updateConversationApi(
+  conversationId: number,
+  update: { pinned?: boolean; title?: string },
+) {
+  return requestClient.request<AiApi.Conversation>(
+    `/ai/conversations/${conversationId}`,
+    { data: update, method: 'PATCH' },
   );
 }
 

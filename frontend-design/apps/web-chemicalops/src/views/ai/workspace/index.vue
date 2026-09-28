@@ -1,12 +1,12 @@
 <script lang="ts" setup>
 import type { AiApi } from '#/api';
 
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
-import { Button, Empty, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
+import { Button, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
 
 import {
   deleteConversationApi,
@@ -17,12 +17,14 @@ import {
   parseNaturalFiltersApi,
   proposePurchaseRequestDraftApi,
   streamChatApi,
+  updateConversationApi,
 } from '#/api';
 import { AI_FILTER_TARGETS } from '#/utils/ai-list-filters';
 import { formatDateTime } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
 
 import QueryCharts from './query-charts.vue';
+import assistantLogo from './chemicalops-ai.svg';
 
 defineOptions({ name: 'AiWorkspace' });
 const router = useRouter();
@@ -54,6 +56,13 @@ interface UiMessage {
 
 const conversations = ref<AiApi.Conversation[]>([]);
 const conversationsLoading = ref(false);
+const conversationSearch = ref('');
+const searchOpen = ref(false);
+const sidebarExpanded = ref(false);
+const sidebarCollapsed = ref(false);
+const menuConversationId = ref<number>();
+const editingConversationId = ref<number>();
+const editingTitle = ref('');
 const activeConversationId = ref<number>();
 
 const messages = ref<UiMessage[]>([]);
@@ -72,6 +81,24 @@ const filterParsing = ref(false);
 const draftMode = ref(false);
 const creatingDraftMessageId = ref<string>();
 const filterFieldNames = computed(() => Object.keys(filterDraft.value));
+const visibleConversations = computed(() =>
+  conversations.value.filter((item) =>
+    (item.title || `会话 #${item.id}`)
+      .toLocaleLowerCase()
+      .includes(conversationSearch.value.trim().toLocaleLowerCase()),
+  ),
+);
+const conversationGroups = computed(() => {
+  const groups = new Map<string, AiApi.Conversation[]>();
+  for (const item of [...visibleConversations.value].sort((a, b) => Number(b.pinned) - Number(a.pinned))) {
+    const date = formatDateTime(item.last_message_at || item.created_at);
+    const label = item.pinned ? '置顶会话' : /^\d{4}-\d{2}/.test(date) ? date.slice(0, 7) : '更早';
+    const group = groups.get(label) ?? [];
+    group.push(item);
+    groups.set(label, group);
+  }
+  return [...groups].map(([label, items]) => ({ items, label }));
+});
 const canApplyFilters = computed(() => {
   const target = AI_FILTER_TARGETS.find(
     (item) => item.dataset === filterResult.value?.dataset,
@@ -99,7 +126,7 @@ function nextId() {
 async function loadConversations() {
   conversationsLoading.value = true;
   try {
-    const res = await getConversationListApi();
+    const res = await getConversationListApi(100);
     conversations.value = res.items;
   } finally {
     conversationsLoading.value = false;
@@ -122,6 +149,8 @@ async function openConversation(conversation: AiApi.Conversation) {
     return;
   }
   activeConversationId.value = conversation.id;
+  menuConversationId.value = undefined;
+  sidebarExpanded.value = false;
   draftMode.value = false;
   historyLoading.value = true;
   try {
@@ -148,9 +177,55 @@ function newConversation() {
     return;
   }
   activeConversationId.value = undefined;
+  menuConversationId.value = undefined;
+  sidebarExpanded.value = false;
   draftMode.value = false;
   messages.value = [];
   inputText.value = '';
+}
+
+function beginRename(conversation: AiApi.Conversation) {
+  menuConversationId.value = undefined;
+  editingConversationId.value = conversation.id;
+  editingTitle.value = conversation.title || `会话 #${conversation.id}`;
+  void nextTick(() => document.querySelector<HTMLInputElement>('.ai-rename-input')?.focus());
+}
+
+async function saveRename(conversation: AiApi.Conversation) {
+  if (editingConversationId.value !== conversation.id) return;
+  editingConversationId.value = undefined;
+  const title = editingTitle.value.trim();
+  if (!title || title === conversation.title) return;
+  try {
+    const updated = await updateConversationApi(conversation.id, { title });
+    conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item);
+  } catch {
+    message.error('重命名失败，请重试');
+  }
+}
+
+async function togglePinned(conversation: AiApi.Conversation) {
+  menuConversationId.value = undefined;
+  try {
+    const updated = await updateConversationApi(conversation.id, { pinned: !conversation.pinned });
+    conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item);
+  } catch {
+    message.error('置顶状态更新失败，请重试');
+  }
+}
+
+function closeHistoryMenu(event: MouseEvent) {
+  if (!(event.target as Element).closest('.ai-history-menu, .ai-history-more')) {
+    menuConversationId.value = undefined;
+  }
+}
+
+function toggleSidebar() {
+  if (window.matchMedia('(max-width: 640px)').matches) {
+    sidebarExpanded.value = !sidebarExpanded.value;
+  } else {
+    sidebarCollapsed.value = !sidebarCollapsed.value;
+  }
 }
 
 async function removeConversation(conversation: AiApi.Conversation) {
@@ -547,65 +622,76 @@ watch(
   { immediate: true },
 );
 
-onMounted(loadConversations);
+onMounted(() => {
+  void loadConversations();
+  document.addEventListener('click', closeHistoryMenu);
+});
+onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
 </script>
 
 <template>
   <Page auto-content-height>
-    <div class="flex h-full gap-4">
+    <div class="ai-workspace flex h-full min-h-0">
       <!-- 左侧会话列表 -->
-      <div
-        class="flex w-64 shrink-0 flex-col rounded-lg border bg-card p-3"
-      >
-        <Button block class="mb-3" type="primary" @click="newConversation">
-          + 新会话
-        </Button>
-        <Spin :spinning="conversationsLoading" class="min-h-0 flex-1 overflow-y-auto">
-          <Empty
-            v-if="conversations.length === 0"
-            description="还没有会话"
-            image-style="height: 60px"
-          />
-          <div v-else class="space-y-1">
-            <div
-              v-for="item in conversations"
-              :key="item.id"
-              class="cursor-pointer rounded-md px-2 py-2 hover:bg-accent"
-              :class="{
-                'bg-accent': item.id === activeConversationId,
-              }"
-              @click="openConversation(item)"
-            >
-              <div class="flex items-center justify-between gap-1">
-                <span class="truncate text-sm">
-                  {{ item.title || `会话 #${item.id}` }}
-                </span>
-                <Button
-                  danger
-                  size="small"
-                  type="text"
-                  @click.stop="removeConversation(item)"
-                >
-                  ×
-                </Button>
-              </div>
+      <aside class="ai-sidebar flex shrink-0 flex-col" :class="{ 'is-collapsed': sidebarCollapsed, 'is-expanded': sidebarExpanded }">
+        <div class="ai-brand-row">
+          <div class="ai-brand"><img :src="assistantLogo" alt="" /> <span>化运 AI</span></div>
+          <button class="ai-icon-button ai-search-toggle" type="button" aria-label="搜索会话" @click="searchOpen = !searchOpen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
+          </button>
+          <button class="ai-icon-button ai-sidebar-toggle" type="button" aria-label="切换会话侧栏" title="收起或展开会话侧栏" @click="toggleSidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+          </button>
+        </div>
+        <Input v-if="searchOpen" v-model:value="conversationSearch" class="ai-search" allow-clear autofocus placeholder="搜索会话" />
+        <button class="ai-new-chat" type="button" @click="newConversation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 20a8 8 0 1 0-8-8v7l3-2"/><path d="M12 8v8M8 12h8"/></svg>
+          开启新对话
+        </button>
+        <div class="ai-history-label">会话记录</div>
+        <Spin :spinning="conversationsLoading" class="ai-history min-h-0 flex-1 overflow-y-auto">
+          <p v-if="visibleConversations.length === 0" class="ai-no-history">{{ conversationSearch ? '没有找到相关会话' : '还没有会话' }}</p>
+          <div v-else class="ai-history-list">
+            <section v-for="group in conversationGroups" :key="group.label" class="ai-history-group">
+              <h2 class="ai-history-group-label">{{ group.label }}</h2>
               <div
-                class="text-muted-foreground mt-1 flex items-center gap-2 text-xs"
-              >
-                <Tag class="!mr-0">{{ item.business_scene }}</Tag>
-                <span>{{ formatDateTime(item.last_message_at) }}</span>
+              v-for="item in group.items"
+              :key="item.id"
+              class="ai-history-item"
+              :class="{
+                'is-active': item.id === activeConversationId,
+              }"
+              role="button"
+              tabindex="0"
+              @click="openConversation(item)"
+              @keydown.enter.self="openConversation(item)"
+              @keydown.space.self.prevent="openConversation(item)"
+            >
+                <div class="ai-history-content">
+                  <input v-if="editingConversationId === item.id" v-model="editingTitle" class="ai-rename-input" maxlength="255" aria-label="会话名称" @click.stop @keydown.enter.stop="saveRename(item)" @keydown.esc.stop="editingConversationId = undefined" @blur="saveRename(item)" />
+                  <span v-else class="ai-history-title" :title="item.title || `会话 #${item.id}`">{{ item.title || `会话 #${item.id}` }}</span>
+                  <span class="ai-history-date">{{ formatDateTime(item.last_message_at || item.created_at) }}</span>
+                </div>
+                <button class="ai-icon-button ai-history-more" type="button" :aria-label="`管理会话 ${item.title || item.id}`" :aria-expanded="menuConversationId === item.id" aria-haspopup="menu" title="管理会话" @click.stop="menuConversationId = menuConversationId === item.id ? undefined : item.id">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                </button>
+                <div v-if="menuConversationId === item.id" class="ai-history-menu" role="menu" @click.stop @keydown.esc.stop="menuConversationId = undefined">
+                  <button type="button" role="menuitem" @click.stop="beginRename(item)">重命名</button>
+                  <button type="button" role="menuitem" @click.stop="togglePinned(item)">{{ item.pinned ? '取消置顶' : '置顶会话' }}</button>
+                  <button class="is-danger" type="button" role="menuitem" @click.stop="menuConversationId = undefined; removeConversation(item)">删除会话</button>
+                </div>
               </div>
-            </div>
+            </section>
           </div>
         </Spin>
-      </div>
+      </aside>
 
       <!-- 右侧对话区 -->
-      <div class="flex min-w-0 flex-1 flex-col rounded-lg border bg-card">
-        <div class="border-b px-4 py-3 text-sm font-medium">
+      <main class="ai-main flex min-w-0 flex-1 flex-col" :class="{ 'is-empty': messages.length === 0 }">
+        <div class="ai-toolbar text-sm font-medium">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              AI 助手
+              <span class="ai-toolbar-title">化运 AI 助手</span>
               <span class="text-muted-foreground ml-2 text-xs font-normal">
                 常规对话仅查询；采购申请草稿需核对预览并单独确认创建
               </span>
@@ -663,31 +749,33 @@ onMounted(loadConversations);
 
         <div
           ref="messagesRef"
-          class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
+          class="ai-messages min-h-0 flex-1 space-y-4 overflow-y-auto"
         >
           <Spin :spinning="historyLoading">
-            <Empty
-              v-if="messages.length === 0"
-              class="mt-16"
-              description="试着问：本月各供应商的采购订单金额排名"
-            />
+            <div v-if="messages.length === 0" class="ai-welcome">
+              <img :src="assistantLogo" alt="" />
+              <div>
+                <h1>你好，今天想了解什么？</h1>
+                <p>采购、库存、质量与运营信息，随时为你解答。</p>
+              </div>
+            </div>
             <div
               v-for="item in messages"
               :key="item.id"
-              class="flex"
+              class="ai-message-row flex"
               :class="item.role === 'user' ? 'justify-end' : 'justify-start'"
             >
               <!-- 用户消息按纯文本展示；助手消息渲染 Markdown -->
               <div
                 v-if="item.role === 'user'"
-                class="bg-primary max-w-[75%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm text-primary-foreground"
+                class="ai-user-message max-w-[75%] whitespace-pre-wrap px-4 py-3 text-sm"
               >
                 {{ item.content }}
               </div>
               <div
                 v-else
-                class="bg-accent min-w-0 rounded-lg px-3 py-2 text-sm"
-                :class="item.queryTrace?.rows?.length ? 'w-full max-w-[1100px]' : 'max-w-[75%]'"
+                class="ai-assistant-message min-w-0 px-4 py-3 text-sm"
+                :class="item.queryTrace?.rows?.length ? 'w-full max-w-[1100px]' : 'max-w-[85%]'"
               >
                 <div
                   v-if="item.content"
@@ -853,26 +941,179 @@ onMounted(loadConversations);
           </Spin>
         </div>
 
-        <div class="border-t p-3">
-          <div class="flex items-end gap-2">
+        <div class="ai-composer-shell">
+          <div class="ai-composer">
             <Input.TextArea
               v-model:value="inputText"
+              class="ai-composer-input"
               :maxlength="2000"
               :rows="2"
-              :placeholder="draftMode ? '写明采购用途、物料、数量和单位；不会推测缺失信息' : '输入问题，Enter 发送，Shift+Enter 换行'"
+              :placeholder="draftMode ? '写明采购用途、物料、数量和单位…' : '给化运 AI 发送消息'"
               @keydown="onTextKeydown"
             />
-            <Button
-              :disabled="sending || !inputText.trim()"
-              :loading="sending"
-              type="primary"
-              @click="onSend"
-            >
-              {{ draftMode ? '生成预览' : '发送' }}
-            </Button>
+            <div class="ai-composer-actions">
+              <span class="ai-composer-hint">{{ draftMode ? '请核对生成的采购草稿后再确认创建' : 'Enter 发送 · Shift+Enter 换行' }}</span>
+              <button class="ai-send" type="button" :disabled="sending || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend">
+                <svg v-if="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
+                <span v-else class="ai-send-loading">···</span>
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   </Page>
 </template>
+
+<style scoped>
+.ai-workspace {
+  --ai-blue: #4568f5;
+  --ai-blue-strong: #3659e8;
+  --ai-ink: #172033;
+  --ai-muted: #818b9e;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #e7ebf1;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ai-ink);
+}
+
+.ai-sidebar {
+  flex: 0 0 280px;
+  width: 280px;
+  min-width: 0;
+  min-height: 0;
+  padding: 20px 14px 14px;
+  border-right: 1px solid #e9edf3;
+  background: #f8f9fb;
+}
+.ai-sidebar.is-collapsed { flex-basis: 68px; width: 68px; align-items: center; padding-inline: 8px; }
+.ai-sidebar.is-collapsed .ai-brand-row { flex-direction: column; gap: 12px; padding: 0; }
+.ai-sidebar.is-collapsed .ai-brand span,
+.ai-sidebar.is-collapsed .ai-search-toggle,
+.ai-sidebar.is-collapsed .ai-search,
+.ai-sidebar.is-collapsed .ai-history-label,
+.ai-sidebar.is-collapsed .ai-history { display: none; }
+.ai-sidebar.is-collapsed .ai-new-chat { width: 46px; overflow: hidden; font-size: 0; }
+.ai-sidebar.is-collapsed .ai-new-chat svg { flex: none; }
+
+.ai-brand-row,
+.ai-brand,
+.ai-new-chat,
+.ai-history-item,
+.ai-composer-actions {
+  display: flex;
+  align-items: center;
+}
+
+.ai-brand-row { justify-content: space-between; padding: 0 7px; }
+.ai-brand { gap: 9px; color: var(--ai-blue); font-size: 19px; font-weight: 700; letter-spacing: -.04em; }
+.ai-brand img { width: 29px; height: 29px; }
+.ai-icon-button,
+.ai-history-delete {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #7e8798;
+  cursor: pointer;
+}
+.ai-icon-button svg, .ai-history-delete svg { width: 18px; height: 18px; }
+.ai-icon-button:hover, .ai-history-delete:hover { background: #e9edf4; color: var(--ai-ink); }
+.ai-sidebar-toggle { display: grid; }
+.ai-search { margin-top: 18px; }
+.ai-new-chat {
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 46px;
+  margin: 24px 0 28px;
+  border: 1px solid #e7eaf0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 4px rgb(30 46 77 / 5%);
+  color: var(--ai-ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: border-color .18s, box-shadow .18s;
+}
+.ai-new-chat svg { width: 19px; height: 19px; }
+.ai-new-chat:hover { border-color: #b9c7ff; box-shadow: 0 4px 12px rgb(69 104 245 / 10%); }
+.ai-history-label { padding: 0 12px 9px; color: var(--ai-muted); font-size: 12px; font-weight: 600; }
+.ai-history { min-width: 0; margin: 0 -5px; overflow-x: hidden; }
+.ai-history :deep(.ant-spin-container) { min-width: 0; }
+.ai-history-list { display: grid; min-width: 0; gap: 12px; }
+.ai-history-group { min-width: 0; }
+.ai-history-group-label { margin: 0; padding: 4px 12px 8px; color: var(--ai-muted); font-size: 12px; font-weight: 600; }
+.ai-history-item { position: relative; min-width: 0; min-height: 56px; gap: 4px; padding: 7px 7px 7px 12px; border-radius: 10px; cursor: pointer; font-size: 13px; }
+.ai-history-item:hover, .ai-history-item.is-active { background: #ecf0f5; }
+.ai-history-item:focus-visible { outline: 2px solid var(--ai-blue); outline-offset: -2px; }
+.ai-history-content { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; overflow: hidden; }
+.ai-history-title { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-history-date { color: var(--ai-muted); font-size: 11px; white-space: nowrap; }
+.ai-history-more { flex: 0 0 28px; opacity: 0; }
+.ai-history-item:hover .ai-history-more, .ai-history-item:focus-within .ai-history-more { opacity: 1; }
+.ai-history-menu { position: absolute; top: 42px; right: 5px; z-index: 10; display: grid; width: 128px; padding: 5px; border: 1px solid #e7ebf1; border-radius: 12px; background: #fff; box-shadow: 0 12px 28px rgb(25 38 65 / 15%); }
+.ai-history-menu button { padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ai-ink); cursor: pointer; text-align: left; font-size: 13px; }
+.ai-history-menu button:hover, .ai-history-menu button:focus-visible { background: #f1f3f7; }
+.ai-history-menu button.is-danger { color: #d53d4a; }
+.ai-rename-input { width: 100%; min-width: 0; padding: 1px 4px; border: 1px solid #9db0ff; border-radius: 4px; outline: 0; font: inherit; }
+.ai-no-history { padding: 12px; color: var(--ai-muted); font-size: 13px; }
+
+.ai-main { min-height: 0; background: #fff; }
+.ai-toolbar { padding: 16px 24px 12px; border-bottom: 1px solid #f0f1f4; }
+.ai-toolbar-title { font-size: 14px; font-weight: 650; }
+.ai-toolbar :deep(.ant-btn) { border-radius: 9px; }
+.ai-messages { padding: 24px clamp(20px, 5vw, 88px); }
+.ai-main.is-empty .ai-messages { flex: 0 0 auto; margin-top: auto; overflow: visible; padding-bottom: 0; }
+.ai-welcome { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.ai-welcome img { width: 47px; height: 47px; }
+.ai-welcome h1 { margin: 0; color: #151b29; font-size: clamp(22px, 2vw, 28px); font-weight: 650; letter-spacing: -.03em; }
+.ai-welcome p { margin: 3px 0 0; color: var(--ai-muted); font-size: 13px; }
+.ai-message-row { max-width: 1100px; margin: 0 auto 20px; }
+.ai-user-message { border-radius: 16px 16px 4px 16px; background: #e8edff; color: #263568; line-height: 1.7; }
+.ai-assistant-message { border-radius: 4px 16px 16px; background: #f5f7fa; color: var(--ai-ink); line-height: 1.75; }
+.ai-composer-shell { width: 100%; padding: 12px clamp(20px, 5vw, 88px) 22px; }
+.ai-main.is-empty .ai-composer-shell { max-width: 1160px; margin: 24px auto auto; padding-bottom: 0; }
+.ai-composer { max-width: 1100px; margin: 0 auto; padding: 12px 14px 10px; border: 1px solid #e0e5ed; border-radius: 22px; background: #fff; box-shadow: 0 10px 28px rgb(37 52 88 / 6%); transition: border-color .18s, box-shadow .18s; }
+.ai-composer:focus-within { border-color: #9db0ff; box-shadow: 0 10px 28px rgb(69 104 245 / 10%); }
+.ai-composer-input :deep(textarea) { min-height: 62px; padding: 3px 5px; border: 0; background: transparent; box-shadow: none; resize: none; font-size: 15px; line-height: 1.55; }
+.ai-composer-input :deep(textarea:focus) { border: 0; box-shadow: none; }
+.ai-composer-input :deep(textarea::placeholder) { color: #a0aaba; }
+.ai-composer-actions { justify-content: space-between; padding: 3px 0 0 5px; }
+.ai-composer-hint { color: #a1aab9; font-size: 11px; }
+.ai-send { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 50%; background: var(--ai-blue); color: #fff; cursor: pointer; transition: background .18s, transform .18s; }
+.ai-send svg { width: 20px; height: 20px; }
+.ai-send:hover:not(:disabled) { background: var(--ai-blue-strong); transform: translateY(-1px); }
+.ai-send:disabled { background: #b9c6ff; cursor: not-allowed; }
+.ai-send-loading { font-size: 17px; line-height: 1; }
+.ai-icon-button:focus-visible, .ai-new-chat:focus-visible, .ai-history-delete:focus-visible, .ai-send:focus-visible { outline: 2px solid var(--ai-blue); outline-offset: 2px; }
+
+@media (max-width: 900px) {
+  .ai-sidebar { padding-inline: 10px; }
+  .ai-toolbar { padding: 12px 16px; }
+  .ai-toolbar :deep(.ant-btn) { height: 30px; padding-inline: 9px; font-size: 12px; }
+  .ai-messages, .ai-composer-shell { padding-inline: 20px; }
+}
+@media (max-width: 640px) {
+  .ai-sidebar { flex-basis: 68px; width: 68px; align-items: center; padding-inline: 8px; }
+  .ai-sidebar.is-expanded { position: absolute; inset: 0 auto 0 0; z-index: 2; width: min(280px, 82vw); align-items: stretch; box-shadow: 12px 0 30px rgb(24 38 67 / 12%); }
+  .ai-brand-row { flex-direction: column; gap: 14px; padding: 0; }
+  .ai-sidebar.is-expanded .ai-brand-row { flex-direction: row; }
+  .ai-brand span, .ai-history, .ai-history-label, .ai-search-toggle, .ai-search { display: none; }
+  .ai-sidebar.is-expanded .ai-brand span, .ai-sidebar.is-expanded .ai-history, .ai-sidebar.is-expanded .ai-history-label, .ai-sidebar.is-expanded .ai-search-toggle, .ai-sidebar.is-expanded .ai-search { display: block; }
+  .ai-new-chat { width: 48px; overflow: hidden; font-size: 0; }
+  .ai-sidebar.is-expanded .ai-new-chat { width: 100%; font-size: 14px; }
+  .ai-new-chat svg { flex: none; }
+  .ai-toolbar .text-muted-foreground { display: none; }
+  .ai-welcome { flex-direction: column; text-align: center; }
+  .ai-welcome img { width: 40px; height: 40px; }
+  .ai-welcome h1 { font-size: 21px; }
+  .ai-user-message, .ai-assistant-message { max-width: 100%; }
+}
+</style>

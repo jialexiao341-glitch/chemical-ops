@@ -72,9 +72,17 @@ class AIConversationRead(BaseModel):
     title: str | None
     business_scene: str
     status: str
+    pinned: bool
     last_message_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class AIConversationUpdate(BaseModel):
+    """会话标题和置顶状态。"""
+
+    title: str | None = None
+    pinned: bool | None = None
 
 
 class AIConversationPage(BaseModel):
