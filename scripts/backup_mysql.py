@@ -10,6 +10,9 @@ import shutil
 import subprocess
 import sys
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
+
 from app.core.config import get_settings
 
 
