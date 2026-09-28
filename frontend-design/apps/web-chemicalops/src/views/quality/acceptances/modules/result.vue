@@ -5,15 +5,29 @@ import { computed, nextTick, ref } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
 
-import { Alert } from 'antdv-next';
+import { Alert, Button, Select } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
-import { submitAcceptanceResultApi } from '#/api';
+import { getAcceptanceReportFilesApi, submitAcceptanceResultApi } from '#/api';
 import { ACCEPTANCE_RESULT_DICT } from '#/constants/dictionary';
 
-const emit = defineEmits(['success']);
+const emit = defineEmits(['success', 'review']);
 
-const acceptance = ref<null | QualityAcceptanceApi.Acceptance>();
+interface ResultDrawerData extends QualityAcceptanceApi.Acceptance {
+  suggested_report_file_id?: number;
+  suggested_test_result?: Record<string, string>;
+}
+
+const acceptance = ref<null | ResultDrawerData>();
+const reportFiles = ref<QualityAcceptanceApi.ReportFile[]>([]);
+const selectedReportFileId = ref<number>();
+const hasAiSuggestion = ref(false);
+
+function openReportReview() {
+  if (!acceptance.value) return;
+  drawerApi.close();
+  emit('review', acceptance.value);
+}
 
 /**
  * 录入质量验收结果。
@@ -73,7 +87,7 @@ const [Form, formApi] = useVbenForm({
   ],
 });
 
-const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance>({
+const [Drawer, drawerApi] = useVbenDrawer<null | ResultDrawerData>({
   async onConfirm() {
     const { valid } = await formApi.validate();
     if (!valid) {
@@ -96,7 +110,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance
       await submitAcceptanceResultApi(acceptance.value!.id, {
         certificate_complete: Boolean(values.certificate_complete),
         conclusion: values.conclusion || undefined,
-        report_file_id: acceptance.value?.report_file_id ?? undefined,
+        report_file_id: selectedReportFileId.value,
         result: values.result,
         test_result: testResult,
       });
@@ -115,16 +129,27 @@ const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance
     }
     const data = drawerApi.getData();
     acceptance.value = data;
+    hasAiSuggestion.value = Boolean(data?.suggested_test_result && Object.keys(data.suggested_test_result).length && !data.test_result);
+    reportFiles.value = [];
+    selectedReportFileId.value = data?.suggested_report_file_id ?? data?.report_file_id ?? undefined;
     formApi.reset();
 
     await nextTick();
     if (data) {
+      try {
+        reportFiles.value = await getAcceptanceReportFilesApi(data.id);
+        selectedReportFileId.value ??= reportFiles.value[0]?.id;
+      } catch {
+        // 附件查询失败时仍允许人工录入结果。
+      }
       formApi.setValues({
         certificate_complete: Boolean(data.certificate_complete),
         conclusion: data.conclusion ?? undefined,
-        result: data.result ?? undefined,
-        test_result_text: data.test_result
-          ? JSON.stringify(data.test_result, null, 2)
+        result: data.result && !['PENDING', 'REINSPECTION'].includes(data.result)
+          ? data.result
+          : undefined,
+        test_result_text: data.test_result || hasAiSuggestion.value
+          ? JSON.stringify(data.test_result || data.suggested_test_result, null, 2)
           : undefined,
       });
     }
@@ -155,7 +180,27 @@ defineExpose({ drawerApi });
         type="warning"
         show-icon
       />
+      <Alert
+        v-if="hasAiSuggestion"
+        message="已带入报告提取的候选检测值。请逐项对照原始报告，必要时修改后再提交。"
+        type="info"
+        show-icon
+      />
+      <div class="flex justify-end">
+        <Button @click="openReportReview">先核对报告</Button>
+      </div>
       <Form />
+      <div>
+        <label class="mb-1 block text-sm">检测报告</label>
+        <Select
+          v-model:value="selectedReportFileId"
+          class="w-full"
+          allow-clear
+          placeholder="选择已关联的报告（可选）"
+          :options="reportFiles.map((item) => ({ label: item.file_name, value: item.id }))"
+        />
+        <p class="mt-1 text-xs text-muted-foreground">可先在验收列表中使用“核对报告”上传并复核。</p>
+      </div>
     </div>
   </Drawer>
 </template>

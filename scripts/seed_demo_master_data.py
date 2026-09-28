@@ -17,32 +17,32 @@ UNITS = (
 )
 
 SUPPLIERS = (
-    ("DEMO-SUP-A", "海川试剂（演示）"),
-    ("DEMO-SUP-B", "华研化工（演示）"),
+    ("SUP-2026-9001", "海川试剂供应中心"),
+    ("SUP-2026-9002", "华研化工材料"),
 )
 
 DEMO_CHEMICAL = {
-    "chemical_name": "乙醇（演示）",
-    "english_name": "Ethanol Demo",
-    "cas_no": "64-17-5-DEMO",
+    "chemical_name": "乙醇",
+    "english_name": "Ethanol",
+    "cas_no": "64-17-5",
     "chemical_formula": "C2H6O",
     "molecular_weight": 46.068,
     "status": "ACTIVE",
 }
 
 DEMO_PRODUCT = {
-    "product_code": "DEMO-ETHANOL-99",
-    "product_name": "无水乙醇 99%（演示）",
+    "product_code": "PRD-ETHANOL-99",
+    "product_name": "乙醇 99%",
     "model": "AR",
     "purity_value": 99,
     "purity_unit": "%",
     "packaging_spec": "25kg/桶",
-    "parameter_json": {"demo": True},
+    "parameter_json": {"certificate_required": True},
     "version_no": 1,
     "status": "ACTIVE",
 }
 
-DEMO_WAREHOUSE = ("DEMO-WH-01", "化学品综合仓（演示）")
+DEMO_WAREHOUSE = ("WH-2026-9001", "化学品综合仓")
 DEMO_LOCATION = ("A-01-01", "A区 01 排 01 位")
 
 

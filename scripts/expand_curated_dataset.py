@@ -40,9 +40,9 @@ WORK_PACKAGES = (
     ("仪器平台", "设备校准周期前试剂储备"),
     ("外协检测组", "委外样本交付周期配套物料"),
     ("样品制备室", "留样复测批次增加"),
-    ("项目甲", "客户方法确认阶段的试剂计划"),
-    ("项目乙", "联合研发阶段的耗材预测"),
-    ("项目丙", "稳定性试验计划调整"),
+    ("分析方法确认组", "客户方法确认阶段的试剂计划"),
+    ("联合研发组", "联合研发阶段的耗材预测"),
+    ("稳定性研究组", "稳定性试验计划调整"),
     ("仓储计划组", "季末消耗盘点后的补库"),
     ("采购计划组", "多部门需求汇总后的集中采购"),
     ("质量改进组", "偏差复核所需检验用料"),
@@ -65,10 +65,9 @@ def scenario_cases():
     for index, number in enumerate(range(27, 327)):
         product_code, base_price = PRODUCTS[(index * 7 + index // 11) % len(PRODUCTS)]
         team, reason = WORK_PACKAGES[index % len(WORK_PACKAGES)]
-        wave = index // len(WORK_PACKAGES) + 1
         quantity = 24 + (index * 37 + index // 7 * 11) % 177
         unit_price = base_price + (index % 9) - 4
-        background = f"{team}第{wave:02d}批：{reason}；本次申请{PRODUCT_NAMES[product_code]} {quantity}，按计划分批跟踪到货与验收"
+        background = f"{team}因{reason}，申请采购{PRODUCT_NAMES[product_code]} {quantity} L；到货后核对批次及随货证明"
         cases.append((number, product_code, quantity, unit_price, background,
             stages[index % len(stages)], index % 3))
     return tuple(cases)
@@ -77,12 +76,12 @@ def scenario_cases():
 def normalize_expiry_dates(db):
     """Keep sample batch shelf life plausible, including previously seeded cases."""
     today = date.today()
-    items = list(db.scalars(select(DeliveryItem).where(DeliveryItem.batch_no.like("SIM-LOT-26-%"))).all())
+    items = list(db.scalars(select(DeliveryItem).where(DeliveryItem.batch_no.like("B2609____"))).all())
     batches = {batch.source_delivery_id: batch for batch in db.scalars(
-        select(InventoryBatch).where(InventoryBatch.batch_no.like("SIM-LOT-26-%"))).all()}
+        select(InventoryBatch).where(InventoryBatch.batch_no.like("B2609____"))).all()}
     changed = 0
     for item in items:
-        number = int(item.batch_no.rsplit("-", 1)[-1])
+        number = int(item.batch_no[5:])
         expiry = today + timedelta(days=240 + number % 180)
         if item.expiry_date != expiry:
             item.expiry_date = expiry
@@ -111,7 +110,7 @@ def main():
         raise SystemExit("Backup belongs to a different database")
     db = SessionLocal()
     try:
-        if db.scalar(select(PurchaseRequest.id).where(PurchaseRequest.request_no == "SCN26-27-PR")):
+        if db.scalar(select(PurchaseRequest.id).where(PurchaseRequest.request_no.in_(("SCN26-27-PR", "PR-2026-0027")))):
             changed = normalize_expiry_dates(db) if args.apply else 0
             if args.apply:
                 verify(db)

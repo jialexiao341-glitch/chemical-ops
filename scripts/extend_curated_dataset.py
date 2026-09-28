@@ -45,6 +45,7 @@ from app.modules.suppliers.product_model import SupplierProduct
 from app.modules.suppliers.model import Supplier
 from app.modules.system.model import Department, User
 from rebuild_curated_development_data import verify
+from curated_record_copy import acceptance_copy, batch_no, business_no
 
 
 TODAY = date.today()
@@ -95,7 +96,7 @@ def preflight(db):
     settings = get_settings()
     if settings.app_env != "development" or settings.mysql_host not in {"localhost", "127.0.0.1"} or settings.mysql_database != "chemicalops":
         raise RuntimeError("Only the local ChemicalOps development database may be changed")
-    if db.scalar(select(PurchaseRequest.id).where(PurchaseRequest.request_no == "SCN26-PR-01")):
+    if db.scalar(select(PurchaseRequest.id).where(PurchaseRequest.request_no.in_(("SCN26-01-PR", "PR-2026-0001")))):
         return False
     if db.scalar(text("SELECT COUNT(*) FROM purchase_requests")) < 3 or db.scalar(text("SELECT COUNT(*) FROM md_products")) < 8:
         raise RuntimeError("Run the curated rebuild before the extension")
@@ -113,12 +114,12 @@ def main_seed(db, cases=CASES, *, add_master=True):
     suppliers = list(db.scalars(select(Supplier)).all())
     if add_master:
         suppliers.extend((
-        add(db, counts, Supplier, supplier_code="SUP-SCN26-05", supplier_name="模拟供应商·东部试剂配送",
+        add(db, counts, Supplier, supplier_code="SUP-2026-0005", supplier_name="华东试剂配送中心",
             country_code="CN", region="华东", cooperation_level="B", default_lead_days=6,
-            status="ACTIVE", note="仅供开发环境流程测试，非真实供应商"),
-        add(db, counts, Supplier, supplier_code="SUP-SCN26-06", supplier_name="模拟供应商·北方实验材料",
+            status="ACTIVE", note="华东地区常规试剂配送，支持批次资料随货交付"),
+        add(db, counts, Supplier, supplier_code="SUP-2026-0006", supplier_name="北方实验材料供应中心",
             country_code="CN", region="华北", cooperation_level="B", default_lead_days=8,
-            status="ACTIVE", note="仅供开发环境流程测试，非真实供应商"),
+            status="ACTIVE", note="华北地区实验材料供货，按采购订单安排交期"),
         ))
     for code, name, cas, packaging in (() if not add_master else (
         ("PRD-TOLUENE-AR", "甲苯", "108-88-3", "20L/桶"),
@@ -138,8 +139,8 @@ def main_seed(db, cases=CASES, *, add_master=True):
                 supplier_model=f"AR-{option+1:02d}", supplied_purity=D("99.5"),
                 moq_quantity=D(20), moq_unit_id=litre.id,
                 standard_lead_days=supplier.default_lead_days,
-                capacity_note="模拟常规供货能力", status="ACTIVE",
-                note="仅供开发环境流程测试")
+                capacity_note="常备规格可按订单分批交付", status="ACTIVE",
+                note="交期以订单确认为准，随货提供批次资料")
     supplier_products = {}
     for sp in db.scalars(select(SupplierProduct).where(SupplierProduct.status == "ACTIVE")).all():
         supplier_products.setdefault(sp.product_id, []).append(sp)
@@ -164,7 +165,6 @@ def main_seed(db, cases=CASES, *, add_master=True):
 
     balances = []
     for number, code, qty, price, background, stage, supplier_option in cases:
-        key = f"SCN26-{number:02d}"
         age = number % 25
         product = products[code]
         sp = supplier_products[product.id][supplier_option % len(supplier_products[product.id])]
@@ -172,7 +172,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
         priority = "HIGH" if number in (3, 6, 9, 10, 12) else "NORMAL"
         submitted = stage not in ("DRAFT",)
         approved = stage not in ("DRAFT", "SUBMITTED")
-        request = add(db, counts, PurchaseRequest, request_no=f"{key}-PR", applicant_id=buyer.id,
+        request = add(db, counts, PurchaseRequest, request_no=business_no(number, "PR"), applicant_id=buyer.id,
             department_id=departments["PROCUREMENT"].id, purpose=background,
             priority=priority, budget_amount=D(qty * price * 1.08), currency_code="CNY",
             expected_date=TODAY + timedelta(days=number % 13 + 5),
@@ -192,7 +192,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
         if not approved:
             continue
 
-        rfq = add(db, counts, RFQ, rfq_no=f"{key}-RFQ", source_request_id=request.id,
+        rfq = add(db, counts, RFQ, rfq_no=business_no(number, "RFQ"), source_request_id=request.id,
             requester_id=buyer.id, quote_deadline=NOW + timedelta(days=4) if stage == "RFQ" else NOW - timedelta(days=age + 11),
             requested_delivery_date=request.expected_date,
             delivery_requirements="按批次分装，随货提供产品合格证明；" + background,
@@ -208,13 +208,13 @@ def main_seed(db, cases=CASES, *, add_master=True):
         for option_index, option in enumerate(quote_options):
             add(db, counts, RFQSupplier, rfq_id=rfq.id, supplier_id=option.supplier_id,
                 response_status="QUOTED", response_at=NOW - timedelta(days=age + 13),
-                invitation_channel="EMAIL", note="模拟询价记录")
+                invitation_channel="EMAIL", note="供应商已按询价要求反馈报价及交期")
             quoted_price = D(price + (2 if option.supplier_id != supplier_id else 0))
-            quote = add(db, counts, SupplierQuote, quote_no=f"{key}-Q{option_index + 1}",
+            quote = add(db, counts, SupplierQuote, quote_no=f"{business_no(number, 'QUO')}-{option_index + 1}",
                 rfq_id=rfq.id, supplier_id=option.supplier_id, quote_version=1,
                 quote_date=TODAY - timedelta(days=age + 13), valid_until=TODAY + timedelta(days=12),
                 currency_code="CNY", status="SUBMITTED", received_by=buyer.id,
-                note="用于流程演示的模拟报价，无真实商业承诺")
+                note="报价按本次询价数量及约定交期填报，有效期内待采购确认")
             quote_item = add(db, counts, SupplierQuoteItem, quote_id=quote.id,
                 rfq_item_id=rfq_item.id, supplier_product_id=option.id,
                 supplier_model=option.supplier_model, quoted_quantity=D(qty), unit_id=product.unit_id,
@@ -225,7 +225,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
                 selected_quote, selected_quote_item = quote, quote_item
         if stage == "RFQ":
             continue
-        comparison = add(db, counts, QuoteComparison, comparison_no=f"{key}-CMP",
+        comparison = add(db, counts, QuoteComparison, comparison_no=business_no(number, "CMP"),
             rfq_id=rfq.id, created_by=buyer.id, selected_quote_id=selected_quote.id,
             conclusion="综合报价和供应交期，选用符合本次任务需求的供应商。",
             selection_reason=background, status="CONFIRMED", confirmed_by=manager.id,
@@ -243,7 +243,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
         fulfilled = stage in ("SETTLED", "RECEIVED")
         short = stage == "SHORT"
         actual = D(qty - (max(5, qty // 5) if short else 0)) if stage not in ("TRANSIT", "ORDERED") else D(0)
-        order = add(db, counts, PurchaseOrder, po_no=f"{key}-PO", supplier_id=supplier_id,
+        order = add(db, counts, PurchaseOrder, po_no=business_no(number, "PO"), supplier_id=supplier_id,
             source_comparison_id=comparison.id, source_quote_id=selected_quote.id,
             source_request_id=request.id, department_id=request.department_id, buyer_id=buyer.id,
             order_amount=D(qty * price), currency_code="CNY", delivery_address="华东园区化学品仓",
@@ -251,7 +251,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
             expected_arrival_date=TODAY - timedelta(days=2) if stage == "TRANSIT" else TODAY + timedelta(days=4),
             status="COMPLETED" if fulfilled else "PARTIAL" if short else "ORDERED",
             supplier_confirmed_at=NOW - timedelta(days=age + 8), approved_at=NOW - timedelta(days=age + 9),
-            note="模拟业务场景：" + background)
+            note="采购用途：" + background)
         po_item = add(db, counts, PurchaseOrderItem, po_id=order.id, line_no=1,
             product_id=product.id, supplier_product_id=sp.id, source_quote_item_id=selected_quote_item.id,
             product_name_snapshot=product.product_name, supplier_model_snapshot=sp.supplier_model,
@@ -263,32 +263,33 @@ def main_seed(db, cases=CASES, *, add_master=True):
             from_status="APPROVED", to_status="ORDERED", event_note=background)
         if stage == "ORDERED":
             continue
-        delivery = add(db, counts, Delivery, delivery_no=f"{key}-DLV", po_id=order.id,
+        delivery = add(db, counts, Delivery, delivery_no=business_no(number, "DLV"), po_id=order.id,
             supplier_id=supplier_id, shipment_date=TODAY - timedelta(days=age + 4),
             expected_arrival_date=order.expected_arrival_date,
             actual_arrival_date=TODAY - timedelta(days=age + 1) if actual else None,
-            logistics_company="园区合规承运商（模拟）", tracking_no=f"SIM-TRACK-{number:02d}",
+            logistics_company="园区危化品配送服务", tracking_no=f"YQ202609{number:04d}",
             status="ACCEPTED" if fulfilled else "RECEIVED" if actual else "IN_TRANSIT",
             received_by=receiver.id if actual else None, received_at=NOW - timedelta(days=age + 1) if actual else None,
             note=background)
         delivery_item = add(db, counts, DeliveryItem, delivery_id=delivery.id, po_item_id=po_item.id,
-            product_id=product.id, line_no=1, batch_no=f"SIM-LOT-26-{number:02d}",
+            product_id=product.id, line_no=1, batch_no=batch_no(number),
             package_spec=product.packaging_spec, planned_quantity=D(qty), actual_quantity=actual,
             short_quantity=D(qty) - actual if actual else D(0), unit_id=product.unit_id,
             production_date=TODAY - timedelta(days=60 + number),
             expiry_date=TODAY + timedelta(days=240 + number % 180),
             document_complete=0 if stage == "DOCUMENT" else 1,
-            note="模拟批次；" + background)
+            note="到货批次按采购需求登记；" + background)
         if not actual:
             create_exception(db, counts, number, "OVERDUE", delivery, delivery_item,
                 "计划到货日已过，需核查承运进度并更新领用计划。", buyer, departments["PROCUREMENT"].id)
             continue
         result = "PASSED" if fulfilled else "PARTIAL" if short else "PENDING"
-        add(db, counts, QualityAcceptance, acceptance_no=f"{key}-QA", delivery_id=delivery.id,
+        test_result, conclusion = acceptance_copy(stage, product.product_name, qty, int(actual), number)
+        add(db, counts, QualityAcceptance, acceptance_no=business_no(number, "QA"), delivery_id=delivery.id,
             inspector_id=inspector.id, result=result, inspection_time=NOW - timedelta(days=age),
-            test_result={"scenario": "模拟验收", "documents": "齐全" if stage != "DOCUMENT" else "待补"},
+            test_result=test_result,
             certificate_complete=0 if stage == "DOCUMENT" else 1,
-            conclusion="模拟批次验收完成" if fulfilled else "尚需复核短交或随货文件")
+            conclusion=conclusion)
         if stage == "DOCUMENT":
             create_exception(db, counts, number, "DOCUMENT_MISSING", delivery, delivery_item,
                 "随货质量证明未齐，暂不入库；通知供应商补齐批次文件。", inspector, departments["QUALITY"].id)
@@ -296,7 +297,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
         if short:
             create_exception(db, counts, number, "SHORT_DELIVERY", delivery, delivery_item,
                 f"订购 {qty}，实到 {actual}；差额 {D(qty)-actual} 待补发。", buyer, departments["PROCUREMENT"].id)
-            replenish = add(db, counts, ReplenishmentRequest, replenishment_no=f"{key}-REP",
+            replenish = add(db, counts, ReplenishmentRequest, replenishment_no=business_no(number, "REP"),
                 supplier_id=supplier_id, source_po_id=order.id, source_delivery_id=delivery.id,
                 applicant_id=buyer.id, reason="到货短交，依据原订单申请补足差额", status="APPROVED",
                 approved_by=manager.id, approved_at=NOW)
@@ -310,16 +311,16 @@ def main_seed(db, cases=CASES, *, add_master=True):
             batch = add(db, counts, InventoryBatch, product_id=product.id,
                 batch_no=delivery_item.batch_no, supplier_id=supplier_id, source_delivery_id=delivery.id,
                 production_date=delivery_item.production_date, expiry_date=delivery_item.expiry_date,
-                status="ACTIVE", note="模拟批次，不代表实物库存")
+                status="ACTIVE", note="到货批次资料已关联收货记录")
             bal = add(db, counts, InventoryBalance, warehouse_id=wh.id, location_id=loc.id,
                 product_id=product.id, batch_id=batch.id, unit_id=product.unit_id,
                 quantity=actual, locked_quantity=D(0), status="AVAILABLE")
-            tx = add(db, counts, InventoryTransaction, transaction_no=f"{key}-IN",
+            tx = add(db, counts, InventoryTransaction, transaction_no=business_no(number, "IN"),
                 transaction_type="INBOUND", warehouse_id=wh.id, location_id=loc.id,
                 product_id=product.id, batch_id=batch.id, unit_id=product.unit_id,
                 quantity=actual, delivery_item_id=delivery_item.id,
                 source_type="DELIVERY", source_id=delivery.id, operator_id=receiver.id,
-                note="模拟入库；" + background)
+                note="验收后入库；" + background)
             layer = add(db, counts, InventoryCostLayer, source_transaction_id=tx.id,
                 warehouse_id=wh.id, location_id=loc.id, product_id=product.id, batch_id=batch.id,
                 unit_id=product.unit_id, unit_cost=D(price), currency_code="CNY",
@@ -329,35 +330,35 @@ def main_seed(db, cases=CASES, *, add_master=True):
             pr_item.status = "FULFILLED" if fulfilled else "OPEN"
         if stage == "SETTLED":
             amount = order.order_amount
-            rec = add(db, counts, FinanceReconciliation, reconciliation_no=f"{key}-REC",
+            rec = add(db, counts, FinanceReconciliation, reconciliation_no=business_no(number, "REC"),
                 po_id=order.id, supplier_id=supplier_id, currency_code="CNY", total_amount=amount,
                 status="CLOSED", created_by=finance.id, confirmed_by=manager.id,
                 confirmed_at=NOW - timedelta(days=1), closed_at=NOW,
-                note="模拟订单对账；" + background)
+                note="按采购订单、到货记录及验收数量核对；" + background)
             net = (amount / D("1.13")).quantize(D("0.01"))
-            add(db, counts, FinanceInvoice, invoice_no=f"{key}-INV", reconciliation_id=rec.id,
-                po_id=order.id, supplier_id=supplier_id, invoice_number=f"SIM-INVOICE-{number:02d}",
+            add(db, counts, FinanceInvoice, invoice_no=business_no(number, "INV"), reconciliation_id=rec.id,
+                po_id=order.id, supplier_id=supplier_id, invoice_number=f"FP202609{number:06d}",
                 invoice_date=TODAY - timedelta(days=1), amount_excl_tax=net,
                 tax_amount=amount-net, amount_incl_tax=amount, currency_code="CNY",
                 status="VERIFIED", submitted_by=finance.id, verified_by=manager.id,
-                verified_at=NOW, note="仅为模拟发票数据，无真实税务凭证")
-            add(db, counts, FinancePayment, payment_no=f"{key}-PAY", reconciliation_id=rec.id,
+                verified_at=NOW, note="票面金额与订单及对账金额核对一致，附件待归档")
+            add(db, counts, FinancePayment, payment_no=business_no(number, "PAY"), reconciliation_id=rec.id,
                 po_id=order.id, supplier_id=supplier_id, amount=amount, currency_code="CNY",
                 payment_method="BANK_TRANSFER", status="PAID", requested_by=finance.id,
                 approved_by=manager.id, paid_by=finance.id, approved_at=NOW, paid_at=NOW,
-                transaction_ref=f"SIM-PAYMENT-{number:02d}", note="仅为模拟付款数据，无真实资金划转")
-            add(db, counts, FinanceSettlement, settlement_no=f"{key}-SET",
+                transaction_ref=f"FIN202609{number:06d}", note="付款登记金额与对账金额一致，银行回单待归档")
+            add(db, counts, FinanceSettlement, settlement_no=business_no(number, "SET"),
                 reconciliation_id=rec.id, po_id=order.id, supplier_id=supplier_id,
                 settlement_amount=amount, currency_code="CNY", status="CONFIRMED",
                 created_by=finance.id, confirmed_by=manager.id, confirmed_at=NOW,
-                note="模拟结算；与订单及对账金额一致")
+                note="结算金额已与订单、发票及付款登记核对一致")
 
     # Draw from multiple batches with quantities proportional to stock. Completed
     # movements update balances and cost layers; drafts leave the ledger intact.
     for index, (number, bal, layer, order, delivery, background) in enumerate(balances, start=1):
         issue_qty = D(min(3 + index * 2, int(bal.quantity // 5)))
         if issue_qty > 0:
-            issue = add(db, counts, InventoryIssueRequest, issue_no=f"SCN26-ISS-{number:02d}",
+            issue = add(db, counts, InventoryIssueRequest, issue_no=business_no(number, "ISS"),
                 applicant_id=buyer.id, department_id=departments["R_AND_D"].id,
                 purpose="批次试验领用；" + background, status="COMPLETED",
                 approved_by=receiver.id, approved_at=NOW, completed_at=NOW)
@@ -365,7 +366,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
                 product_id=bal.product_id, warehouse_id=bal.warehouse_id, location_id=bal.location_id,
                 batch_id=bal.batch_id, unit_id=bal.unit_id, requested_quantity=issue_qty,
                 issued_quantity=issue_qty, status="COMPLETED")
-            tx = add(db, counts, InventoryTransaction, transaction_no=f"SCN26-OUT-{number:02d}",
+            tx = add(db, counts, InventoryTransaction, transaction_no=business_no(number, "OUT"),
                 transaction_type="OUTBOUND", warehouse_id=bal.warehouse_id, location_id=bal.location_id,
                 product_id=bal.product_id, batch_id=bal.batch_id, unit_id=bal.unit_id,
                 quantity=issue_qty, source_type="ISSUE_REQUEST", source_id=issue.id,
@@ -375,7 +376,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
                 total_cost=issue_qty * layer.unit_cost)
             bal.quantity -= issue_qty
             layer.remaining_quantity -= issue_qty
-        stocktake = add(db, counts, InventoryStocktakeRequest, stocktake_no=f"SCN26-STK-{number:02d}",
+        stocktake = add(db, counts, InventoryStocktakeRequest, stocktake_no=business_no(number, "STK"),
             applicant_id=receiver.id, warehouse_id=bal.warehouse_id, location_id=bal.location_id,
             purpose="月度账实核对；" + background, status="COMPLETED",
             approved_by=receiver.id, approved_at=NOW, completed_at=NOW)
@@ -383,9 +384,9 @@ def main_seed(db, cases=CASES, *, add_master=True):
             line_no=1, product_id=bal.product_id, location_id=bal.location_id,
             batch_id=bal.batch_id, unit_id=bal.unit_id, book_quantity=bal.quantity,
             counted_quantity=bal.quantity, difference_quantity=D(0), status="COMPLETED",
-            note="模拟盘点，账实一致")
+            note="账面数量与本次盘点数量一致，无需调整")
         if number in (1, 4, 5, 8) or (number >= 27 and number % 5 == 0):
-            ret = add(db, counts, InventoryReturnRequest, return_no=f"SCN26-RET-{number:02d}",
+            ret = add(db, counts, InventoryReturnRequest, return_no=business_no(number, "RET"),
                 supplier_id=order.supplier_id, po_id=order.id, delivery_id=delivery.id,
                 applicant_id=receiver.id, reason="留样复核待确认；" + background, status="DRAFT")
             add(db, counts, InventoryReturnItem, return_request_id=ret.id,
@@ -397,7 +398,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
             reserve = warehouses["WH-SOLVENT-RESERVE"]
             reserve_loc = locations[reserve.id]
             move_qty = D(min(6 + number, int(bal.quantity // 4)))
-            transfer = add(db, counts, InventoryTransferRequest, transfer_no=f"SCN26-TRF-{number:02d}",
+            transfer = add(db, counts, InventoryTransferRequest, transfer_no=business_no(number, "TRF"),
                 applicant_id=receiver.id, purpose="同类仓区周转；" + background,
                 status="COMPLETED", approved_by=receiver.id, approved_at=NOW, completed_at=NOW)
             add(db, counts, InventoryTransferItem, transfer_request_id=transfer.id, line_no=1,
@@ -405,12 +406,12 @@ def main_seed(db, cases=CASES, *, add_master=True):
                 source_location_id=bal.location_id, target_warehouse_id=reserve.id,
                 target_location_id=reserve_loc.id, batch_id=bal.batch_id, unit_id=bal.unit_id,
                 requested_quantity=move_qty, transferred_quantity=move_qty, status="COMPLETED")
-            out = add(db, counts, InventoryTransaction, transaction_no=f"SCN26-TO-{number:02d}",
+            out = add(db, counts, InventoryTransaction, transaction_no=business_no(number, "TO"),
                 transaction_type="TRANSFER_OUT", warehouse_id=bal.warehouse_id,
                 location_id=bal.location_id, product_id=bal.product_id, batch_id=bal.batch_id,
                 unit_id=bal.unit_id, quantity=move_qty, source_type="TRANSFER_REQUEST",
                 source_id=transfer.id, operator_id=receiver.id, note=transfer.purpose)
-            in_tx = add(db, counts, InventoryTransaction, transaction_no=f"SCN26-TI-{number:02d}",
+            in_tx = add(db, counts, InventoryTransaction, transaction_no=business_no(number, "TI"),
                 transaction_type="TRANSFER_IN", warehouse_id=reserve.id, location_id=reserve_loc.id,
                 product_id=bal.product_id, batch_id=bal.batch_id, unit_id=bal.unit_id,
                 quantity=move_qty, source_type="TRANSFER_REQUEST", source_id=transfer.id,
@@ -430,8 +431,7 @@ def main_seed(db, cases=CASES, *, add_master=True):
 
 
 def create_exception(db, counts, number, kind, delivery, item, description, owner, department_id):
-    key = f"SCN26-{number:02d}"
-    exc = add(db, counts, OperationException, exception_no=f"{key}-EX",
+    exc = add(db, counts, OperationException, exception_no=business_no(number, "EX"),
         exception_type=kind, source_type="DELIVERY", source_id=delivery.id,
         po_id=delivery.po_id, delivery_id=delivery.id, delivery_item_id=item.id,
         responsible_department_id=department_id, owner_id=owner.id, severity="HIGH",
@@ -440,7 +440,7 @@ def create_exception(db, counts, number, kind, delivery, item, description, owne
         title="核查并处理" + ("短交" if kind == "SHORT_DELIVERY" else "随货文件" if kind == "DOCUMENT_MISSING" else "逾期到货"),
         assignee_id=owner.id, priority="HIGH", due_at=exc.due_at, status="OPEN")
     add(db, counts, OperationTaskComment, task_id=task.id,
-        commenter_id=owner.id, content="已建立跟进任务，待取得供应商反馈；模拟记录。")
+        commenter_id=owner.id, content="已联系供应商核实，待反馈补交时间及处理方案。")
     add(db, counts, Notification, recipient_id=owner.id, related_type="OPERATION_EXCEPTION",
         related_id=exc.id, notification_type="EXCEPTION", title="待处理业务异常",
         content=description, is_read=0)

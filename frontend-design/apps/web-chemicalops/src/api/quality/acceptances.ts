@@ -3,6 +3,33 @@ import type { PageQuery, PageResult } from '#/api/request';
 import { requestClient } from '#/api/request';
 
 export namespace QualityAcceptanceApi {
+  export interface ReportFile {
+    id: number;
+    file_name: string;
+    uploaded_at: string;
+  }
+
+  export interface ReportCheck {
+    item_name: string;
+    report_value: null | string;
+    recorded_value: null | string;
+    source_quote: null | string;
+    source_location: null | string;
+    status: 'MATCH' | 'MISMATCH' | 'NOT_RECORDED' | 'REPORT_MISSING';
+  }
+
+  export interface ReportReview {
+    acceptance_id: number;
+    file_id: number;
+    file_name: string;
+    report_batch_no: null | string;
+    expected_batch_nos: string[];
+    batch_status: 'MATCH' | 'MISMATCH' | 'UNVERIFIED';
+    checks: ReportCheck[];
+    warnings: string[];
+    reviewed_at: string;
+  }
+
   /** 质量验收记录，对应后端 QualityAcceptanceRead */
   export interface Acceptance {
     acceptance_no: string;
@@ -32,6 +59,26 @@ export namespace QualityAcceptanceApi {
     /** 后端参数名为 result */
     result?: string;
   }
+}
+
+export async function getAcceptanceReportFilesApi(id: number) {
+  return requestClient.get<QualityAcceptanceApi.ReportFile[]>(`/quality-acceptances/${id}/report-files`);
+}
+
+export async function uploadAcceptanceReportApi(id: number, file: File) {
+  const data = new FormData();
+  data.append('file', file);
+  return requestClient.post<QualityAcceptanceApi.ReportFile>(`/quality-acceptances/${id}/report-files`, data, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+}
+
+export async function reviewAcceptanceReportApi(id: number, fileId: number) {
+  return requestClient.post<QualityAcceptanceApi.ReportReview>(`/quality-acceptances/${id}/report-review`, { file_id: fileId });
+}
+
+export async function downloadAcceptanceReportApi(id: number, fileId: number) {
+  return requestClient.download<Blob>(`/quality-acceptances/${id}/report-files/${fileId}/download`);
 }
 
 /** 分页查询质量验收 */

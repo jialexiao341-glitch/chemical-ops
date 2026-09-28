@@ -172,7 +172,7 @@ USERS = (
     ("management_viewer", "管理层查看者", "MANAGEMENT", "MANAGEMENT_VIEWER"),
     ("finance_clerk", "财务专员", "FINANCE", "FINANCE_CLERK"),
     ("finance_manager", "财务经理", "FINANCE", "FINANCE_MANAGER"),
-    ("supplier_portal_demo", "演示供应商账号", "MANAGEMENT", "SUPPLIER_PORTAL"),
+    ("supplier_portal_demo", "供应商门户账号", "MANAGEMENT", "SUPPLIER_PORTAL"),
 )
 
 

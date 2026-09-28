@@ -197,6 +197,10 @@ def _can_access_resource_instance(db: Session, user: User, resource_type: str, r
         order = db.get(PurchaseOrder, resource.po_id)
         return order is not None and _can_access_resource_instance(db, user, "PURCHASE_ORDER", order)
     if resource_type == "QUALITY_ACCEPTANCE":
+        # 与质量验收详情的数据范围一致：负责检验员可查看自己的验收报告。
+        # 其他用户仍沿用既有的到货单/订单权限链路。
+        if resource.inspector_id == user.id:
+            return True
         delivery = db.get(Delivery, resource.delivery_id)
         return delivery is not None and _can_access_resource_instance(db, user, "DELIVERY", delivery)
     if resource_type == "OPERATION_EXCEPTION":

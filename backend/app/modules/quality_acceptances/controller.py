@@ -1,16 +1,68 @@
 """质量验收的 HTTP 接口。"""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi.responses import Response
+from urllib.parse import quote
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
 from app.core.db import get_db
 from app.modules.quality_acceptances import service
-from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptancePage, QualityAcceptanceRead, QualityAcceptanceResult
+from app.modules.quality_acceptances import report_review
+from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptancePage, QualityAcceptanceRead, QualityAcceptanceResult, QualityReportFile, QualityReportReview, QualityReportReviewRequest
+from app.modules.files import service as file_service
+from app.modules.files.schema import FileAttachmentCreate
 from app.modules.system.model import User
 
 
 router = APIRouter(prefix="/quality-acceptances", tags=["质量验收"])
+
+
+@router.get("/{acceptance_id}/report-files", response_model=list[QualityReportFile], summary="查询验收报告")
+def report_files(
+    acceptance_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("quality.acceptances.read")),
+) -> list[QualityReportFile]:
+    return report_review.list_report_files(db, user, acceptance_id)
+
+
+@router.post("/{acceptance_id}/report-files", response_model=QualityReportFile, status_code=201, summary="上传验收报告")
+async def upload_report_file(
+    acceptance_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("quality.acceptances.write")),
+) -> QualityReportFile:
+    service.get_acceptance(db, user, acceptance_id)
+    # 上传前按现有附件权限检查，避免文件已存储却无法关联。
+    file_service.list_attachments(db, user, "QUALITY_ACCEPTANCE", acceptance_id, page=1, page_size=1)
+    settings = file_service.get_settings()
+    content = await file.read(settings.document_max_size_mb * 1024 * 1024 + 1)
+    value = file_service.upload_file(db, user, file_name=file.filename or "", mime_type=file.content_type or "application/octet-stream", content=content, file_category="QUALITY_REPORT", access_level="INTERNAL")
+    file_service.attach_file(db, user, value.id, FileAttachmentCreate(resource_type="QUALITY_ACCEPTANCE", resource_id=acceptance_id))
+    return QualityReportFile(id=value.id, file_name=value.file_name, uploaded_at=value.uploaded_at)
+
+
+@router.get("/{acceptance_id}/report-files/{file_id}/download", summary="下载验收报告")
+def download_report_file(
+    acceptance_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("quality.acceptances.read")),
+) -> Response:
+    value, content = report_review.read_report_file(db, user, acceptance_id, file_id)
+    return Response(content=content, media_type=value.mime_type, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(value.file_name)}"})
+
+
+@router.post("/{acceptance_id}/report-review", response_model=QualityReportReview, summary="只读核对验收报告")
+async def review_report(
+    acceptance_id: int,
+    data: QualityReportReviewRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("quality.acceptances.read")),
+) -> QualityReportReview:
+    return await report_review.review_report(db, user, acceptance_id, data.file_id)
 
 
 @router.post("", response_model=QualityAcceptanceRead, status_code=status.HTTP_201_CREATED, summary="创建质量验收")

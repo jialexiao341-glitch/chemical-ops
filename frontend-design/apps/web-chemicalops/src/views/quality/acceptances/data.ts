@@ -64,6 +64,10 @@ export function useColumns(
         name: 'CellOperation',
         options: [
           {
+            code: 'review',
+            text: '核对报告',
+          },
+          {
             code: 'result',
             text: '录入结果',
             // PENDING（刚创建）和 REINSPECTION（复检中）可录入；
@@ -78,7 +82,7 @@ export function useColumns(
       field: 'operation',
       fixed: 'right',
       title: '操作',
-      width: 140,
+      width: 210,
     },
   ];
 }

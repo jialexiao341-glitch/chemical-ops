@@ -19,6 +19,7 @@ import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
+import ReportReviewDrawer from './modules/report-review.vue';
 import ResultDrawer from './modules/result.vue';
 
 defineOptions({ name: 'AcceptanceList' });
@@ -31,6 +32,11 @@ const [Create, createApi] = useVbenModal({
 
 const [Result, resultApi] = useVbenDrawer({
   connectedComponent: ResultDrawer,
+  destroyOnClose: true,
+});
+
+const [ReportReview, reportReviewApi] = useVbenDrawer({
+  connectedComponent: ReportReviewDrawer,
   destroyOnClose: true,
 });
 
@@ -70,6 +76,8 @@ function onActionClick({
 }: OnActionClickParams<QualityAcceptanceApi.Acceptance>) {
   if (code === 'result') {
     resultApi.setData(row).open();
+  } else if (code === 'review') {
+    reportReviewApi.setData(row).open();
   }
 }
 
@@ -114,7 +122,8 @@ watch(
 <template>
   <Page auto-content-height>
     <Create @success="gridApi.query()" />
-    <Result @success="gridApi.query()" />
+    <Result @success="gridApi.query()" @review="(record: QualityAcceptanceApi.Acceptance) => reportReviewApi.setData(record).open()" />
+    <ReportReview @continue="(record: QualityAcceptanceApi.Acceptance) => resultApi.setData(record).open()" />
     <Grid table-title="质量验收">
       <template #toolbar-tools>
         <Button type="primary" @click="createApi.open()">

@@ -48,3 +48,34 @@ class QualityAcceptancePage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class QualityReportFile(BaseModel):
+    id: int
+    file_name: str
+    uploaded_at: datetime
+
+
+class QualityReportReviewRequest(BaseModel):
+    file_id: int = Field(gt=0)
+
+
+class QualityReportCheck(BaseModel):
+    item_name: str
+    report_value: str | None = None
+    recorded_value: str | None = None
+    source_quote: str | None = None
+    source_location: str | None = None
+    status: str
+
+
+class QualityReportReview(BaseModel):
+    acceptance_id: int
+    file_id: int
+    file_name: str
+    report_batch_no: str | None = None
+    expected_batch_nos: list[str]
+    batch_status: str
+    checks: list[QualityReportCheck]
+    warnings: list[str]
+    reviewed_at: datetime
