@@ -17,9 +17,24 @@ from app.modules.doc_kb.embedding import embed_texts
 from app.modules.doc_kb.retrieve import (
     DocSectionHit,
     build_doc_context,
+    requested_single_doc_type,
+    requested_msds_section,
     resolve_doc_targets,
     retrieve_sections,
 )
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("乙醇的 TDS 分子量是多少？", "tds"),
+        ("乙醇的物性页熔点是多少？", "property"),
+        ("乙醇的 MSDS 第9节闪点是多少？", "msds"),
+        ("比较乙醇的 MSDS 和 TDS", None),
+    ],
+)
+def test_requested_single_doc_type(question, expected):
+    assert requested_single_doc_type(question) == expected
 
 
 # ---------- 意图与 CAS ----------
@@ -242,6 +257,25 @@ def test_embed_texts_rejects_count_mismatch(monkeypatch: pytest.MonkeyPatch):
 
 
 # ---------- 混合检索 ----------
+
+
+def test_explicit_msds_section_routes_to_database(monkeypatch: pytest.MonkeyPatch, db_session):
+    async def should_not_embed(_texts, _settings=None):
+        raise AssertionError("明确的 MSDS 章节应直接读取已解析文档")
+
+    monkeypatch.setattr(retrieve_module, "embed_texts", should_not_embed)
+    assert requested_msds_section("乙醇MSDS第9节的闪点是多少？") == 9
+    assert requested_msds_section("乙醇 MSDS 与 TDS 有什么区别？") is None
+    assert requested_msds_section("乙醇 MSDS 第9节和第10节有什么区别？") is None
+
+    hits = asyncio.run(retrieve_sections(db_session, "乙醇（CAS 64-17-5）的MSDS第9节闪点是多少？"))
+
+    assert hits
+    assert hits[0].cas_no == "64-17-5"
+    assert hits[0].doc_type == "msds"
+    assert hits[0].section_no == 9
+    assert hits[0].source == "exact"
+    assert "Flash point" in hits[0].content
 
 
 def _hit_payload(section_id, cas="64-17-5", content="Flash point13C"):

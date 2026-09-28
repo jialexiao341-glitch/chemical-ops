@@ -149,6 +149,7 @@ CHEMICAL_SPECIFIC_DOC_MARKERS = (
     "msds",
     "sds",
     "安全数据表",
+    "安全技术说明书",
     "急救",
     "消防",
     "灭火",
@@ -837,14 +838,11 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
     intent_result = await _classify_chat_intent(db, user_message.content)
     LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
     if intent_result.intent is Intent.DOC and not data.attachment_file_ids:
-        from app.modules.doc_kb.retrieve import build_doc_context, retrieve_sections
+        from app.modules.doc_kb.retrieve import build_doc_context, no_doc_hits_reply, retrieve_sections
 
         hits = [] if intent_result.reason == "chemical_target_unresolved" else await retrieve_sections(db, user_message.content)
         if not hits:
-            fixed_content = UNRESOLVED_CHEMICAL_REPLY if intent_result.reason == "chemical_target_unresolved" else (
-                "没有在化学品知识库中匹配到相关文档。"
-                "请改用 CAS 号（例如 64-17-5）或准确的中英文名称（例如 乙醇 / Ethanol）再试。"
-            )
+            fixed_content = UNRESOLVED_CHEMICAL_REPLY if intent_result.reason == "chemical_target_unresolved" else no_doc_hits_reply(user_message.content)
             LOGGER.info("AI 文档检索为空 user_id=%s question_hash=%s", user.id, _text_fingerprint(user_message.content))
             db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
             db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
@@ -959,7 +957,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     stream_intent_result = await _classify_chat_intent(db, user_message.content)
     LOGGER.info("AI 意图识别 mode=stream user_id=%s intent=%s reason=%s", user.id, stream_intent_result.intent, stream_intent_result.reason)
     if stream_intent_result.intent is Intent.DOC and not data.attachment_file_ids:
-        from app.modules.doc_kb.retrieve import build_doc_context, retrieve_sections
+        from app.modules.doc_kb.retrieve import build_doc_context, no_doc_hits_reply, retrieve_sections
 
         hits = [] if stream_intent_result.reason == "chemical_target_unresolved" else await retrieve_sections(db, user_message.content)
         doc_citations: list | None = None
@@ -981,10 +979,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
             doc_model = result.model
             LOGGER.info("AI 流式文档问答完成 user_id=%s hits=%s answer_length=%s", user.id, len(hits), len(doc_content))
         else:
-            doc_content = UNRESOLVED_CHEMICAL_REPLY if stream_intent_result.reason == "chemical_target_unresolved" else (
-                "没有在化学品知识库中匹配到相关文档。"
-                "请改用 CAS 号（例如 64-17-5）或准确的中英文名称（例如 乙醇 / Ethanol）再试。"
-            )
+            doc_content = UNRESOLVED_CHEMICAL_REPLY if stream_intent_result.reason == "chemical_target_unresolved" else no_doc_hits_reply(user_message.content)
             LOGGER.info("AI 流式文档检索为空 user_id=%s", user.id)
         chunk_count = 0
         async for chunk in _stream_text_chunks(doc_content):

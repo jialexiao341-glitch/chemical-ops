@@ -1,0 +1,126 @@
+{
+  "case_count": 200,
+  "evaluated_count": 200,
+  "answerable_count": 149,
+  "no_evidence_count": 39,
+  "needs_target_count": 12,
+  "retrieval": {
+    "recall_at_6": 0.8624,
+    "precision_at_6": 0.1499,
+    "rr_at_6": 0.6842,
+    "ndcg_at_6": 0.729
+  },
+  "answer_fact_accuracy": 0.8523,
+  "source_grounded_fact_accuracy": 0.8523,
+  "answer_text_citation_rate": 0.8591,
+  "no_evidence_abstention_rate": 1.0,
+  "needs_target_clarification_rate": 1.0,
+  "generation_errors": 0,
+  "retrieval_post_embedding_p50_seconds": 0.002,
+  "retrieval_post_embedding_p95_seconds": 0.069,
+  "generation_p95_seconds": 5.271,
+  "failed_fact_case_ids": [
+    "RAGH-048",
+    "RAGH-026",
+    "RAGH-017",
+    "RAGH-010",
+    "RAGH-018",
+    "RAGH-011",
+    "RAGH-025",
+    "RAGH-036",
+    "RAGH-044",
+    "RAGH-045",
+    "RAGH-003",
+    "RAGH-042",
+    "RAGH-043",
+    "RAGH-047",
+    "RAGH-035",
+    "RAGH-001",
+    "RAGH-002",
+    "RAGH-014",
+    "RAGH-034",
+    "RAGH-041",
+    "RAGH-037",
+    "RAGH-021"
+  ],
+  "missed_retrieval_case_ids": [
+    "RAGH-048",
+    "RAGH-026",
+    "RAGH-017",
+    "RAGH-010",
+    "RAGH-018",
+    "RAGH-011",
+    "RAGH-025",
+    "RAGH-036",
+    "RAGH-045",
+    "RAGH-003",
+    "RAGH-042",
+    "RAGH-047",
+    "RAGH-035",
+    "RAGH-001",
+    "RAGH-002",
+    "RAGH-014",
+    "RAGH-034",
+    "RAGH-037",
+    "RAGH-021"
+  ],
+  "retrieval_by_gold_doc_type": {
+    "msds": {
+      "cases": 59,
+      "hits_at_6": 49
+    },
+    "property": {
+      "cases": 34,
+      "hits_at_6": 33
+    },
+    "tds": {
+      "cases": 44,
+      "hits_at_6": 41
+    }
+  },
+  "by_category": {
+    "cross_source_two_facts": {
+      "cases": 12,
+      "full_recall_at_6": 4,
+      "fact_match": 4,
+      "abstained": 0
+    },
+    "easy_answerable": {
+      "cases": 101,
+      "full_recall_at_6": 101,
+      "fact_match": 101,
+      "abstained": 0
+    },
+    "easy_needs_target": {
+      "cases": 12,
+      "full_recall_at_6": 0,
+      "fact_match": 0,
+      "abstained": 0
+    },
+    "easy_no_evidence": {
+      "cases": 27,
+      "full_recall_at_6": 0,
+      "fact_match": 0,
+      "abstained": 27
+    },
+    "insufficient_scenario": {
+      "cases": 12,
+      "full_recall_at_6": 0,
+      "fact_match": 0,
+      "abstained": 12
+    },
+    "natural_single": {
+      "cases": 24,
+      "full_recall_at_6": 15,
+      "fact_match": 15,
+      "abstained": 0
+    },
+    "same_source_two_facts": {
+      "cases": 12,
+      "full_recall_at_6": 7,
+      "fact_match": 7,
+      "abstained": 0
+    }
+  },
+  "scope": "Document RAG only. Fact accuracy checks the expected value; source-grounded accuracy also requires the requested section. Embeddings were batched and cached, so retrieval timing excludes embedding. Text citation rate is a presence proxy, not citation correctness or full faithfulness."
+}
