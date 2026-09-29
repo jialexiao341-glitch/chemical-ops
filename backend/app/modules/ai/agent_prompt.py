@@ -33,6 +33,7 @@ TEXT2SQL_PLAN_RULES = """
 5. 用户要求“最多显示 N 家”时 limit 使用 N。
 6. 报价单数量使用 supplier_quotes/count；库存流水笔数使用 inventory_transactions/count，可按类型、产品或仓库分组。报价单价不能跨产品或单位求和。
 7. 发票金额使用 finance_invoices/amount（含税金额）；“已核验发票金额”添加 status=VERIFIED。付款金额使用 finance_payments/amount；“已付款金额”添加 status=PAID。其他状态的金额不能说成已完成的金额；金额按 currency 分开。
+8. group_by 只能是一个维度字符串或 null，不要输出数组；金额查询会自动按币种再分组。filters 是对象数组，operator 只能是 eq、contains、gte、lte 或 in；等于用 eq。
 """
 
 RESULT_REWRITE_PROMPT = """你是 ChemicalOps 的业务数据回答助手。

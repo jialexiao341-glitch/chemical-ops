@@ -158,6 +158,15 @@ def _field(model: Any, name: str) -> Any:
     return value
 
 
+def _reject_unsupported_metric(question: str) -> None:
+    """拒绝容易被误换成笔数或库存余额的未开放汇总口径。"""
+
+    if any(marker in question for marker in ("报价", "报价单")) and any(marker in question for marker in ("金额", "总额", "合计金额")):
+        raise BusinessValidationError("当前不支持汇总报价金额；报价单可统计笔数，报价单价需按产品和单位逐项查看")
+    if any(marker in question for marker in ("库存流水", "库存变动")) and any(marker in question for marker in ("数量合计", "合计数量", "净变化", "净变动", "总量")):
+        raise BusinessValidationError("当前不支持汇总库存流水数量；请按具体产品或批次查看流水，并逐项核对计量单位")
+
+
 def build_statement(plan: QueryPlan, db: Session | None = None, user: User | None = None) -> Select[Any]:
     spec = CATALOG.get(plan.dataset)
     if spec is None:
@@ -845,18 +854,33 @@ def _normalize_query_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["dataset"] = dataset_aliases[normalized["dataset"]]
     if normalized.get("metric") in metric_aliases:
         normalized["metric"] = metric_aliases[normalized["metric"]]
-    if normalized.get("group_by") in group_aliases:
-        normalized["group_by"] = group_aliases[normalized["group_by"]]
+    group_by = normalized.get("group_by")
+    if isinstance(group_by, str):
+        normalized["group_by"] = group_aliases.get(group_by, group_by)
+    elif isinstance(group_by, list):
+        groups = [group_aliases.get(item, item) for item in group_by if isinstance(item, str)]
+        if len(groups) == 1:
+            normalized["group_by"] = groups[0]
+        elif len(groups) == 2 and "currency" in groups and groups[0] != groups[1] and normalized.get("metric") == "amount":
+            normalized["group_by"] = next(item for item in groups if item != "currency")
     if normalized.get("order") in {"升序", "正序"}:
         normalized["order"] = "asc"
     elif normalized.get("order") in {"降序", "倒序"}:
         normalized["order"] = "desc"
+    elif normalized.get("order") is None:
+        normalized.pop("order", None)
     if normalized.get("filters") is None:
         normalized["filters"] = []
     elif isinstance(normalized.get("filters"), dict):
         normalized["filters"] = [normalized["filters"]]
+    if isinstance(normalized["filters"], list):
+        for item in normalized["filters"]:
+            if isinstance(item, dict) and item.get("operator") in {"=", "==", "equals"}:
+                item["operator"] = "eq"
     if isinstance(normalized.get("limit"), str) and normalized["limit"].isdigit():
         normalized["limit"] = int(normalized["limit"])
+    if normalized.get("limit") is None:
+        normalized.pop("limit", None)
     for field in ("date_from", "date_to"):
         if normalized.get(field) in {"", "null", "None"}:
             normalized[field] = None
@@ -899,6 +923,8 @@ def _inventory_by_batch_plan(db: Session, question: str) -> QueryPlan | None:
 
 def _inventory_movement_trace_plan(db: Session, user: User, question: str, previous_plan: QueryPlan | None = None) -> QueryPlan | None:
     normalized = question.lower()
+    if any(marker in normalized for marker in ("统计", "笔数", "条数", "记录数", "多少笔")) and not any(marker in normalized for marker in ("为什么", "原因", "来源", "追溯", "冻结", "扣减")):
+        return None
     asks_trace = (
         any(marker in normalized for marker in ("库存流水", "库存变动", "库存", "批次", "扣减", "锁定", "冻结"))
         and any(marker in normalized for marker in ("为什么", "原因", "来源", "追溯", "流水", "扣减", "锁定", "冻结", "变动"))
@@ -963,6 +989,8 @@ def _inventory_movement_trace_plan(db: Session, user: User, question: str, previ
 
 def _supplier_profile_plan(db: Session, user: User, question: str) -> QueryPlan | None:
     normalized = question.lower()
+    if any(marker in normalized for marker in ("统计", "笔数", "条数", "记录数", "多少份")) and not any(marker in normalized for marker in ("交期", "价格", "异常", "表现", "履约")):
+        return None
     asks_supplier_profile = (
         any(marker in normalized for marker in ("供应商", "报价", "报价单"))
         and any(marker in normalized for marker in ("报价", "价格", "交期", "供货周期", "异常", "表现", "准时", "履约"))
@@ -1225,6 +1253,8 @@ async def run_text2sql(
     intent = classify_intent(request.question)
     if intent.intent is not Intent.QUERY:
         raise BusinessValidationError("Text2SQL 只支持采购运营相关的查询咨询，请改为查询订单、库存、到货、质量、异常、财务或供应商数据。")
+
+    _reject_unsupported_metric(request.question)
 
     runtime = settings or get_settings()
 

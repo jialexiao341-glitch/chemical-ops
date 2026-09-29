@@ -7,8 +7,9 @@ from sqlalchemy import create_engine
 
 from app.core.errors import BusinessValidationError
 from app.modules.ai import text2sql
+from app.modules.ai.text2sql import _inventory_movement_trace_plan, _supplier_profile_plan
 from app.modules.ai.catalog import CATALOG, catalog_prompt
-from app.modules.ai.text2sql import QueryFilter, QueryPlan, _validate_plan, build_statement
+from app.modules.ai.text2sql import QueryFilter, QueryPlan, _normalize_query_plan_payload, _reject_unsupported_metric, _validate_plan, build_statement
 from app.modules.inventory import service as inventory_service
 
 
@@ -108,3 +109,44 @@ def test_known_finance_rows_keep_paid_status_and_currencies_separate() -> None:
         rows = connection.execute(build_statement(plan)).mappings().all()
 
     assert {(row["currency"], int(row["metric_value"])) for row in rows} == {("CNY", 100), ("USD", 30)}
+
+
+def test_model_plan_normalizes_common_payment_shapes() -> None:
+    payload = {
+        "dataset": "finance_payments",
+        "metric": "amount",
+        "group_by": ["supplier", "currency"],
+        "filters": [{"field": "status", "operator": "=", "value": "PAID"}],
+        "limit": None,
+        "order": None,
+    }
+    plan = QueryPlan.model_validate(_normalize_query_plan_payload(payload))
+
+    assert plan.group_by == "supplier"
+    assert plan.filters[0].operator == "eq"
+    assert plan.limit == 20
+    assert plan.order == "desc"
+
+
+def test_model_plan_does_not_silently_drop_unsupported_groups() -> None:
+    payload = {"dataset": "finance_payments", "metric": "count", "group_by": ["supplier", "status"]}
+    with pytest.raises(ValueError):
+        QueryPlan.model_validate(_normalize_query_plan_payload(payload))
+
+
+@pytest.mark.parametrize("question", ["统计供应商报价金额合计", "统计库存流水数量合计", "查看库存变动净变化"])
+def test_unsupported_amount_or_quantity_question_is_rejected(question: str) -> None:
+    with pytest.raises(BusinessValidationError, match="不支持"):
+        _reject_unsupported_metric(question)
+
+
+def test_supported_counts_and_batch_trace_are_not_blocked() -> None:
+    for question in ("按供应商统计报价单笔数", "按类型统计库存流水笔数", "这个批次的库存变动来源是什么"):
+        _reject_unsupported_metric(question)
+
+
+def test_aggregate_questions_do_not_enter_object_trace_routes() -> None:
+    db = SimpleNamespace()
+    user = SimpleNamespace(id=1)
+    assert _supplier_profile_plan(db, user, "按供应商统计报价单笔数") is None
+    assert _inventory_movement_trace_plan(db, user, "按类型统计库存流水笔数") is None
