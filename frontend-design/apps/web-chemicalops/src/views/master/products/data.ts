@@ -194,11 +194,12 @@ export function useColumns(
         },
         name: 'CellOperation',
         options: [{ code: 'standard', text: '检测标准' }, 'edit', 'delete'],
+        props: { renderMode: 'menu' },
       },
       field: 'operation',
       fixed: 'right',
       title: '操作',
-      width: 210,
+      width: 130,
     },
   ];
 }

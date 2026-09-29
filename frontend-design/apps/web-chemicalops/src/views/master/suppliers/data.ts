@@ -171,11 +171,12 @@ export function useColumns(
           'edit',
           'delete',
         ],
+        props: { renderMode: 'menu' },
       },
       field: 'operation',
       fixed: 'right',
       title: '操作',
-      width: 190,
+      width: 130,
     },
   ];
 }

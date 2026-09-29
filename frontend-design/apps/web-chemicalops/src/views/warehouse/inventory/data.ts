@@ -138,11 +138,12 @@ export function useColumns(
           },
           { code: 'logs', text: '变更记录' },
         ],
+        props: { renderMode: 'menu' },
       },
       field: 'operation',
       fixed: 'right',
       title: '操作',
-      width: 310,
+      width: 130,
     },
   ];
 }

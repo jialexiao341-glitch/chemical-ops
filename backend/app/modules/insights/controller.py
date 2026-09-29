@@ -300,13 +300,27 @@ def _location_advice(db: Session, user: User, balance_id: int) -> BusinessInsigh
     """按有效期排列可见的同产品库存批次供仓管核查。"""
     balance = _balance(db, user, balance_id)
     scope = inventory_service.accessible_warehouse_ids(db, user)
-    rows = db.scalars(select(InventoryBalance, InventoryBatch).join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id).where(InventoryBalance.product_id == balance.product_id, InventoryBalance.unit_id == balance.unit_id, InventoryBalance.quantity > 0)).all()
+    rows = db.execute(
+        select(InventoryBalance, InventoryBatch)
+        .join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id)
+        .where(
+            InventoryBalance.product_id == balance.product_id,
+            InventoryBalance.unit_id == balance.unit_id,
+            InventoryBalance.quantity > 0,
+        )
+    ).all()
     rows = [(slot, batch) for slot, batch in rows if slot.status == "AVAILABLE" and (scope is None or slot.warehouse_id in scope)]
     rows.sort(key=lambda pair: pair[1].expiry_date or date.max)
     result = _result("location-advice", "库位与批次提示", "仓管", "同产品同单位的可用库存按有效期排序，供人工核查。")
     for slot, batch in rows[:10]:
         location = db.get(WarehouseLocation, slot.location_id)
-        _evidence(result, batch.batch_no, f"有效期 {batch.expiry_date or '未记录'}，可用 {slot.quantity-slot.locked_quantity}，库位 {location.location_name if location else slot.location_id}", f"库存余额 #{slot.id}", "/warehouse/inventory")
+        _evidence(
+            result,
+            batch.batch_no,
+            f"有效期 {batch.expiry_date or '未记录'}，可用 {slot.quantity - slot.locked_quantity}，库位 {location.location_name if location else slot.location_id}",
+            f"库存余额 #{slot.id}",
+            "/warehouse/inventory",
+        )
     result.suggestions.append("核实储存限制、兼容性和实际作业后，再决定是否优先使用或调拨。")
     result.limitations.append("未维护库位容量、距离及化学品兼容性，暂不推荐实际库位变更。")
     return result
