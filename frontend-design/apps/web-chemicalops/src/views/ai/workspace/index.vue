@@ -67,6 +67,8 @@ const activeConversationId = ref<number>();
 const messages = ref<UiMessage[]>([]);
 const inputText = ref('');
 const sending = ref(false);
+const slashMenuOpen = ref(false);
+const slashMenuActiveIndex = ref(0);
 const historyLoading = ref(false);
 const messagesRef = ref<HTMLElement>();
 const filterPanelOpen = ref(false);
@@ -115,6 +117,12 @@ const filterDatasetOptions = AI_FILTER_TARGETS.filter(
   label,
   value: dataset,
 }));
+const slashCommands = [
+  { description: '用自然语言设置条件，并带入业务列表', icon: 'filter', label: '自然语言筛选', value: 'filter' },
+  { description: '整理采购信息，核对后创建草稿', icon: 'draft', label: '采购申请草稿', value: 'purchase-draft' },
+  { description: '查看本次生成的运营晨报', icon: 'briefing', label: '生成运营晨报', value: 'briefing' },
+  { description: '确认接收对象后生成并推送晨报', icon: 'send', label: '生成并推送', value: 'briefing-push' },
+] as const;
 
 let messageSeed = 0;
 function nextId() {
@@ -179,6 +187,7 @@ function newConversation() {
   menuConversationId.value = undefined;
   sidebarExpanded.value = false;
   draftMode.value = false;
+  slashMenuOpen.value = false;
   messages.value = [];
   inputText.value = '';
 }
@@ -599,10 +608,79 @@ function applyListFilters() {
 }
 
 function onTextKeydown(event: KeyboardEvent) {
+  if (slashMenuOpen.value) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      slashMenuActiveIndex.value =
+        (slashMenuActiveIndex.value + direction + slashCommands.length) % slashCommands.length;
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      slashMenuOpen.value = false;
+      return;
+    }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      selectSlashCommand(slashCommands[slashMenuActiveIndex.value]?.value);
+      return;
+    }
+  }
+
+  // 输入框为空时键入“/”，立即打开功能选择菜单。
+  if (event.key === '/' && !inputText.value) {
+    event.preventDefault();
+    openSlashMenu();
+    return;
+  }
+
   // Enter 发送，Shift+Enter 换行
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     onSend();
+  }
+}
+
+function openSlashMenu() {
+  slashMenuActiveIndex.value = 0;
+  slashMenuOpen.value = true;
+}
+
+function onComposerInput(event: Event) {
+  const target = event.target as HTMLTextAreaElement | null;
+  if (target?.value === '/') {
+    inputText.value = '';
+    openSlashMenu();
+  } else if (target?.value) {
+    slashMenuOpen.value = false;
+  }
+}
+
+async function selectSlashCommand(command?: (typeof slashCommands)[number]['value']) {
+  slashMenuOpen.value = false;
+  inputText.value = '';
+
+  if (command === 'filter') {
+    filterPanelOpen.value = true;
+    filterQuestion.value = '';
+    filterResult.value = undefined;
+    await nextTick();
+    document.querySelector<HTMLInputElement>('.ai-filter-question input')?.focus();
+    return;
+  }
+  if (command === 'purchase-draft') {
+    draftMode.value = true;
+    await nextTick();
+    document.querySelector<HTMLTextAreaElement>('.ai-composer-input textarea')?.focus();
+    return;
+  }
+  if (command === 'briefing') {
+    await generateBriefing(false);
+    return;
+  }
+  if (command === 'briefing-push') {
+    confirmBriefingPush();
   }
 }
 
@@ -691,31 +769,16 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
               <span class="ai-toolbar-title">化运 AI 助手</span>
-              <span class="text-muted-foreground ml-2 text-xs font-normal">
-                常规对话仅查询；采购申请草稿需核对预览并单独确认创建
-              </span>
-            </div>
-            <div class="flex gap-2">
-              <Button @click="filterPanelOpen = !filterPanelOpen">自然语言筛选</Button>
-              <Button :type="draftMode ? 'primary' : 'default'" @click="draftMode = !draftMode">采购申请草稿</Button>
-              <Button @click="generateBriefing(false)">生成运营晨报</Button>
-              <Button type="primary" @click="confirmBriefingPush">生成并推送</Button>
             </div>
           </div>
-          <details class="mt-2 text-xs font-normal">
-            <summary class="text-muted-foreground cursor-pointer select-none">
-              当前支持范围
-            </summary>
-            <div class="text-muted-foreground mt-2 space-y-1 leading-5">
-              <p>业务查询：采购申请及询价缺口、订单履约风险、产品批次库存、库存变动追溯、已验收订单财务进度、供应商报价与交期，以及采购订单、到货、质量验收、运营异常、对账和供应商。</p>
-              <p>其他领用/盘点分析、退货补货尚未接入。常规汇总支持按业务维度分组，暂不支持按日期聚合的采购趋势；金额按币种、库存数量按单位分别展示。本地开发数据为模拟样本。</p>
-              <p>可尝试：“本周哪些订单逾期或短交”“乙醇各仓库批次可用库存”“这批库存为什么被扣减”。</p>
-            </div>
-          </details>
           <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
+            <div class="mb-2 flex items-center justify-between">
+              <span class="font-medium">自然语言筛选</span>
+              <Button size="small" type="text" @click="filterPanelOpen = false">关闭</Button>
+            </div>
             <div class="grid gap-2 sm:grid-cols-[180px_1fr_auto]">
               <Select v-model:value="filterDataset" :options="filterDatasetOptions" />
-              <Input v-model:value="filterQuestion" placeholder="例如：只看本月已批准的采购申请" @press-enter="parseListFilters" />
+              <Input class="ai-filter-question" v-model:value="filterQuestion" placeholder="例如：只看本月已批准的采购申请" @press-enter="parseListFilters" />
               <Button :loading="filterParsing" :disabled="!filterQuestion.trim()" type="primary" @click="parseListFilters">解析条件</Button>
             </div>
             <div v-if="filterResult" class="mt-3 space-y-2">
@@ -942,16 +1005,44 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
 
         <div class="ai-composer-shell">
           <div class="ai-composer">
+            <div v-if="slashMenuOpen" class="ai-slash-menu" role="listbox" aria-label="选择 AI 功能">
+              <button
+                v-for="(command, index) in slashCommands"
+                :key="command.value"
+                class="ai-slash-command"
+                :class="{ 'is-active': slashMenuActiveIndex === index }"
+                role="option"
+                :aria-selected="slashMenuActiveIndex === index"
+                type="button"
+                @mouseenter="slashMenuActiveIndex = index"
+                @click="selectSlashCommand(command.value)"
+              >
+                <svg class="ai-slash-command-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <template v-if="command.icon === 'filter'"><path d="M3 4h14l-5.5 6v5l-3 1v-6L3 4Z" /></template>
+                  <template v-else-if="command.icon === 'draft'"><path d="M6 2.8h5l4 4v10.4H6z"/><path d="M11 2.8v4h4M8.5 11h4M8.5 14h4"/></template>
+                  <template v-else-if="command.icon === 'briefing'"><path d="M3 16.5h14M5 14V9m5 5V4m5 10v-7"/><path d="m4 7 5-3 5 3 3-2"/></template>
+                  <template v-else><path d="M3 10h12M10 5l5 5-5 5"/><path d="M14 4h3v12h-3"/></template>
+                </svg>
+                <span class="ai-slash-command-copy">
+                  <span class="ai-slash-command-label">{{ command.label }}</span>
+                  <span class="ai-slash-command-description">{{ command.description }}</span>
+                </span>
+              </button>
+            </div>
             <Input.TextArea
               v-model:value="inputText"
               class="ai-composer-input"
               :maxlength="2000"
               :rows="2"
-              :placeholder="draftMode ? '写明采购用途、物料、数量和单位…' : '给化运 AI 发送消息'"
+              :placeholder="draftMode ? '写明采购用途、物料、数量和单位…' : '给化运 AI 发送消息，输入 / 选择功能'"
               @keydown="onTextKeydown"
+              @input="onComposerInput"
             />
             <div class="ai-composer-actions">
-              <span class="ai-composer-hint">{{ draftMode ? '请核对生成的采购草稿后再确认创建' : 'Enter 发送 · Shift+Enter 换行' }}</span>
+              <div class="flex min-w-0 items-center gap-3">
+                <span class="ai-composer-hint">{{ draftMode ? '采购申请草稿模式' : 'Enter 发送 · Shift+Enter 换行' }}</span>
+                <button v-if="draftMode" class="ai-mode-exit" type="button" @click="draftMode = false">退出草稿模式</button>
+              </div>
               <button class="ai-send" type="button" :disabled="sending || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend">
                 <svg v-if="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
                 <span v-else class="ai-send-loading">···</span>
@@ -1083,13 +1174,22 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
 .ai-assistant-message { border-radius: 4px 16px 16px; background: #f5f7fa; color: var(--ai-ink); line-height: 1.75; }
 .ai-composer-shell { width: 100%; padding: 12px clamp(20px, 5vw, 88px) 22px; }
 .ai-main.is-empty .ai-composer-shell { max-width: 1160px; margin: 24px auto auto; padding-bottom: 0; }
-.ai-composer { max-width: 1100px; margin: 0 auto; padding: 12px 14px 10px; border: 1px solid #e0e5ed; border-radius: 22px; background: #fff; box-shadow: 0 10px 28px rgb(37 52 88 / 6%); transition: border-color .18s, box-shadow .18s; }
+.ai-composer { position: relative; max-width: 1100px; margin: 0 auto; padding: 12px 14px 10px; border: 1px solid #e0e5ed; border-radius: 22px; background: #fff; box-shadow: 0 10px 28px rgb(37 52 88 / 6%); transition: border-color .18s, box-shadow .18s; }
+.ai-slash-menu { position: absolute; right: 14px; bottom: calc(100% + 10px); left: 14px; z-index: 5; display: grid; gap: 2px; padding: 7px; border: 1px solid #e4e8f0; border-radius: 14px; background: #fff; box-shadow: 0 14px 34px rgb(30 44 72 / 16%); }
+.ai-slash-command { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; color: #343b45; cursor: pointer; text-align: left; }
+.ai-slash-command:hover, .ai-slash-command.is-active { background: #f1f2f3; }
+.ai-slash-command-icon { width: 17px; height: 17px; flex: none; color: #606873; }
+.ai-slash-command-copy { display: flex; min-width: 0; align-items: baseline; gap: 9px; }
+.ai-slash-command-label { flex: none; font-size: 13px; font-weight: 500; }
+.ai-slash-command-description { overflow: hidden; color: #9aa0a8; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .ai-composer:focus-within { border-color: #9db0ff; box-shadow: 0 10px 28px rgb(69 104 245 / 10%); }
 .ai-composer-input :deep(textarea) { min-height: 62px; padding: 3px 5px; border: 0; background: transparent; box-shadow: none; resize: none; font-size: 15px; line-height: 1.55; }
 .ai-composer-input :deep(textarea:focus) { border: 0; box-shadow: none; }
 .ai-composer-input :deep(textarea::placeholder) { color: #a0aaba; }
 .ai-composer-actions { justify-content: space-between; padding: 3px 0 0 5px; }
 .ai-composer-hint { color: #a1aab9; font-size: 11px; }
+.ai-mode-exit { border: 0; background: transparent; color: var(--ai-blue); cursor: pointer; font-size: 11px; }
+.ai-mode-exit:hover { color: var(--ai-blue-strong); text-decoration: underline; }
 .ai-send { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 50%; background: var(--ai-blue); color: #fff; cursor: pointer; transition: background .18s, transform .18s; }
 .ai-send svg { width: 20px; height: 20px; }
 .ai-send:hover:not(:disabled) { background: var(--ai-blue-strong); transform: translateY(-1px); }
