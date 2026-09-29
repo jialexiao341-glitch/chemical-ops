@@ -18,9 +18,21 @@ class QualityAcceptanceResult(BaseModel):
 
     result: str = Field(pattern="^(PASSED|PARTIAL|FAILED|REINSPECTION)$")
     test_result: dict[str, Any] | list[Any] | None = None
+    item_results: list["QualityItemResult"] | None = None
     certificate_complete: bool = False
     report_file_id: int | None = Field(default=None, gt=0)
     conclusion: str | None = Field(default=None, max_length=2000)
+
+
+class QualityItemResult(BaseModel):
+    delivery_item_id: int = Field(gt=0)
+    tests: dict[str, str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_tests(self):
+        if any(not name.strip() or not value.strip() for name, value in self.tests.items()):
+            raise ValueError("检测项目和值不能为空")
+        return self
 
 
 class QualityAcceptanceRead(BaseModel):
@@ -60,6 +72,7 @@ class QualityReportFile(BaseModel):
 class QualityReportReviewRequest(BaseModel):
     file_id: int = Field(gt=0)
     delivery_item_id: int | None = Field(default=None, gt=0)
+    standard_id: int | None = Field(default=None, gt=0)
 
 
 class QualityReviewTarget(BaseModel):
@@ -165,3 +178,32 @@ class QualityReviewHistory(BaseModel):
 class QualityReviewDecision(BaseModel):
     status: str = Field(pattern="^(CONFIRMED|NEEDS_CORRECTION)$")
     reviewer_note: str = Field(min_length=1, max_length=2000)
+    correction_items: list[str] = Field(default_factory=list)
+
+
+class QualityCorrectionAction(BaseModel):
+    item_name: str = Field(min_length=1, max_length=100)
+    note: str = Field(min_length=1, max_length=2000)
+
+
+class QualityCorrectionRead(BaseModel):
+    id: int
+    review_id: int
+    item_name: str
+    status: str
+    note: str
+    actor_id: int
+    created_at: datetime
+
+
+class QualityReportComparison(BaseModel):
+    item_name: str
+    values: list[dict[str, Any]]
+    conflict: bool
+
+
+class QualityReportSummary(BaseModel):
+    delivery_item_id: int
+    reviews: list[QualityReviewHistory]
+    comparisons: list[QualityReportComparison]
+    corrections: list[QualityCorrectionRead]

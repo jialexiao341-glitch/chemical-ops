@@ -18,7 +18,7 @@ export namespace QualityAcceptanceApi {
     product_name: string;
     batch_no: null | string;
     standard_version: null | number;
-    status: 'CONFIRMED' | 'NEEDS_CORRECTION' | 'PENDING';
+    status: 'CONFIRMED' | 'CORRECTION_SUBMITTED' | 'NEEDS_CORRECTION' | 'PENDING';
     created_at: string;
     reviewed_at: null | string;
     reviewer_note: null | string;
@@ -64,6 +64,23 @@ export namespace QualityAcceptanceApi {
     reviewed_at: string;
   }
 
+  export interface Correction {
+    id: number;
+    review_id: number;
+    item_name: string;
+    status: 'OPEN' | 'RESOLVED';
+    note: string;
+    actor_id: number;
+    created_at: string;
+  }
+
+  export interface ReportSummary {
+    delivery_item_id: number;
+    reviews: ReviewHistory[];
+    comparisons: { item_name: string; values: { review_id: number; file_name: string; value: string; source_quote: null | string; source_location: null | string }[]; conflict: boolean }[];
+    corrections: Correction[];
+  }
+
   /** 质量验收记录，对应后端 QualityAcceptanceRead */
   export interface Acceptance {
     acceptance_no: string;
@@ -87,6 +104,7 @@ export namespace QualityAcceptanceApi {
     /** PASSED | PARTIAL | FAILED | REINSPECTION */
     result: string;
     test_result?: any;
+    item_results?: { delivery_item_id: number; tests: Record<string, string> }[];
   }
 
   export interface ListParams extends PageQuery {
@@ -111,11 +129,24 @@ export async function getAcceptanceReviewRecordApi(id: number, reviewId: number)
 }
 
 /** 保存人工复核结论与说明，不提交验收结果。 */
-export async function decideAcceptanceReviewApi(id: number, reviewId: number, status: 'CONFIRMED' | 'NEEDS_CORRECTION', reviewerNote: string) {
+export async function decideAcceptanceReviewApi(id: number, reviewId: number, status: 'CONFIRMED' | 'NEEDS_CORRECTION', reviewerNote: string, correctionItems: string[] = []) {
   return requestClient.post<QualityAcceptanceApi.ReviewHistory>(`/quality-acceptances/${id}/report-reviews/${reviewId}/decision`, {
     status,
     reviewer_note: reviewerNote,
+    correction_items: correctionItems,
   });
+}
+
+export async function getAcceptanceReportSummaryApi(id: number, deliveryItemId: number) {
+  return requestClient.get<QualityAcceptanceApi.ReportSummary>(`/quality-acceptances/${id}/report-summary/${deliveryItemId}`);
+}
+
+export async function getAcceptanceCorrectionsApi(id: number, reviewId: number) {
+  return requestClient.get<QualityAcceptanceApi.Correction[]>(`/quality-acceptances/${id}/report-reviews/${reviewId}/corrections`);
+}
+
+export async function resolveAcceptanceCorrectionApi(id: number, reviewId: number, itemName: string, note: string) {
+  return requestClient.post<QualityAcceptanceApi.Correction>(`/quality-acceptances/${id}/report-reviews/${reviewId}/corrections`, { item_name: itemName, note });
 }
 
 /** 列出关联到当前验收单的报告文件。 */
@@ -133,8 +164,8 @@ export async function uploadAcceptanceReportApi(id: number, file: File) {
 }
 
 /** 指定报告与可选到货明细，发起一次只读核对并保存结果。 */
-export async function reviewAcceptanceReportApi(id: number, fileId: number, deliveryItemId?: number) {
-  return requestClient.post<QualityAcceptanceApi.ReportReview>(`/quality-acceptances/${id}/report-review`, { file_id: fileId, delivery_item_id: deliveryItemId });
+export async function reviewAcceptanceReportApi(id: number, fileId: number, deliveryItemId?: number, standardId?: number) {
+  return requestClient.post<QualityAcceptanceApi.ReportReview>(`/quality-acceptances/${id}/report-review`, { file_id: fileId, delivery_item_id: deliveryItemId, standard_id: standardId });
 }
 
 /** 下载已关联的验收报告原始文件。 */

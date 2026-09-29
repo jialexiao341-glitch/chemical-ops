@@ -4,27 +4,41 @@ import type { QualityAcceptanceApi } from '#/api';
 import { computed, ref } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
+import { useUserStore } from '@vben/stores';
 
 import { Alert, Button, Input, Select, Spin, Tag, message } from 'antdv-next';
 
 import {
   downloadAcceptanceReportApi,
   decideAcceptanceReviewApi,
+  getAcceptanceCorrectionsApi,
   getAcceptanceReportFilesApi,
+  getAcceptanceReportSummaryApi,
   getAcceptanceReviewHistoryApi,
   getAcceptanceReviewRecordApi,
   getAcceptanceReviewTargetsApi,
+  getProductQualityStandardsApi,
+  resolveAcceptanceCorrectionApi,
   reviewAcceptanceReportApi,
   uploadAcceptanceReportApi,
 } from '#/api';
 
 const emit = defineEmits(['continue']);
+const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const acceptance = ref<null | QualityAcceptanceApi.Acceptance>(null);
 const files = ref<QualityAcceptanceApi.ReportFile[]>([]);
 const targets = ref<QualityAcceptanceApi.ReviewTarget[]>([]);
 const history = ref<QualityAcceptanceApi.ReviewHistory[]>([]);
 const selectedFileId = ref<number>();
 const selectedTargetId = ref<number>();
+const standards = ref<{ id: number; version_no: number; source_reference: string }[]>([]);
+const selectedStandardId = ref<number>();
+const summary = ref<null | QualityAcceptanceApi.ReportSummary>(null);
+const corrections = ref<QualityAcceptanceApi.Correction[]>([]);
+const correctionItems = ref<string[]>([]);
+const correctionNotes = ref<Record<string, string>>({});
 const reviewerNote = ref('');
 const deciding = ref(false);
 const review = ref<null | QualityAcceptanceApi.ReportReview>(null);
@@ -38,6 +52,11 @@ const selectedFile = computed(() => files.value.find((item) => item.id === selec
 const mismatchCount = computed(() => review.value?.checks.filter((item) => item.status !== 'MATCH').length ?? 0);
 const standardIssueCount = computed(() => review.value?.checks.filter((item) => ['MISSING', 'OUTSIDE_STANDARD', 'UNVERIFIED'].includes(item.standard_status)).length ?? 0);
 const currentHistory = computed(() => history.value.find((item) => item.id === review.value?.review_id));
+const currentCorrections = computed(() => {
+  const byName = new Map<string, QualityAcceptanceApi.Correction>();
+  for (const item of corrections.value) byName.set(item.item_name, item);
+  return [...byName.values()];
+});
 const canRecordResult = computed(() => !acceptance.value?.result || ['PENDING', 'REINSPECTION'].includes(acceptance.value.result));
 const canPrefill = computed(() => canRecordResult.value && targets.value.length === 1 && review.value?.review_id === history.value[0]?.id && review.value?.batch_status === 'MATCH' && review.value?.product_status === 'MATCH');
 
@@ -78,6 +97,29 @@ async function loadContext(id: number) {
   targets.value = targetRows;
   history.value = reviewRows;
   selectedTargetId.value = targetRows.length === 1 ? targetRows[0]?.delivery_item_id : undefined;
+  if (selectedTargetId.value) await selectTarget(selectedTargetId.value);
+}
+
+async function selectTarget(deliveryItemId: number) {
+  review.value = null;
+  summary.value = null;
+  standards.value = [];
+  selectedStandardId.value = undefined;
+  const target = targets.value.find((item) => item.delivery_item_id === deliveryItemId);
+  if (!acceptance.value || !target) return;
+  const [versions, reportSummary] = await Promise.all([
+    getProductQualityStandardsApi(target.product_id),
+    getAcceptanceReportSummaryApi(acceptance.value.id, deliveryItemId),
+  ]);
+  standards.value = versions;
+  selectedStandardId.value = versions[0]?.id;
+  summary.value = reportSummary;
+}
+
+async function refreshSummary() {
+  if (acceptance.value && selectedTargetId.value) {
+    summary.value = await getAcceptanceReportSummaryApi(acceptance.value.id, selectedTargetId.value);
+  }
 }
 
 const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance>({
@@ -87,6 +129,9 @@ const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance
     acceptance.value = drawerApi.getData() ?? null;
     review.value = null;
     targets.value = [];
+    summary.value = null;
+    corrections.value = [];
+    correctionNotes.value = {};
     history.value = [];
     reviewerNote.value = '';
     files.value = [];
@@ -121,10 +166,12 @@ async function runReview() {
   if (!acceptance.value || !selectedFileId.value) return;
   reviewing.value = true;
   review.value = null;
+  corrections.value = [];
   try {
-    review.value = await reviewAcceptanceReportApi(acceptance.value.id, selectedFileId.value, selectedTargetId.value);
+    review.value = await reviewAcceptanceReportApi(acceptance.value.id, selectedFileId.value, selectedTargetId.value, selectedStandardId.value);
     reviewerNote.value = '';
     history.value = await getAcceptanceReviewHistoryApi(acceptance.value.id);
+    await refreshSummary();
   } catch {
     // 请求层已显示解析或 AI 服务错误。
   } finally {
@@ -135,10 +182,18 @@ async function runReview() {
 /** 展示指定历史核对快照及其已有复核意见。 */
 async function openHistory(reviewId: number) {
   if (!acceptance.value) return;
-  review.value = await getAcceptanceReviewRecordApi(acceptance.value.id, reviewId);
+  const snapshot = await getAcceptanceReviewRecordApi(acceptance.value.id, reviewId);
+  if (snapshot.delivery_item_id && snapshot.delivery_item_id !== selectedTargetId.value) {
+    selectedTargetId.value = snapshot.delivery_item_id;
+    await selectTarget(snapshot.delivery_item_id);
+  }
+  review.value = snapshot;
+  selectedStandardId.value = snapshot.standard_id ?? undefined;
   selectedFileId.value = review.value.file_id;
   selectedTargetId.value = review.value.delivery_item_id ?? undefined;
   reviewerNote.value = currentHistory.value?.reviewer_note ?? '';
+  correctionItems.value = [];
+  corrections.value = await getAcceptanceCorrectionsApi(acceptance.value.id, reviewId);
 }
 
 /** 保存人工确认或退回修正结论，要求填写复核意见。 */
@@ -148,16 +203,37 @@ async function decide(status: 'CONFIRMED' | 'NEEDS_CORRECTION') {
     message.warning('请填写人工复核意见');
     return;
   }
+  if (status === 'NEEDS_CORRECTION' && correctionItems.value.length === 0) {
+    message.warning('请选择需要修正的检测项目');
+    return;
+  }
   deciding.value = true;
   try {
-    await decideAcceptanceReviewApi(acceptance.value.id, review.value.review_id, status, reviewerNote.value.trim());
+    await decideAcceptanceReviewApi(acceptance.value.id, review.value.review_id, status, reviewerNote.value.trim(), correctionItems.value);
     history.value = await getAcceptanceReviewHistoryApi(acceptance.value.id);
+    corrections.value = await getAcceptanceCorrectionsApi(acceptance.value.id, review.value.review_id);
+    correctionItems.value = [];
+    await refreshSummary();
     message.success('复核意见已保存');
   } catch {
     // 请求层已显示错误。
   } finally {
     deciding.value = false;
   }
+}
+
+async function resolveCorrection(itemName: string) {
+  const note = correctionNotes.value[itemName]?.trim();
+  if (!acceptance.value || !review.value?.review_id || !note) {
+    message.warning('请填写该检测项目的修正处理说明');
+    return;
+  }
+  await resolveAcceptanceCorrectionApi(acceptance.value.id, review.value.review_id, itemName, note);
+  delete correctionNotes.value[itemName];
+  corrections.value = await getAcceptanceCorrectionsApi(acceptance.value.id, review.value.review_id);
+  history.value = await getAcceptanceReviewHistoryApi(acceptance.value.id);
+  await refreshSummary();
+  message.success('修正处理已提交，等待质量负责人确认');
 }
 
 /** 将标准比对状态转换为页面展示文字。 */
@@ -221,7 +297,14 @@ defineExpose({ drawerApi });
             class="mb-3 w-full"
             :options="targets.map((item) => ({ label: `${item.line_no}. ${item.product_name}${item.product_model ? `（${item.product_model}）` : ''} · ${item.batch_no || '批次未录入'}`, value: item.delivery_item_id }))"
             placeholder="请选择要核对的产品和批次"
-            @change="review = null"
+            @change="(value: number) => selectTarget(value)"
+          />
+          <Select
+            v-model:value="selectedStandardId"
+            class="mb-3 w-full"
+            :options="standards.map((item) => ({ label: `检测标准第 ${item.version_no} 版 · ${item.source_reference}`, value: item.id }))"
+            placeholder="当前产品未配置检测标准"
+            :disabled="standards.length === 0"
           />
           <div class="flex flex-wrap items-center gap-2">
             <Select
@@ -241,12 +324,21 @@ defineExpose({ drawerApi });
         <p class="mt-2 text-xs text-muted-foreground">支持可提取文字的 PDF、DOCX、XLSX 和文本报告；扫描件需启用文档识别服务。</p>
       </section>
 
+      <section v-if="summary && summary.reviews.length" class="rounded-lg border border-border p-4">
+        <h3 class="mb-2 text-sm font-semibold">当前明细的多报告汇总</h3>
+        <p class="mb-3 text-xs text-muted-foreground">每份报告取最近一次核对快照；数值冲突需要人工判断，以原报告和复核意见为准。</p>
+        <div v-for="item in summary.comparisons" :key="item.item_name" class="border-t border-border py-2 text-sm">
+          <div class="flex items-center gap-2"><span class="font-medium">{{ item.item_name }}</span><Tag v-if="item.conflict" color="orange">报告值冲突</Tag></div>
+          <p v-for="value in item.values" :key="value.review_id" class="mt-1 text-xs">{{ value.file_name }}：{{ value.value }} · {{ value.source_location || '正文' }}</p>
+        </div>
+      </section>
+
       <section v-if="history.length" class="rounded-lg border border-border p-4">
         <h3 class="mb-2 text-sm font-semibold">历史核对记录</h3>
         <div class="max-h-36 space-y-2 overflow-y-auto">
           <button v-for="item in history" :key="item.id" type="button" class="flex w-full items-center justify-between gap-3 rounded border border-border px-3 py-2 text-left text-xs hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" @click="openHistory(item.id)">
             <span class="truncate">{{ item.product_name }} · {{ item.batch_no || '无批次' }} · {{ item.file_name }} · 标准{{ item.standard_version ? `第 ${item.standard_version} 版` : '未配置' }}</span>
-            <Tag :color="item.status === 'CONFIRMED' ? 'green' : item.status === 'NEEDS_CORRECTION' ? 'orange' : 'blue'" class="!mr-0 shrink-0">{{ item.status === 'CONFIRMED' ? '已确认' : item.status === 'NEEDS_CORRECTION' ? '需修正' : '待复核' }}</Tag>
+            <Tag :color="item.status === 'CONFIRMED' ? 'green' : item.status === 'NEEDS_CORRECTION' ? 'orange' : 'blue'" class="!mr-0 shrink-0">{{ item.status === 'CONFIRMED' ? '已确认' : item.status === 'NEEDS_CORRECTION' ? '需修正' : item.status === 'CORRECTION_SUBMITTED' ? '修正待确认' : '待复核' }}</Tag>
           </button>
         </div>
       </section>
@@ -307,12 +399,26 @@ defineExpose({ drawerApi });
         <div v-if="review.review_id" class="space-y-3 rounded-lg border border-border p-4">
           <h4 class="text-sm font-semibold">人工复核</h4>
           <p class="text-xs text-muted-foreground">确认表示已核查这份分析记录，不代表验收合格或库存放行。</p>
-          <Input.TextArea v-model:value="reviewerNote" :rows="2" :maxlength="2000" :disabled="currentHistory?.status !== 'PENDING'" placeholder="填写核查依据、待补材料或修正意见" />
-          <div v-if="currentHistory?.status === 'PENDING'" class="flex justify-end gap-2">
-            <Button :loading="deciding" @click="decide('NEEDS_CORRECTION')">标记需修正</Button>
+          <Input.TextArea v-model:value="reviewerNote" :rows="2" :maxlength="2000" :disabled="!hasAccessByCodes(['quality.acceptances.review']) || !['PENDING', 'CORRECTION_SUBMITTED'].includes(currentHistory?.status ?? '')" placeholder="填写核查依据、待补材料或修正意见" />
+          <div v-if="currentHistory?.status === 'PENDING' && hasAccessByCodes(['quality.acceptances.review'])" class="space-y-2">
+            <Select v-model:value="correctionItems" mode="multiple" class="w-full" :options="review.checks.map((item) => ({ label: item.item_name, value: item.item_name }))" placeholder="标记需修正时请选择具体检测项目" />
+          </div>
+          <div v-if="['PENDING', 'CORRECTION_SUBMITTED'].includes(currentHistory?.status ?? '') && hasAccessByCodes(['quality.acceptances.review'])" class="flex justify-end gap-2">
+            <Button v-if="currentHistory?.status === 'PENDING'" :loading="deciding" @click="decide('NEEDS_CORRECTION')">标记需修正</Button>
             <Button type="primary" :loading="deciding" @click="decide('CONFIRMED')">确认已复核</Button>
           </div>
-          <Tag v-else :color="currentHistory?.status === 'CONFIRMED' ? 'green' : 'orange'">{{ currentHistory?.status === 'CONFIRMED' ? '已确认' : '需修正' }}</Tag>
+          <Tag v-else :color="currentHistory?.status === 'CONFIRMED' ? 'green' : 'orange'">{{ currentHistory?.status === 'CONFIRMED' ? '已确认' : currentHistory?.status === 'CORRECTION_SUBMITTED' ? '修正待确认' : '需修正' }}</Tag>
+          <div v-if="corrections.length" class="space-y-2 border-t border-border pt-3">
+            <h5 class="text-sm font-medium">逐项修正记录</h5>
+            <div v-for="item in currentCorrections" :key="item.id" class="text-xs">
+              <Tag :color="item.status === 'OPEN' ? 'orange' : 'green'">{{ item.status === 'OPEN' ? '待处理' : '已提交处理' }}</Tag>
+              {{ item.item_name }} · {{ item.note }}
+              <div v-if="item.status === 'OPEN' && currentHistory?.status === 'NEEDS_CORRECTION' && (String(acceptance?.inspector_id) === String(userStore.userInfo?.userId) || userStore.userRoles?.includes('SYS_ADMIN'))" class="mt-2 flex gap-2">
+                <Input.TextArea v-model:value="correctionNotes[item.item_name]" :rows="2" placeholder="说明已修正的系统值或补充报告，并在原验收流程中完成必要修改" />
+                <Button @click="resolveCorrection(item.item_name)">提交处理</Button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div v-if="review.checks.some((item) => item.source_quote)" class="rounded-lg border border-border p-4">

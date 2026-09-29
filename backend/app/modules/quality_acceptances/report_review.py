@@ -18,13 +18,14 @@ from app.modules.deliveries.model import DeliveryItem
 from app.modules.files import mineru, service as file_service
 from app.modules.files.parser import parse_file_content
 from app.modules.products.model import Product
-from app.modules.quality_acceptances.model import QualityAcceptance, QualityReportReviewRecord
-from app.modules.quality_acceptances.schema import QualityCriterion, QualityReportCheck, QualityReportFile, QualityReportReview, QualityReviewDecision, QualityReviewHistory, QualityReviewTarget
+from app.modules.quality_acceptances.model import QualityAcceptance, QualityInspectionStandard, QualityReportReviewRecord, QualityReviewCorrection
+from app.modules.quality_acceptances.schema import QualityCorrectionAction, QualityCorrectionRead, QualityCriterion, QualityReportCheck, QualityReportComparison, QualityReportFile, QualityReportReview, QualityReportSummary, QualityReviewDecision, QualityReviewHistory, QualityReviewTarget
 from app.modules.quality_acceptances.standards import latest_standard
 from app.modules.quality_acceptances.service import get_acceptance
 from app.modules.system.file_model import SysFile, SysFileAttachment
 from app.modules.system.audit import add_audit_log
 from app.modules.system.model import User
+from app.modules.system.crud import get_user_role_codes
 
 
 class _ExtractedItem(BaseModel):
@@ -118,6 +119,13 @@ def _recorded_items(value: dict | list | None) -> dict[str, str]:
                 result[str(name).strip()] = f"{number}{unit}".strip()
         return result
     return {}
+
+
+def _recorded_for_target(value: dict | list | None, delivery_item_id: int, target_count: int) -> dict[str, str]:
+    """只读取明确归属该到货明细的结果；旧整单值仅在单明细时使用。"""
+    if isinstance(value, dict) and isinstance(value.get("by_delivery_item"), dict):
+        return _recorded_items(value["by_delivery_item"].get(str(delivery_item_id)))
+    return _recorded_items(value) if target_count == 1 else {}
 
 
 def _key(value: str) -> str:
@@ -261,7 +269,9 @@ def get_review_record(db: Session, user: User, acceptance_id: int, review_id: in
 
 def decide_review(db: Session, user: User, acceptance_id: int, review_id: int, decision: QualityReviewDecision) -> QualityReviewHistory:
     """保存一次性人工复核结论；不改变正式验收结果。"""
-    get_acceptance(db, user, acceptance_id)
+    acceptance = get_acceptance(db, user, acceptance_id)
+    if user.id == acceptance.inspector_id and "SYS_ADMIN" not in get_user_role_codes(db, user.id):
+        raise BusinessValidationError("检验员不能复核自己负责的验收报告")
     record = db.scalar(select(QualityReportReviewRecord).where(
         QualityReportReviewRecord.id == review_id,
         QualityReportReviewRecord.acceptance_id == acceptance_id,
@@ -269,12 +279,29 @@ def decide_review(db: Session, user: User, acceptance_id: int, review_id: int, d
     if record is None:
         raise ResourceNotFoundError("核对记录不存在")
     file_service.get_file(db, user, record.file_id)
-    if record.status != "PENDING":
+    if record.status not in {"PENDING", "CORRECTION_SUBMITTED"}:
         raise BusinessValidationError("该核对记录已完成人工复核")
-    record.status = decision.status
-    record.reviewer_note = decision.reviewer_note.strip()
-    if not record.reviewer_note:
+    if record.status == "CORRECTION_SUBMITTED" and decision.status != "CONFIRMED":
+        raise BusinessValidationError("修正提交后请由质量负责人确认，或发起新的报告核对")
+    reviewer_note = decision.reviewer_note.strip()
+    if not reviewer_note:
         raise BusinessValidationError("请填写复核意见")
+    checks = QualityReportReview.model_validate(record.result_json).checks
+    available = {check.item_name for check in checks}
+    names = [name.strip() for name in decision.correction_items]
+    if decision.status == "NEEDS_CORRECTION":
+        if not names or len(names) != len(set(names)) or not set(names) <= available:
+            raise BusinessValidationError("请选择本次核对结果中需要修正的具体检测项目")
+        for name in names:
+            db.add(QualityReviewCorrection(review_id=record.id, item_name=name, status="OPEN", note=reviewer_note, actor_id=user.id))
+    elif names:
+        raise BusinessValidationError("确认复核时不应提交待修正项目")
+    if record.status == "CORRECTION_SUBMITTED":
+        latest = _latest_corrections(db, record.id)
+        if any(item.status != "RESOLVED" for item in latest.values()):
+            raise BusinessValidationError("仍有未处理的检测项目")
+    record.status = decision.status
+    record.reviewer_note = reviewer_note
     record.reviewed_by = user.id
     record.reviewed_at = datetime.now()
     add_audit_log(db, actor_id=user.id, action_type="REVIEW_DECISION", resource_type="QUALITY_REPORT_REVIEW", resource_id=record.id, request_summary=f"记录报告复核结论 {decision.status}", result_status="SUCCESS")
@@ -288,7 +315,85 @@ def decide_review(db: Session, user: User, acceptance_id: int, review_id: int, d
     )
 
 
-async def review_report(db: Session, user: User, acceptance_id: int, file_id: int, delivery_item_id: int | None = None) -> QualityReportReview:
+def _latest_corrections(db: Session, review_id: int) -> dict[str, QualityReviewCorrection]:
+    rows = db.scalars(select(QualityReviewCorrection).where(QualityReviewCorrection.review_id == review_id).order_by(QualityReviewCorrection.id)).all()
+    return {row.item_name: row for row in rows}
+
+
+def list_corrections(db: Session, user: User, acceptance_id: int, review_id: int) -> list[QualityCorrectionRead]:
+    get_review_record(db, user, acceptance_id, review_id)
+    rows = db.scalars(select(QualityReviewCorrection).where(QualityReviewCorrection.review_id == review_id).order_by(QualityReviewCorrection.id)).all()
+    return [QualityCorrectionRead.model_validate(row, from_attributes=True) for row in rows]
+
+
+def resolve_correction(db: Session, user: User, acceptance_id: int, review_id: int, data: QualityCorrectionAction) -> QualityCorrectionRead:
+    """检验员逐项记录修正说明；质量负责人随后确认，不更改正式验收值。"""
+    acceptance = get_acceptance(db, user, acceptance_id)
+    if user.id != acceptance.inspector_id and "SYS_ADMIN" not in get_user_role_codes(db, user.id):
+        raise BusinessValidationError("只有本单检验员可提交修正说明")
+    record = db.scalar(select(QualityReportReviewRecord).where(QualityReportReviewRecord.id == review_id, QualityReportReviewRecord.acceptance_id == acceptance_id).with_for_update())
+    if record is None:
+        raise ResourceNotFoundError("核对记录不存在")
+    if record.status != "NEEDS_CORRECTION":
+        raise BusinessValidationError("当前核对记录没有待处理的修正项目")
+    latest = _latest_corrections(db, review_id)
+    item = latest.get(data.item_name.strip())
+    if item is None or item.status != "OPEN":
+        raise BusinessValidationError("该检测项目无需修正或已提交处理")
+    note = data.note.strip()
+    if not note:
+        raise BusinessValidationError("请填写修正处理说明")
+    action = QualityReviewCorrection(review_id=review_id, item_name=item.item_name, status="RESOLVED", note=note, actor_id=user.id)
+    db.add(action)
+    db.flush()
+    if all(name == item.item_name or row.status == "RESOLVED" for name, row in latest.items()):
+        record.status = "CORRECTION_SUBMITTED"
+    add_audit_log(db, actor_id=user.id, action_type="RESOLVE_CORRECTION", resource_type="QUALITY_REPORT_REVIEW", resource_id=review_id, request_summary=f"提交检测项修正说明：{item.item_name}", result_status="SUCCESS")
+    db.commit()
+    return QualityCorrectionRead.model_validate(action, from_attributes=True)
+
+
+def summarize_reports(db: Session, user: User, acceptance_id: int, delivery_item_id: int) -> QualityReportSummary:
+    """汇总同一到货明细各报告的最新快照，显式标识数值冲突。"""
+    target = _choose_target(review_targets(db, user, acceptance_id), delivery_item_id)
+    rows = db.scalars(select(QualityReportReviewRecord).where(
+        QualityReportReviewRecord.acceptance_id == acceptance_id,
+        QualityReportReviewRecord.delivery_item_id == target.delivery_item_id,
+    ).order_by(QualityReportReviewRecord.id.desc())).all()
+    latest_by_file: dict[int, QualityReportReviewRecord] = {}
+    for row in rows:
+        latest_by_file.setdefault(row.file_id, row)
+    comparisons: dict[str, list[dict]] = {}
+    corrections: list[QualityCorrectionRead] = []
+    visible_reviews: list[QualityReviewHistory] = []
+    for row in latest_by_file.values():
+        try:
+            file_service.get_file(db, user, row.file_id)
+        except ResourceNotFoundError:
+            continue
+        file = db.get(SysFile, row.file_id)
+        history = QualityReviewHistory(
+            id=row.id, file_name=file.file_name, product_name=target.product_name,
+            batch_no=target.batch_no, standard_version=row.result_json.get("standard_version"),
+            status=row.status, created_at=row.created_at, reviewed_at=row.reviewed_at,
+            reviewer_note=row.reviewer_note,
+        )
+        visible_reviews.append(history)
+        snapshot = QualityReportReview.model_validate(row.result_json)
+        corrections.extend(list_corrections(db, user, acceptance_id, row.id))
+        for check in snapshot.checks:
+            if check.report_value:
+                name = check.standard_criterion or check.item_name
+                comparisons.setdefault(name, []).append({"review_id": row.id, "file_name": history.file_name, "value": check.report_value, "source_quote": check.source_quote, "source_location": check.source_location})
+    return QualityReportSummary(
+        delivery_item_id=delivery_item_id,
+        reviews=visible_reviews,
+        comparisons=[QualityReportComparison(item_name=name, values=values, conflict=any(not _same_value(values[0]["value"], item["value"]) for item in values[1:])) for name, values in comparisons.items()],
+        corrections=corrections,
+    )
+
+
+async def review_report(db: Session, user: User, acceptance_id: int, file_id: int, delivery_item_id: int | None = None, standard_id: int | None = None) -> QualityReportReview:
     """提取报告并核对产品、批次、系统值和标准，留存只读结果快照。"""
     acceptance = get_acceptance(db, user, acceptance_id)
     targets = review_targets(db, user, acceptance_id)
@@ -326,7 +431,7 @@ async def review_report(db: Session, user: User, acceptance_id: int, file_id: in
         raise BusinessValidationError("报告字段提取结果不可核对，请重新尝试或人工查看报告") from exc
 
     # 旧验收单的 test_result 没有明细 ID；多明细时不可把整单数据误配给某个产品。
-    recorded = _recorded_items(acceptance.test_result) if len(targets) == 1 else {}
+    recorded = _recorded_for_target(acceptance.test_result, target.delivery_item_id, len(targets))
     recorded_by_key = {_key(name): (name, result) for name, result in recorded.items()}
     checked: set[str] = set()
     checks: list[QualityReportCheck] = []
@@ -345,7 +450,7 @@ async def review_report(db: Session, user: User, acceptance_id: int, file_id: in
             recorded_value=saved[1] if saved else None,
             source_quote=item.quote,
             source_location=location,
-            status="NOT_COMPARABLE" if len(targets) > 1 else "MATCH" if saved and _same_value(item.value, saved[1]) else "MISMATCH" if saved else "NOT_RECORDED",
+            status="MATCH" if saved and _same_value(item.value, saved[1]) else "MISMATCH" if saved else "NOT_RECORDED" if recorded or len(targets) == 1 else "NOT_COMPARABLE",
         ))
     for item_key, (name, result) in recorded_by_key.items():
         if item_key not in checked:
@@ -360,9 +465,11 @@ async def review_report(db: Session, user: User, acceptance_id: int, file_id: in
     warnings = []
     if product_status != "MATCH":
         warnings.append("报告检品名称与所选产品未能可靠匹配；检测标准只展示，不自动判断指标范围。")
-    if len(targets) > 1:
+    if len(targets) > 1 and not (isinstance(acceptance.test_result, dict) and isinstance(acceptance.test_result.get("by_delivery_item"), dict)):
         warnings.append("该验收单含多条到货明细；旧检测结果未标记明细，系统值不参与本次自动对照。")
-    standard = latest_standard(db, target.product_id)
+    standard = db.get(QualityInspectionStandard, standard_id) if standard_id is not None else latest_standard(db, target.product_id)
+    if standard_id is not None and (standard is None or standard.product_id != target.product_id):
+        raise BusinessValidationError("所选检测标准不属于当前到货产品")
     if standard is None:
         warnings.append("当前产品未配置检测标准，本次只核对报告与系统录入值，不判断指标是否落在标准范围内。")
     else:

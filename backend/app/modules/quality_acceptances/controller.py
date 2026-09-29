@@ -9,7 +9,7 @@ from app.core.auth import require_permission
 from app.core.db import get_db
 from app.modules.quality_acceptances import service
 from app.modules.quality_acceptances import report_review
-from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptancePage, QualityAcceptanceRead, QualityAcceptanceResult, QualityReportFile, QualityReportReview, QualityReportReviewRequest, QualityReviewDecision, QualityReviewHistory, QualityReviewTarget
+from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptancePage, QualityAcceptanceRead, QualityAcceptanceResult, QualityCorrectionAction, QualityCorrectionRead, QualityReportFile, QualityReportReview, QualityReportReviewRequest, QualityReportSummary, QualityReviewDecision, QualityReviewHistory, QualityReviewTarget
 from app.modules.files import service as file_service
 from app.modules.files.schema import FileAttachmentCreate
 from app.modules.system.model import User
@@ -48,6 +48,16 @@ def report_reviews(
     return report_review.list_review_history(db, user, acceptance_id)
 
 
+@router.get("/{acceptance_id}/report-summary/{delivery_item_id}", response_model=QualityReportSummary, summary="汇总到货明细的多份报告")
+def report_summary(
+    acceptance_id: int,
+    delivery_item_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("quality.acceptances.read")),
+) -> QualityReportSummary:
+    return report_review.summarize_reports(db, user, acceptance_id, delivery_item_id)
+
+
 @router.get("/{acceptance_id}/report-reviews/{review_id}", response_model=QualityReportReview, summary="查询报告核对快照")
 def report_review_detail(
     acceptance_id: int,
@@ -65,10 +75,31 @@ def decide_report_review(
     review_id: int,
     data: QualityReviewDecision,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("quality.acceptances.write")),
+    user: User = Depends(require_permission("quality.acceptances.review")),
 ) -> QualityReviewHistory:
     """保存指定报告核对记录的人工结论和复核意见。"""
     return report_review.decide_review(db, user, acceptance_id, review_id, data)
+
+
+@router.get("/{acceptance_id}/report-reviews/{review_id}/corrections", response_model=list[QualityCorrectionRead], summary="查询逐项修正记录")
+def report_corrections(
+    acceptance_id: int,
+    review_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("quality.acceptances.read")),
+) -> list[QualityCorrectionRead]:
+    return report_review.list_corrections(db, user, acceptance_id, review_id)
+
+
+@router.post("/{acceptance_id}/report-reviews/{review_id}/corrections", response_model=QualityCorrectionRead, summary="提交检测项修正说明")
+def resolve_report_correction(
+    acceptance_id: int,
+    review_id: int,
+    data: QualityCorrectionAction,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("quality.acceptances.write")),
+) -> QualityCorrectionRead:
+    return report_review.resolve_correction(db, user, acceptance_id, review_id, data)
 
 
 @router.post("/{acceptance_id}/report-files", response_model=QualityReportFile, status_code=201, summary="上传验收报告")
@@ -109,7 +140,7 @@ async def review_report(
     user: User = Depends(require_permission("quality.acceptances.read")),
 ) -> QualityReportReview:
     """解析选定报告并生成核对快照；不直接提交验收结果。"""
-    return await report_review.review_report(db, user, acceptance_id, data.file_id, data.delivery_item_id)
+    return await report_review.review_report(db, user, acceptance_id, data.file_id, data.delivery_item_id, data.standard_id)
 
 
 @router.post("", response_model=QualityAcceptanceRead, status_code=status.HTTP_201_CREATED, summary="创建质量验收")

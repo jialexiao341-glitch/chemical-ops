@@ -5,10 +5,10 @@ import { computed, nextTick, ref } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
 
-import { Alert, Button, Select } from 'antdv-next';
+import { Alert, Button, Input, Select, message } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
-import { getAcceptanceReportFilesApi, submitAcceptanceResultApi } from '#/api';
+import { getAcceptanceReportFilesApi, getAcceptanceReviewTargetsApi, submitAcceptanceResultApi } from '#/api';
 import { ACCEPTANCE_RESULT_DICT } from '#/constants/dictionary';
 
 const emit = defineEmits(['success', 'review']);
@@ -22,6 +22,25 @@ const acceptance = ref<null | ResultDrawerData>();
 const reportFiles = ref<QualityAcceptanceApi.ReportFile[]>([]);
 const selectedReportFileId = ref<number>();
 const hasAiSuggestion = ref(false);
+const targets = ref<QualityAcceptanceApi.ReviewTarget[]>([]);
+const targetsLoaded = ref(false);
+const itemRows = ref<Record<number, { name: string; value: string }[]>>({});
+
+function addTestItem(deliveryItemId: number) {
+  (itemRows.value[deliveryItemId] ??= []).push({ name: '', value: '' });
+}
+
+function rowsFromSaved(value: unknown): { name: string; value: string }[] {
+  if (Array.isArray(value)) {
+    return value.filter((row) => row && typeof row === 'object').map((row) => ({
+      name: String(row.name ?? row.item ?? ''), value: String(row.value ?? row.result ?? ''),
+    }));
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value).map(([name, result]) => ({ name, value: String(result ?? '') }));
+  }
+  return [];
+}
 
 function openReportReview() {
   if (!acceptance.value) return;
@@ -73,17 +92,6 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'conclusion',
       label: '验收结论',
     },
-    {
-      component: 'Textarea',
-      componentProps: {
-        maxlength: 2000,
-        placeholder: '可填写 JSON，例如 {"纯度": "99.5%", "水分": "0.02%"}',
-        rows: 4,
-      },
-      fieldName: 'test_result_text',
-      help: '检测数据，按 JSON 格式填写；留空表示不记录检测项。',
-      label: '检测数据（JSON）',
-    },
   ],
 });
 
@@ -94,16 +102,32 @@ const [Drawer, drawerApi] = useVbenDrawer<null | ResultDrawerData>({
       return;
     }
     const values = await formApi.getValues<any>();
-    // 检测数据按 JSON 解析，格式不合法时直接提示，避免提交脏数据
-    let testResult: any;
-    const raw = String(values.test_result_text ?? '').trim();
-    if (raw) {
-      try {
-        testResult = JSON.parse(raw);
-      } catch {
-        formApi.setFieldError('test_result_text', '不是合法的 JSON');
-        return;
+    if (!targetsLoaded.value || targets.value.length === 0) {
+      message.warning('到货明细尚未加载，暂不能提交验收结果');
+      return;
+    }
+    let itemResults: QualityAcceptanceApi.ResultPayload['item_results'];
+    if (values.result !== 'REINSPECTION' && targets.value.length) {
+      itemResults = [];
+      for (const target of targets.value) {
+        const rows = itemRows.value[target.delivery_item_id] ?? [];
+        const tests: Record<string, string> = {};
+        for (const row of rows) {
+          const name = row.name.trim();
+          const value = row.value.trim();
+          if (!name || !value || name in tests) {
+            message.warning(`请检查第 ${target.line_no} 条到货明细的检测项目和值，项目名称不能重复`);
+            return;
+          }
+          tests[name] = value;
+        }
+        if (targets.value.length > 1 && rows.length === 0) {
+          message.warning(`请填写第 ${target.line_no} 条到货明细的检测结果`);
+          return;
+        }
+        if (rows.length) itemResults.push({ delivery_item_id: target.delivery_item_id, tests });
       }
+      if (!itemResults.length) itemResults = undefined;
     }
     drawerApi.lock();
     try {
@@ -112,7 +136,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | ResultDrawerData>({
         conclusion: values.conclusion || undefined,
         report_file_id: selectedReportFileId.value,
         result: values.result,
-        test_result: testResult,
+        item_results: itemResults,
       });
       emit('success');
       drawerApi.close();
@@ -131,25 +155,37 @@ const [Drawer, drawerApi] = useVbenDrawer<null | ResultDrawerData>({
     acceptance.value = data;
     hasAiSuggestion.value = Boolean(data?.suggested_test_result && Object.keys(data.suggested_test_result).length && !data.test_result);
     reportFiles.value = [];
+    targets.value = [];
+    targetsLoaded.value = false;
+    itemRows.value = {};
     selectedReportFileId.value = data?.suggested_report_file_id ?? data?.report_file_id ?? undefined;
     formApi.reset();
 
     await nextTick();
     if (data) {
-      try {
-        reportFiles.value = await getAcceptanceReportFilesApi(data.id);
+      const [filesResult, targetsResult] = await Promise.allSettled([
+        getAcceptanceReportFilesApi(data.id),
+        getAcceptanceReviewTargetsApi(data.id),
+      ]);
+      if (filesResult.status === 'fulfilled') reportFiles.value = filesResult.value;
+      if (targetsResult.status === 'fulfilled') {
+        targets.value = targetsResult.value;
+        targetsLoaded.value = true;
+      }
+      if (targetsResult.status === 'rejected') message.warning('未能读取到货明细，请重试后再提交验收结果');
+      if (filesResult.status === 'fulfilled') {
         selectedReportFileId.value ??= reportFiles.value[0]?.id;
-      } catch {
-        // 附件查询失败时仍允许人工录入结果。
+      }
+      const saved = data.test_result?.by_delivery_item ?? {};
+      for (const target of targets.value) {
+        const values = saved[String(target.delivery_item_id)] ?? (targets.value.length === 1 ? data.test_result ?? data.suggested_test_result : undefined);
+        itemRows.value[target.delivery_item_id] = rowsFromSaved(values);
       }
       formApi.setValues({
         certificate_complete: Boolean(data.certificate_complete),
         conclusion: data.conclusion ?? undefined,
         result: data.result && !['PENDING', 'REINSPECTION'].includes(data.result)
           ? data.result
-          : undefined,
-        test_result_text: data.test_result || hasAiSuggestion.value
-          ? JSON.stringify(data.test_result || data.suggested_test_result, null, 2)
           : undefined,
       });
     }
@@ -190,6 +226,18 @@ defineExpose({ drawerApi });
         <Button @click="openReportReview">先核对报告</Button>
       </div>
       <Form />
+      <div v-if="targets.length" class="space-y-4">
+        <h3 class="text-sm font-semibold">按到货明细录入检测结果</h3>
+        <div v-for="target in targets" :key="target.delivery_item_id" class="space-y-2 rounded-lg border border-border p-3">
+          <div class="text-sm font-medium">{{ target.line_no }}. {{ target.product_name }} · {{ target.batch_no || '无批次' }}</div>
+          <div v-for="(row, index) in itemRows[target.delivery_item_id] ?? []" :key="index" class="flex gap-2">
+            <Input v-model:value="row.name" aria-label="检测项目" placeholder="检测项目" />
+            <Input v-model:value="row.value" aria-label="检测值及单位" placeholder="检测值及单位" />
+            <Button @click="itemRows[target.delivery_item_id]?.splice(index, 1)">移除</Button>
+          </div>
+          <Button @click="addTestItem(target.delivery_item_id)">添加检测项</Button>
+        </div>
+      </div>
       <div>
         <label class="mb-1 block text-sm">检测报告</label>
         <Select

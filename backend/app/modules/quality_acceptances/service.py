@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.deliveries.model import Delivery
+from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.quality_acceptances import crud
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptanceResult
@@ -27,7 +27,7 @@ def _now() -> datetime:
 def _can_manage_all(db: Session, user: User) -> bool:
     """判断用户是否可以查看全部质量验收记录。"""
 
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "QUALITY", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
+    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "QUALITY", "QUALITY_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
 
 
 def _require_acceptance(db: Session, acceptance_id: int, *, for_update: bool = False) -> QualityAcceptance:
@@ -99,8 +99,20 @@ def submit_result(db: Session, user: User, acceptance_id: int, data: QualityAcce
     delivery = crud.get_delivery(db, acceptance.delivery_id, for_update=True)
     if delivery is None:
         raise ResourceNotFoundError("关联到货单不存在")
+    delivery_item_ids = set(db.scalars(select(DeliveryItem.id).where(DeliveryItem.delivery_id == delivery.id)).all())
+    if data.item_results is not None:
+        supplied = [item.delivery_item_id for item in data.item_results]
+        if len(supplied) != len(set(supplied)) or set(supplied) != delivery_item_ids:
+            raise BusinessValidationError("请为当前到货单的每条明细分别填写检测结果，且不能重复")
+        if data.test_result is not None:
+            raise BusinessValidationError("已按明细填写检测结果时，不可同时提交旧的整单检测结果")
+        test_result = {"by_delivery_item": {str(item.delivery_item_id): item.tests for item in data.item_results}}
+    else:
+        if len(delivery_item_ids) > 1 and data.result != "REINSPECTION":
+            raise BusinessValidationError("多明细验收单必须按到货明细分别填写检测结果")
+        test_result = data.test_result
     acceptance.result = data.result
-    acceptance.test_result = data.test_result
+    acceptance.test_result = test_result
     acceptance.certificate_complete = 1 if data.certificate_complete else 0
     acceptance.report_file_id = data.report_file_id
     acceptance.conclusion = data.conclusion

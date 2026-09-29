@@ -198,8 +198,8 @@ def _can_access_resource_instance(db: Session, user: User, resource_type: str, r
         return order is not None and _can_access_resource_instance(db, user, "PURCHASE_ORDER", order)
     if resource_type == "QUALITY_ACCEPTANCE":
         # 与质量验收详情的数据范围一致：负责检验员可查看自己的验收报告。
-        # 其他用户仍沿用既有的到货单/订单权限链路。
-        if resource.inspector_id == user.id:
+        # 质量负责人可跨检验员复核；其他用户沿用到货单/订单权限链路。
+        if resource.inspector_id == user.id or "QUALITY_MANAGER" in role_codes:
             return True
         delivery = db.get(Delivery, resource.delivery_id)
         return delivery is not None and _can_access_resource_instance(db, user, "DELIVERY", delivery)
@@ -230,7 +230,14 @@ def _check_file_access(db: Session, user: User, value: SysFile) -> None:
 
     is_admin = _is_system_admin(db, user)
     if value.access_level == "PRIVATE" and value.uploader_id != user.id and not is_admin:
-        raise ResourceNotFoundError(f"文件 {value.id} 不存在")
+        quality_manager = "QUALITY_MANAGER" in get_user_role_codes(db, user.id)
+        quality_attachment = db.scalar(select(SysFileAttachment).where(
+            SysFileAttachment.file_id == value.id,
+            SysFileAttachment.resource_type == "QUALITY_ACCEPTANCE",
+        ).limit(1))
+        acceptance = db.get(QualityAcceptance, quality_attachment.resource_id) if quality_attachment else None
+        if not quality_manager or acceptance is None or not _can_access_resource_instance(db, user, "QUALITY_ACCEPTANCE", acceptance):
+            raise ResourceNotFoundError(f"文件 {value.id} 不存在")
     if is_admin or (value.access_level == "PRIVATE" and value.uploader_id == user.id):
         return
     linked_resources = db.scalars(select(SysFileAttachment).where(SysFileAttachment.file_id == value.id)).all()
