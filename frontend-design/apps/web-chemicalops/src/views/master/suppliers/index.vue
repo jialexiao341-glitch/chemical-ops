@@ -5,10 +5,11 @@ import type {
 } from '#/adapter/vxe-table';
 import type { SupplierApi } from '#/api';
 
-import { onMounted, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page, useVbenDrawer } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { Plus } from '@vben/icons';
 
 import { Button, message } from 'antdv-next';
@@ -19,9 +20,12 @@ import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
+import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
 defineOptions({ name: 'SupplierList' });
+const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -37,7 +41,14 @@ const [Grid, gridApi] = useVbenVxeGrid({
     wrapperClass: 'flex-nowrap items-center overflow-x-auto',
   },
   gridOptions: {
-    columns: useColumns(onActionClick),
+    columns: useColumns(
+      onActionClick,
+      [
+        'procurement.orders.read',
+        'warehouse.deliveries.read',
+        'quality.acceptances.read',
+      ].every((code) => hasAccessByCodes([code])),
+    ),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -67,6 +78,10 @@ function onActionClick({
   row,
 }: OnActionClickParams<SupplierApi.Supplier>) {
   switch (code) {
+    case 'supplier-score': {
+      insightDrawer.value?.open(code, row.id);
+      break;
+    }
     case 'delete': {
       onDelete(row);
       break;
@@ -118,6 +133,7 @@ watch(
 
 <template>
   <Page auto-content-height>
+    <BusinessInsightDrawer ref="insightDrawer" />
     <FormDrawer @success="onRefresh" />
     <Grid table-title="供应商主数据">
       <template #toolbar-tools>

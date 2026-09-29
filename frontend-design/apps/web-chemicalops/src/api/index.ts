@@ -8,3 +8,4 @@ export * from './system';
 export * from './dashboard';
 export * from './operations';
 export * from './ai';
+export * from './insights';

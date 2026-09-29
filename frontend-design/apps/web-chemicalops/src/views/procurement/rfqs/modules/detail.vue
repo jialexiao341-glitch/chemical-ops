@@ -4,6 +4,7 @@ import type { RfqApi } from '#/api';
 import { computed, ref } from 'vue';
 
 import { useVbenDrawer, useVbenModal } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 
 import {
   Alert,
@@ -11,6 +12,7 @@ import {
   Descriptions,
   DescriptionsItem,
   Empty,
+  InputNumber,
   Spin,
   TabPane,
   Table,
@@ -36,15 +38,19 @@ import { getSupplierNameMap } from '#/utils/lookup';
 
 import QuoteModal from './quote.vue';
 import SelectQuoteModal from './select-quote.vue';
+import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
 const emit = defineEmits(['success']);
+const { hasAccessByCodes } = useAccess();
 
 const detail = ref<RfqApi.Rfq>();
+const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const comparison = ref<RfqApi.QuoteComparison>();
 const loading = ref(false);
 const acting = ref(false);
 const supplierMap = ref<Map<number, string>>(new Map());
 const activeTab = ref('items');
+const scenarioPriceWeight = ref(70);
 
 const [SelectQuote, selectQuoteApi] = useVbenModal({
   connectedComponent: SelectQuoteModal,
@@ -249,11 +255,67 @@ const comparisonColumns = [
   { key: '__action', title: '操作', width: 120 },
 ];
 
+/** 用当前比价快照按价格与交期权重生成临时情景排序。 */
+const scenarioCurrencyConflict = computed(() => {
+  const currencies = new Set(
+    (detail.value?.quotes ?? [])
+      .filter((quote) => quote.status === 'SUBMITTED')
+      .map((quote) => quote.currency_code),
+  );
+  return currencies.size > 1;
+});
+
+const scenarioRanking = computed(() => {
+  if (scenarioCurrencyConflict.value) return [];
+  const rows = comparison.value?.items ?? [];
+  const groups = new Map<number, RfqApi.ComparisonItem[]>();
+  for (const row of rows) {
+    const group = groups.get(row.rfq_item_id) ?? [];
+    group.push(row);
+    groups.set(row.rfq_item_id, group);
+  }
+  const totalWeight = Math.max(0, Math.min(100, Number(scenarioPriceWeight.value) || 0));
+  const priceWeight = totalWeight / 100;
+  const leadWeight = 1 - priceWeight;
+  const scores = new Map<number, { count: number; total: number }>();
+  for (const group of groups.values()) {
+    const prices = group.map((row) => Number(row.quoted_unit_price)).filter(Number.isFinite);
+    const leads = group.map((row) => row.lead_days).filter((value): value is number => value != null);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    const minLead = leads.length ? Math.min(...leads) : undefined;
+    const maxLead = leads.length ? Math.max(...leads) : undefined;
+    for (const row of group) {
+      const price = Number(row.quoted_unit_price);
+      const priceScore = maxPrice === minPrice ? 100 : ((maxPrice - price) / (maxPrice - minPrice)) * 100;
+      const leadScore = row.lead_days == null || minLead == null || maxLead == null
+        ? undefined
+        : maxLead === minLead ? 100 : ((maxLead - row.lead_days) / (maxLead - minLead)) * 100;
+      const weight = leadScore == null ? 1 : priceWeight + leadWeight;
+      const score = leadScore == null
+        ? priceScore
+        : priceScore * priceWeight + leadScore * leadWeight;
+      const current = scores.get(row.supplier_id) ?? { count: 0, total: 0 };
+      current.count += 1;
+      current.total += score / weight;
+      scores.set(row.supplier_id, current);
+    }
+  }
+  return [...scores.entries()]
+    .map(([supplier_id, value]) => ({
+      supplier_id,
+      score: value.total / value.count,
+      count: value.count,
+    }))
+    .sort((left, right) => right.score - left.score);
+});
+
 defineExpose({ drawerApi });
 </script>
 
 <template>
   <Drawer :title="`询价单 ${detail?.rfq_no ?? ''}`" class="w-[1100px]">
+    <BusinessInsightDrawer ref="insightDrawer" />
     <SelectQuote @success="onSelectSuccess" />
     <Quote @success="onQuoteSuccess" />
     <Spin :spinning="loading">
@@ -283,6 +345,12 @@ defineExpose({ drawerApi });
         </Descriptions>
 
         <div class="flex flex-wrap gap-2">
+          <Button
+            v-if="detail.id && hasAccessByCodes(['procurement.orders.read'])"
+            @click="insightDrawer?.open('supplier-change', detail.id)"
+          >
+            核对供应商变更
+          </Button>
           <Button v-if="canSend" :loading="acting" type="primary" @click="onSend">
             发送询价单
           </Button>
@@ -369,6 +437,53 @@ defineExpose({ drawerApi });
                 <Tag :color="COMPARISON_STATUS_DICT.color(comparison.status)">
                   {{ COMPARISON_STATUS_DICT.label(comparison.status) }}
                 </Tag>
+              </div>
+              <div class="rounded-lg border p-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div class="font-medium">比价情景试算</div>
+                    <div class="text-xs text-muted-foreground">只在本页临时计算，不改写正式比价结果；分数按每个询价明细的候选范围归一化。</div>
+                  </div>
+                  <div class="flex items-center gap-2 text-sm">
+                    <span>价格 {{ scenarioPriceWeight }}%</span>
+                    <InputNumber v-model:value="scenarioPriceWeight" :disabled="scenarioCurrencyConflict" :min="0" :max="100" :step="5" class="w-24" />
+                    <span>交期 {{ 100 - scenarioPriceWeight }}%</span>
+                  </div>
+                </div>
+                <Alert
+                  v-if="scenarioCurrencyConflict"
+                  class="mt-3"
+                  show-icon
+                  type="warning"
+                  message="当前询价包含多种币种，暂不进行跨币种试算。"
+                />
+                <Empty
+                  v-else-if="scenarioRanking.length === 0"
+                  class="mt-3"
+                  description="暂无可试算的结构化报价"
+                />
+                <Table
+                  v-else
+                  class="mt-3"
+                  :columns="[
+                    { key: 'rank', title: '情景排名', width: 100 },
+                    { key: 'supplier_id', title: '供应商' },
+                    { key: 'score', title: '试算分', width: 120, align: 'right' },
+                    { key: 'count', title: '参与报价行', width: 120, align: 'right' },
+                  ]"
+                  :data-source="scenarioRanking"
+                  :pagination="false"
+                  row-key="supplier_id"
+                  size="small"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'rank'">第 {{ index + 1 }} 名</template>
+                    <template v-else-if="column.key === 'supplier_id'">{{ supplierName(record.supplier_id) }}</template>
+                    <template v-else-if="column.key === 'score'">{{ record.score.toFixed(1) }}</template>
+                    <template v-else-if="column.key === 'count'">{{ record.count }}</template>
+                  </template>
+                </Table>
+                <div class="mt-2 text-xs text-muted-foreground">当前缺少可比的历史履约与验收样本，因此本次只按报价价格和交期试算。</div>
               </div>
               <Table
                 :columns="comparisonColumns"

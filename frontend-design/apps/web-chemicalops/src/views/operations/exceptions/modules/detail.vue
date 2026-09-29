@@ -40,6 +40,7 @@ import {
 import { formatDateTime } from '#/utils/format';
 
 import TaskForm from './task-form.vue';
+import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
 const emit = defineEmits(['success']);
 const router = useRouter();
@@ -52,6 +53,7 @@ const router = useRouter();
  *   RESOLVED → CLOSED（必填关闭说明）/PROCESSING；终态无操作。
  */
 const detail = ref<OperationExceptionApi.Exception>();
+const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const tasks = ref<OperationExceptionApi.Task[]>([]);
 const loading = ref(false);
 const acting = ref(false);
@@ -378,6 +380,7 @@ defineExpose({ drawerApi });
 
 <template>
   <Drawer :title="titleText" class="w-[1000px]">
+    <BusinessInsightDrawer ref="insightDrawer" />
     <TaskFormModal @success="reload()" />
     <Spin :spinning="loading">
       <Empty v-if="!detail && !loading" description="未找到该异常" />
@@ -404,7 +407,13 @@ defineExpose({ drawerApi });
           "
           show-icon
         />
-        <div v-if="statusActions.length > 0" class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-2">
+          <Button
+            v-if="detail.id"
+            @click="insightDrawer?.open('exception-action', detail.id)"
+          >
+            查看处置建议
+          </Button>
           <Button
             v-for="action in statusActions"
             :key="action.status"

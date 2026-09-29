@@ -26,9 +26,11 @@ import { useColumns, useGridFormSchema } from './data';
 import FreezeModal from './modules/freeze.vue';
 import InboundModal from './modules/inbound.vue';
 import LogsDrawer from './modules/logs.vue';
+import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
 defineOptions({ name: 'InventoryList' });
 const route = useRoute();
+const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 
 function getAiInventoryFilters() {
   const raw = route.query.ai_filters;
@@ -111,6 +113,12 @@ function onActionClick({
   row,
 }: OnActionClickParams<InventoryApi.InventoryBalance>) {
   switch (code) {
+    case 'batch-impact':
+    case 'replenishment':
+    case 'location-advice': {
+      insightDrawer.value?.open(code, row.id);
+      break;
+    }
     case 'logs': {
       logsApi.setData(row.id).open();
       break;
@@ -176,6 +184,7 @@ watch(
 
 <template>
   <Page auto-content-height>
+    <BusinessInsightDrawer ref="insightDrawer" />
     <Freeze @success="onRefresh" />
     <Inbound @success="onRefresh" />
     <Logs />

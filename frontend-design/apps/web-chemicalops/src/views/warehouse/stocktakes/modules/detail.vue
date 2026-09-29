@@ -6,6 +6,7 @@ import { computed, ref } from 'vue';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import {
+  Button,
   Descriptions,
   DescriptionsItem,
   Empty,
@@ -25,8 +26,10 @@ import {
   getUnitNameMap,
   getWarehouseNameMap,
 } from '#/utils/lookup';
+import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
 const detail = ref<StocktakeApi.StocktakeRequest>();
+const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const loading = ref(false);
 const productName = ref<(id?: null | number) => string>(() => '-');
 const unitName = ref<(id?: null | number) => string>(() => '-');
@@ -89,9 +92,13 @@ defineExpose({ drawerApi });
 
 <template>
   <Drawer :title="titleText" class="w-[900px]">
+    <BusinessInsightDrawer ref="insightDrawer" />
     <Spin :spinning="loading">
       <Empty v-if="!detail && !loading" description="未找到该申请" />
       <div v-else-if="detail" class="space-y-5">
+        <Button @click="insightDrawer?.open('stocktake-explain', detail.id)">
+          分析盘点差异
+        </Button>
         <Descriptions bordered :column="2" size="small">
           <DescriptionsItem label="盘点单号">
             {{ detail.stocktake_no }}

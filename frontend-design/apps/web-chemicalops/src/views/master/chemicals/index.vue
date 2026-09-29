@@ -2,7 +2,10 @@
 import type { OnActionClickParams, VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { ChemicalApi } from '#/api';
 
+import { ref } from 'vue';
+
 import { Page, useVbenDrawer } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { Plus } from '@vben/icons';
 
 import { Button, message } from 'antdv-next';
@@ -12,8 +15,11 @@ import { deleteChemicalApi, getChemicalListApi } from '#/api';
 
 import { useColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
+import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
 defineOptions({ name: 'ChemicalList' });
+const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
+const { hasAccessByCodes } = useAccess();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -26,7 +32,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
     submitOnChange: false,
   },
   gridOptions: {
-    columns: useColumns(onActionClick),
+    columns: useColumns(
+      onActionClick,
+      hasAccessByCodes(['warehouse.inventory.read']),
+    ),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -53,6 +62,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 function onActionClick({ code, row }: OnActionClickParams<ChemicalApi.Chemical>) {
   switch (code) {
+    case 'msds-change': {
+      insightDrawer.value?.open(code, row.id);
+      break;
+    }
     case 'delete': {
       onDelete(row);
       break;
@@ -98,6 +111,7 @@ function onRefresh() {
 
 <template>
   <Page auto-content-height>
+    <BusinessInsightDrawer ref="insightDrawer" />
     <FormDrawer @success="onRefresh" />
     <Grid table-title="化学品主数据">
       <template #toolbar-tools>

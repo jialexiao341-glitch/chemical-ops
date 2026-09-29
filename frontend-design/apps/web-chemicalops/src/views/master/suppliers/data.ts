@@ -131,6 +131,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
 /** 列表列定义 */
 export function useColumns(
   onActionClick: OnActionClickFn<SupplierApi.Supplier>,
+  canViewPerformance: boolean,
 ): VxeTableGridColumns {
   return [
     { field: 'supplier_code', width: 140, title: '供应商编码' },
@@ -161,12 +162,20 @@ export function useColumns(
           onClick: onActionClick,
         },
         name: 'CellOperation',
-        options: ['edit', 'delete'],
+        options: [
+          {
+            code: 'supplier-score',
+            text: '履约画像',
+            show: () => canViewPerformance,
+          },
+          'edit',
+          'delete',
+        ],
       },
       field: 'operation',
       fixed: 'right',
       title: '操作',
-      width: 140,
+      width: 190,
     },
   ];
 }

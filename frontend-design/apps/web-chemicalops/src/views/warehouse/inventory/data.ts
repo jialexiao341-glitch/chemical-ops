@@ -128,6 +128,9 @@ export function useColumns(
         name: 'CellOperation',
         // 冻结与解冻共用一个入口，按当前状态在页面内分流
         options: [
+          { code: 'batch-impact', text: '批次影响' },
+          { code: 'replenishment', text: '消耗观察' },
+          { code: 'location-advice', text: '库位提示' },
           {
             code: 'toggle-freeze',
             text: (row: InventoryApi.InventoryBalance) =>
@@ -139,7 +142,7 @@ export function useColumns(
       field: 'operation',
       fixed: 'right',
       title: '操作',
-      width: 180,
+      width: 310,
     },
   ];
 }

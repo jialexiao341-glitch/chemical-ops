@@ -5,6 +5,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { ArrowLeft } from '@vben/icons';
 
 import {
@@ -41,13 +42,16 @@ import { getSupplierNameMap, getUnitNameMap } from '#/utils/lookup';
 
 import ApproveModal from './modules/approve.vue';
 import CancelModal from './modules/cancel.vue';
+import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
 defineOptions({ name: 'PurchaseOrderDetail' });
 
 const route = useRoute();
 const router = useRouter();
+const { hasAccessByCodes } = useAccess();
 
 const order = ref<PurchaseOrderApi.PurchaseOrder>();
+const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const loading = ref(false);
 const acting = ref(false);
 const resolveSupplier = ref<(id?: null | number) => string>(() => '-');
@@ -174,6 +178,7 @@ onMounted(load);
 
 <template>
   <Page auto-content-height>
+    <BusinessInsightDrawer ref="insightDrawer" />
     <Approve @success="load" />
     <Cancel @success="load" />
     <Spin :spinning="loading">
@@ -191,6 +196,12 @@ onMounted(load);
             </Tag>
           </div>
           <div class="flex flex-wrap gap-2">
+            <Button
+              v-if="order.id && hasAccessByCodes(['finance.reconciliations.read'])"
+              @click="insightDrawer?.open('finance-difference', order.id)"
+            >
+              核对财务差异
+            </Button>
             <Button
               v-if="order.status === 'DRAFT'"
               :loading="acting"
