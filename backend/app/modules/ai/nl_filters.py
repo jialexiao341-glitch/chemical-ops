@@ -105,6 +105,18 @@ DATASET_VALUE_HINTS: dict[str, dict[str, dict[str, str]]] = {
             "已取消": "CANCELLED",
         },
     },
+    "supplier_quotes": {
+        "status": {"草稿": "DRAFT", "已提交": "SUBMITTED", "已中选": "SELECTED", "未中选": "REJECTED"},
+    },
+    "inventory_transactions": {
+        "type": {"入库": "INBOUND", "出库": "OUTBOUND", "盘点调整": "ADJUSTMENT"},
+    },
+    "finance_invoices": {
+        "status": {"草稿": "DRAFT", "已提交": "SUBMITTED", "已核验": "VERIFIED", "已驳回": "REJECTED", "已作废": "VOIDED"},
+    },
+    "finance_payments": {
+        "status": {"已申请": "REQUESTED", "已批准": "APPROVED", "已付款": "PAID", "已驳回": "REJECTED", "已取消": "CANCELLED"},
+    },
     "suppliers": {
         "status": {
             "合作中": "ACTIVE",

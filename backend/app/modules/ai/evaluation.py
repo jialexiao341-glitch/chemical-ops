@@ -41,6 +41,10 @@ CATALOG_CASES = (
     ("inventory_quantity", "inventory", "sum_quantity", "created_at"),
     ("reconciliation_count", "finance_reconciliations", "count", "created_at"),
     ("quality_count", "quality_acceptances", "count", "inspection_time"),
+    ("quote_count", "supplier_quotes", "count", "quote_date"),
+    ("inventory_movement_count", "inventory_transactions", "count", "created_at"),
+    ("invoice_amount", "finance_invoices", "amount", "invoice_date"),
+    ("payment_amount", "finance_payments", "amount", "paid_at"),
 )
 
 

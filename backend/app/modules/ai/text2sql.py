@@ -138,6 +138,14 @@ def _base_statement(plan: QueryPlan) -> tuple[Select[Any], Any, dict[str, Any]]:
         return select(OperationException), OperationException, {"type": OperationException.exception_type, "severity": OperationException.severity, "status": OperationException.status}
     if plan.dataset == "finance_reconciliations":
         return select(FinanceReconciliation).join(Supplier, FinanceReconciliation.supplier_id == Supplier.id), FinanceReconciliation, {"supplier": Supplier.supplier_name, "status": FinanceReconciliation.status, "currency": FinanceReconciliation.currency_code, "supplier_name": Supplier.supplier_name, "currency_code": FinanceReconciliation.currency_code}
+    if plan.dataset == "supplier_quotes":
+        return select(SupplierQuote).join(RFQ, SupplierQuote.rfq_id == RFQ.id).join(Supplier, SupplierQuote.supplier_id == Supplier.id), SupplierQuote, {"supplier": Supplier.supplier_name, "status": SupplierQuote.status, "currency": SupplierQuote.currency_code, "supplier_name": Supplier.supplier_name, "currency_code": SupplierQuote.currency_code}
+    if plan.dataset == "inventory_transactions":
+        return select(InventoryTransaction).join(Product, InventoryTransaction.product_id == Product.id).join(Warehouse, InventoryTransaction.warehouse_id == Warehouse.id), InventoryTransaction, {"type": InventoryTransaction.transaction_type, "product": Product.product_name, "warehouse": Warehouse.warehouse_name, "product_name": Product.product_name, "warehouse_name": Warehouse.warehouse_name}
+    if plan.dataset == "finance_invoices":
+        return select(FinanceInvoice).join(Supplier, FinanceInvoice.supplier_id == Supplier.id), FinanceInvoice, {"supplier": Supplier.supplier_name, "status": FinanceInvoice.status, "currency": FinanceInvoice.currency_code, "supplier_name": Supplier.supplier_name, "currency_code": FinanceInvoice.currency_code}
+    if plan.dataset == "finance_payments":
+        return select(FinancePayment).join(Supplier, FinancePayment.supplier_id == Supplier.id), FinancePayment, {"supplier": Supplier.supplier_name, "status": FinancePayment.status, "currency": FinancePayment.currency_code, "supplier_name": Supplier.supplier_name, "currency_code": FinancePayment.currency_code}
     if plan.dataset == "suppliers":
         return select(Supplier), Supplier, {"region": Supplier.region, "cooperation_level": Supplier.cooperation_level, "status": Supplier.status}
     raise BusinessValidationError("未授权的数据集")
@@ -591,7 +599,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
     stmt, model, aliases = _base_statement(plan)
     metric = func.count(model.id) if plan.metric in {"count", "amount"} else func.sum(_field(model, "quantity"))
     if plan.metric == "amount":
-        amount_field = {"purchase_orders": "order_amount", "purchase_requests": "budget_amount"}.get(plan.dataset, "total_amount")
+        amount_field = {"purchase_orders": "order_amount", "purchase_requests": "budget_amount", "finance_invoices": "amount_incl_tax", "finance_payments": "amount"}.get(plan.dataset, "total_amount")
         metric = func.sum(_field(model, amount_field))
     group_keys = [plan.group_by] if plan.group_by else []
     # 金额必须按币种分组，避免把 CNY、USD 等不同币种直接相加。
@@ -618,6 +626,15 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         if plan.date_from: predicates.append(time_field >= plan.date_from)
         if plan.date_to: predicates.append(time_field < date.fromordinal(plan.date_to.toordinal() + 1))
     if predicates: stmt = stmt.where(and_(*predicates))
+    if user is not None and db is not None and plan.dataset == "supplier_quotes":
+        if not {"SYS_ADMIN", "PROCUREMENT_MANAGER"}.intersection(get_user_role_codes(db, user.id)):
+            stmt = stmt.where(RFQ.requester_id == user.id)
+    if user is not None and db is not None and plan.dataset == "inventory_transactions":
+        from app.modules.inventory.service import accessible_warehouse_ids
+
+        warehouse_ids = accessible_warehouse_ids(db, user)
+        if warehouse_ids is not None:
+            stmt = stmt.where(InventoryTransaction.warehouse_id.in_(warehouse_ids))
     if group_keys: stmt = stmt.group_by(*(aliases[group_key] for group_key in group_keys))
     stmt = stmt.order_by(desc("metric_value") if plan.order == "desc" else "metric_value")
     return stmt.limit(plan.limit + 1)
@@ -646,6 +663,10 @@ DATASET_LABELS = {
     "quality_acceptances": "质量验收",
     "exceptions": "运营异常",
     "finance_reconciliations": "财务对账",
+    "supplier_quotes": "供应商报价",
+    "inventory_transactions": "库存流水",
+    "finance_invoices": "财务发票",
+    "finance_payments": "财务付款",
     "suppliers": "供应商",
 }
 METRIC_LABELS = {"count": "数量", "records": "业务明细", "amount": "金额", "sum_quantity": "数量合计"}
