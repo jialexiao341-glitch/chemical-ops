@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, ForeignKey, SmallInteger, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, ForeignKey, Integer, SmallInteger, String, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,3 +30,37 @@ class QualityAcceptance(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3)
     )
+
+
+class QualityInspectionStandard(Base):
+    """产品检测标准的不可变版本。"""
+
+    __tablename__ = "quality_inspection_standards"
+    __table_args__ = (UniqueConstraint("product_id", "version_no", name="uk_quality_standard_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("md_products.id"), nullable=False)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    criteria: Mapped[list] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+
+
+class QualityReportReviewRecord(Base):
+    """一次报告核对的结果快照与人工复核意见。"""
+
+    __tablename__ = "quality_report_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    acceptance_id: Mapped[int] = mapped_column(ForeignKey("quality_acceptances.id"), nullable=False)
+    delivery_item_id: Mapped[int] = mapped_column(ForeignKey("delivery_items.id"), nullable=False)
+    file_id: Mapped[int] = mapped_column(ForeignKey("sys_files.id"), nullable=False)
+    standard_id: Mapped[int | None] = mapped_column(ForeignKey("quality_inspection_standards.id"), nullable=True)
+    result_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
+    reviewer_note: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("sys_users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)

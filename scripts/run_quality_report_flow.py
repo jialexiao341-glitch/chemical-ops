@@ -28,6 +28,7 @@ CASES = (
 
 
 def main() -> None:
+    """仅在本地开发环境运行报告上传、核对与复核流程的演示脚本。"""
     settings = get_settings()
     if settings.app_env.lower() not in {"development", "dev", "local"}:
         raise SystemExit("仅允许在本地开发环境运行")
@@ -67,7 +68,7 @@ def main() -> None:
 
             review = asyncio.run(review_report(db, user, acceptance.id, file_id))
             counts = Counter(item.status for item in review.checks)
-            print(f"{acceptance_no} | {file_name} | file_id={file_id} | {action} | batch={review.batch_status} | checks={dict(counts)}")
+            print(f"{acceptance_no} | {file_name} | file_id={file_id} | {action} | product={review.product_status} | batch={review.batch_status} | standard={review.standard_version or 'none'} | checks={dict(counts)}")
 
 
 if __name__ == "__main__":

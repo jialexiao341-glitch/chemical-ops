@@ -7,6 +7,8 @@ from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
 from app.modules.products import crud, service
 from app.modules.products.schema import ProductCreate, ProductPage, ProductRead, ProductUpdate, UnitRead
+from app.modules.quality_acceptances import standards
+from app.modules.quality_acceptances.schema import QualityStandardCreate, QualityStandardRead
 from app.modules.system.model import User
 
 
@@ -55,6 +57,27 @@ def get_product(product_id: int, db: Session = Depends(get_db), _: object = Depe
     """根据产品 ID 查询详情。"""
 
     return service.get_product(db, product_id)
+
+
+@router.get("/{product_id}/quality-standards", response_model=list[QualityStandardRead], summary="查询产品检测标准版本")
+def list_quality_standards(
+    product_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("master.products.read")),
+) -> list[QualityStandardRead]:
+    """向有产品读取权限的用户返回指定产品的检测标准版本。"""
+    return standards.list_standards(db, product_id)
+
+
+@router.post("/{product_id}/quality-standards", response_model=QualityStandardRead, status_code=201, summary="创建产品检测标准版本")
+def create_quality_standard(
+    product_id: int,
+    data: QualityStandardCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("master.products.write")),
+) -> QualityStandardRead:
+    """由有产品写入权限的用户为产品创建检测标准新版本。"""
+    return standards.create_standard(db, user, product_id, data)
 
 
 @router.patch("/{product_id}", response_model=ProductRead, summary="更新产品")

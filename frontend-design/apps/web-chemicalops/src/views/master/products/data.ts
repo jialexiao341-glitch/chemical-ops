@@ -193,12 +193,12 @@ export function useColumns(
           onClick: onActionClick,
         },
         name: 'CellOperation',
-        options: ['edit', 'delete'],
+        options: [{ code: 'standard', text: '检测标准' }, 'edit', 'delete'],
       },
       field: 'operation',
       fixed: 'right',
       title: '操作',
-      width: 140,
+      width: 210,
     },
   ];
 }

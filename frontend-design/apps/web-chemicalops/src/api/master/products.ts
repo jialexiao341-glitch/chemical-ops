@@ -3,6 +3,26 @@ import type { PageQuery, PageResult } from '#/api/request';
 import { requestClient } from '#/api/request';
 
 export namespace ProductApi {
+  export interface QualityCriterion {
+    name: string;
+    aliases: string[];
+    kind: 'NUMERIC' | 'TEXT';
+    unit: null | string;
+    minimum: null | string;
+    maximum: null | string;
+    expected_text: null | string;
+  }
+
+  export interface QualityStandard {
+    id: number;
+    product_id: number;
+    version_no: number;
+    source_reference: string;
+    criteria: QualityCriterion[];
+    created_by: number;
+    created_at: string;
+  }
+
   /** 产品规格，对应后端 ProductRead */
   export interface Product {
     category_id?: null | number;
@@ -64,6 +84,16 @@ export async function getProductListApi(params?: ProductApi.ListParams) {
 /** 查询产品详情 */
 export async function getProductApi(id: number) {
   return requestClient.get<ProductApi.Product>(`/products/${id}`);
+}
+
+/** 按版本从新到旧读取产品的检测标准。 */
+export async function getProductQualityStandardsApi(id: number) {
+  return requestClient.get<ProductApi.QualityStandard[]>(`/products/${id}/quality-standards`);
+}
+
+/** 提交标准来源和检测项目，为产品创建一个新版本。 */
+export async function createProductQualityStandardApi(id: number, data: Pick<ProductApi.QualityStandard, 'source_reference' | 'criteria'>) {
+  return requestClient.post<ProductApi.QualityStandard>(`/products/${id}/quality-standards`, data);
 }
 
 /** 查询全部计量单位（任意登录用户可读，用于表单下拉） */

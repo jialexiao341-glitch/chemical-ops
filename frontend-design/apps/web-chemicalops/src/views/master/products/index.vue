@@ -15,11 +15,17 @@ import { deleteProductApi, getProductListApi } from '#/api';
 
 import { useColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
+import QualityStandard from './modules/quality-standard.vue';
 
 defineOptions({ name: 'ProductList' });
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
+  destroyOnClose: true,
+});
+
+const [StandardDrawer, standardDrawerApi] = useVbenDrawer({
+  connectedComponent: QualityStandard,
   destroyOnClose: true,
 });
 
@@ -57,11 +63,16 @@ const [Grid, gridApi] = useVbenVxeGrid({
   } as VxeTableGridOptions<ProductApi.Product>,
 });
 
+/** 根据表格操作类型打开编辑表单或检测标准抽屉。 */
 function onActionClick({
   code,
   row,
 }: OnActionClickParams<ProductApi.Product>) {
   switch (code) {
+    case 'standard': {
+      standardDrawerApi.setData(row).open();
+      break;
+    }
     case 'delete': {
       onDelete(row);
       break;
@@ -73,6 +84,7 @@ function onActionClick({
   }
 }
 
+/** 停用选定产品，并在操作完成后刷新列表。 */
 function onDelete(row: ProductApi.Product) {
   const hideLoading = message.loading({
     content: `正在停用 ${row.product_name}`,
@@ -92,6 +104,7 @@ function onDelete(row: ProductApi.Product) {
     });
 }
 
+/** 重新查询当前产品列表。 */
 function onRefresh() {
   gridApi.query();
 }
@@ -100,6 +113,7 @@ function onRefresh() {
 <template>
   <Page auto-content-height>
     <FormDrawer @success="onRefresh" />
+    <StandardDrawer />
     <Grid table-title="产品规格">
       <template #toolbar-tools>
         <Button type="primary" @click="formDrawerApi.setData(null).open()">
