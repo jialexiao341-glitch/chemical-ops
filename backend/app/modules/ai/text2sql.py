@@ -29,6 +29,7 @@ from app.modules.inventory.model import InventoryBalance, InventoryBalanceStatus
 from app.modules.chemicals.model import Chemical
 from app.modules.operation_exceptions.model import OperationException
 from app.modules.products.model import Product
+from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem, Unit
 from app.modules.rfqs.model import RFQ, RFQItem
@@ -242,14 +243,8 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             .order_by(PurchaseOrder.po_no, Delivery.delivery_no, DeliveryItem.line_no)
             .limit(plan.limit + 1)
         )
-        if user is not None:
-            role_codes = set(get_user_role_codes(db, user.id)) if db is not None else set()
-            if role_codes.intersection({"SYS_ADMIN", "PROCUREMENT_MANAGER"}):
-                pass
-            elif user.department_id is not None:
-                statement = statement.where(PurchaseOrder.department_id == user.department_id)
-            else:
-                statement = statement.where(PurchaseOrder.buyer_id == user.id)
+        if user is not None and db is not None:
+            statement = statement.where(order_read_condition(user, get_user_role_codes(db, user.id)))
         return statement
     if plan.dataset == "inventory_by_batch":
         product_ids = next(
@@ -490,12 +485,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             .limit(plan.limit + 1)
         )
         if user is not None and db is not None:
-            role_codes = set(get_user_role_codes(db, user.id))
-            if not role_codes.intersection({"SYS_ADMIN", "PROCUREMENT_MANAGER"}):
-                if user.department_id is not None:
-                    statement = statement.where(PurchaseOrder.department_id == user.department_id)
-                else:
-                    statement = statement.where(PurchaseOrder.buyer_id == user.id)
+            statement = statement.where(order_read_condition(user, get_user_role_codes(db, user.id)))
         return statement
     if plan.dataset == "supplier_quote_delivery_profile":
         supplier_ids = next((item.value for item in plan.filters if item.field == "supplier_id" and item.operator == "in"), [])
@@ -644,6 +634,16 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         warehouse_ids = accessible_warehouse_ids(db, user)
         if warehouse_ids is not None:
             stmt = stmt.where(InventoryTransaction.warehouse_id.in_(warehouse_ids))
+    if user is not None and db is not None and plan.dataset in {"purchase_orders", "finance_reconciliations", "finance_invoices", "finance_payments"}:
+        condition = order_read_condition(user, get_user_role_codes(db, user.id))
+        if plan.dataset == "purchase_orders":
+            stmt = stmt.where(condition)
+        else:
+            stmt = stmt.where(model.po_id.in_(select(PurchaseOrder.id).where(condition)))
+    if user is not None and db is not None and plan.dataset == "deliveries":
+        roles = set(get_user_role_codes(db, user.id))
+        if "WAREHOUSE" not in roles:
+            stmt = stmt.where(Delivery.po_id.in_(select(PurchaseOrder.id).where(order_read_condition(user, roles))))
     if group_keys: stmt = stmt.group_by(*(aliases[group_key] for group_key in group_keys))
     stmt = stmt.order_by(desc("metric_value") if plan.order == "desc" else "metric_value")
     return stmt.limit(plan.limit + 1)

@@ -15,10 +15,10 @@ def get_reconciliation(db: Session, reconciliation_id: int, *, for_update: bool 
     return db.scalar(statement)
 
 
-def list_reconciliations(db: Session, *, status: str | None, supplier_id: int | None, page: int, page_size: int):
+def list_reconciliations(db: Session, *, scope_condition=None, status: str | None, supplier_id: int | None, page: int, page_size: int):
     """分页查询对账单。"""
 
-    conditions = []
+    conditions = [scope_condition] if scope_condition is not None else []
     if status:
         conditions.append(FinanceReconciliation.status == status)
     if supplier_id is not None:
@@ -37,10 +37,10 @@ def get_invoice(db: Session, invoice_id: int, *, for_update: bool = False) -> Fi
     return db.scalar(statement)
 
 
-def list_invoices(db: Session, *, reconciliation_id: int | None, status: str | None, page: int, page_size: int):
+def list_invoices(db: Session, *, scope_condition=None, reconciliation_id: int | None, status: str | None, page: int, page_size: int):
     """分页查询发票。"""
 
-    conditions = []
+    conditions = [scope_condition] if scope_condition is not None else []
     if reconciliation_id is not None:
         conditions.append(FinanceInvoice.reconciliation_id == reconciliation_id)
     if status:
@@ -59,10 +59,10 @@ def get_payment(db: Session, payment_id: int, *, for_update: bool = False) -> Fi
     return db.scalar(statement)
 
 
-def list_payments(db: Session, *, reconciliation_id: int | None, status: str | None, page: int, page_size: int):
+def list_payments(db: Session, *, scope_condition=None, reconciliation_id: int | None, status: str | None, page: int, page_size: int):
     """分页查询付款记录。"""
 
-    conditions = []
+    conditions = [scope_condition] if scope_condition is not None else []
     if reconciliation_id is not None:
         conditions.append(FinancePayment.reconciliation_id == reconciliation_id)
     if status:
@@ -81,10 +81,10 @@ def get_settlement(db: Session, settlement_id: int, *, for_update: bool = False)
     return db.scalar(statement)
 
 
-def list_settlements(db: Session, *, status: str | None, supplier_id: int | None, page: int, page_size: int):
+def list_settlements(db: Session, *, scope_condition=None, status: str | None, supplier_id: int | None, page: int, page_size: int):
     """分页查询结算单。"""
 
-    conditions = []
+    conditions = [scope_condition] if scope_condition is not None else []
     if status:
         conditions.append(FinanceSettlement.status == status)
     if supplier_id is not None:

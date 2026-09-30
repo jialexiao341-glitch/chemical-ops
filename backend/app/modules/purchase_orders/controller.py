@@ -54,7 +54,7 @@ def get_order(
 ) -> PurchaseOrderRead:
     """查询采购订单、明细、审批和事件。"""
 
-    return service.get_order(db, user, order_id)
+    return service.read_order(db, user, order_id)
 
 
 @router.patch("/{order_id}", response_model=PurchaseOrderRead, summary="更新采购订单草稿")

@@ -81,7 +81,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db), user: Use
 def list_invoices(reconciliation_id: int | None = Query(default=None, gt=0), invoice_status: str | None = Query(default=None, alias="status", pattern="^(DRAFT|SUBMITTED|VERIFIED|REJECTED|VOIDED)$"), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), _: User = Depends(require_permission("finance.invoices.read"))) -> InvoicePage:
     """按对账单和状态分页查询发票。"""
 
-    items, total = service.list_invoices(db, reconciliation_id=reconciliation_id, status=invoice_status, page=page, page_size=page_size)
+    items, total = service.list_invoices(db, _, reconciliation_id=reconciliation_id, status=invoice_status, page=page, page_size=page_size)
     return InvoicePage(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -89,7 +89,7 @@ def list_invoices(reconciliation_id: int | None = Query(default=None, gt=0), inv
 def get_invoice(invoice_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("finance.invoices.read"))) -> InvoiceRead:
     """查询发票详情。"""
 
-    return service.get_invoice(db, invoice_id)
+    return service.get_invoice(db, _, invoice_id)
 
 
 @router.post("/invoices/{invoice_id}/submit", response_model=InvoiceRead, summary="提交发票核验")
@@ -124,7 +124,7 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db), user: Use
 def list_payments(reconciliation_id: int | None = Query(default=None, gt=0), payment_status: str | None = Query(default=None, alias="status", pattern="^(REQUESTED|APPROVED|PAID|REJECTED|CANCELLED)$"), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), _: User = Depends(require_permission("finance.payments.read"))) -> PaymentPage:
     """按对账单和状态分页查询付款记录。"""
 
-    items, total = service.list_payments(db, reconciliation_id=reconciliation_id, status=payment_status, page=page, page_size=page_size)
+    items, total = service.list_payments(db, _, reconciliation_id=reconciliation_id, status=payment_status, page=page, page_size=page_size)
     return PaymentPage(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -132,7 +132,7 @@ def list_payments(reconciliation_id: int | None = Query(default=None, gt=0), pay
 def get_payment(payment_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("finance.payments.read"))) -> PaymentRead:
     """查询付款申请和付款结果。"""
 
-    return service.get_payment(db, payment_id)
+    return service.get_payment(db, _, payment_id)
 
 
 @router.post("/payments/{payment_id}/approve", response_model=PaymentRead, summary="审批付款申请")
@@ -167,7 +167,7 @@ def create_settlement(data: SettlementCreate, db: Session = Depends(get_db), use
 def list_settlements(settlement_status: str | None = Query(default=None, alias="status", pattern="^(DRAFT|CONFIRMED|CANCELLED)$"), supplier_id: int | None = Query(default=None, gt=0), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), _: User = Depends(require_permission("finance.settlements.read"))) -> SettlementPage:
     """按状态和供应商分页查询结算单。"""
 
-    items, total = service.list_settlements(db, status=settlement_status, supplier_id=supplier_id, page=page, page_size=page_size)
+    items, total = service.list_settlements(db, _, status=settlement_status, supplier_id=supplier_id, page=page, page_size=page_size)
     return SettlementPage(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -175,7 +175,7 @@ def list_settlements(settlement_status: str | None = Query(default=None, alias="
 def get_settlement(settlement_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("finance.settlements.read"))) -> SettlementRead:
     """查询结算单详情。"""
 
-    return service.get_settlement(db, settlement_id)
+    return service.get_settlement(db, _, settlement_id)
 
 
 @router.post("/settlements/{settlement_id}/confirm", response_model=SettlementRead, summary="确认采购结算单")

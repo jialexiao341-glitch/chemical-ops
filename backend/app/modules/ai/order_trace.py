@@ -15,6 +15,7 @@ from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction
 from app.modules.inventory_returns.model import InventoryReturnRequest
+from app.modules.purchase_orders.scope import ORDER_READ_ALL_ROLES
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
 from app.modules.purchase_requests.model import PurchaseRequest
 from app.modules.quality_acceptances.model import QualityAcceptance
@@ -85,7 +86,7 @@ def _record(no: str | None, status: str | None, updated_at: datetime | None, **v
 
 
 def _require_order_scope(db: Session, user: User, order: PurchaseOrder, roles: set[str]) -> None:
-    if "SYS_ADMIN" in roles or "PROCUREMENT_MANAGER" in roles:
+    if ORDER_READ_ALL_ROLES.intersection(roles):
         return
     if user.department_id is not None:
         if order.department_id != user.department_id:

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
+from app.modules.purchase_orders.scope import ORDER_READ_ALL_ROLES, order_read_condition
 from app.modules.purchase_orders import crud
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderApproval, PurchaseOrderEvent, PurchaseOrderItem
 from app.modules.purchase_orders.schema import (
@@ -150,10 +151,18 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate) -> Purchase
 def list_orders(db: Session, user: User, *, keyword: str | None, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询采购订单。"""
 
-    can_manage_all = _can_manage_all(db, user)
+    can_manage_all = bool(ORDER_READ_ALL_ROLES.intersection(get_user_role_codes(db, user.id)))
     buyer_id = None if can_manage_all or user.department_id is not None else user.id
     department_id = user.department_id if not can_manage_all else None
     return crud.list_page(db, buyer_id=buyer_id, department_id=department_id, keyword=keyword, status=status, page=page, page_size=page_size)
+
+
+def read_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
+    """读取订单来源；写操作继续使用 get_order 的采购范围。"""
+    order = db.scalar(select(PurchaseOrder).where(PurchaseOrder.id == order_id, order_read_condition(user, get_user_role_codes(db, user.id))))
+    if order is None:
+        raise ResourceNotFoundError(f"采购订单 {order_id} 不存在")
+    return order
 
 
 def get_order(db: Session, user: User, order_id: int, *, for_update: bool = False) -> PurchaseOrder:

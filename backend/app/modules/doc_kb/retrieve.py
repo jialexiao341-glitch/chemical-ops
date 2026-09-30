@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -53,36 +54,67 @@ class DocSectionHit:
     updated_at: str | None = None
 
 
+def _normalized_name(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value).casefold()
+    value = re.sub(r"[‐‑‒–—−]", "-", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _name_pattern(name: str) -> str:
+    parts = re.split(r"[\s-]+", _normalized_name(name))
+    pattern = r"[\s-]*".join(re.escape(part) for part in parts)
+    if re.match(r"[a-z0-9]", parts[0]):
+        pattern = r"(?<![a-z0-9])" + pattern
+    if re.search(r"[a-z0-9]$", parts[-1]):
+        pattern += r"(?![a-z0-9])"
+    return pattern
+
+
 async def resolve_doc_targets(db: Session, question: str) -> list[str]:
-    """从问题中解析目标物质的 CAS 列表：合法 CAS + 库内中英文名匹配。"""
-
+    """Resolve explicit CAS, master aliases and parsed document names without guessing."""
     from app.modules.chemicals.model import Chemical
+    from app.modules.doc_kb.model import AiDocument
+    from app.core.errors import BusinessValidationError
 
-    targets: list[str] = list(extract_valid_cas(question))
-    lowered = question.lower()
-    rows = db.execute(
-        select(Chemical.cas_no, Chemical.chemical_name, Chemical.english_name, Chemical.alias_text)
-        .where(Chemical.status == "ACTIVE")
-    ).all()
-    name_hits: list[tuple[int, str]] = []
-    for cas_no, chemical_name, english_name, alias_text in rows:
-        if not cas_no:
+    targets = list(extract_valid_cas(unicodedata.normalize("NFKC", question)))
+    candidates: dict[str, set[str]] = {}
+    def add(cas, name):
+        if cas and isinstance(name, str):
+            normalized = _normalized_name(name)
+            if len(normalized) >= MIN_NAME_LENGTH:
+                candidates.setdefault(normalized, set()).add(cas)
+
+    rows = db.execute(select(Chemical.cas_no, Chemical.chemical_name, Chemical.english_name, Chemical.alias_text).where(Chemical.status == "ACTIVE")).all()
+    for cas, chinese, english, aliases in rows:
+        for name in [chinese, english, *re.split(r"[,;，；、|/\n]+", aliases or "")]:
+            add(cas, name)
+    docs = db.execute(select(AiDocument.cas_no, AiDocument.name_zh, AiDocument.meta_json).where(AiDocument.parse_status == "PARSED")).all()
+    for cas, chinese, metadata in docs:
+        add(cas, chinese)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        english = metadata.get("name_en")
+        if _normalized_name(english or "") not in {"technical data sheet", "safety data sheet", "material safety data sheet"}:
+            add(cas, english)
+        synonyms = metadata.get("synonyms", [])
+        if isinstance(synonyms, str):
+            synonyms = re.split(r"[,;，；、|/\n]+", synonyms)
+        if isinstance(synonyms, list):
+            for name in synonyms:
+                add(cas, name)
+    normalized_question = _normalized_name(question)
+    hits = [(match.start(), match.end(), name, cas_list) for name, cas_list in candidates.items() for match in re.finditer(_name_pattern(name), normalized_question)]
+    occupied: list[tuple[int, int]] = []
+    for start, end, name, cas_list in sorted(hits, key=lambda hit: (-(hit[1]-hit[0]), hit[0], hit[2])):
+        if any(start < prior_end and end > prior_start for prior_start, prior_end in occupied):
             continue
-        names = [chemical_name, english_name]
-        if alias_text:
-            names.extend(re.split(r"[,;，；、|/]+", str(alias_text)))
-        for name in names:
-            if not name:
-                continue
-            cleaned = str(name).strip()
-            # 过短名字（如"酸"）会误命中，中英文都要求最小长度
-            if len(cleaned) >= MIN_NAME_LENGTH and cleaned.lower() in lowered:
-                name_hits.append((len(cleaned), cas_no))
-                break
-    # 名称长的更具体，优先；每个 CAS 只保留一次
-    for _length, cas_no in sorted(name_hits, key=lambda item: -item[0]):
-        if cas_no not in targets:
-            targets.append(cas_no)
+        occupied.append((start, end))
+        if len(cas_list) > 1:
+            if not targets or not cas_list.intersection(targets):
+                raise BusinessValidationError(f"名称“{name}”对应多个化学品，请使用 CAS 号明确目标")
+            continue
+        cas = next(iter(cas_list))
+        if cas not in targets:
+            targets.append(cas)
         if len(targets) >= MAX_TARGET_CAS:
             break
     return targets

@@ -27,7 +27,8 @@ from app.modules.inventory.model import InventoryBalance, InventoryBalanceStatus
 from app.modules.operation_exceptions import service as exception_service
 from app.modules.products.model import Product
 from app.modules.purchase_orders import service as order_service
-from app.modules.purchase_orders.model import PurchaseOrderItem
+from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
+from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.rfqs import service as rfq_service
 from app.modules.rfqs.model import RFQItem, SupplierQuote, SupplierQuoteItem
@@ -165,7 +166,7 @@ def _batch_impact(db: Session, user: User, balance_id: int) -> BusinessInsight:
 
 def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsight:
     """按订单行核对到货；发票和付款保持单据级口径。"""
-    order = order_service.get_order(db, user, order_id)
+    order = order_service.read_order(db, user, order_id)
     result = _result("finance-difference", f"订单 {order.po_no} 财务差异", "财务对账人员、采购员", "按订单行核对到货数量和含税估算金额；发票、付款按对账单汇总。")
     _evidence(result, "订单金额", f"{order.order_amount:.2f} {order.currency_code}", order.po_no, f"/procurement/purchase-orders/{order.id}")
     lines = db.scalars(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == order.id).order_by(PurchaseOrderItem.line_no)).all()
@@ -277,10 +278,13 @@ def _supplier_score(db: Session, user: User, supplier_id: int) -> BusinessInsigh
     if supplier is None:
         raise ResourceNotFoundError("供应商不存在")
     result = _result("supplier-score", f"{supplier.supplier_name} 履约画像", "采购员、采购主管", "按已录入的订单和到货记录展示分项指标。")
-    order_page, order_count = order_service.list_orders(db, user, keyword=None, status=None, page=1, page_size=100)
-    orders = [x for x in order_page if x.supplier_id == supplier_id and x.status not in {"DRAFT", "CANCELLED"}]
-    delivery_page, delivery_count = delivery_service.list_deliveries(db, user, keyword=None, status=None, page=1, page_size=100)
-    deliveries = [x for x in delivery_page if x.supplier_id == supplier_id]
+    roles = set(system_crud.get_user_role_codes(db, user.id))
+    orders = db.scalars(select(PurchaseOrder).where(PurchaseOrder.supplier_id == supplier_id, PurchaseOrder.status.not_in({"DRAFT", "CANCELLED"}), order_read_condition(user, roles))).all()
+    delivery_query = select(Delivery).join(PurchaseOrder, Delivery.po_id == PurchaseOrder.id).where(Delivery.supplier_id == supplier_id)
+    if not delivery_service._can_manage_all(db, user):
+        delivery_query = delivery_query.where(order_read_condition(user, roles))
+    deliveries = db.scalars(delivery_query).all()
+    _evidence(result, "统计范围", "当前权限内该供应商全部已录入记录；订单排除草稿和取消，未限定日期", "按供应商筛选后统计完整样本")
     dated = [x for x in deliveries if x.expected_arrival_date and x.actual_arrival_date]
     timely = sum(x.actual_arrival_date <= x.expected_arrival_date for x in dated)
     _evidence(result, "采购订单", len(orders), "采购订单", "/procurement/purchase-orders")
@@ -292,8 +296,6 @@ def _supplier_score(db: Session, user: User, supplier_id: int) -> BusinessInsigh
     acceptance_rows = db.scalars(select(QualityAcceptance).where(QualityAcceptance.delivery_id.in_(delivery_ids))).all() if delivery_ids else []
     _evidence(result, "验收结果样本", f"合格 {sum(x.result == 'PASSED' for x in acceptance_rows)}，部分合格 {sum(x.result == 'PARTIAL' for x in acceptance_rows)}，不合格 {sum(x.result == 'FAILED' for x in acceptance_rows)}", "质量验收记录", "/quality/acceptances")
     result.limitations.append("未配置评分权重、同物料可比价格和最小样本量，因此不计算综合分或推荐排名。")
-    if order_count > 100 or delivery_count > 100:
-        result.limitations.append("当前统计基于用户可见的最近 100 条订单及到货记录，样本不完整。")
     return result
 
 
@@ -320,7 +322,7 @@ def _supplier_change(db: Session, user: User, rfq_id: int) -> BusinessInsight:
             linked_lines = db.scalars(select(PurchaseOrderItem).where(PurchaseOrderItem.source_quote_item_id == line.id)).all()
             for order_line in linked_lines:
                 try:
-                    order = order_service.get_order(db, user, order_line.po_id)
+                    order = order_service.read_order(db, user, order_line.po_id)
                 except ResourceNotFoundError:
                     continue
                 _evidence(result, "已引用该报价的采购订单", f"{order.po_no} · 下单价 {order_line.unit_price} · 数量 {order_line.order_quantity}", f"订单明细 #{order_line.id}", f"/procurement/purchase-orders/{order.id}")
@@ -353,20 +355,34 @@ def _stocktake_explain(db: Session, user: User, stocktake_id: int) -> BusinessIn
 def _replenishment(db: Session, user: User, balance_id: int) -> BusinessInsight:
     """汇总三十天同产品同单位的出库记录及当前余额。"""
     balance = _balance(db, user, balance_id)
-    cutoff = date.today() - timedelta(days=30)
-    query = select(InventoryTransaction).where(InventoryTransaction.product_id == balance.product_id, InventoryTransaction.unit_id == balance.unit_id, InventoryTransaction.created_at >= cutoff)
+    today = date.today()
+    cutoff = today - timedelta(days=29)
+    query = select(InventoryTransaction).where(InventoryTransaction.product_id == balance.product_id, InventoryTransaction.unit_id == balance.unit_id, InventoryTransaction.created_at >= cutoff, InventoryTransaction.created_at < today + timedelta(days=1))
     scope = inventory_service.accessible_warehouse_ids(db, user)
+    if scope is not None:
+        query = query.where(InventoryTransaction.warehouse_id.in_(scope))
     txs = db.scalars(query).all()
-    outbound = [x for x in txs if x.transaction_type == "OUTBOUND" and (scope is None or x.warehouse_id in scope)]
+    outbound = [x for x in txs if x.transaction_type == "OUTBOUND" and x.source_type == "ISSUE_REQUEST"]
     consumed = sum((abs(x.quantity) for x in outbound), Decimal(0))
-    result = _result("replenishment", "近 30 天消耗观察", "仓管、采购员", "仅按同产品、同单位的库存流水汇总，不生成采购建议量。")
-    _evidence(result, "当前余额", f"{balance.quantity} · 单位 #{balance.unit_id}", f"库存余额 #{balance.id}", "/warehouse/inventory")
-    _evidence(result, "已记录出库", f"{consumed} · {len(outbound)} 笔", "近 30 天库存流水", "/warehouse/transactions")
+    balances_query = select(InventoryBalance).where(InventoryBalance.product_id == balance.product_id, InventoryBalance.unit_id == balance.unit_id)
+    if scope is not None:
+        balances_query = balances_query.where(InventoryBalance.warehouse_id.in_(scope))
+    balances = db.scalars(balances_query).all()
+    available = sum((max(Decimal(0), x.quantity - x.locked_quantity) for x in balances if x.status == "AVAILABLE"), Decimal(0))
+    result = _result("replenishment", "近 30 天领用观察", "仓管、采购员", "统计当前权限内同产品、同单位的领用出库；调拨和退货不计消耗。")
+    _evidence(result, "统计范围", f"{cutoff} 至 {today}；可见仓库全部批次和库位，同产品同单位", "库存余额与流水使用相同仓库范围")
+    _evidence(result, "范围内可用库存", f"{available} · 单位 #{balance.unit_id}", "可用状态余额扣除锁定量", "/warehouse/inventory")
+    _evidence(result, "已记录领用出库", f"{consumed} · {len(outbound)} 笔", "近 30 天 ISSUE_REQUEST 流水", "/warehouse/transactions")
+    excluded = [x for x in txs if x.transaction_type == "OUTBOUND" and x.source_type != "ISSUE_REQUEST"]
+    source_labels = {"INVENTORY_TRANSFER": "调拨出库", "INVENTORY_RETURN": "供应商退货"}
+    for source in sorted({x.source_type or "未记录来源" for x in excluded}):
+        rows = [x for x in excluded if (x.source_type or "未记录来源") == source]
+        _evidence(result, f"不计消耗：{source_labels.get(source, '其他出库（来源待核查）')}", f"{sum((abs(x.quantity) for x in rows), Decimal(0))} · {len(rows)} 笔", "其他出库来源")
     if consumed > 0:
         daily = consumed / Decimal(30)
-        cover = max(Decimal(0), balance.quantity - balance.locked_quantity) / daily
-        _evidence(result, "粗略日均 / 可用量覆盖天数", f"{daily.quantize(Decimal('0.01'))} / {cover.quantize(Decimal('0.1'))} 天", "按近 30 天记录均摊估算")
-    result.limitations.append("未验证历史连续性、在途量、交期稳定性及预测误差，不输出预计缺口或补货量。")
+        cover = available / daily
+        _evidence(result, "粗略日均 / 可用量覆盖天数", f"{daily.quantize(Decimal('0.01'))} / {cover.quantize(Decimal('0.1'))} 天", "按范围内近 30 天领用均摊估算")
+    result.limitations.append("领用记录不等于实际生产消耗；未验证历史连续性、在途量、交期稳定性及预测误差，不输出预计缺口或补货量。")
     return result
 
 

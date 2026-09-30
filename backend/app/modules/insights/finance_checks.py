@@ -49,24 +49,24 @@ def _can_handle(db: Session, user: User, order_id: int) -> bool:
     if "SYS_ADMIN" not in system_crud.get_user_role_codes(db, user.id) and "finance.reconciliations.write" not in permissions:
         return False
     try:
-        order_service.get_order(db, user, order_id)
+        order_service.read_order(db, user, order_id)
     except ResourceNotFoundError:
         return False
     return True
 
 
 def list_checks(db: Session, user: User, order_id: int) -> list[FinanceDifferenceCheck]:
-    order_service.get_order(db, user, order_id)
+    order_service.read_order(db, user, order_id)
     return list(db.scalars(select(FinanceDifferenceCheck).where(FinanceDifferenceCheck.order_id == order_id).order_by(FinanceDifferenceCheck.id)).all())
 
 
 def list_assignees(db: Session, user: User, order_id: int) -> list[dict[str, int | str]]:
-    order_service.get_order(db, user, order_id)
+    order_service.read_order(db, user, order_id)
     return [{"id": person.id, "name": person.display_name} for person in db.scalars(select(User).where(User.status == "ACTIVE").order_by(User.display_name)).all() if _can_handle(db, person, order_id)]
 
 
 def create_checks(db: Session, user: User, order_id: int, snapshot_id: int) -> list[FinanceDifferenceCheck]:
-    order = order_service.get_order(db, user, order_id)
+    order = order_service.read_order(db, user, order_id)
     snapshot = db.get(InsightSnapshot, snapshot_id)
     if snapshot is None or snapshot.created_by != user.id or snapshot.kind != "finance-difference" or snapshot.object_id != order.id:
         raise BusinessValidationError("请先保存当前财务差异分析")
@@ -92,7 +92,7 @@ def list_events(db: Session, user: User, order_id: int, check_id: int) -> list[F
 
 
 def update_check(db: Session, user: User, order_id: int, check_id: int, data: CheckItemUpdate) -> FinanceDifferenceCheck:
-    order_service.get_order(db, user, order_id)
+    order_service.read_order(db, user, order_id)
     item = db.scalar(select(FinanceDifferenceCheck).where(FinanceDifferenceCheck.id == check_id, FinanceDifferenceCheck.order_id == order_id).with_for_update())
     if item is None:
         raise ResourceNotFoundError("财务核查项不存在")

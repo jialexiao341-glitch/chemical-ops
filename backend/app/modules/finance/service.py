@@ -14,6 +14,8 @@ from app.modules.finance import crud
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
 from app.modules.finance.schema import InvoiceCreate, PaymentCreate, SettlementCreate
 from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.purchase_orders import service as order_service
+from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_role_codes
 from app.modules.system.model import User
@@ -23,12 +25,6 @@ def _now() -> datetime:
     """返回当前本地时间。"""
 
     return datetime.now()
-
-
-def _can_manage_all(db: Session, user: User) -> bool:
-    """判断用户是否可以查看和操作全部财务单据。"""
-
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "FINANCE_MANAGER", "FINANCE_CLERK"} & set(get_user_role_codes(db, user.id)))
 
 
 def _require_reconciliation(db: Session, reconciliation_id: int, *, for_update: bool = False) -> FinanceReconciliation:
@@ -67,11 +63,13 @@ def _require_settlement(db: Session, settlement_id: int, *, for_update: bool = F
     return settlement
 
 
-def _require_finance_scope(db: Session, user: User, supplier_id: int) -> None:
-    """校验非财务管理员只能访问自己的财务数据范围。"""
+def _require_finance_scope(db: Session, user: User, po_id: int) -> None:
+    order_service.read_order(db, user, po_id)
 
-    if not _can_manage_all(db, user) and supplier_id <= 0:
-        raise ResourceNotFoundError("财务记录不存在")
+
+def _scope_condition(db: Session, user: User, model):
+    visible_orders = select(PurchaseOrder.id).where(order_read_condition(user, get_user_role_codes(db, user.id)))
+    return model.po_id.in_(visible_orders)
 
 
 def _lock_order(db: Session, po_id: int) -> PurchaseOrder:
@@ -112,6 +110,7 @@ def _sum_payments(db: Session, reconciliation_id: int, *, paid_only: bool = Fals
 def create_reconciliation(db: Session, user: User, po_id: int, note: str | None) -> FinanceReconciliation:
     """为已完成并验收通过的采购订单创建对账单。"""
 
+    _require_finance_scope(db, user, po_id)
     order = _lock_order(db, po_id)
     _check_order_ready_for_reconciliation(db, order)
     if db.scalar(select(FinanceReconciliation).where(FinanceReconciliation.po_id == po_id)) is not None:
@@ -137,16 +136,14 @@ def create_reconciliation(db: Session, user: User, po_id: int, note: str | None)
 def list_reconciliations(db: Session, user: User, *, status: str | None, supplier_id: int | None, page: int, page_size: int):
     """按权限范围分页查询对账单。"""
 
-    if not _can_manage_all(db, user):
-        supplier_id = -1
-    return crud.list_reconciliations(db, status=status, supplier_id=supplier_id, page=page, page_size=page_size)
+    return crud.list_reconciliations(db, scope_condition=_scope_condition(db, user, FinanceReconciliation), status=status, supplier_id=supplier_id, page=page, page_size=page_size)
 
 
 def get_reconciliation(db: Session, user: User, reconciliation_id: int) -> FinanceReconciliation:
     """查询对账单详情并执行数据范围校验。"""
 
     reconciliation = _require_reconciliation(db, reconciliation_id)
-    _require_finance_scope(db, user, reconciliation.supplier_id)
+    _require_finance_scope(db, user, reconciliation.po_id)
     return reconciliation
 
 
@@ -154,6 +151,7 @@ def confirm_reconciliation(db: Session, user: User, reconciliation_id: int, reas
     """确认对账单，允许后续发起付款申请。"""
 
     reconciliation = _require_reconciliation(db, reconciliation_id, for_update=True)
+    _require_finance_scope(db, user, reconciliation.po_id)
     if reconciliation.status not in {"DRAFT", "DISPUTED"}:
         raise BusinessValidationError("只有草稿或争议中的对账单可以确认")
     reconciliation.status = "CONFIRMED"
@@ -170,6 +168,7 @@ def dispute_reconciliation(db: Session, user: User, reconciliation_id: int, reas
     """将对账单标记为争议状态并保留原因。"""
 
     reconciliation = _require_reconciliation(db, reconciliation_id, for_update=True)
+    _require_finance_scope(db, user, reconciliation.po_id)
     if reconciliation.status not in {"DRAFT", "CONFIRMED"}:
         raise BusinessValidationError("当前状态不允许发起对账争议")
     reconciliation.status = "DISPUTED"
@@ -183,6 +182,7 @@ def create_invoice(db: Session, user: User, data: InvoiceCreate) -> FinanceInvoi
     """为对账单录入发票，并校验发票金额不超过对账金额。"""
 
     reconciliation = _require_reconciliation(db, data.reconciliation_id, for_update=True)
+    _require_finance_scope(db, user, reconciliation.po_id)
     if reconciliation.status in {"CLOSED", "CANCELLED"}:
         raise BusinessValidationError("已关闭或已取消的对账单不能录入发票")
     if data.amount_incl_tax != data.amount_excl_tax + data.tax_amount:
@@ -214,16 +214,17 @@ def create_invoice(db: Session, user: User, data: InvoiceCreate) -> FinanceInvoi
     return _require_invoice(db, invoice.id)
 
 
-def list_invoices(db: Session, *, reconciliation_id: int | None, status: str | None, page: int, page_size: int):
+def list_invoices(db: Session, user: User, *, reconciliation_id: int | None, status: str | None, page: int, page_size: int):
     """分页查询发票。"""
 
-    return crud.list_invoices(db, reconciliation_id=reconciliation_id, status=status, page=page, page_size=page_size)
+    return crud.list_invoices(db, scope_condition=_scope_condition(db, user, FinanceInvoice), reconciliation_id=reconciliation_id, status=status, page=page, page_size=page_size)
 
 
 def submit_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
     """提交发票进入财务核验。"""
 
     invoice = _require_invoice(db, invoice_id, for_update=True)
+    _require_finance_scope(db, user, invoice.po_id)
     if invoice.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的发票可以提交核验")
     invoice.status = "SUBMITTED"
@@ -237,6 +238,7 @@ def verify_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
     """记录内部人工复核；当前不调用税务平台。"""
 
     invoice = _require_invoice(db, invoice_id, for_update=True)
+    _require_finance_scope(db, user, invoice.po_id)
     if invoice.status != "SUBMITTED":
         raise BusinessValidationError("只有已提交的发票可以核验")
     invoice.status = "VERIFIED"
@@ -251,6 +253,7 @@ def reject_invoice(db: Session, user: User, invoice_id: int, reason: str) -> Fin
     """驳回发票并记录可供前端展示的原因。"""
 
     invoice = _require_invoice(db, invoice_id, for_update=True)
+    _require_finance_scope(db, user, invoice.po_id)
     if invoice.status != "SUBMITTED":
         raise BusinessValidationError("只有已提交的发票可以驳回")
     invoice.status = "REJECTED"
@@ -260,16 +263,19 @@ def reject_invoice(db: Session, user: User, invoice_id: int, reason: str) -> Fin
     return _require_invoice(db, invoice.id)
 
 
-def get_invoice(db: Session, invoice_id: int) -> FinanceInvoice:
+def get_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
     """查询发票详情。"""
 
-    return _require_invoice(db, invoice_id)
+    value = _require_invoice(db, invoice_id)
+    _require_finance_scope(db, user, value.po_id)
+    return value
 
 
 def create_payment(db: Session, user: User, data: PaymentCreate) -> FinancePayment:
     """对已确认对账单发起付款申请。"""
 
     reconciliation = _require_reconciliation(db, data.reconciliation_id, for_update=True)
+    _require_finance_scope(db, user, reconciliation.po_id)
     if reconciliation.status != "CONFIRMED":
         raise BusinessValidationError("只有已确认的对账单可以发起付款")
     if _sum_payments(db, reconciliation.id) + data.amount > reconciliation.total_amount:
@@ -296,18 +302,21 @@ def create_payment(db: Session, user: User, data: PaymentCreate) -> FinancePayme
     return _require_payment(db, payment.id)
 
 
-def list_payments(db: Session, *, reconciliation_id: int | None, status: str | None, page: int, page_size: int):
+def list_payments(db: Session, user: User, *, reconciliation_id: int | None, status: str | None, page: int, page_size: int):
     """分页查询付款记录。"""
 
-    return crud.list_payments(db, reconciliation_id=reconciliation_id, status=status, page=page, page_size=page_size)
+    return crud.list_payments(db, scope_condition=_scope_condition(db, user, FinancePayment), reconciliation_id=reconciliation_id, status=status, page=page, page_size=page_size)
 
 
 def approve_payment(db: Session, user: User, payment_id: int) -> FinancePayment:
     """审批付款申请，并再次校验已核验发票和金额上限。"""
 
     payment = _require_payment(db, payment_id)
+    _require_finance_scope(db, user, payment.po_id)
     reconciliation = _require_reconciliation(db, payment.reconciliation_id, for_update=True)
+    _require_finance_scope(db, user, reconciliation.po_id)
     payment = _require_payment(db, payment_id, for_update=True)
+    _require_finance_scope(db, user, payment.po_id)
     if payment.status != "REQUESTED":
         raise BusinessValidationError("只有待审批付款可以审批")
     if reconciliation.status != "CONFIRMED":
@@ -326,6 +335,7 @@ def reject_payment(db: Session, user: User, payment_id: int, reason: str) -> Fin
     """驳回付款申请。"""
 
     payment = _require_payment(db, payment_id, for_update=True)
+    _require_finance_scope(db, user, payment.po_id)
     if payment.status != "REQUESTED":
         raise BusinessValidationError("只有待审批付款可以驳回")
     payment.status = "REJECTED"
@@ -339,6 +349,7 @@ def mark_payment_paid(db: Session, user: User, payment_id: int, transaction_ref:
     """登记人工核对的付款结果；不表示银行已与系统直连。"""
 
     payment = _require_payment(db, payment_id, for_update=True)
+    _require_finance_scope(db, user, payment.po_id)
     if payment.status != "APPROVED":
         raise BusinessValidationError("只有已审批付款可以登记付款结果")
     duplicate = db.scalar(select(FinancePayment).where(FinancePayment.transaction_ref == transaction_ref, FinancePayment.id != payment.id))
@@ -359,16 +370,19 @@ def mark_payment_paid(db: Session, user: User, payment_id: int, transaction_ref:
     return _require_payment(db, payment.id)
 
 
-def get_payment(db: Session, payment_id: int) -> FinancePayment:
+def get_payment(db: Session, user: User, payment_id: int) -> FinancePayment:
     """查询付款详情。"""
 
-    return _require_payment(db, payment_id)
+    value = _require_payment(db, payment_id)
+    _require_finance_scope(db, user, value.po_id)
+    return value
 
 
 def create_settlement(db: Session, user: User, data: SettlementCreate) -> FinanceSettlement:
     """为已足额付款的对账单创建结算单。"""
 
     reconciliation = _require_reconciliation(db, data.reconciliation_id, for_update=True)
+    _require_finance_scope(db, user, reconciliation.po_id)
     if reconciliation.status != "CONFIRMED":
         raise BusinessValidationError("只有已确认且未关闭的对账单可以创建结算单")
     if _sum_payments(db, reconciliation.id, paid_only=True) < reconciliation.total_amount:
@@ -394,18 +408,21 @@ def create_settlement(db: Session, user: User, data: SettlementCreate) -> Financ
     return _require_settlement(db, settlement.id)
 
 
-def list_settlements(db: Session, *, status: str | None, supplier_id: int | None, page: int, page_size: int):
+def list_settlements(db: Session, user: User, *, status: str | None, supplier_id: int | None, page: int, page_size: int):
     """分页查询结算单。"""
 
-    return crud.list_settlements(db, status=status, supplier_id=supplier_id, page=page, page_size=page_size)
+    return crud.list_settlements(db, scope_condition=_scope_condition(db, user, FinanceSettlement), status=status, supplier_id=supplier_id, page=page, page_size=page_size)
 
 
 def confirm_settlement(db: Session, user: User, settlement_id: int) -> FinanceSettlement:
     """确认结算单并原子关闭对账单。"""
 
     settlement = _require_settlement(db, settlement_id)
+    _require_finance_scope(db, user, settlement.po_id)
     reconciliation = _require_reconciliation(db, settlement.reconciliation_id, for_update=True)
+    _require_finance_scope(db, user, reconciliation.po_id)
     settlement = _require_settlement(db, settlement_id, for_update=True)
+    _require_finance_scope(db, user, settlement.po_id)
     if settlement.status != "DRAFT":
         raise BusinessValidationError("只有草稿结算单可以确认")
     if reconciliation.status != "CONFIRMED" or _sum_payments(db, reconciliation.id, paid_only=True) < reconciliation.total_amount:
@@ -424,6 +441,7 @@ def cancel_settlement(db: Session, user: User, settlement_id: int, reason: str) 
     """取消尚未确认的结算单。"""
 
     settlement = _require_settlement(db, settlement_id, for_update=True)
+    _require_finance_scope(db, user, settlement.po_id)
     if settlement.status != "DRAFT":
         raise BusinessValidationError("只有草稿结算单可以取消")
     settlement.status = "CANCELLED"
@@ -434,7 +452,9 @@ def cancel_settlement(db: Session, user: User, settlement_id: int, reason: str) 
     return _require_settlement(db, settlement.id)
 
 
-def get_settlement(db: Session, settlement_id: int) -> FinanceSettlement:
+def get_settlement(db: Session, user: User, settlement_id: int) -> FinanceSettlement:
     """查询结算单详情。"""
 
-    return _require_settlement(db, settlement_id)
+    value = _require_settlement(db, settlement_id)
+    _require_finance_scope(db, user, value.po_id)
+    return value
