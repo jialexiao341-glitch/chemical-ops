@@ -83,7 +83,7 @@ function unitName(id?: null | number) {
 </script>
 
 <template>
-  <Drawer :title="`采购申请 ${detail?.request_no ?? ''}`" class="w-[900px]">
+  <Drawer :title="`采购申请 ${detail?.request_no ?? ''}`" class="w-[900px] max-w-[100vw]">
     <Spin :spinning="loading">
       <Empty v-if="!detail && !loading" description="未找到该采购申请" />
       <div v-else-if="detail" class="space-y-6">

@@ -172,7 +172,7 @@ watch(
       </template>
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
-          <Button size="small" type="link" @click="itemsApi.setData(row.id).open()">对账明细</Button>
+          <Button size="small" type="link" @click="itemsApi.setData(row.id).open()">{{ row.items_version > 0 ? '对账明细' : '对账依据' }}</Button>
           <Button
             v-if="hasAccessByCodes(['finance.reconciliations.write']) && ['DRAFT', 'DISPUTED'].includes(row.status)"
             size="small"

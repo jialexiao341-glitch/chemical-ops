@@ -68,7 +68,7 @@ const title = computed(() => (isFreeze.value ? '冻结库存' : '解冻库存'))
 </script>
 
 <template>
-  <Modal :title="title" class="w-[520px]">
+  <Modal :title="title" class="w-[520px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         :message="

@@ -77,7 +77,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal title="创建结算单" class="w-[560px]">
+  <Modal title="创建结算单" class="w-[560px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert

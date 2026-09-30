@@ -42,6 +42,12 @@ export function useColumns(
     },
     { field: 'currency_code', title: '币种', width: 80 },
     {
+      field: 'items_version',
+      title: '明细依据',
+      width: 140,
+      formatter: ({ cellValue }) => Number(cellValue) > 0 ? `第 ${cellValue} 版快照` : '历史单据级记录',
+    },
+    {
       field: 'po_id',
       formatter: ({ cellValue }) => (cellValue ? `#${cellValue}` : '-'),
       title: '订单',

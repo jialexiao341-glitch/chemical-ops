@@ -2,7 +2,7 @@
 import { computed, watch } from 'vue';
 
 import { useAntdDesignTokens } from '@vben/hooks';
-import { preferences, usePreferences } from '@vben/preferences';
+import { usePreferences } from '@vben/preferences';
 
 import { App, ConfigProvider, StyleProvider, theme } from 'antdv-next';
 
@@ -18,14 +18,25 @@ const tokenTheme = computed(() => {
     ? [theme.darkAlgorithm]
     : [theme.defaultAlgorithm];
 
-  // antd 紧凑模式算法
-  if (preferences.app.compact) {
-    algorithm.push(theme.compactAlgorithm);
-  }
-
   return {
     algorithm,
-    token: tokens,
+    token: {
+      ...tokens,
+      fontFamily: "'Segoe UI', 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif",
+      fontSize: 14,
+      controlHeight: 32,
+      borderRadius: 6,
+    },
+    components: {
+      Table: {
+        cellPaddingBlock: 10,
+        cellPaddingInline: 12,
+        cellPaddingBlockSM: 8,
+        cellPaddingInlineSM: 12,
+        headerBorderRadius: 6,
+      },
+      Button: { fontWeight: 400 },
+    },
   };
 });
 
@@ -41,7 +52,11 @@ watch(
 <template>
   <!-- layer: antd 组件样式注入 @layer antd，让 Tailwind 工具类可以覆盖组件样式 -->
   <StyleProvider layer>
-    <ConfigProvider :locale="antdLocale" :theme="tokenTheme">
+    <ConfigProvider
+      :locale="antdLocale"
+      :theme="tokenTheme"
+      :button="{ autoInsertSpace: false }"
+    >
       <App>
         <RouterView />
       </App>

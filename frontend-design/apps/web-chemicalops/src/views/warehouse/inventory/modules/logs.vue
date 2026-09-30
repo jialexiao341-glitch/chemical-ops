@@ -64,7 +64,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="`库存批次 #${balanceId ?? ''} 状态变更记录`" class="w-[720px]">
+  <Drawer :title="`库存批次 #${balanceId ?? ''} 状态变更记录`" class="w-[720px] max-w-[100vw]">
     <Spin :spinning="loading">
       <Empty v-if="logs.length === 0 && !loading" description="暂无变更记录" />
       <Table

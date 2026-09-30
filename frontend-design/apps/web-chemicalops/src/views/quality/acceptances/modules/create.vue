@@ -60,7 +60,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal title="创建质量验收" class="w-[540px]">
+  <Modal title="创建质量验收" class="w-[540px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert

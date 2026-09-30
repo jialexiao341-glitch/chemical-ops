@@ -101,7 +101,7 @@ async function onWarehouseChange(value: number) {
 </script>
 
 <template>
-  <Modal title="库存入库" class="w-[560px]">
+  <Modal title="库存入库" class="w-[560px] max-w-[100vw]">
     <Spin :spinning="loadingRefs">
       <div class="space-y-4 px-1">
         <Alert

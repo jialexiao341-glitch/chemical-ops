@@ -93,7 +93,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="titleText" class="w-[920px]">
+  <Drawer :title="titleText" class="w-[920px] max-w-[100vw]">
     <Spin :spinning="loading">
       <Empty v-if="!detail && !loading" description="未找到该申请" />
       <div v-else-if="detail" class="space-y-5">

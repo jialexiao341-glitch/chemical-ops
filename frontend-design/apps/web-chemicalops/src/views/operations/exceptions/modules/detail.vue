@@ -379,7 +379,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="titleText" class="w-[1000px]">
+  <Drawer :title="titleText" class="w-[1000px] max-w-[100vw]">
     <BusinessInsightDrawer ref="insightDrawer" @changed="reload()" />
     <TaskFormModal @success="reload()" />
     <Spin :spinning="loading">

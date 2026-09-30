@@ -66,7 +66,7 @@ const title = computed(() => `确认中选 · ${payload.value?.supplierName ?? '
 </script>
 
 <template>
-  <Modal :title="title" class="w-[540px]">
+  <Modal :title="title" class="w-[540px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         message="确认后该询价单关闭，其他已提交报价会被置为未中选，且不可撤销。"

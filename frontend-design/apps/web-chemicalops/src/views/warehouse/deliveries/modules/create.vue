@@ -170,7 +170,7 @@ const columns = [
 </script>
 
 <template>
-  <Modal title="登记到货计划" class="w-[1100px]">
+  <Modal title="登记到货计划" class="w-[1100px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert
@@ -178,7 +178,7 @@ const columns = [
           type="info"
           show-icon
         />
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <div class="mb-2 text-sm">采购订单</div>
             <Select

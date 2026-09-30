@@ -1,7 +1,7 @@
 /**
  * 应用级样式覆盖。
  *
- * 这里只放对 Vben 内置组件的少量调整，业务样式一律走 Tailwind 工具类。
+ * 集中维护字体、列表密度和筛选栏尺寸；业务局部布局继续使用 Tailwind。
  */
 
 /**
@@ -19,4 +19,114 @@
 aside a:has(img[alt='ChemicalOps']) {
   justify-content: center;
   width: 100%;
+}
+
+/* Shared business UI: 14px body, 16px section titles, 32px controls.
+ * Keep Ant Design/Vben colors and focus states; only normalize typography,
+ * density and responsive filter sizing in this application's adapter. */
+:root {
+  --chemicalops-font: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif;
+  --font-family: var(--chemicalops-font);
+}
+
+body,
+.vxe-table,
+.vxe-grid,
+.vxe-toolbar,
+.vxe-pager {
+  font-family: var(--chemicalops-font);
+  font-size: 14px;
+}
+
+[data-layout-region='page-content'] {
+  min-width: 0;
+}
+
+.chemicalops-grid {
+  --vxe-ui-font-family: var(--chemicalops-font);
+  --vxe-ui-font-size-small: 14px;
+  --vxe-ui-font-size-mini: 14px;
+  min-width: 0;
+}
+
+.chemicalops-grid .vxe-toolbar--actions .font-bold {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.chemicalops-grid .vxe-header--column {
+  font-weight: 600;
+}
+
+.chemicalops-grid .vxe-button {
+  height: 32px;
+}
+
+.chemicalops-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  min-width: 0;
+  padding: 4px 8px;
+}
+
+.chemicalops-filter-field {
+  flex: 0 1 300px;
+  width: 300px;
+  min-width: 0;
+  max-width: 100%;
+  padding-bottom: 0;
+}
+
+.chemicalops-filter-choice {
+  flex-basis: 230px;
+  width: 230px;
+}
+
+.chemicalops-filter-range {
+  flex-basis: 360px;
+  width: 360px;
+}
+
+.chemicalops-filter-label {
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.chemicalops-filter-field :is(.ant-input, .ant-input-affix-wrapper, .ant-select, .ant-picker, .ant-input-number) {
+  width: 100%;
+  min-width: 0;
+}
+
+.chemicalops-filter-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+  gap: 8px;
+  padding-bottom: 0;
+}
+
+.vxe-table--body td,
+.ant-table-tbody > tr > td {
+  font-variant-numeric: tabular-nums;
+}
+
+.ant-table-thead > tr > th {
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .chemicalops-filter-field,
+  .chemicalops-filter-choice,
+  .chemicalops-filter-range {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .chemicalops-filter-actions {
+    flex-basis: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
 }

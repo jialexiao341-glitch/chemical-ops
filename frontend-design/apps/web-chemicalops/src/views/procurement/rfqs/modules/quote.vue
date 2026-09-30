@@ -158,7 +158,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
 </script>
 
 <template>
-  <Modal :title="title" class="w-[1200px]">
+  <Modal :title="title" class="w-[1200px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert
@@ -166,7 +166,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
           type="info"
           show-icon
         />
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <div class="mb-2 text-sm">
               报价供应商 <span class="text-red-500">*</span>

@@ -1,8 +1,12 @@
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
+import type { InventoryApi } from '#/api';
 
 import { getProductListApi } from '#/api';
-import { INVENTORY_TRANSACTION_TYPE_DICT } from '#/constants/dictionary';
+import {
+  INVENTORY_TRANSACTION_SOURCE_TYPE_DICT,
+  INVENTORY_TRANSACTION_TYPE_DICT,
+} from '#/constants/dictionary';
 import { formatDateTime, formatQuantity } from '#/utils/format';
 
 /** 列表筛选条件 */
@@ -39,6 +43,27 @@ export function useGridFormSchema(): VbenFormSchema[] {
   ];
 }
 
+function formatTransactionType(row: InventoryApi.InventoryTransaction): string {
+  if (
+    row.source_type === 'TRANSFER_REQUEST' ||
+    row.source_type === 'INVENTORY_TRANSFER'
+  ) {
+    if (
+      row.transaction_type === 'INBOUND' ||
+      row.transaction_type === 'TRANSFER_IN'
+    ) {
+      return '调拨入库';
+    }
+    if (
+      row.transaction_type === 'OUTBOUND' ||
+      row.transaction_type === 'TRANSFER_OUT'
+    ) {
+      return '调拨出库';
+    }
+  }
+  return INVENTORY_TRANSACTION_TYPE_DICT.label(row.transaction_type);
+}
+
 /**
  * 列表列定义。
  *
@@ -52,13 +77,11 @@ export function useColumns(
   return [
     { field: 'transaction_no', minWidth: 190, title: '流水号' },
     {
-      cellRender: {
-        name: 'CellTag',
-        options: INVENTORY_TRANSACTION_TYPE_DICT.items,
-      },
+      formatter: ({ row }: { row: InventoryApi.InventoryTransaction }) =>
+        formatTransactionType(row),
       field: 'transaction_type',
       title: '类型',
-      width: 90,
+      width: 110,
     },
     {
       field: 'product_id',
@@ -90,7 +113,8 @@ export function useColumns(
     },
     {
       field: 'source_type',
-      formatter: ({ cellValue }: { cellValue: any }) => cellValue ?? '-',
+      formatter: ({ cellValue }: { cellValue: any }) =>
+        INVENTORY_TRANSACTION_SOURCE_TYPE_DICT.label(cellValue),
       title: '来源类型',
       width: 150,
     },

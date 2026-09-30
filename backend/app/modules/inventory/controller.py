@@ -110,7 +110,7 @@ def list_balance_status_logs(balance_id: int, page: int = Query(default=1, ge=1)
 
 
 @router.get("/transactions", response_model=InventoryTransactionPage, summary="查询库存流水")
-def list_transactions(product_id: int | None = Query(default=None, gt=0), transaction_type: str | None = Query(default=None, pattern="^(INBOUND|OUTBOUND|ADJUSTMENT)$"), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryTransactionPage:
+def list_transactions(product_id: int | None = Query(default=None, gt=0), transaction_type: str | None = Query(default=None, pattern="^(INBOUND|OUTBOUND|ADJUSTMENT|TRANSFER_IN|TRANSFER_OUT)$"), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.read"))) -> InventoryTransactionPage:
     """按产品和流水类型查询库存变化记录。"""
 
     items, total = crud.list_transactions(db, product_id=product_id, transaction_type=transaction_type, warehouse_ids=service.accessible_warehouse_ids(db, user), page=page, page_size=page_size)

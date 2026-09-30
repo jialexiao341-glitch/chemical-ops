@@ -314,7 +314,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="`询价单 ${detail?.rfq_no ?? ''}`" class="w-[1100px]">
+  <Drawer :title="`询价单 ${detail?.rfq_no ?? ''}`" class="w-[1100px] max-w-[100vw]">
     <BusinessInsightDrawer ref="insightDrawer" />
     <SelectQuote @success="onSelectSuccess" />
     <Quote @success="onQuoteSuccess" />

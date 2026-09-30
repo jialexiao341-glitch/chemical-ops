@@ -286,12 +286,12 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[980px]">
+  <Drawer :title="title" class="w-[980px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
 
       <!-- 盘点范围：仓库必选，库位可选（表单外独立控件） -->
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <div class="mb-2 text-sm">
             盘点仓库 <span class="text-red-500">*</span>

@@ -18,15 +18,17 @@ export function useColumns(
       formatter: ({ cellValue }: { cellValue: any }) =>
         resolveProduct(cellValue),
       minWidth: 180,
+      align: 'left',
       title: '产品',
     },
-    { field: 'batch_no', width: 160, title: '批次号' },
+    { field: 'batch_no', minWidth: 150, title: '批次号' },
     {
       field: 'warehouse_id',
       formatter: ({ cellValue }: { cellValue: any }) =>
         resolveWarehouse(cellValue),
       title: '仓库',
-      width: 140,
+      minWidth: 200,
+      align: 'left',
     },
     {
       field: 'quantity',
@@ -34,20 +36,20 @@ export function useColumns(
       formatter: ({ cellValue }: { cellValue: any }) =>
         formatQuantity(cellValue),
       title: '数量',
-      width: 120,
+      minWidth: 90,
     },
     {
       field: 'expiry_date',
       formatter: ({ cellValue }: { cellValue: any }) => formatDate(cellValue),
       title: '有效期至',
-      width: 130,
+      minWidth: 120,
     },
     {
       field: 'days_remaining',
       formatter: ({ cellValue }: { cellValue: any }) =>
         cellValue < 0 ? `已过期 ${Math.abs(cellValue)} 天` : `剩余 ${cellValue} 天`,
       title: '剩余天数',
-      width: 140,
+      minWidth: 120,
     },
     {
       cellRender: {
@@ -56,7 +58,7 @@ export function useColumns(
       },
       field: 'alert_level',
       title: '预警级别',
-      width: 120,
+      minWidth: 140,
     },
   ];
 }

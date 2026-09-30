@@ -176,8 +176,12 @@ def read_items(db: Session, user: User, reconciliation_id: int, version: int | N
     items = list(db.scalars(select(FinanceReconciliationItem).where(FinanceReconciliationItem.reconciliation_id == rec.id, FinanceReconciliationItem.version_no == selected).order_by(FinanceReconciliationItem.line_no)).all())
     current = collect_basis(db, order)
     saved_hash = items[0].basis_json["source_hash"] if items else None
-    warnings = list(items[0].basis_json["global_warnings"]) if items else ["历史对账单尚未建立明细，原金额保持不变"]
-    return ReconciliationItemsRead(reconciliation_id=rec.id, version_no=selected, available_versions=versions, amount_precision=items[0].basis_json["amount_precision"] if items else rec.amount_precision, currency_code=rec.currency_code, total_amount=sum((row.amount_incl_tax for row in items), Decimal(0)) if items else rec.total_amount, source_changed=saved_hash != basis_hash(current), warnings=warnings, items=items)
+    warnings = list(items[0].basis_json["global_warnings"]) if items else [
+        "历史对账单尚未建立明细，原金额保持不变" if selected == 0 else "当前对账版本的明细未找到，请联系管理员核查"
+    ]
+    # 没有保存过快照时不存在可比较的历史来源，不能据此判定来源已变化。
+    changed = selected > 0 and saved_hash != basis_hash(current)
+    return ReconciliationItemsRead(reconciliation_id=rec.id, version_no=selected, available_versions=versions, amount_precision=items[0].basis_json["amount_precision"] if items else rec.amount_precision, currency_code=rec.currency_code, total_amount=sum((row.amount_incl_tax for row in items), Decimal(0)) if items else rec.total_amount, source_changed=changed, warnings=warnings, items=items)
 
 
 def refresh_items(db: Session, user: User, reconciliation_id: int, payload: ReconciliationItemsRefresh) -> ReconciliationItemsRead:

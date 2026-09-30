@@ -89,7 +89,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal title="发起付款申请" class="w-[560px]">
+  <Modal title="发起付款申请" class="w-[560px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert
@@ -110,7 +110,7 @@ const [Modal, modalApi] = useVbenModal({
           placeholder="请选择已确认的对账单"
           show-search
         />
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <div class="mb-1 text-sm">
               付款金额 <span class="text-red-500">*</span>

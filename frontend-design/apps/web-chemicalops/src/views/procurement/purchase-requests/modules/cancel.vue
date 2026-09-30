@@ -50,7 +50,7 @@ const title = computed(() => `取消采购申请 ${requestNo.value}`);
 </script>
 
 <template>
-  <Modal :title="title" class="w-[520px]">
+  <Modal :title="title" class="w-[520px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         message="取消后该申请不可恢复；已批准的申请无法取消。"

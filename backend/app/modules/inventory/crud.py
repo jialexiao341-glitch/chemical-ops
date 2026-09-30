@@ -1,6 +1,6 @@
 """库存模块的数据访问操作。"""
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import and_, func, insert, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.inventory.model import (
@@ -148,7 +148,36 @@ def list_transactions(db: Session, *, product_id: int | None, transaction_type: 
     if product_id is not None:
         conditions.append(InventoryTransaction.product_id == product_id)
     if transaction_type:
-        conditions.append(InventoryTransaction.transaction_type == transaction_type)
+        transfer_sources = ("TRANSFER_REQUEST", "INVENTORY_TRANSFER")
+        if transaction_type == "TRANSFER_IN":
+            conditions.append(
+                or_(
+                    InventoryTransaction.transaction_type == "TRANSFER_IN",
+                    and_(
+                        InventoryTransaction.transaction_type == "INBOUND",
+                        InventoryTransaction.source_type.in_(transfer_sources),
+                    ),
+                )
+            )
+        elif transaction_type == "TRANSFER_OUT":
+            conditions.append(
+                or_(
+                    InventoryTransaction.transaction_type == "TRANSFER_OUT",
+                    and_(
+                        InventoryTransaction.transaction_type == "OUTBOUND",
+                        InventoryTransaction.source_type.in_(transfer_sources),
+                    ),
+                )
+            )
+        else:
+            conditions.append(InventoryTransaction.transaction_type == transaction_type)
+            if transaction_type in {"INBOUND", "OUTBOUND"}:
+                conditions.append(
+                    or_(
+                        InventoryTransaction.source_type.is_(None),
+                        InventoryTransaction.source_type.not_in(transfer_sources),
+                    )
+                )
     if warehouse_ids is not None:
         conditions.append(InventoryTransaction.warehouse_id.in_(warehouse_ids))
     total = db.scalar(select(func.count(InventoryTransaction.id)).where(*conditions)) or 0

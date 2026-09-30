@@ -127,7 +127,7 @@ defineExpose({
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[760px]">
+  <Drawer :title="title" class="w-[760px] max-w-[100vw]">
     <Spin :spinning="loading">
       <Empty v-if="!record && !loading" description="未找到该财务记录或当前账号无权查看" />
       <Descriptions v-else-if="record" bordered :column="2" size="small">

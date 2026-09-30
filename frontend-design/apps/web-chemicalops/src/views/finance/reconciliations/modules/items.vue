@@ -1,14 +1,16 @@
 <script lang="ts" setup>
 import type { FinanceApi, ReconciliationItem, ReconciliationItems } from '#/api';
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
-import { Alert, Button, Input, InputNumber, message, Select, Spin, Table } from 'antdv-next';
+import { Alert, Button, Empty, Input, InputNumber, message, Select, Spin, Table } from 'antdv-next';
 import { getReconciliationApi, getReconciliationItemsApi, refreshReconciliationItemsApi } from '#/api';
 import { formatAmount, formatQuantity } from '#/utils/format';
 
 const emit = defineEmits(['success']);
 const { hasAccessByCodes } = useAccess();
+const router = useRouter();
 const record = ref<FinanceApi.Reconciliation>();
 const basis = ref<ReconciliationItems>();
 const loading = ref(false);
@@ -18,6 +20,16 @@ const precision = ref(2);
 const selectedVersion = ref<number>();
 const editable = computed(() => !!record.value && hasAccessByCodes(['finance.reconciliations.write']) && ['DRAFT', 'DISPUTED'].includes(record.value.status) && basis.value?.version_no === record.value.items_version);
 const rowWarnings = computed(() => basis.value?.items.flatMap(row => row.warnings.map(warning => `第 ${row.line_no} 行：${warning}`)) ?? []);
+const legacy = computed(() => basis.value?.version_no === 0 && !basis.value.items.length);
+const warnings = computed(() => [...new Set([
+  ...(basis.value?.warnings ?? []).filter(warning => !legacy.value || warning !== '历史对账单尚未建立明细，原金额保持不变'),
+  ...rowWarnings.value,
+])]);
+function openOrder() {
+  if (!record.value) return;
+  void drawerApi.close();
+  void router.push(`/procurement/orders/${record.value.po_id}`);
+}
 const treatments = [
   { label: '待确认', value: 'PENDING' },
   { label: '退货扣款', value: 'DEDUCT' },
@@ -71,7 +83,7 @@ const [Drawer, drawerApi] = useVbenDrawer<number>({ onOpenChange(open) { if (ope
 </script>
 
 <template>
-  <Drawer title="订单行对账明细" class="w-full max-w-full sm:w-[1100px]" :footer="false">
+  <Drawer :title="legacy ? '历史对账记录' : '订单行对账明细'" class="w-full max-w-full sm:w-[1100px]" :footer="false">
     <Spin :spinning="loading">
       <div v-if="failed" class="space-y-3 py-4"><Alert message="明细加载失败，请重试" type="error" /><Button @click="load()">重试</Button></div>
       <div v-else-if="basis && record" class="space-y-4">
@@ -79,16 +91,22 @@ const [Drawer, drawerApi] = useVbenDrawer<number>({ onOpenChange(open) { if (ope
           <div><div class="font-semibold">{{ record.reconciliation_no }}</div><div class="text-muted-foreground">{{ basis.currency_code }} · 含税合计 {{ formatAmount(basis.total_amount, basis.amount_precision) }}</div></div>
           <Select v-if="basis.available_versions.length" :value="selectedVersion" :disabled="loading || saving" class="w-40" :options="basis.available_versions.map(v => ({ label: `第 ${v} 版${v === record?.items_version ? '（当前）' : ''}`, value: v }))" @change="value => load(Number(value))" />
         </div>
-        <Alert v-if="basis.source_changed" type="warning" show-icon message="来源已变化或尚未建立明细，请核查后重新生成。历史版本金额保持原值。" />
-        <Alert v-for="warning in basis.warnings" :key="warning" :message="warning" type="warning" show-icon />
-        <Alert v-for="warning in rowWarnings" :key="warning" :message="warning" type="warning" show-icon />
-        <div class="flex flex-wrap items-center gap-3">
+        <Alert v-if="!legacy && basis.source_changed && basis.items.length" type="warning" show-icon :message="editable ? '来源已变化，请核查后保存新版本。历史版本金额保持原值。' : '当前来源与保存时的快照不同。该版本仅供查阅，历史金额保持原值。'" />
+        <Alert v-if="warnings.length" :type="!legacy && !basis.items.length ? 'error' : 'warning'" show-icon message="需核查事项">
+          <template #description><ul class="list-disc space-y-1 pl-4"><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul></template>
+        </Alert>
+        <div v-if="basis.items.length || editable" class="flex flex-wrap items-center gap-3">
           <label for="amount-precision">金额小数位</label><InputNumber id="amount-precision" v-model:value="precision" :min="0" :max="6" :precision="0" :disabled="!editable || saving" />
           <span class="text-muted-foreground text-xs">不含税金额和税额逐行四舍五入，再汇总含税金额。</span>
-          <Button v-if="editable" type="primary" :loading="saving" :disabled="loading" @click="save">按最新来源保存新版本</Button>
+          <Button v-if="editable" type="primary" :loading="saving" :disabled="loading" @click="save">{{ basis.items.length ? '按最新来源保存新版本' : '生成对账明细' }}</Button>
         </div>
         <Alert v-if="editable" type="info" message="扣款减少应付；待补交保留应付且必须填写依据。修改口径后保存新版本，金额才会更新。未处理的问题会阻止确认。" />
-        <Table :columns="columns" :data-source="basis.items" row-key="id" :pagination="false" :scroll="{ x: 1270 }" size="small">
+        <Empty v-if="!basis.items.length" class="rounded-md border border-dashed p-6" :description="false">
+          <div class="mt-3 font-medium">{{ legacy ? '历史单据未保存行级快照' : '该版本的明细未找到' }}</div>
+          <p class="text-muted-foreground mx-auto mt-2 max-w-lg text-sm">{{ legacy ? '此处不展示推算明细，原对账金额保持不变。关联订单的当前明细可供查阅，但不代表当时的对账依据。' : '请联系管理员核查版本记录，不应按历史单据缺项处理。' }}</p>
+          <Button v-if="hasAccessByCodes(['procurement.orders.read'])" class="mt-4" @click="openOrder">查看关联采购订单</Button>
+        </Empty>
+        <Table v-else :columns="columns" :data-source="basis.items" row-key="id" :pagination="false" :scroll="{ x: 1270 }" size="small">
           <template #bodyCell="{ column, record: row }">
             <template v-if="column.key === 'product'">{{ row.product_name }}<div class="text-muted-foreground">第 {{ row.line_no }} 行 · {{ row.unit_name }}</div></template>
             <template v-else-if="String(column.key).endsWith('_quantity')">{{ quantityText(row, column.key) }}</template>

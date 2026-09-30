@@ -76,7 +76,7 @@ const titleText = computed(() => '新建处理任务');
 </script>
 
 <template>
-  <Modal :title="titleText" class="w-[520px]">
+  <Modal :title="titleText" class="w-[520px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <div>
         <div class="mb-2 text-sm">
@@ -100,7 +100,7 @@ const titleText = computed(() => '新建处理任务');
           show-search
         />
       </div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <div class="mb-2 text-sm">优先级</div>
           <Select

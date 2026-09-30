@@ -165,7 +165,19 @@ export const INVENTORY_BALANCE_STATUS_DICT = buildDict([
 export const INVENTORY_TRANSACTION_TYPE_DICT = buildDict([
   { color: 'blue', label: '入库', value: 'INBOUND' },
   { color: 'orange', label: '出库', value: 'OUTBOUND' },
-  { color: 'purple', label: '调整', value: 'ADJUSTMENT' },
+  { color: 'purple', label: '库存调整', value: 'ADJUSTMENT' },
+  { color: 'cyan', label: '调拨入库', value: 'TRANSFER_IN' },
+  { color: 'volcano', label: '调拨出库', value: 'TRANSFER_OUT' },
+]);
+
+/** 库存流水来源类型 */
+export const INVENTORY_TRANSACTION_SOURCE_TYPE_DICT = buildDict([
+  { color: 'cyan', label: '到货单', value: 'DELIVERY' },
+  { color: 'orange', label: '领用申请', value: 'ISSUE_REQUEST' },
+  { color: 'purple', label: '调拨申请', value: 'TRANSFER_REQUEST' },
+  { color: 'purple', label: '调拨申请', value: 'INVENTORY_TRANSFER' },
+  { color: 'geekblue', label: '盘点单', value: 'INVENTORY_STOCKTAKE' },
+  { color: 'volcano', label: '退货申请', value: 'INVENTORY_RETURN' },
 ]);
 
 /**

@@ -18,7 +18,7 @@ const [Form, formApi] = useVbenForm({
   layout: 'vertical',
   schema: [],
   showDefaultActions: false,
-  wrapperClass: 'grid-cols-2',
+  wrapperClass: 'grid-cols-1 sm:grid-cols-2',
 });
 
 const [Drawer, drawerApi] = useVbenDrawer<null | SystemDepartmentApi.SystemDepartment>({
@@ -79,7 +79,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[600px]">
+  <Drawer :title="title" class="w-[600px] max-w-[100vw]">
     <Form />
   </Drawer>
 </template>

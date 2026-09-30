@@ -307,7 +307,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[1080px]">
+  <Drawer :title="title" class="w-[1080px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
       <div>

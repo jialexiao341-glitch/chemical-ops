@@ -453,6 +453,34 @@ export const useVbenVxeGrid = <
     >
   >
 ) => {
+  const options = rest[0] as any;
+  options.class = ['chemicalops-grid', options.class];
+  if (options.formOptions) {
+    const formOptions = options.formOptions;
+    options.formOptions = {
+      ...formOptions,
+      layout: 'inline',
+      compact: true,
+      actionLayout: 'inline',
+      showCollapseButton: false,
+      wrapperClass: 'chemicalops-filter-bar',
+      actionWrapperClass: 'chemicalops-filter-actions',
+      commonConfig: {
+        ...formOptions.commonConfig,
+        labelWidth: 'auto',
+        labelClass: 'chemicalops-filter-label',
+        formItemClass: 'chemicalops-filter-field',
+      },
+      schema: formOptions.schema?.map((field: any) => ({
+        ...field,
+        formItemClass: [
+          field.formItemClass,
+          field.component === 'Select' ? 'chemicalops-filter-choice' : '',
+          field.component === 'RangePicker' ? 'chemicalops-filter-range' : '',
+        ].filter(Boolean).join(' '),
+      })),
+    };
+  }
   const route = useRoute();
   const batch = BATCH_LISTS[route.path];
   if (batch) {

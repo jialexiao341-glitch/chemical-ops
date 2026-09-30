@@ -203,7 +203,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[640px]">
+  <Drawer :title="title" class="w-[640px] max-w-[100vw]">
     <div class="space-y-4">
       <Alert
         v-if="needReinspectionHint"

@@ -30,7 +30,7 @@ const supplierOptions = ref<Array<{ label: string; value: number }>>([]);
 const [Form, formApi] = useVbenForm({
   layout: 'vertical',
   showDefaultActions: false,
-  wrapperClass: 'grid-cols-2',
+  wrapperClass: 'grid-cols-1 sm:grid-cols-2',
   schema: [
     {
       component: 'ApiSelect',
@@ -255,7 +255,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[1100px]">
+  <Drawer :title="title" class="w-[1100px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
 

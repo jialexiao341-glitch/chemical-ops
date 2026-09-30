@@ -1,16 +1,24 @@
 <script lang="ts" setup>
 import type { FinanceApi, InvoiceMatchAllocation, InvoiceMatches } from '#/api';
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
-import { Alert, Button, Input, message, Select, Spin, Table } from 'antdv-next';
+import { Alert, Button, Empty, Input, message, Select, Spin, Table } from 'antdv-next';
 import { getInvoiceApi, getInvoiceMatchesApi, saveInvoiceMatchesApi } from '#/api';
 import { formatAmount } from '#/utils/format';
 
 const emit = defineEmits(['success']);
 const { hasAccessByCodes } = useAccess();
+const router = useRouter();
+function openOrder() {
+  if (!invoice.value) return;
+  void drawerApi.close();
+  void router.push(`/procurement/orders/${invoice.value.po_id}`);
+}
 const invoice = ref<FinanceApi.Invoice>();
 const result = ref<InvoiceMatches>();
+const warnings = computed(() => (result.value?.warnings ?? []).filter(warning => !result.value?.legacy || warning !== '历史对账单无行级依据，发票沿用单据级核验'));
 const allocations = ref<InvoiceMatchAllocation[]>([]);
 const selectedVersion = ref<number>();
 const loading = ref(false);
@@ -76,8 +84,15 @@ const [Drawer, drawerApi] = useVbenDrawer<number>({ onOpenChange(open) { if (ope
       <div v-else-if="invoice && result" class="space-y-4">
         <div class="font-semibold">{{ invoice.invoice_no }} · {{ invoice.invoice_number }}</div>
         <div>{{ invoice.currency_code }} · 不含税 {{ formatAmount(invoice.amount_excl_tax, 6) }} · 税额 {{ formatAmount(invoice.tax_amount, 6) }} · 价税合计 {{ formatAmount(invoice.amount_incl_tax, 6) }}</div>
-        <Alert type="info" show-icon message="按实际发票手工分配。不含税与税额合计须分别等于票面金额；税额比例和尾差不同须填写处理说明。提交后由另一名财务人员复核，付款仍按单据管理。" />
-        <Alert v-for="warning in result.warnings" :key="warning" type="warning" show-icon :message="warning" />
+        <Alert v-if="!result.legacy" type="info" show-icon message="按实际发票手工分配。不含税与税额合计须分别等于票面金额；税额比例和尾差不同须填写处理说明。提交后由另一名财务人员复核，付款仍按单据管理。" />
+        <Alert v-if="warnings.length" type="warning" show-icon message="需核查事项">
+          <template #description><ul class="list-disc space-y-1 pl-4"><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul></template>
+        </Alert>
+        <Empty v-if="result.legacy" class="rounded-md border border-dashed p-6" :description="false">
+          <div class="mt-3 font-medium">历史发票沿用单据级核验</div>
+          <p class="text-muted-foreground mx-auto mt-2 max-w-lg text-sm">关联对账单未保存行级快照，因此无法展示行匹配。原发票金额和核验记录保持不变，当前订单明细不作为历史匹配依据。</p>
+          <Button v-if="hasAccessByCodes(['procurement.orders.read'])" class="mt-4" @click="openOrder">查看关联采购订单</Button>
+        </Empty>
         <div v-if="!result.legacy" class="flex flex-wrap items-center gap-3">
           <span>对账版本 {{ selected?.reconciliation_version ?? result.reconciliation_version }}</span>
           <Select v-if="result.versions.length" v-model:value="selectedVersion" aria-label="匹配历史版本" class="w-60" :options="result.versions.map(row => ({ value: row.version_no, label: `匹配版本 ${row.version_no} · ${row.created_at}` }))" @change="chooseVersion" />

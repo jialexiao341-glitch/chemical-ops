@@ -133,7 +133,7 @@ function recalcIncl() {
 </script>
 
 <template>
-  <Modal title="录入发票" class="w-[640px]">
+  <Modal title="录入发票" class="w-[640px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert
@@ -154,7 +154,7 @@ function recalcIncl() {
           placeholder="请选择对账单"
           show-search
         />
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <div class="mb-1 text-sm">
               发票号码 <span class="text-red-500">*</span>
@@ -185,7 +185,7 @@ function recalcIncl() {
             value-format="YYYY-MM-DD"
           />
         </div>
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <div class="mb-1 text-sm">
               不含税 <span class="text-red-500">*</span>

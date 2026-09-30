@@ -29,7 +29,7 @@ const submitting = ref(false);
 const [Form, formApi] = useVbenForm({
   layout: 'vertical',
   showDefaultActions: false,
-  wrapperClass: 'grid-cols-2',
+  wrapperClass: 'grid-cols-1 sm:grid-cols-2',
   schema: [
     {
       component: 'Textarea',
@@ -285,7 +285,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[1080px]">
+  <Drawer :title="title" class="w-[1080px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
       <div>

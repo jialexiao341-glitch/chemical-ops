@@ -50,7 +50,7 @@ const title = computed(() => `取消采购订单 ${poNo.value}`);
 </script>
 
 <template>
-  <Modal :title="title" class="w-[520px]">
+  <Modal :title="title" class="w-[520px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         message="只有草稿、审批中或已批准但尚未正式下单的订单可以取消。"
