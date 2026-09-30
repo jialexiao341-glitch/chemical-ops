@@ -1,0 +1,44 @@
+[
+  {
+    "case": "全额匹配待复核",
+    "po_no": "PO-SIMINV-FULL",
+    "order_id": 3199,
+    "reconciliation_id": 854,
+    "reconciliation_no": "FR20260930000854"
+  },
+  {
+    "case": "分两张发票开票",
+    "po_no": "PO-SIMINV-SPLIT",
+    "order_id": 3200,
+    "reconciliation_id": 855,
+    "reconciliation_no": "FR20260930000855"
+  },
+  {
+    "case": "一张发票匹配多个产品行",
+    "po_no": "PO-SIMINV-MULTI",
+    "order_id": 3201,
+    "reconciliation_id": 856,
+    "reconciliation_no": "FR20260930000856"
+  },
+  {
+    "case": "匹配合计不符待处理",
+    "po_no": "PO-SIMINV-AMOUNT",
+    "order_id": 3202,
+    "reconciliation_id": 857,
+    "reconciliation_no": "FR20260930000857"
+  },
+  {
+    "case": "税额差异待说明",
+    "po_no": "PO-SIMINV-TAX",
+    "order_id": 3203,
+    "reconciliation_id": 858,
+    "reconciliation_no": "FR20260930000858"
+  },
+  {
+    "case": "驳回后重新录入",
+    "po_no": "PO-SIMINV-REJECT",
+    "order_id": 3204,
+    "reconciliation_id": 859,
+    "reconciliation_no": "FR20260930000859"
+  }
+]
