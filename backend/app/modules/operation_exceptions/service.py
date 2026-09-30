@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.inventory.model import InventoryBatch
+from app.modules.insights.model import ExceptionActionDecision
 from app.modules.operation_exceptions import crud
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment
 from app.modules.operation_exceptions.schema import (
@@ -186,6 +187,12 @@ def update_exception(db: Session, user: User, exception_id: int, data: Operation
             raise BusinessValidationError("异常负责人不存在或已停用")
     next_status = data.status
     if next_status:
+        if next_status in {"RESOLVED", "CLOSED"}:
+            decision = db.scalar(select(ExceptionActionDecision).where(ExceptionActionDecision.exception_id == exception.id, ExceptionActionDecision.decision == "ADOPTED"))
+            if decision is not None:
+                linked_task = db.get(OperationTask, decision.task_id)
+                if linked_task is None or linked_task.status != "COMPLETED":
+                    raise BusinessValidationError("采纳的处置建议任务尚未完成，不能解决或关闭异常")
         allowed = {
             "OPEN": {"PROCESSING", "CANCELLED"},
             "PROCESSING": {"RESOLVED", "CANCELLED"},

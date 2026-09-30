@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -16,7 +16,13 @@ from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.deliveries import service as delivery_service
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
+from app.modules.inventory_returns.model import InventoryReturnItem, InventoryReturnRequest
 from app.modules.inventory import service as inventory_service
+from app.modules.insights import checks
+from app.modules.insights import exception_actions
+from app.modules.insights import finance_checks
+from app.modules.insights import recall_report
+from app.modules.insights.source_matching import match_sources
 from app.modules.inventory.model import InventoryBalance, InventoryBalanceStatusLog, InventoryBatch, InventoryStocktakeItem, InventoryTransaction, WarehouseLocation
 from app.modules.operation_exceptions import service as exception_service
 from app.modules.products.model import Product
@@ -112,28 +118,91 @@ def _batch_impact(db: Session, user: User, balance_id: int) -> BusinessInsight:
             continue
         location = db.get(WarehouseLocation, row.location_id)
         _evidence(result, f"库位 {location.location_name if location else row.location_id}", f"余额 {row.quantity}，锁定 {row.locked_quantity}，状态 {row.status}", f"库存余额 #{row.id}", "/warehouse/inventory")
-    txs = db.scalars(select(InventoryTransaction).where(InventoryTransaction.batch_id == batch.id).order_by(InventoryTransaction.created_at.desc()).limit(100)).all()
-    for row in txs:
+    txs = db.scalars(select(InventoryTransaction).where(InventoryTransaction.batch_id == batch.id).order_by(InventoryTransaction.created_at.desc())).all()
+    visible_txs = [row for row in txs if scope is None or row.warehouse_id in scope]
+    source_matches = match_sources(db, visible_txs)
+    by_slot: dict[tuple[int, int, int], Decimal] = {}
+    incomplete = False
+    for row in visible_txs:
+        key = (row.warehouse_id, row.location_id, row.unit_id)
+        if row.transaction_type == "INBOUND":
+            change = row.quantity
+        elif row.transaction_type == "OUTBOUND":
+            change = -row.quantity
+        elif row.transaction_type == "ADJUSTMENT" and row.source_type == "INVENTORY_STOCKTAKE":
+            matched = source_matches[row.id]
+            change = Decimal(matched["signed_quantity"]) if matched["status"] == "MATCHED" else None
+        else:
+            change = None
+        if change is None:
+            incomplete = True
+        else:
+            by_slot[key] = by_slot.get(key, Decimal(0)) + change
+    for row in balances:
+        if scope is not None and row.warehouse_id not in scope:
+            continue
+        key = (row.warehouse_id, row.location_id, row.unit_id)
+        calculated = by_slot.pop(key, Decimal(0))
+        if not incomplete and calculated != row.quantity:
+            _evidence(result, "数量待核查", f"库位 #{row.location_id} · 单位 #{row.unit_id}：流水净额 {calculated}，当前余额 {row.quantity}", f"库存余额 #{row.id}", "/warehouse/inventory")
+    if by_slot and not incomplete:
+        result.limitations.append("部分流水所在库位没有对应余额记录，需核查历史库存记录。")
+    if incomplete:
+        result.limitations.append("部分调整流水缺少可确认的增减方向，数量守恒无法完整校验。")
+    else:
+        result.limitations.append("已按库位和单位比较全部可见流水净额与当前余额；仍需人工核实来源单据。")
+    for row in visible_txs[:100]:
         if scope is None or row.warehouse_id in scope:
-            _evidence(result, f"流水 {row.transaction_no}", f"{row.transaction_type} {row.quantity} · {row.created_at}", f"{row.source_type or '库存流水'} #{row.source_id or row.id}", "/warehouse/transactions")
+            matched = source_matches[row.id]
+            _evidence(result, f"流水 {row.transaction_no}", f"{row.transaction_type} {row.quantity} · {row.created_at}；{matched['reason']}" + (f" · 明细 #{matched['item_id']}" if matched["item_id"] is not None else ""), f"{row.source_type or '库存流水'} #{row.source_id or row.id}", "/warehouse/transactions")
+    conflicts = sum(row["status"] != "MATCHED" for row in source_matches.values())
+    if conflicts:
+        result.limitations.append(f"{conflicts} 条可见流水的来源明细尚未严格匹配，请在演练报告查看冲突原因。")
     result.suggestions.append("逐一核查列出的库位和去向；冻结或召回仍需在原库存流程中确认。")
-    result.limitations.append("只展示最近 100 条流水；系统外使用、客户去向和不可见仓库无法判断。")
+    result.limitations.append(f"展示最近 {min(len(visible_txs), 100)} 条、共 {len(visible_txs)} 条可见流水；系统外使用、客户去向和不可见仓库无法判断。")
     return result
 
 
 def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsight:
-    """逐单比较采购量、收货、对账、核验发票和已付款金额。"""
+    """按订单行核对到货；发票和付款保持单据级口径。"""
     order = order_service.get_order(db, user, order_id)
-    result = _result("finance-difference", f"订单 {order.po_no} 财务差异", "财务对账人员、采购员", "金额按各自币种汇总，不进行跨币种折算。")
+    result = _result("finance-difference", f"订单 {order.po_no} 财务差异", "财务对账人员、采购员", "按订单行核对到货数量和含税估算金额；发票、付款按对账单汇总。")
     _evidence(result, "订单金额", f"{order.order_amount:.2f} {order.currency_code}", order.po_no, f"/procurement/purchase-orders/{order.id}")
-    lines = db.scalars(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == order.id)).all()
+    lines = db.scalars(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == order.id).order_by(PurchaseOrderItem.line_no)).all()
+    deliveries = db.scalars(select(Delivery).where(Delivery.po_id == order.id)).all()
+    delivery_by_id = {delivery.id: delivery for delivery in deliveries}
+    delivered_lines = db.scalars(select(DeliveryItem).where(DeliveryItem.delivery_id.in_(delivery_by_id))).all() if delivery_by_id else []
+    by_order_line: dict[int, list[DeliveryItem]] = {}
+    for item in delivered_lines:
+        by_order_line.setdefault(item.po_item_id, []).append(item)
+    accepted_total = Decimal(0)
     for line in lines:
-        _evidence(result, f"订单行 {line.line_no} · {line.product_name_snapshot}", f"订购 {line.order_quantity}，已收 {line.received_quantity}，未收 {line.order_quantity-line.received_quantity}", f"订单明细 #{line.id}", f"/procurement/purchase-orders/{order.id}")
+        rows = by_order_line.get(line.id, [])
+        received = sum((row.actual_quantity for row in rows if delivery_by_id[row.delivery_id].status in {"RECEIVED", "ACCEPTED"}), Decimal(0))
+        accepted = sum((row.actual_quantity for row in rows if delivery_by_id[row.delivery_id].status == "ACCEPTED"), Decimal(0))
+        tax_multiplier = Decimal(1) + (line.tax_rate or Decimal(0)) / Decimal(100)
+        ordered_amount = line.order_quantity * line.unit_price * tax_multiplier
+        accepted_amount = accepted * line.unit_price * tax_multiplier
+        accepted_total += accepted_amount
+        _evidence(result, f"订单行 {line.line_no} · {line.product_name_snapshot}", f"订购 {line.order_quantity}，已收 {received}，已验收到货 {accepted}，未收 {line.order_quantity-received} · 单位 #{line.unit_id}；订单含税估算 {ordered_amount:.2f}，已验收到货含税估算 {accepted_amount:.2f} {order.currency_code}", f"订单明细 #{line.id}", f"/procurement/purchase-orders/{order.id}")
+        if line.received_quantity != received:
+            result.limitations.append(f"订单行 {line.line_no} 的累计已收 {line.received_quantity} 与关联到货明细合计 {received} 不一致，需核对原单据。")
+        for row in rows:
+            delivery = delivery_by_id[row.delivery_id]
+            _evidence(result, f"到货行 {delivery.delivery_no} · 第 {row.line_no} 行", f"到货 {row.actual_quantity}，短交 {row.short_quantity}，状态 {delivery.status}", f"到货明细 #{row.id}", "/warehouse/deliveries")
+    if lines:
+        _evidence(result, "已验收到货含税估算", f"{accepted_total:.2f} {order.currency_code}；与订单金额相差 {order.order_amount-accepted_total:.2f}", "按订单行单价、税率和已验收到货量计算")
+    returns = db.scalars(select(InventoryReturnRequest).where(InventoryReturnRequest.status == "COMPLETED", or_(InventoryReturnRequest.po_id == order.id, InventoryReturnRequest.delivery_id.in_(list(delivery_by_id))))).all()
+    for returned in returns:
+        return_items = db.scalars(select(InventoryReturnItem).where(InventoryReturnItem.return_request_id == returned.id)).all()
+        _evidence(result, f"已完成退货 {returned.return_no}", "；".join(f"产品 #{item.product_id} 退回 {item.returned_quantity} · 单位 #{item.unit_id}" for item in return_items) or "无退货明细", f"退货单 #{returned.id}", "/warehouse/returns")
+    if returns:
+        result.limitations.append("退货明细未直接关联采购订单行，不将退货量或金额自动分摊到订单行。")
     reconciliations = db.scalars(select(FinanceReconciliation).where(FinanceReconciliation.po_id == order.id)).all()
     if not reconciliations:
         result.limitations.append("当前订单没有对账单，因此无法分析发票和付款差额。")
     for rec in reconciliations:
-        _evidence(result, "对账单", f"{rec.total_amount:.2f} {rec.currency_code} · {rec.status}", rec.reconciliation_no, "/finance/reconciliations")
+        _evidence(result, "对账单 / 与订单差额", f"{rec.total_amount:.2f} {rec.currency_code} · {rec.status}；差额 {rec.total_amount-order.order_amount:.2f}", rec.reconciliation_no, "/finance/reconciliations")
         if rec.cancelled_at is not None:
             result.limitations.append(f"对账单 {rec.reconciliation_no} 已取消，不计入发票和付款差额。")
             continue
@@ -141,6 +210,10 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
         payments = db.scalars(select(FinancePayment).where(FinancePayment.reconciliation_id == rec.id)).all()
         verified = sum((x.amount_incl_tax for x in invoices if x.status == "VERIFIED" and x.currency_code == rec.currency_code), Decimal(0))
         paid = sum((x.amount for x in payments if x.status == "PAID" and x.currency_code == rec.currency_code), Decimal(0))
+        for invoice in invoices:
+            _evidence(result, f"发票 {invoice.invoice_no}", f"含税 {invoice.amount_incl_tax:.2f}，税额 {invoice.tax_amount:.2f} {invoice.currency_code} · {invoice.status}", f"发票记录 #{invoice.id}", "/finance/invoices")
+        for payment in payments:
+            _evidence(result, f"付款 {payment.payment_no}", f"{payment.amount:.2f} {payment.currency_code} · {payment.status}", f"付款记录 #{payment.id}", "/finance/payments")
         _evidence(result, "已核验发票 / 未开票差额", f"{verified:.2f} / {rec.total_amount-verified:.2f} {rec.currency_code}", rec.reconciliation_no, "/finance/invoices")
         _evidence(result, "已付款 / 未付款差额", f"{paid:.2f} / {rec.total_amount-paid:.2f} {rec.currency_code}", rec.reconciliation_no, "/finance/payments")
         settlements = db.scalars(select(FinanceSettlement).where(FinanceSettlement.reconciliation_id == rec.id)).all()
@@ -149,6 +222,7 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
         if any(x.currency_code != rec.currency_code for x in [*invoices, *payments]):
             result.limitations.append(f"{rec.reconciliation_no} 包含其他币种单据，这些单据未参与汇总。")
     result.suggestions.append("先在原单据核对收货与对账口径，再处理发票和付款差额。")
+    result.limitations.append("现有发票和付款没有订单行分摊字段；不得将其总额自动归因到某一订单行。已验收到货金额是按订单价税率计算的核查估算，不替代正式应付金额。")
     return result
 
 
@@ -162,7 +236,7 @@ def _exception_action(db: Session, user: User, exception_id: int) -> BusinessIns
     tasks, _ = exception_service.list_tasks(db, user, exception_id, status=None, page=1, page_size=100)
     for task in tasks:
         _evidence(result, f"待办 {task.id}", f"{task.title} · {task.status} · 负责人 {task.assignee_id or '未指定'}", item.exception_no)
-    result.suggestions.append("核实来源影响并确定负责人后，在异常详情中创建或更新处理任务。")
+    result.suggestions.append(f"建议任务：{exception_actions.proposed_title(item.exception_type)}。请先核实来源与责任人，再决定是否采纳。")
     return result
 
 
@@ -347,3 +421,136 @@ def get_business_insight(kind: str, object_id: int, db: Session = Depends(get_db
         "location-advice": lambda: _location_advice(db, user, object_id),
     }
     return handlers[kind]()
+
+
+@router.post("/{kind}/{object_id}/snapshots", response_model=checks.SnapshotRead, summary="保存业务分析结果快照")
+def create_insight_snapshot(kind: str, object_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> checks.SnapshotRead:
+    result = get_business_insight(kind, object_id, db, user)
+    return checks.save_snapshot(db, user, kind, object_id, result.model_dump(mode="json"))
+
+
+@router.get("/{kind}/{object_id}/snapshots", response_model=list[checks.SnapshotRead], summary="查看本人保存的分析快照")
+def list_insight_snapshots(kind: str, object_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[checks.SnapshotRead]:
+    get_business_insight(kind, object_id, db, user)
+    return checks.list_snapshots(db, user, kind, object_id)
+
+
+@router.get("/batch-impact/{balance_id}/checks", response_model=list[checks.CheckItemRead], summary="查看批次核查清单")
+def list_batch_checks(balance_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[checks.CheckItemRead]:
+    _check_permission(db, user, "warehouse.inventory.read")
+    return checks.list_batch_checks(db, user, balance_id)
+
+
+@router.post("/batch-impact/{balance_id}/recall-reports", response_model=recall_report.ReportRead, summary="生成召回演练报告")
+def create_batch_recall_report(balance_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> recall_report.ReportRead:
+    _check_permission(db, user, "warehouse.inventory.read")
+    return recall_report.read_report(db, recall_report.save_report(db, user, balance_id))
+
+
+@router.get("/batch-impact/{balance_id}/recall-reports", response_model=list[recall_report.ReportRead], summary="查看本人或待复核的召回演练报告")
+def list_batch_recall_reports(balance_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[recall_report.ReportRead]:
+    _check_permission(db, user, "warehouse.inventory.read")
+    return [recall_report.read_report(db, report) for report in recall_report.list_reports(db, user, balance_id)]
+
+
+@router.get("/batch-impact/{balance_id}/recall-reports/{report_id}", response_model=recall_report.ReportRead, summary="查看召回演练报告详情")
+def get_batch_recall_report(balance_id: int, report_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> recall_report.ReportRead:
+    _check_permission(db, user, "warehouse.inventory.read")
+    return recall_report.read_report(db, recall_report.get_report(db, user, balance_id, report_id))
+
+
+@router.get("/batch-impact/{balance_id}/recall-reports/{report_id}/owners", summary="可指派的报告负责人")
+def list_recall_report_owners(balance_id: int, report_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    _check_permission(db, user, "warehouse.inventory.write")
+    return recall_report.list_owners(db, user, balance_id, report_id)
+
+
+@router.post("/batch-impact/{balance_id}/recall-reports/{report_id}/workflow", response_model=recall_report.ReportRead, summary="指派、提交或确认召回演练报告")
+def update_recall_report_workflow(balance_id: int, report_id: int, data: recall_report.WorkflowInput, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> recall_report.ReportRead:
+    _check_permission(db, user, "warehouse.inventory.write")
+    return recall_report.read_report(db, recall_report.update_workflow(db, user, balance_id, report_id, data))
+
+
+@router.post("/batch-impact/{balance_id}/checks", response_model=list[checks.CheckItemRead], summary="建立批次核查清单")
+def create_batch_checks(balance_id: int, snapshot_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[checks.CheckItemRead]:
+    _check_permission(db, user, "warehouse.inventory.write")
+    return checks.create_batch_checks(db, user, balance_id, snapshot_id)
+
+
+@router.patch("/batch-impact/{balance_id}/checks/{check_id}", response_model=checks.CheckItemRead, summary="指派或复核批次核查项")
+def update_batch_check(balance_id: int, check_id: int, data: checks.CheckItemUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> checks.CheckItemRead:
+    _check_permission(db, user, "warehouse.inventory.write")
+    return checks.update_batch_check(db, user, balance_id, check_id, data)
+
+
+@router.get("/batch-impact/{balance_id}/assignees", summary="可指派的批次核查人员")
+def list_batch_assignees(balance_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict[int, list[dict[str, int | str]]]:
+    _check_permission(db, user, "warehouse.inventory.write")
+    visible = checks.list_batch_checks(db, user, balance_id)
+    warehouse_by_check = {item.id: checks.item_warehouse_id(db, item) for item in visible}
+    eligible: dict[int, list[dict[str, int | str]]] = {item.id: [] for item in visible}
+    people = db.scalars(select(User).where(User.status == "ACTIVE").order_by(User.display_name)).all()
+    for person in people:
+        try:
+            _check_permission(db, person, "warehouse.inventory.write")
+        except HTTPException:
+            continue
+        for check_id, warehouse_id in warehouse_by_check.items():
+            if inventory_service._can_access_warehouse(db, person, warehouse_id):
+                eligible[check_id].append({"id": person.id, "name": person.display_name})
+    return eligible
+
+
+@router.get("/batch-impact/{balance_id}/checks/{check_id}/events", response_model=list[checks.CheckEventRead], summary="查看批次核查处理记录")
+def list_batch_check_events(balance_id: int, check_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[checks.CheckEventRead]:
+    _check_permission(db, user, "warehouse.inventory.read")
+    return checks.list_check_events(db, user, balance_id, check_id)
+
+
+@router.get("/exception-action/{exception_id}/decision", response_model=exception_actions.DecisionRead | None, summary="查看异常处置建议决定")
+def get_exception_action_decision(exception_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> exception_actions.DecisionRead | None:
+    _check_permission(db, user, "operations.exceptions.read")
+    return exception_actions.get_decision(db, user, exception_id)
+
+
+@router.get("/exception-action/{exception_id}/decision/events", response_model=list[exception_actions.DecisionEventRead], summary="查看异常处置建议处理记录")
+def list_exception_action_events(exception_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[exception_actions.DecisionEventRead]:
+    _check_permission(db, user, "operations.exceptions.read")
+    return exception_actions.list_events(db, user, exception_id)
+
+
+@router.post("/exception-action/{exception_id}/decision", response_model=exception_actions.DecisionRead, summary="采纳或驳回异常处置建议")
+def decide_exception_action(exception_id: int, data: exception_actions.DecisionInput, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> exception_actions.DecisionRead:
+    _check_permission(db, user, "operations.exceptions.write")
+    result = _exception_action(db, user, exception_id)
+    return exception_actions.decide(db, user, exception_id, data, result.model_dump(mode="json"))
+
+
+@router.get("/finance-difference/{order_id}/checks", response_model=list[finance_checks.FinanceCheckRead], summary="查看订单财务核查清单")
+def list_finance_checks(order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[finance_checks.FinanceCheckRead]:
+    _check_permission(db, user, PERMISSIONS["finance-difference"])
+    return finance_checks.list_checks(db, user, order_id)
+
+
+@router.get("/finance-difference/{order_id}/assignees", summary="可指派的财务核查人员")
+def list_finance_assignees(order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict[str, int | str]]:
+    _check_permission(db, user, ("finance.reconciliations.write", "procurement.orders.read"))
+    return finance_checks.list_assignees(db, user, order_id)
+
+
+@router.post("/finance-difference/{order_id}/checks", response_model=list[finance_checks.FinanceCheckRead], summary="建立订单财务核查清单")
+def create_finance_checks(order_id: int, snapshot_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[finance_checks.FinanceCheckRead]:
+    _check_permission(db, user, ("finance.reconciliations.write", "procurement.orders.read"))
+    return finance_checks.create_checks(db, user, order_id, snapshot_id)
+
+
+@router.patch("/finance-difference/{order_id}/checks/{check_id}", response_model=finance_checks.FinanceCheckRead, summary="更新订单财务核查项")
+def update_finance_check(order_id: int, check_id: int, data: checks.CheckItemUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> finance_checks.FinanceCheckRead:
+    _check_permission(db, user, ("finance.reconciliations.write", "procurement.orders.read"))
+    return finance_checks.update_check(db, user, order_id, check_id, data)
+
+
+@router.get("/finance-difference/{order_id}/checks/{check_id}/events", response_model=list[finance_checks.FinanceEventRead], summary="查看财务核查处理记录")
+def list_finance_check_events(order_id: int, check_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[finance_checks.FinanceEventRead]:
+    _check_permission(db, user, PERMISSIONS["finance-difference"])
+    return finance_checks.list_events(db, user, order_id, check_id)

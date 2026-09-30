@@ -380,7 +380,7 @@ defineExpose({ drawerApi });
 
 <template>
   <Drawer :title="titleText" class="w-[1000px]">
-    <BusinessInsightDrawer ref="insightDrawer" />
+    <BusinessInsightDrawer ref="insightDrawer" @changed="reload()" />
     <TaskFormModal @success="reload()" />
     <Spin :spinning="loading">
       <Empty v-if="!detail && !loading" description="未找到该异常" />
