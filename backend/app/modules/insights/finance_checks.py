@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.insights.checks import CheckItemUpdate
 from app.modules.insights.model import FinanceDifferenceCheck, FinanceDifferenceEvent, InsightSnapshot
+from app.modules.finance.model import FinanceInvoice
 from app.modules.purchase_orders import service as order_service
 from app.modules.purchase_orders.model import PurchaseOrderItem
 from app.modules.system import crud as system_crud
@@ -72,6 +73,7 @@ def create_checks(db: Session, user: User, order_id: int, snapshot_id: int) -> l
         raise BusinessValidationError("请先保存当前财务差异分析")
     scopes = [(f"LINE:{line.id}", f"订单行 {line.line_no} · {line.product_name_snapshot}") for line in db.scalars(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == order.id).order_by(PurchaseOrderItem.line_no)).all()]
     scopes.append(("DOCUMENTS", "对账、发票、付款及结算单据"))
+    scopes.extend((f"INVOICE:{invoice.id}", f"发票 {invoice.invoice_no} · 行匹配及差异处理") for invoice in db.scalars(select(FinanceInvoice).where(FinanceInvoice.po_id == order.id).order_by(FinanceInvoice.id)))
     for key, label in scopes:
         exists = db.scalar(select(FinanceDifferenceCheck.id).where(FinanceDifferenceCheck.order_id == order.id, FinanceDifferenceCheck.scope_key == key))
         if exists is None:
@@ -91,6 +93,19 @@ def list_events(db: Session, user: User, order_id: int, check_id: int) -> list[F
     return list(db.scalars(select(FinanceDifferenceEvent).where(FinanceDifferenceEvent.check_id == check_id).order_by(FinanceDifferenceEvent.id)).all())
 
 
+def reopen_for_invoice_change(db: Session, user: User, invoice: FinanceInvoice) -> None:
+    """票面依据或有效状态变化后，旧处理结果不能继续显示已复核。"""
+    for item in db.scalars(select(FinanceDifferenceCheck).where(FinanceDifferenceCheck.order_id == invoice.po_id).with_for_update().execution_options(populate_existing=True)):
+        if item.status == "OPEN":
+            continue
+        item.status = "OPEN"
+        item.checked_by = None
+        item.checked_at = None
+        item.reviewed_by = None
+        item.reviewed_at = None
+        db.add(FinanceDifferenceEvent(check_id=item.id, actor_id=user.id, status="OPEN", assignee_id=item.assignee_id, finding=f"发票 {invoice.invoice_no} 的匹配依据或状态变化，原处理结论保留供参考，请重新核查"))
+
+
 def update_check(db: Session, user: User, order_id: int, check_id: int, data: CheckItemUpdate) -> FinanceDifferenceCheck:
     order_service.read_order(db, user, order_id)
     item = db.scalar(select(FinanceDifferenceCheck).where(FinanceDifferenceCheck.id == check_id, FinanceDifferenceCheck.order_id == order_id).with_for_update())
@@ -99,6 +114,8 @@ def update_check(db: Session, user: User, order_id: int, check_id: int, data: Ch
     values = data.model_dump(exclude_unset=True)
     if not values:
         raise BusinessValidationError("没有需要更新的核查内容")
+    if item.status == "VERIFIED" and data.status != "OPEN":
+        raise BusinessValidationError("已复核的核查项须先重开，才能修改负责人或处理说明")
     if "assignee_id" in values:
         person = db.get(User, data.assignee_id) if data.assignee_id else None
         if data.assignee_id is not None and (person is None or person.status != "ACTIVE" or not _can_handle(db, person, order_id)):
@@ -108,7 +125,7 @@ def update_check(db: Session, user: User, order_id: int, check_id: int, data: Ch
         allowed = {"OPEN": {"CHECKED", "NEEDS_ACTION"}, "CHECKED": {"VERIFIED", "NEEDS_ACTION", "OPEN"}, "NEEDS_ACTION": {"CHECKED", "OPEN"}, "VERIFIED": {"OPEN"}}
         if data.status not in allowed.get(item.status, set()):
             raise BusinessValidationError("财务核查项状态不能这样变更")
-        if data.status != "OPEN" and not (data.finding or item.finding):
+        if data.status != "OPEN" and not (values.get("finding", item.finding) or "").strip():
             raise BusinessValidationError("提交核查结果前请填写说明")
         if data.status in {"CHECKED", "NEEDS_ACTION"} and item.assignee_id not in {None, user.id}:
             raise BusinessValidationError("仅指派人员可提交核查结果")

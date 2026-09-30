@@ -5,7 +5,8 @@ import type { FinanceApi } from '#/api';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { Page, useVbenModal } from '@vben/common-ui';
+import { Page, useVbenModal, useVbenDrawer } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { Plus } from '@vben/icons';
 
 import { Button, Input, message, Modal } from 'antdv-next';
@@ -16,15 +17,19 @@ import {
   rejectInvoiceApi,
   submitInvoiceApi,
   verifyInvoiceApi,
+  voidInvoiceApi,
 } from '#/api';
 import { getSupplierNameMap } from '#/utils/lookup';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
+import MatchDrawer from './modules/matches.vue';
 import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-detail.vue';
 
 defineOptions({ name: 'InvoiceList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
+const [Matches, matchesApi] = useVbenDrawer({ connectedComponent: MatchDrawer, destroyOnClose: true });
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
 const [Create, createApi] = useVbenModal({
@@ -38,6 +43,7 @@ const resolveSupplier = ref<(id?: null | number) => string>(() => '-');
 const rejectVisible = ref(false);
 const rejectReason = ref('');
 const rejectRow = ref<FinanceApi.Invoice>();
+const voiding = ref(false);
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
@@ -96,22 +102,29 @@ function runVerify(row: FinanceApi.Invoice) {
 }
 
 function openReject(row: FinanceApi.Invoice) {
+  voiding.value = false;
   rejectRow.value = row;
   rejectReason.value = '';
   rejectVisible.value = true;
 }
 
+function openVoid(row: FinanceApi.Invoice) {
+  openReject(row);
+  voiding.value = true;
+}
+
 async function onRejectConfirm() {
   if (!rejectReason.value.trim()) {
-    message.warning('请填写驳回原因');
+    message.warning('请填写原因');
     return;
   }
   if (!rejectRow.value) {
     return;
   }
   try {
-    await rejectInvoiceApi(rejectRow.value.id, rejectReason.value.trim());
-    message.success('发票已驳回');
+    if (voiding.value) await voidInvoiceApi(rejectRow.value.id, rejectReason.value.trim());
+    else await rejectInvoiceApi(rejectRow.value.id, rejectReason.value.trim());
+    message.success(voiding.value ? '发票已作废，匹配额度已释放' : '发票已驳回');
     rejectVisible.value = false;
     gridApi.query();
   } catch {
@@ -151,17 +164,20 @@ watch(
   <Page auto-content-height>
     <FinanceSourceDetail ref="financeSourceDetail" />
     <Create @success="gridApi.query()" />
+    <Matches @success="gridApi.query()" />
     <Grid table-title="供应商发票">
       <template #toolbar-tools>
-        <Button type="primary" @click="createApi.open()">
+        <Button v-if="hasAccessByCodes(['finance.invoices.write'])" type="primary" @click="createApi.open()">
           <Plus class="size-5" />
           录入发票
         </Button>
       </template>
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
+          <Button v-if="hasAccessByCodes(['finance.invoices.read'])" size="small" type="link" @click="matchesApi.setData(row.id).open()">行匹配</Button>
+          <Button v-if="['DRAFT', 'REJECTED'].includes(row.status) && hasAccessByCodes(['finance.invoices.write'])" size="small" type="link" danger @click="openVoid(row)">作废</Button>
           <Button
-            v-if="['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="['DRAFT', 'REJECTED'].includes(row.status) && hasAccessByCodes(['finance.invoices.write'])"
             size="small"
             type="link"
             @click="runSubmit(row)"
@@ -169,7 +185,7 @@ watch(
             提交核验
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED'"
+            v-if="row.status === 'SUBMITTED' && hasAccessByCodes(['finance.invoices.verify'])"
             size="small"
             type="link"
             @click="runVerify(row)"
@@ -177,7 +193,7 @@ watch(
             核验
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED'"
+            v-if="row.status === 'SUBMITTED' && hasAccessByCodes(['finance.invoices.verify'])"
             danger
             size="small"
             type="link"
@@ -193,13 +209,13 @@ watch(
     <Modal
       v-model:open="rejectVisible"
       cancel-text="取消"
-      ok-text="确认驳回"
-      title="驳回发票"
+      :ok-text="voiding ? '确认作废' : '确认驳回'"
+      :title="voiding ? '作废发票' : '驳回发票'"
       @ok="onRejectConfirm"
     >
       <div class="py-2">
         <div class="mb-2 text-sm">
-          驳回原因 <span class="text-red-500">*</span>
+          {{ voiding ? '作废原因' : '驳回原因' }} <span class="text-red-500">*</span>
         </div>
         <Input.TextArea
           v-model:value="rejectReason"

@@ -221,6 +221,18 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
         paid = sum((x.amount for x in payments if x.status == "PAID" and x.currency_code == rec.currency_code), Decimal(0))
         for invoice in invoices:
             _evidence(result, f"发票 {invoice.invoice_no}", f"含税 {invoice.amount_incl_tax:.2f}，税额 {invoice.tax_amount:.2f} {invoice.currency_code} · {invoice.status}", f"发票记录 #{invoice.id}", "/finance/invoices")
+            from app.modules.finance.invoice_matches import latest
+            match = latest(db, invoice.id)
+            if match:
+                for allocation in match.allocations:
+                    _evidence(result, f"发票匹配 · {invoice.invoice_no} · 第 {allocation['line_no']} 行", f"匹配版本 {match.version_no} / 对账版本 {match.reconciliation_version}；不含税 {allocation['amount_excl_tax']}，税额 {allocation['tax_amount']}；状态 {invoice.status}；差异处理 {allocation.get('difference_note') or '无'}", f"发票记录 #{invoice.id}", "/finance/invoices")
+        if rec.items_version:
+            from app.modules.finance.invoice_matches import line_summary
+            summary, unallocated = line_summary(db, rec)
+            for row in summary:
+                _evidence(result, f"对账行 {row['line_no']} · 已核验开票 / 未核验差额", f"{row['verified_amount']} / {Decimal(row['amount_incl_tax']) - Decimal(row['verified_amount'])} {rec.currency_code}；有效发票已占用 {row['reserved_amount']}", rec.reconciliation_no, "/finance/invoices")
+            if unallocated:
+                result.limitations.append("有效发票尚未行级匹配，不推算行归属：" + "、".join(unallocated))
         for payment in payments:
             _evidence(result, f"付款 {payment.payment_no}", f"{payment.amount:.2f} {payment.currency_code} · {payment.status}", f"付款记录 #{payment.id}", "/finance/payments")
         _evidence(result, "已核验发票 / 未开票差额", f"{verified:.2f} / {rec.total_amount-verified:.2f} {rec.currency_code}", rec.reconciliation_no, "/finance/invoices")
@@ -231,7 +243,7 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
         if any(x.currency_code != rec.currency_code for x in [*invoices, *payments]):
             result.limitations.append(f"{rec.reconciliation_no} 包含其他币种单据，这些单据未参与汇总。")
     result.suggestions.append("先在原单据核对收货与对账口径，再处理发票和付款差额。")
-    result.limitations.append("现有发票和付款没有订单行分摊字段；不得将其总额自动归因到某一订单行。已验收到货金额是按订单价税率计算的核查估算，不替代正式应付金额。")
+    result.limitations.append("历史未匹配发票和付款没有订单行分摊字段；不得将其总额自动归因到某一订单行。已验收到货金额是按订单价税率计算的核查估算，不替代正式应付金额。")
     return result
 
 

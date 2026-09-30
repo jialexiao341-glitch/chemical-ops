@@ -141,3 +141,19 @@ class FinanceReconciliationItem(Base):
     warnings: Mapped[list] = mapped_column(JSON, nullable=False)
     created_by: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+
+
+class FinanceInvoiceMatch(Base):
+    """人工匹配的追加式版本；正式发票状态负责提交和双人复核。"""
+    __tablename__ = "finance_invoice_matches"
+    __table_args__ = (UniqueConstraint("invoice_id", "version_no", name="uk_invoice_match_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("finance_invoices.id"), nullable=False)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    reconciliation_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    allocations: Mapped[list] = mapped_column(JSON, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))

@@ -33,7 +33,7 @@ def get_invoice(db: Session, invoice_id: int, *, for_update: bool = False) -> Fi
 
     statement = select(FinanceInvoice).where(FinanceInvoice.id == invoice_id)
     if for_update:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     return db.scalar(statement)
 
 

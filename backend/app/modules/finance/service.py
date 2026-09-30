@@ -95,8 +95,9 @@ def _sum_invoices(db: Session, reconciliation_id: int, *, verified_only: bool = 
     """统计对账单的有效发票金额。"""
 
     statuses = ["VERIFIED"] if verified_only else ["DRAFT", "SUBMITTED", "VERIFIED"]
-    value = db.scalar(select(func.coalesce(func.sum(FinanceInvoice.amount_incl_tax), 0)).where(FinanceInvoice.reconciliation_id == reconciliation_id, FinanceInvoice.status.in_(statuses)))
-    return Decimal(value or 0)
+    # 使用当前锁定读，避免等待主单锁后仍从旧事务快照统计占用额度。
+    values = db.scalars(select(FinanceInvoice.amount_incl_tax).where(FinanceInvoice.reconciliation_id == reconciliation_id, FinanceInvoice.status.in_(statuses)).with_for_update()).all()
+    return sum(values, Decimal(0))
 
 
 def _sum_payments(db: Session, reconciliation_id: int, *, paid_only: bool = False) -> Decimal:
@@ -230,12 +231,19 @@ def list_invoices(db: Session, user: User, *, reconciliation_id: int | None, sta
 def submit_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
     """提交发票进入财务核验。"""
 
+    invoice = get_invoice(db, user, invoice_id)
+    reconciliation = _require_reconciliation(db, invoice.reconciliation_id, for_update=True)
     invoice = _require_invoice(db, invoice_id, for_update=True)
     _require_finance_scope(db, user, invoice.po_id)
     if invoice.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的发票可以提交核验")
+    from app.modules.finance.invoice_matches import validate_transition
+    validate_transition(db, user, invoice, reconciliation)
     invoice.status = "SUBMITTED"
+    invoice.submitted_by = user.id
     invoice.reject_reason = None
+    from app.modules.insights.finance_checks import reopen_for_invoice_change
+    reopen_for_invoice_change(db, user, invoice)
     add_audit_log(db, actor_id=user.id, action_type="SUBMIT", resource_type="FINANCE_INVOICE", resource_id=invoice.id, request_summary="提交发票核验", result_status="SUCCESS")
     db.commit()
     return _require_invoice(db, invoice.id)
@@ -244,13 +252,19 @@ def submit_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
 def verify_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
     """记录内部人工复核；当前不调用税务平台。"""
 
+    invoice = get_invoice(db, user, invoice_id)
+    reconciliation = _require_reconciliation(db, invoice.reconciliation_id, for_update=True)
     invoice = _require_invoice(db, invoice_id, for_update=True)
     _require_finance_scope(db, user, invoice.po_id)
     if invoice.status != "SUBMITTED":
         raise BusinessValidationError("只有已提交的发票可以核验")
+    from app.modules.finance.invoice_matches import validate_transition
+    validate_transition(db, user, invoice, reconciliation, verifying=True)
     invoice.status = "VERIFIED"
     invoice.verified_by = user.id
     invoice.verified_at = _now()
+    from app.modules.insights.finance_checks import reopen_for_invoice_change
+    reopen_for_invoice_change(db, user, invoice)
     add_audit_log(db, actor_id=user.id, action_type="VERIFY", resource_type="FINANCE_INVOICE", resource_id=invoice.id, request_summary="人工复核发票通过", result_status="SUCCESS")
     db.commit()
     return _require_invoice(db, invoice.id)
@@ -259,12 +273,16 @@ def verify_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
 def reject_invoice(db: Session, user: User, invoice_id: int, reason: str) -> FinanceInvoice:
     """驳回发票并记录可供前端展示的原因。"""
 
+    invoice = get_invoice(db, user, invoice_id)
+    _require_reconciliation(db, invoice.reconciliation_id, for_update=True)
     invoice = _require_invoice(db, invoice_id, for_update=True)
     _require_finance_scope(db, user, invoice.po_id)
     if invoice.status != "SUBMITTED":
         raise BusinessValidationError("只有已提交的发票可以驳回")
     invoice.status = "REJECTED"
     invoice.reject_reason = reason
+    from app.modules.insights.finance_checks import reopen_for_invoice_change
+    reopen_for_invoice_change(db, user, invoice)
     add_audit_log(db, actor_id=user.id, action_type="REJECT", resource_type="FINANCE_INVOICE", resource_id=invoice.id, request_summary=f"驳回发票：{reason}", result_status="SUCCESS")
     db.commit()
     return _require_invoice(db, invoice.id)

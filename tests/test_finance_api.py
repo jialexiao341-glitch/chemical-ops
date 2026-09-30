@@ -64,16 +64,19 @@ def test_finance_full_settlement_flow(client: TestClient, db_session, demo_passw
             "reconciliation_id": reconciliation_id,
             "invoice_number": "TEST-FINANCE-001",
             "invoice_date": "2026-09-17",
-            "amount_excl_tax": "885",
-            "tax_amount": "115",
+            "amount_excl_tax": "1000",
+            "tax_amount": "0",
             "amount_incl_tax": "1000",
         },
     )
     assert invoice.status_code == 201, invoice.text
     invoice_id = invoice.json()["id"]
+    assert client.post(f"/api/v1/finance/reconciliations/{reconciliation_id}/confirm", headers=manager, json={}).status_code == 200
+    basis = client.get(f"/api/v1/finance/reconciliations/{reconciliation_id}/items", headers=clerk).json()
+    match = client.post(f"/api/v1/finance/invoices/{invoice_id}/matches", headers=clerk, json={"reconciliation_version": basis["version_no"], "allocations": [{"reconciliation_item_id": basis["items"][0]["id"], "amount_excl_tax": "1000", "tax_amount": "0"}]})
+    assert match.status_code == 200, match.text
     assert client.post(f"/api/v1/finance/invoices/{invoice_id}/submit", headers=clerk).status_code == 200
     assert client.post(f"/api/v1/finance/invoices/{invoice_id}/verify", headers=manager).status_code == 200
-    assert client.post(f"/api/v1/finance/reconciliations/{reconciliation_id}/confirm", headers=manager, json={}).status_code == 200
 
     payment = client.post(
         "/api/v1/finance/payments",

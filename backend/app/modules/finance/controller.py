@@ -6,12 +6,14 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_permission
 from app.core.db import get_db
 from app.core.errors import BusinessValidationError
-from app.modules.finance import service, reconciliation_items
+from app.modules.finance import service, reconciliation_items, invoice_matches
 from app.modules.finance.schema import (
     InvoiceCreate,
     InvoicePage,
     InvoiceRead,
     InvoiceReject,
+    InvoiceMatchRead,
+    InvoiceMatchSave,
     PaymentCreate,
     PaymentPage,
     PaymentPaid,
@@ -32,6 +34,21 @@ from app.modules.system.model import User
 
 
 router = APIRouter(prefix="/finance", tags=["财务管理"])
+
+
+@router.get("/invoices/{invoice_id}/matches", response_model=InvoiceMatchRead, summary="查看发票行匹配和历史版本")
+def read_invoice_matches(invoice_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.invoices.read"))):
+    return invoice_matches.read_match(db, user, invoice_id)
+
+
+@router.post("/invoices/{invoice_id}/matches", response_model=InvoiceMatchRead, summary="保存发票人工行匹配")
+def save_invoice_matches(invoice_id: int, data: InvoiceMatchSave, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.invoices.write"))):
+    return invoice_matches.save_match(db, user, invoice_id, data)
+
+
+@router.post("/invoices/{invoice_id}/void", response_model=InvoiceRead, summary="作废未核验发票并释放匹配额度")
+def void_invoice(invoice_id: int, data: InvoiceReject, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.invoices.write"))):
+    return invoice_matches.void_invoice(db, user, invoice_id, data.reason)
 
 
 @router.post("/reconciliations", response_model=ReconciliationRead, status_code=status.HTTP_201_CREATED, summary="创建财务对账单")

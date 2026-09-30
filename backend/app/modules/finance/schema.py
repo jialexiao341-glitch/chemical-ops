@@ -60,9 +60,9 @@ class InvoiceCreate(BaseModel):
     invoice_code: str | None = Field(default=None, max_length=32)
     invoice_number: str = Field(min_length=1, max_length=64)
     invoice_date: date
-    amount_excl_tax: Decimal = Field(ge=0)
-    tax_amount: Decimal = Field(default=0, ge=0)
-    amount_incl_tax: Decimal = Field(gt=0)
+    amount_excl_tax: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    tax_amount: Decimal = Field(default=0, ge=0, max_digits=18, decimal_places=6)
+    amount_incl_tax: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
     source_file_id: int | None = Field(default=None, gt=0)
     note: str | None = Field(default=None, max_length=1000)
 
@@ -259,3 +259,37 @@ class ReconciliationItemsRead(BaseModel):
     source_changed: bool
     warnings: list[str]
     items: list[ReconciliationItemRead]
+
+
+class InvoiceAllocation(BaseModel):
+    reconciliation_item_id: int = Field(gt=0)
+    amount_excl_tax: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    tax_amount: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    difference_note: str | None = Field(default=None, max_length=1000)
+
+
+class InvoiceMatchSave(BaseModel):
+    reconciliation_version: int = Field(gt=0)
+    allocations: list[InvoiceAllocation] = Field(min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class InvoiceMatchVersionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    version_no: int
+    reconciliation_version: int
+    allocations: list[dict]
+    note: str | None
+    created_by: int
+    created_at: datetime
+
+
+class InvoiceMatchRead(BaseModel):
+    invoice_id: int
+    reconciliation_version: int
+    source_changed: bool
+    legacy: bool
+    warnings: list[str]
+    items: list[dict]
+    versions: list[InvoiceMatchVersionRead]

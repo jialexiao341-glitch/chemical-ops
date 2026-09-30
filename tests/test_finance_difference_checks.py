@@ -67,7 +67,8 @@ def test_receipt_line_and_document_review_are_separate(client, db_session, demo_
     assert client.post(f"{base}/checks", headers=viewer, params={"snapshot_id": snapshot.json()["id"]}).status_code == 403
     first = client.post(f"{base}/checks", headers=clerk, params={"snapshot_id": snapshot.json()["id"]})
     assert first.status_code == 200, first.text
-    assert {row["scope_key"] for row in first.json()} == {f"LINE:{line.id}", "DOCUMENTS"}
+    assert {row["scope_key"] for row in first.json()} >= {f"LINE:{line.id}", "DOCUMENTS"}
+    assert len([row for row in first.json() if row['scope_key'].startswith('INVOICE:')]) == 2
     repeated = client.post(f"{base}/checks", headers=clerk, params={"snapshot_id": snapshot.json()["id"]})
     assert [row["id"] for row in repeated.json()] == [row["id"] for row in first.json()]
     check = first.json()[0]

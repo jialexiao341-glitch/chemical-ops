@@ -516,7 +516,7 @@ defineExpose({ open });
         <section v-if="targetKind === 'finance-difference'" class="space-y-3">
           <div class="flex items-center justify-between">
             <h3 class="font-medium">财务核查清单</h3>
-            <Button v-if="hasAccessByCodes(['finance.reconciliations.write'])" :loading="busy" @click="startFinanceChecks">{{ financeChecks.length ? '补充新订单行' : '建立核查清单' }}</Button>
+            <Button v-if="hasAccessByCodes(['finance.reconciliations.write'])" :loading="busy" @click="startFinanceChecks">{{ financeChecks.length ? '补充订单行与发票' : '建立核查清单' }}</Button>
           </div>
           <Alert show-icon type="info" message="订单行核对到货；发票、付款和退货保持单据级口径，不自动分摊到产品行。" />
           <div v-for="item in financeChecks" :key="item.id" class="space-y-2 rounded-lg border p-3 text-sm">
@@ -532,10 +532,10 @@ defineExpose({ open });
               allow-clear
               class="w-full"
               placeholder="指派财务核查人员"
-              :disabled="busy"
+              :disabled="busy || item.status === 'VERIFIED'"
               @change="(value) => changeFinanceCheck(item, { assignee_id: typeof value === 'number' ? value : null })"
             />
-            <Input.TextArea v-if="hasAccessByCodes(['finance.reconciliations.write'])" v-model:value="findings[item.id]" :rows="2" :maxlength="2000" placeholder="记录差异来源、核对结论或待处理事项" />
+            <Input.TextArea v-if="hasAccessByCodes(['finance.reconciliations.write'])" v-model:value="findings[item.id]" :disabled="item.status === 'VERIFIED'" :rows="2" :maxlength="2000" placeholder="记录差异来源、处理办法、关联单据编号和处理结论" />
             <div v-else-if="item.finding" class="whitespace-pre-wrap text-muted-foreground">{{ item.finding }}</div>
             <div v-if="hasAccessByCodes(['finance.reconciliations.write'])" class="flex flex-wrap gap-2">
               <Button v-if="item.status === 'OPEN' || item.status === 'NEEDS_ACTION'" size="small" :disabled="busy" @click="changeFinanceCheck(item, { status: 'CHECKED', finding: findings[item.id] })">提交核查</Button>

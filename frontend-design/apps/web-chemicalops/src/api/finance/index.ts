@@ -181,6 +181,56 @@ export function refreshReconciliationItemsApi(id: number, data: {
   return requestClient.post<ReconciliationItems>(`/finance/reconciliations/${id}/items/refresh`, data);
 }
 
+export interface InvoiceMatchAllocation {
+  reconciliation_item_id: number;
+  amount_excl_tax: string;
+  tax_amount: string;
+  difference_note?: null | string;
+  product_name?: string;
+  line_no?: number;
+}
+
+export interface InvoiceMatches {
+  invoice_id: number;
+  reconciliation_version: number;
+  source_changed: boolean;
+  legacy: boolean;
+  warnings: string[];
+  items: {
+    reconciliation_item_id: number;
+    line_no: number;
+    product_name: string;
+    amount_incl_tax: string;
+    remaining_amount: string;
+    verified_amount: string;
+  }[];
+  versions: {
+    id: number;
+    version_no: number;
+    reconciliation_version: number;
+    allocations: InvoiceMatchAllocation[];
+    note: null | string;
+    created_by: number;
+    created_at: string;
+  }[];
+}
+
+export function getInvoiceMatchesApi(id: number) {
+  return requestClient.get<InvoiceMatches>(`/finance/invoices/${id}/matches`);
+}
+
+export function saveInvoiceMatchesApi(id: number, data: {
+  reconciliation_version: number;
+  allocations: InvoiceMatchAllocation[];
+  note?: string;
+}) {
+  return requestClient.post<InvoiceMatches>(`/finance/invoices/${id}/matches`, data);
+}
+
+export function voidInvoiceApi(id: number, reason: string) {
+  return requestClient.post<FinanceApi.Invoice>(`/finance/invoices/${id}/void`, { reason });
+}
+
 // ---------- 财务对账 ----------
 
 /** 分页查询财务对账单 */

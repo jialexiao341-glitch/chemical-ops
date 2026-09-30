@@ -63,9 +63,9 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const expected = Math.round(
-      ((amountExclTax.value ?? 0) + (taxAmount.value ?? 0)) * 100,
-    ) / 100;
-    if (Math.abs(expected - amountInclTax.value) > 0.009) {
+      ((amountExclTax.value ?? 0) + (taxAmount.value ?? 0)) * 1_000_000,
+    ) / 1_000_000;
+    if (Math.abs(expected - amountInclTax.value) > 0.0000009) {
       message.warning('价税合计必须等于不含税金额加税额');
       return;
     }
@@ -127,8 +127,8 @@ function recalcIncl() {
   }
   amountInclTax.value =
     Math.round(
-      ((amountExclTax.value ?? 0) + (taxAmount.value ?? 0)) * 100,
-    ) / 100;
+      ((amountExclTax.value ?? 0) + (taxAmount.value ?? 0)) * 1_000_000,
+    ) / 1_000_000;
 }
 </script>
 
@@ -193,7 +193,7 @@ function recalcIncl() {
             <InputNumber
               v-model:value="amountExclTax"
               :min="0"
-              :precision="2"
+              :precision="6"
               class="w-full"
               placeholder="0.00"
               @change="recalcIncl"
@@ -204,7 +204,7 @@ function recalcIncl() {
             <InputNumber
               v-model:value="taxAmount"
               :min="0"
-              :precision="2"
+              :precision="6"
               class="w-full"
               placeholder="0.00"
               @change="recalcIncl"
@@ -217,7 +217,7 @@ function recalcIncl() {
             <InputNumber
               v-model:value="amountInclTax"
               :min="0"
-              :precision="2"
+              :precision="6"
               class="w-full"
               placeholder="0.00"
             />
