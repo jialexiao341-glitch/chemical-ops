@@ -29,6 +29,8 @@ class ReconciliationRead(BaseModel):
     po_id: int
     supplier_id: int
     currency_code: str
+    items_version: int
+    amount_precision: int
     total_amount: Decimal
     status: str
     created_by: int
@@ -208,3 +210,52 @@ class SettlementPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ReconciliationItemDecision(BaseModel):
+    po_item_id: int = Field(gt=0)
+    return_treatment: str = Field(pattern="^(NONE|PENDING|DEDUCT|REPLACEMENT)$")
+    treatment_note: str | None = Field(default=None, max_length=1000)
+
+
+class ReconciliationItemsRefresh(BaseModel):
+    amount_precision: int = Field(default=2, ge=0, le=6)
+    decisions: list[ReconciliationItemDecision] = Field(default_factory=list, max_length=100)
+
+
+class ReconciliationItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    version_no: int
+    po_item_id: int
+    line_no: int
+    product_name: str
+    unit_name: str
+    ordered_quantity: Decimal
+    received_quantity: Decimal
+    accepted_quantity: Decimal
+    returned_quantity: Decimal
+    reconciliation_quantity: Decimal
+    unit_price: Decimal
+    tax_rate: Decimal
+    amount_excl_tax: Decimal
+    tax_amount: Decimal
+    amount_incl_tax: Decimal
+    return_treatment: str
+    treatment_note: str | None
+    basis_json: dict
+    warnings: list[str]
+    created_by: int
+    created_at: datetime
+
+
+class ReconciliationItemsRead(BaseModel):
+    reconciliation_id: int
+    version_no: int
+    available_versions: list[int]
+    amount_precision: int
+    currency_code: str
+    total_amount: Decimal
+    source_changed: bool
+    warnings: list[str]
+    items: list[ReconciliationItemRead]

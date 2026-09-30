@@ -179,7 +179,7 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
     accepted_total = Decimal(0)
     for line in lines:
         rows = by_order_line.get(line.id, [])
-        received = sum((row.actual_quantity for row in rows if delivery_by_id[row.delivery_id].status in {"RECEIVED", "ACCEPTED"}), Decimal(0))
+        received = sum((row.actual_quantity for row in rows if delivery_by_id[row.delivery_id].status != "IN_TRANSIT"), Decimal(0))
         accepted = sum((row.actual_quantity for row in rows if delivery_by_id[row.delivery_id].status == "ACCEPTED"), Decimal(0))
         tax_multiplier = Decimal(1) + (line.tax_rate or Decimal(0)) / Decimal(100)
         ordered_amount = line.order_quantity * line.unit_price * tax_multiplier
@@ -197,13 +197,21 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
     for returned in returns:
         return_items = db.scalars(select(InventoryReturnItem).where(InventoryReturnItem.return_request_id == returned.id)).all()
         _evidence(result, f"已完成退货 {returned.return_no}", "；".join(f"产品 #{item.product_id} 退回 {item.returned_quantity} · 单位 #{item.unit_id}" for item in return_items) or "无退货明细", f"退货单 #{returned.id}", "/warehouse/returns")
-    if returns:
+    if any(item.source_po_item_id is None for returned in returns for item in returned.items):
         result.limitations.append("退货明细未直接关联采购订单行，不将退货量或金额自动分摊到订单行。")
     reconciliations = db.scalars(select(FinanceReconciliation).where(FinanceReconciliation.po_id == order.id)).all()
     if not reconciliations:
         result.limitations.append("当前订单没有对账单，因此无法分析发票和付款差额。")
     for rec in reconciliations:
         _evidence(result, "对账单 / 与订单差额", f"{rec.total_amount:.2f} {rec.currency_code} · {rec.status}；差额 {rec.total_amount-order.order_amount:.2f}", rec.reconciliation_no, "/finance/reconciliations")
+        from app.modules.finance.reconciliation_items import read_items
+        saved = read_items(db, user, rec.id)
+        for row in saved.items:
+            _evidence(result, f"对账行 {row.line_no} · {row.product_name}", f"第 {saved.version_no} 版：验收 {row.accepted_quantity}，退货 {row.returned_quantity}，对账 {row.reconciliation_quantity} {row.unit_name}；退货口径 {row.return_treatment}；含税 {row.amount_incl_tax:.{saved.amount_precision}f} {saved.currency_code}；依据 {row.treatment_note or '无退货处理依据'}", rec.reconciliation_no, "/finance/reconciliations")
+            result.limitations.extend(row.warnings)
+        result.limitations.extend(saved.warnings)
+        if saved.source_changed and saved.items:
+            result.limitations.append(f"对账单 {rec.reconciliation_no} 的订单、到货或退货来源已变化，当前金额仍是保存版本，请重新核查。")
         if rec.cancelled_at is not None:
             result.limitations.append(f"对账单 {rec.reconciliation_no} 已取消，不计入发票和付款差额。")
             continue

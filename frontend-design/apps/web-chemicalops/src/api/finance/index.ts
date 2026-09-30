@@ -14,6 +14,8 @@ export namespace FinanceApi {
     created_by: number;
     currency_code: string;
     id: number;
+    items_version: number;
+    amount_precision: number;
     note?: null | string;
     po_id: number;
     reconciliation_no: string;
@@ -129,6 +131,54 @@ export namespace FinanceApi {
     status?: string;
     supplier_id?: number;
   }
+}
+
+export interface ReconciliationItem {
+  id: number;
+  po_item_id: number;
+  line_no: number;
+  product_name: string;
+  unit_name: string;
+  ordered_quantity: string;
+  received_quantity: string;
+  accepted_quantity: string;
+  returned_quantity: string;
+  reconciliation_quantity: string;
+  unit_price: string;
+  tax_rate: string;
+  amount_excl_tax: string;
+  tax_amount: string;
+  amount_incl_tax: string;
+  return_treatment: string;
+  treatment_note: null | string;
+  warnings: string[];
+  basis_json: {
+    receipts: { delivery_no: string; quantity: string; status: string }[];
+    returns: { return_no: string; returned_quantity: string; status: string }[];
+  };
+}
+
+export interface ReconciliationItems {
+  reconciliation_id: number;
+  version_no: number;
+  available_versions: number[];
+  amount_precision: number;
+  currency_code: string;
+  total_amount: string;
+  source_changed: boolean;
+  warnings: string[];
+  items: ReconciliationItem[];
+}
+
+export function getReconciliationItemsApi(id: number, version?: number) {
+  return requestClient.get<ReconciliationItems>(`/finance/reconciliations/${id}/items`, { params: { version } });
+}
+
+export function refreshReconciliationItemsApi(id: number, data: {
+  amount_precision: number;
+  decisions: { po_item_id: number; return_treatment: string; treatment_note?: string }[];
+}) {
+  return requestClient.post<ReconciliationItems>(`/finance/reconciliations/${id}/items/refresh`, data);
 }
 
 // ---------- 财务对账 ----------

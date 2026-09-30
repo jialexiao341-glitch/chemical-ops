@@ -11,7 +11,7 @@ def get_reconciliation(db: Session, reconciliation_id: int, *, for_update: bool 
 
     statement = select(FinanceReconciliation).where(FinanceReconciliation.id == reconciliation_id)
     if for_update:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     return db.scalar(statement)
 
 

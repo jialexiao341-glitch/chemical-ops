@@ -14,6 +14,12 @@ const routes: RouteRecordRaw[] = [
     path: '/warehouse',
     children: [
       {
+        name: 'InventoryReturns',
+        path: 'returns',
+        component: () => import('#/views/warehouse/returns/index.vue'),
+        meta: { authority: ['warehouse.inventory.return.read'], icon: 'lucide:package-minus', title: '供应商退货' },
+      },
+      {
         name: 'DeliveryList',
         path: 'deliveries',
         component: () => import('#/views/warehouse/deliveries/index.vue'),

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_permission
 from app.core.db import get_db
 from app.modules.inventory_returns import service
-from app.modules.inventory_returns.schema import ReturnCreate, ReturnPage, ReturnRead, ReturnReject
+from app.modules.inventory_returns.schema import ReturnCreate, ReturnPage, ReturnRead, ReturnReject, ReturnSourceRead
 from app.modules.system.model import User
 
 
@@ -24,6 +24,11 @@ def list_returns(return_status: str | None = Query(default=None, alias="status",
     """按状态查询退货申请。"""
     items, total = service.list_returns(db, user, status=return_status, page=page, page_size=page_size)
     return ReturnPage(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/sources", response_model=list[ReturnSourceRead], summary="查询库存余额对应的可核对退货来源")
+def list_return_sources(balance_id: int = Query(gt=0), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.return.write"))):
+    return service.list_return_sources(db, user, balance_id)
 
 
 @router.get("/{return_id}", response_model=ReturnRead, summary="查询退货申请详情")

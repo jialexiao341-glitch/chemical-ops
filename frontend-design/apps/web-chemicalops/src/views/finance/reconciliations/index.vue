@@ -5,7 +5,8 @@ import type { FinanceApi } from '#/api';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { Page, useVbenModal } from '@vben/common-ui';
+import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { Plus } from '@vben/icons';
 
 import { Button, Input, message, Modal } from 'antdv-next';
@@ -21,10 +22,13 @@ import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
+import ItemsDrawer from './modules/items.vue';
 import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-detail.vue';
 
 defineOptions({ name: 'ReconciliationList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
+const [Items, itemsApi] = useVbenDrawer({ connectedComponent: ItemsDrawer, destroyOnClose: true });
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
 const [Create, createApi] = useVbenModal({
@@ -158,17 +162,19 @@ watch(
   <Page auto-content-height>
     <FinanceSourceDetail ref="financeSourceDetail" />
     <Create @success="gridApi.query()" />
+    <Items @success="gridApi.query()" />
     <Grid table-title="财务对账">
       <template #toolbar-tools>
-        <Button type="primary" @click="createApi.open()">
+        <Button v-if="hasAccessByCodes(['finance.reconciliations.write'])" type="primary" @click="createApi.open()">
           <Plus class="size-5" />
           创建对账单
         </Button>
       </template>
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
+          <Button size="small" type="link" @click="itemsApi.setData(row.id).open()">对账明细</Button>
           <Button
-            v-if="['DRAFT', 'DISPUTED'].includes(row.status)"
+            v-if="hasAccessByCodes(['finance.reconciliations.write']) && ['DRAFT', 'DISPUTED'].includes(row.status)"
             size="small"
             type="link"
             @click="runConfirm(row)"
@@ -176,7 +182,7 @@ watch(
             确认对账
           </Button>
           <Button
-            v-if="['DRAFT', 'CONFIRMED'].includes(row.status)"
+            v-if="hasAccessByCodes(['finance.reconciliations.write']) && ['DRAFT', 'CONFIRMED'].includes(row.status)"
             danger
             size="small"
             type="link"

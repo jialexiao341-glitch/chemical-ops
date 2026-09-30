@@ -25,6 +25,7 @@ import {
 import { useColumns, useGridFormSchema } from './data';
 import FreezeModal from './modules/freeze.vue';
 import InboundModal from './modules/inbound.vue';
+import ReturnModal from './modules/return.vue';
 import LogsDrawer from './modules/logs.vue';
 import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
@@ -62,6 +63,7 @@ const [Inbound, inboundApi] = useVbenModal({
   connectedComponent: InboundModal,
   destroyOnClose: true,
 });
+const [Return, returnApi] = useVbenModal({ connectedComponent: ReturnModal, destroyOnClose: true });
 
 const [Logs, logsApi] = useVbenDrawer({
   connectedComponent: LogsDrawer,
@@ -113,6 +115,10 @@ function onActionClick({
   row,
 }: OnActionClickParams<InventoryApi.InventoryBalance>) {
   switch (code) {
+    case 'return': {
+      returnApi.setData(row).open();
+      break;
+    }
     case 'batch-impact':
     case 'replenishment':
     case 'location-advice': {
@@ -187,6 +193,7 @@ watch(
     <BusinessInsightDrawer ref="insightDrawer" />
     <Freeze @success="onRefresh" />
     <Inbound @success="onRefresh" />
+    <Return @success="onRefresh" />
     <Logs />
     <Grid table-title="库存余额">
       <template #toolbar-tools>

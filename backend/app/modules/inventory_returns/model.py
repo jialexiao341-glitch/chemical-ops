@@ -47,6 +47,8 @@ class InventoryReturnItem(Base):
     location_id: Mapped[int] = mapped_column(ForeignKey("warehouse_locations.id"), nullable=False)
     batch_id: Mapped[int] = mapped_column(ForeignKey("inventory_batches.id"), nullable=False)
     unit_id: Mapped[int] = mapped_column(ForeignKey("md_units.id"), nullable=False)
+    source_delivery_item_id: Mapped[int | None] = mapped_column(ForeignKey("delivery_items.id"), nullable=True)
+    source_po_item_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_order_items.id"), nullable=True)
     requested_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     returned_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="OPEN")

@@ -6,8 +6,9 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.modules.deliveries.model import Delivery
-from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.deliveries.model import Delivery, DeliveryItem
+from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
+from app.modules.products.model import Product
 from app.modules.suppliers.model import Supplier
 from app.modules.system.model import User
 
@@ -40,8 +41,14 @@ def test_finance_full_settlement_flow(client: TestClient, db_session, demo_passw
         buyer_id=buyer_id, order_amount=Decimal("1000"), currency_code="CNY", status="COMPLETED")
     db_session.add(order)
     db_session.flush()
-    db_session.add(Delivery(delivery_no=f"TEST-DLV-{suffix}", po_id=order.id,
-        supplier_id=supplier_id, status="ACCEPTED"))
+    product = db_session.scalar(select(Product).where(Product.status == "ACTIVE"))
+    line = PurchaseOrderItem(po_id=order.id, line_no=1, product_id=product.id, product_name_snapshot=product.product_name, unit_id=product.unit_id, order_quantity=10, received_quantity=10, unit_price=100, tax_rate=0)
+    db_session.add(line)
+    db_session.flush()
+    delivery = Delivery(delivery_no=f"TEST-DLV-{suffix}", po_id=order.id, supplier_id=supplier_id, status="ACCEPTED")
+    db_session.add(delivery)
+    db_session.flush()
+    db_session.add(DeliveryItem(delivery_id=delivery.id, po_item_id=line.id, line_no=1, product_id=product.id, unit_id=product.unit_id, planned_quantity=10, actual_quantity=10))
     db_session.flush()
 
     created = client.post("/api/v1/finance/reconciliations", headers=clerk, json={"po_id": order.id, "note": "接口测试对账"})

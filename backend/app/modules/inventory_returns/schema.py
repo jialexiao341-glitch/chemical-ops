@@ -14,7 +14,9 @@ class ReturnItemCreate(BaseModel):
     location_id: int = Field(gt=0)
     batch_id: int = Field(gt=0)
     unit_id: int = Field(gt=0)
-    requested_quantity: Decimal = Field(gt=0)
+    source_delivery_item_id: int | None = Field(default=None, gt=0)
+    source_po_item_id: int | None = Field(default=None, gt=0)
+    requested_quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
     note: str | None = Field(default=None, max_length=1000)
 
 
@@ -40,12 +42,18 @@ class ReturnItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     return_request_id: int
+    product_name: str | None = None
+    unit_name: str | None = None
+    source_delivery_no: str | None = None
+    source_po_no: str | None = None
     line_no: int
     product_id: int
     warehouse_id: int
     location_id: int
     batch_id: int
     unit_id: int
+    source_delivery_item_id: int | None
+    source_po_item_id: int | None
     requested_quantity: Decimal
     returned_quantity: Decimal
     status: str
@@ -83,3 +91,20 @@ class ReturnPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ReturnSourceRead(BaseModel):
+    source_delivery_item_id: int
+    source_po_item_id: int
+    delivery_id: int
+    po_id: int
+    supplier_id: int
+    supplier_name: str
+    po_no: str
+    delivery_no: str
+    line_no: int
+    product_name: str
+    batch_no: str
+    unit_name: str
+    received_quantity: Decimal
+    returned_quantity: Decimal

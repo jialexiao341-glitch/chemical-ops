@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_permission
 from app.core.db import get_db
 from app.core.errors import BusinessValidationError
-from app.modules.finance import service
+from app.modules.finance import service, reconciliation_items
 from app.modules.finance.schema import (
     InvoiceCreate,
     InvoicePage,
@@ -18,6 +18,8 @@ from app.modules.finance.schema import (
     PaymentRead,
     PaymentReject,
     ReconciliationAction,
+    ReconciliationItemsRead,
+    ReconciliationItemsRefresh,
     ReconciliationCreate,
     ReconciliationPage,
     ReconciliationRead,
@@ -52,6 +54,16 @@ def get_reconciliation(reconciliation_id: int, db: Session = Depends(get_db), us
     """查询一张对账单详情。"""
 
     return service.get_reconciliation(db, user, reconciliation_id)
+
+
+@router.get("/reconciliations/{reconciliation_id}/items", response_model=ReconciliationItemsRead, summary="查看对账明细与历史版本")
+def get_reconciliation_items(reconciliation_id: int, version: int | None = Query(default=None, gt=0), db: Session = Depends(get_db), user: User = Depends(require_permission("finance.reconciliations.read"))):
+    return reconciliation_items.read_items(db, user, reconciliation_id, version)
+
+
+@router.post("/reconciliations/{reconciliation_id}/items/refresh", response_model=ReconciliationItemsRead, summary="重新核对并保存退货处理口径")
+def refresh_reconciliation_items(reconciliation_id: int, data: ReconciliationItemsRefresh, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.reconciliations.write"))):
+    return reconciliation_items.refresh_items(db, user, reconciliation_id, data)
 
 
 @router.post("/reconciliations/{reconciliation_id}/confirm", response_model=ReconciliationRead, summary="确认财务对账单")

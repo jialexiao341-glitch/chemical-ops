@@ -24,6 +24,8 @@ const recordKind = ref<FinanceRecordKind>();
 const loading = ref(false);
 const labels: Record<string, string> = {
   amount: '金额',
+  amount_precision: '金额小数位',
+  items_version: '对账明细版本',
   amount_excl_tax: '不含税金额',
   amount_incl_tax: '价税合计',
   approved_at: '审批时间',

@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, func
+from sqlalchemy import JSON, Date, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,6 +20,9 @@ class FinanceReconciliation(Base):
     po_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.id"), nullable=False, unique=True)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="CNY")
+    items_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    amount_precision: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT")
     created_by: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
@@ -108,3 +111,33 @@ class FinanceSettlement(Base):
     note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
     updated_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3))
+
+
+class FinanceReconciliationItem(Base):
+    """按版本追加保存的订单行对账依据，不改写旧版本。"""
+    __tablename__ = "finance_reconciliation_items"
+    __table_args__ = (UniqueConstraint("reconciliation_id", "version_no", "po_item_id", name="uk_finance_rec_item_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reconciliation_id: Mapped[int] = mapped_column(ForeignKey("finance_reconciliations.id"), nullable=False)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    po_item_id: Mapped[int] = mapped_column(ForeignKey("purchase_order_items.id"), nullable=False)
+    line_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    unit_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    ordered_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    received_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    accepted_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    returned_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    reconciliation_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    amount_excl_tax: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    amount_incl_tax: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    return_treatment: Mapped[str] = mapped_column(String(20), nullable=False)
+    treatment_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    basis_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    warnings: Mapped[list] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))

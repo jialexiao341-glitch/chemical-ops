@@ -75,7 +75,7 @@ def _scope_condition(db: Session, user: User, model):
 def _lock_order(db: Session, po_id: int) -> PurchaseOrder:
     """锁定采购订单，防止并发创建重复对账单。"""
 
-    order = db.scalar(select(PurchaseOrder).where(PurchaseOrder.id == po_id).with_for_update())
+    order = db.scalar(select(PurchaseOrder).where(PurchaseOrder.id == po_id).with_for_update().execution_options(populate_existing=True))
     if order is None:
         raise ResourceNotFoundError(f"采购订单 {po_id} 不存在")
     return order
@@ -86,7 +86,7 @@ def _check_order_ready_for_reconciliation(db: Session, order: PurchaseOrder) -> 
 
     if order.status != "COMPLETED":
         raise BusinessValidationError("只有已完成收货的采购订单可以创建对账单")
-    deliveries = list(db.scalars(select(Delivery).where(Delivery.po_id == order.id)).all())
+    deliveries = list(db.scalars(select(Delivery).where(Delivery.po_id == order.id).with_for_update().execution_options(populate_existing=True)).all())
     if not deliveries or any(delivery.status != "ACCEPTED" for delivery in deliveries):
         raise BusinessValidationError("采购订单必须全部完成质量验收后才能创建对账单")
 
@@ -128,6 +128,9 @@ def create_reconciliation(db: Session, user: User, po_id: int, note: str | None)
     db.add(reconciliation)
     db.flush()
     reconciliation.reconciliation_no = f"FR{date.today():%Y%m%d}{reconciliation.id:06d}"
+    from app.modules.finance.reconciliation_items import append_basis
+    from app.modules.finance.schema import ReconciliationItemsRefresh
+    append_basis(db, user, reconciliation, order, ReconciliationItemsRefresh())
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="FINANCE_RECONCILIATION", resource_id=reconciliation.id, request_summary="创建财务对账单", result_status="SUCCESS")
     db.commit()
     return _require_reconciliation(db, reconciliation.id)
@@ -154,6 +157,10 @@ def confirm_reconciliation(db: Session, user: User, reconciliation_id: int, reas
     _require_finance_scope(db, user, reconciliation.po_id)
     if reconciliation.status not in {"DRAFT", "DISPUTED"}:
         raise BusinessValidationError("只有草稿或争议中的对账单可以确认")
+    order = _lock_order(db, reconciliation.po_id)
+    _check_order_ready_for_reconciliation(db, order)
+    from app.modules.finance.reconciliation_items import validate_for_confirmation
+    validate_for_confirmation(db, reconciliation, order)
     reconciliation.status = "CONFIRMED"
     reconciliation.confirmed_by = user.id
     reconciliation.confirmed_at = _now()

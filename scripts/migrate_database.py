@@ -236,6 +236,22 @@ def _apply_idempotency_response_headers(connection) -> None:
         connection.commit()
 
 
+def _apply_return_reconciliation_items(connection, migration: Migration) -> None:
+    """恢复中断的增量迁移；每个 ALTER 在 MySQL 中作为一个原子 DDL。"""
+    statements = [part.strip() for part in migration.path.read_text(encoding="utf-8").split(";") if part.strip()]
+    for sql in statements:
+        if sql.startswith("ALTER TABLE inventory_return_items") and _column_exists(connection, "inventory_return_items", "source_delivery_item_id"):
+            continue
+        if sql.startswith("ALTER TABLE finance_reconciliations") and _column_exists(connection, "finance_reconciliations", "items_version"):
+            continue
+        if sql.startswith("ALTER TABLE finance_settlements"):
+            checks = inspect(connection).get_check_constraints("finance_settlements")
+            if any(check["name"] == "chk_finance_settlement_amount" and ">=" in check["sqltext"] for check in checks):
+                continue
+        connection.exec_driver_sql(sql)
+        connection.commit()
+
+
 def _apply_migration(connection, migration: Migration) -> None:
     if migration.version == "014":
         _apply_finance_ref(connection, migration)
@@ -247,6 +263,8 @@ def _apply_migration(connection, migration: Migration) -> None:
         _apply_auth_security(connection)
     elif migration.version == "022":
         _apply_idempotency_response_headers(connection)
+    elif migration.version == "034":
+        _apply_return_reconciliation_items(connection, migration)
     else:
         _execute_sql_file(connection, migration)
 

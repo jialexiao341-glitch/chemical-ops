@@ -36,7 +36,7 @@ export function useColumns(
     {
       align: 'right',
       field: 'total_amount',
-      formatter: ({ cellValue }) => formatAmount(cellValue),
+      formatter: ({ cellValue, row }) => formatAmount(cellValue, row.amount_precision ?? 2),
       title: '应付金额',
       width: 130,
     },
@@ -68,7 +68,7 @@ export function useColumns(
       fixed: 'right',
       slots: { default: 'operation' },
       title: '操作',
-      width: 170,
+      width: 260,
     },
   ];
 }
