@@ -36,6 +36,35 @@ const mockRoutes = [
   },
 ] as RouteRecordRaw[];
 
+const permissionGroupedRoutes = [
+  {
+    meta: { authority: ['dashboard.read'] },
+    path: '/dashboard',
+    children: [
+      { path: 'overview', meta: { authority: ['dashboard.read'] } },
+    ],
+  },
+  {
+    meta: { authority: ['procurement.requests.read', 'procurement.orders.read'] },
+    path: '/procurement',
+    children: [
+      { path: 'requests', meta: { authority: ['procurement.requests.read'] } },
+      { path: 'orders', meta: { authority: ['procurement.orders.read'] } },
+    ],
+  },
+  {
+    meta: { authority: ['quality.acceptances.read'] },
+    path: '/quality',
+    children: [
+      { path: 'acceptances', meta: { authority: ['quality.acceptances.read'] } },
+    ],
+  },
+  {
+    meta: { authority: ['dashboard.read'] },
+    path: '/ai/workspace',
+  },
+] as RouteRecordRaw[];
+
 describe('hasAuthority', () => {
   it('should return true if there is no authority defined', () => {
     expect(hasAuthority(mockRoutes[2], ['admin'])).toBe(true);
@@ -51,6 +80,31 @@ describe('hasAuthority', () => {
 });
 
 describe('generateRoutesByFrontend', () => {
+  it('hides empty module groups while keeping permitted modules and pages', async () => {
+    const generatedRoutes = await generateRoutesByFrontend(
+      permissionGroupedRoutes,
+      ['dashboard.read', 'procurement.orders.read'],
+    );
+
+    expect(generatedRoutes.map((route) => route.path)).toEqual([
+      '/dashboard',
+      '/procurement',
+      '/ai/workspace',
+    ]);
+    expect(generatedRoutes[1]?.children?.map((route) => route.path)).toEqual([
+      'orders',
+    ]);
+  });
+
+  it('does not show internal dashboard or AI workspace to supplier portal accounts', async () => {
+    const generatedRoutes = await generateRoutesByFrontend(
+      permissionGroupedRoutes,
+      ['supplier.portal.read'],
+    );
+
+    expect(generatedRoutes).toEqual([]);
+  });
+
   it('should handle routes without children', async () => {
     const generatedRoutes = await generateRoutesByFrontend(mockRoutes, [
       'user',

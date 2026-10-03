@@ -3,6 +3,12 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     meta: {
+      authority: [
+        'finance.reconciliations.read',
+        'finance.invoices.read',
+        'finance.payments.read',
+        'finance.settlements.read',
+      ],
       icon: 'lucide:landmark',
       order: 6,
       title: '财务管理',

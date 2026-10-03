@@ -9,6 +9,11 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     meta: {
+      authority: [
+        'master.chemicals.read',
+        'master.products.read',
+        'master.suppliers.read',
+      ],
       icon: 'lucide:database',
       order: 2,
       title: '主数据',

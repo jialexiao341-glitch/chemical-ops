@@ -1353,6 +1353,29 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
 .ai-send-loading { font-size: 17px; line-height: 1; }
 .ai-icon-button:focus-visible, .ai-new-chat:focus-visible, .ai-history-delete:focus-visible, .ai-send:focus-visible { outline: 2px solid var(--ai-blue); outline-offset: 2px; }
 
+:global(.dark .ai-workspace) { --ai-ink: #e2e8f0; --ai-muted: #94a3b8; border-color: #334155; background: #111827; }
+:global(.dark .ai-workspace .ai-sidebar) { border-color: #334155; background: #151c28; }
+:global(.dark .ai-workspace .ai-icon-button), :global(.dark .ai-workspace .ai-history-delete) { color: #94a3b8; }
+:global(.dark .ai-workspace .ai-icon-button:hover), :global(.dark .ai-workspace .ai-history-delete:hover) { background: #273449; color: #f1f5f9; }
+:global(.dark .ai-workspace .ai-search), :global(.dark .ai-workspace .ai-new-chat), :global(.dark .ai-workspace .ai-history-menu), :global(.dark .ai-workspace .ai-composer), :global(.dark .ai-workspace .ai-slash-menu) { border-color: #374151; background: #1f2937; color: #e2e8f0; }
+:global(.dark .ai-workspace .ai-search input) { color: #e2e8f0; }
+:global(.dark .ai-workspace .ai-search input::placeholder), :global(.dark .ai-workspace .ai-composer-input textarea::placeholder) { color: #94a3b8; }
+:global(.dark .ai-workspace .ai-history-item:hover), :global(.dark .ai-workspace .ai-history-item.is-active), :global(.dark .ai-workspace .ai-history-menu button:hover), :global(.dark .ai-workspace .ai-history-menu button:focus-visible) { background: #273449; }
+:global(.dark .ai-workspace .ai-history-menu) { box-shadow: 0 12px 28px rgb(0 0 0 / 30%); }
+:global(.dark .ai-workspace .ai-history-menu button) { color: #e2e8f0; }
+:global(.dark .ai-workspace .ai-main) { background: #111827; }
+:global(.dark .ai-workspace .ai-toolbar) { border-color: #273449; }
+:global(.dark .ai-workspace .ai-welcome h1) { color: #f8fafc; }
+:global(.dark .ai-workspace .ai-user-message) { background: #26365d; color: #e0e7ff; }
+:global(.dark .ai-workspace .ai-assistant-message) { background: #1f2937; color: #e2e8f0; }
+:global(.dark .ai-workspace .ai-assistant-message.is-agent) { background: transparent; color: #e2e8f0; }
+:global(.dark .ai-workspace .ai-slash-command) { color: #e2e8f0; }
+:global(.dark .ai-workspace .ai-slash-command:hover), :global(.dark .ai-workspace .ai-slash-command.is-active) { background: #273449; }
+:global(.dark .ai-workspace .ai-slash-command-icon), :global(.dark .ai-workspace .ai-slash-command-description) { color: #94a3b8; }
+:global(.dark .ai-workspace .ai-composer) { box-shadow: 0 10px 28px rgb(0 0 0 / 20%); }
+:global(.dark .ai-workspace .ai-composer-hint) { color: #94a3b8; }
+:global(.dark .ai-workspace .ai-send:disabled) { background: #465582; color: #cbd5e1; }
+
 @media (max-width: 900px) {
   .ai-sidebar { padding-inline: 10px; }
   .ai-toolbar { padding: 12px 16px; }

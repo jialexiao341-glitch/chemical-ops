@@ -1,0 +1,1474 @@
+{
+  "started_at": "2026-10-03T15:38:27.793361+08:00",
+  "dataset_version": "agent-read-v1.1",
+  "dataset_sha256": "5c09972fdb6f386d97af6170b095b99cc7c1cfd783bed9924bd6204698db04dd",
+  "evaluator_sha256": "af0535f84e6e3528af0d5e18de81498214f26da8d0b6952621f54ab2c1cef3bc",
+  "code_revision": "cd272e747ecbb596d5ff4dbcb1d60ea4ef94c03b",
+  "working_tree_dirty": true,
+  "model": "deepseek-flash",
+  "model_config": {
+    "temperature": 0.2,
+    "max_output_tokens": 2048,
+    "max_steps": 12,
+    "task_timeout_seconds": 120,
+    "context_max_chars": 18000
+  },
+  "planner_sha256": "0970438794d8814a795abe39b3889ba482d62fdeec192b697f7d29d995490e25",
+  "runtime_sha256": "6140c58db85d75464c0fe54afc6a189bea77de592daa0672d411e0d5c4a70a3d",
+  "tool_schemas": [
+    {
+      "name": "catalog.search_products",
+      "description": "按名称/编码找产品规格；多候选必须让用户选择，不猜 ID",
+      "version": "1.0",
+      "risk": "READ_ONLY",
+      "permission": "master.products.read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "keyword": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Keyword",
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "maximum": 20,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "keyword"
+        ],
+        "title": "ProductSearchInput",
+        "type": "object"
+      },
+      "output_schema": {
+        "$defs": {
+          "ProductCandidate": {
+            "additionalProperties": false,
+            "properties": {
+              "product_id": {
+                "title": "Product Id",
+                "type": "integer"
+              },
+              "product_code": {
+                "title": "Product Code",
+                "type": "string"
+              },
+              "product_name": {
+                "title": "Product Name",
+                "type": "string"
+              },
+              "model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Model"
+              },
+              "packaging_spec": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Packaging Spec"
+              },
+              "unit_id": {
+                "title": "Unit Id",
+                "type": "integer"
+              },
+              "unit_name": {
+                "title": "Unit Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "product_id",
+              "product_code",
+              "product_name",
+              "model",
+              "packaging_spec",
+              "unit_id",
+              "unit_name"
+            ],
+            "title": "ProductCandidate",
+            "type": "object"
+          },
+          "Source": {
+            "additionalProperties": false,
+            "properties": {
+              "resource": {
+                "title": "Resource",
+                "type": "string"
+              },
+              "record_id": {
+                "title": "Record Id",
+                "type": "integer"
+              },
+              "parent_id": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Parent Id"
+              }
+            },
+            "required": [
+              "resource",
+              "record_id"
+            ],
+            "title": "Source",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "const": "catalog.search_products",
+            "default": "catalog.search_products",
+            "title": "Tool",
+            "type": "string"
+          },
+          "keyword": {
+            "title": "Keyword",
+            "type": "string"
+          },
+          "total_rows": {
+            "title": "Total Rows",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/$defs/ProductCandidate"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/$defs/Source"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keyword",
+          "total_rows",
+          "truncated",
+          "rows",
+          "sources"
+        ],
+        "title": "ProductSearchResult",
+        "type": "object"
+      }
+    },
+    {
+      "name": "supplier_quotes.find_rfq_items",
+      "description": "定位产品的可见询价明细；多候选必须让用户选择",
+      "version": "1.0",
+      "risk": "READ_ONLY",
+      "permission": "procurement.rfqs.read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "exclusiveMinimum": 0,
+            "title": "Product Id",
+            "type": "integer"
+          },
+          "rfq_no": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rfq No"
+          },
+          "limit": {
+            "default": 10,
+            "maximum": 20,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "title": "RFQSearchInput",
+        "type": "object"
+      },
+      "output_schema": {
+        "$defs": {
+          "RFQCandidate": {
+            "additionalProperties": false,
+            "properties": {
+              "rfq_item_id": {
+                "title": "Rfq Item Id",
+                "type": "integer"
+              },
+              "rfq_id": {
+                "title": "Rfq Id",
+                "type": "integer"
+              },
+              "rfq_no": {
+                "title": "Rfq No",
+                "type": "string"
+              },
+              "product_id": {
+                "title": "Product Id",
+                "type": "integer"
+              },
+              "specification": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Specification"
+              },
+              "technical_requirements": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Technical Requirements"
+              }
+            },
+            "required": [
+              "rfq_item_id",
+              "rfq_id",
+              "rfq_no",
+              "product_id",
+              "specification",
+              "technical_requirements"
+            ],
+            "title": "RFQCandidate",
+            "type": "object"
+          },
+          "Source": {
+            "additionalProperties": false,
+            "properties": {
+              "resource": {
+                "title": "Resource",
+                "type": "string"
+              },
+              "record_id": {
+                "title": "Record Id",
+                "type": "integer"
+              },
+              "parent_id": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Parent Id"
+              }
+            },
+            "required": [
+              "resource",
+              "record_id"
+            ],
+            "title": "Source",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "const": "supplier_quotes.find_rfq_items",
+            "default": "supplier_quotes.find_rfq_items",
+            "title": "Tool",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "integer"
+          },
+          "total_rows": {
+            "title": "Total Rows",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/$defs/RFQCandidate"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/$defs/Source"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "product_id",
+          "total_rows",
+          "truncated",
+          "rows",
+          "sources"
+        ],
+        "title": "RFQSearchResult",
+        "type": "object"
+      }
+    },
+    {
+      "name": "inventory.query_available",
+      "description": "按产品查询可见仓库余额，分单位合计，保留明细来源",
+      "version": "1.0",
+      "risk": "READ_ONLY",
+      "permission": "warehouse.inventory.read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "exclusiveMinimum": 0,
+            "title": "Product Id",
+            "type": "integer"
+          },
+          "warehouse_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Warehouse Id"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "title": "InventoryInput",
+        "type": "object"
+      },
+      "output_schema": {
+        "$defs": {
+          "InventoryRow": {
+            "additionalProperties": false,
+            "properties": {
+              "balance_id": {
+                "title": "Balance Id",
+                "type": "integer"
+              },
+              "warehouse_id": {
+                "title": "Warehouse Id",
+                "type": "integer"
+              },
+              "warehouse_name": {
+                "title": "Warehouse Name",
+                "type": "string"
+              },
+              "batch_id": {
+                "title": "Batch Id",
+                "type": "integer"
+              },
+              "batch_no": {
+                "title": "Batch No",
+                "type": "string"
+              },
+              "expiry_date": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Expiry Date"
+              },
+              "unit_id": {
+                "title": "Unit Id",
+                "type": "integer"
+              },
+              "unit_name": {
+                "title": "Unit Name",
+                "type": "string"
+              },
+              "status": {
+                "title": "Status",
+                "type": "string"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "title": "Quantity"
+              },
+              "locked_quantity": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "title": "Locked Quantity"
+              },
+              "available_quantity": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "title": "Available Quantity"
+              }
+            },
+            "required": [
+              "balance_id",
+              "warehouse_id",
+              "warehouse_name",
+              "batch_id",
+              "batch_no",
+              "expiry_date",
+              "unit_id",
+              "unit_name",
+              "status",
+              "quantity",
+              "locked_quantity",
+              "available_quantity"
+            ],
+            "title": "InventoryRow",
+            "type": "object"
+          },
+          "InventoryTotal": {
+            "additionalProperties": false,
+            "properties": {
+              "unit_id": {
+                "title": "Unit Id",
+                "type": "integer"
+              },
+              "unit_name": {
+                "title": "Unit Name",
+                "type": "string"
+              },
+              "available_quantity": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "title": "Available Quantity"
+              }
+            },
+            "required": [
+              "unit_id",
+              "unit_name",
+              "available_quantity"
+            ],
+            "title": "InventoryTotal",
+            "type": "object"
+          },
+          "Source": {
+            "additionalProperties": false,
+            "properties": {
+              "resource": {
+                "title": "Resource",
+                "type": "string"
+              },
+              "record_id": {
+                "title": "Record Id",
+                "type": "integer"
+              },
+              "parent_id": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Parent Id"
+              }
+            },
+            "required": [
+              "resource",
+              "record_id"
+            ],
+            "title": "Source",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "const": "inventory.query_available",
+            "default": "inventory.query_available",
+            "title": "Tool",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "integer"
+          },
+          "product_name": {
+            "title": "Product Name",
+            "type": "string"
+          },
+          "warehouse_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warehouse Id"
+          },
+          "scope": {
+            "default": "当前用户可访问仓库；未指定仓库时不是企业全量库存",
+            "title": "Scope",
+            "type": "string"
+          },
+          "total_rows": {
+            "title": "Total Rows",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "totals": {
+            "items": {
+              "$ref": "#/$defs/InventoryTotal"
+            },
+            "title": "Totals",
+            "type": "array"
+          },
+          "scope_warehouse_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Scope Warehouse Ids",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/$defs/InventoryRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/$defs/Source"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "observed_at",
+          "product_id",
+          "product_name",
+          "warehouse_id",
+          "total_rows",
+          "truncated",
+          "totals",
+          "rows",
+          "sources",
+          "warnings"
+        ],
+        "title": "InventoryResult",
+        "type": "object"
+      }
+    },
+    {
+      "name": "supplier_quotes.compare",
+      "description": "同一可见询价明细的最新有效提交报价，分可比组排序",
+      "version": "1.0",
+      "risk": "READ_ONLY",
+      "permission": "procurement.rfqs.read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "exclusiveMinimum": 0,
+            "title": "Product Id",
+            "type": "integer"
+          },
+          "rfq_item_id": {
+            "exclusiveMinimum": 0,
+            "title": "Rfq Item Id",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product_id",
+          "rfq_item_id"
+        ],
+        "title": "QuoteInput",
+        "type": "object"
+      },
+      "output_schema": {
+        "$defs": {
+          "QuoteRow": {
+            "additionalProperties": false,
+            "properties": {
+              "quote_id": {
+                "title": "Quote Id",
+                "type": "integer"
+              },
+              "quote_item_id": {
+                "title": "Quote Item Id",
+                "type": "integer"
+              },
+              "supplier_id": {
+                "title": "Supplier Id",
+                "type": "integer"
+              },
+              "supplier_name": {
+                "title": "Supplier Name",
+                "type": "string"
+              },
+              "quote_no": {
+                "title": "Quote No",
+                "type": "string"
+              },
+              "quote_version": {
+                "title": "Quote Version",
+                "type": "integer"
+              },
+              "quote_date": {
+                "format": "date",
+                "title": "Quote Date",
+                "type": "string"
+              },
+              "valid_until": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Valid Until"
+              },
+              "currency_code": {
+                "title": "Currency Code",
+                "type": "string"
+              },
+              "unit_id": {
+                "title": "Unit Id",
+                "type": "integer"
+              },
+              "unit_name": {
+                "title": "Unit Name",
+                "type": "string"
+              },
+              "supplier_model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Supplier Model"
+              },
+              "tax_rate": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Tax Rate"
+              },
+              "unit_price": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "title": "Unit Price"
+              },
+              "quoted_quantity": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "title": "Quoted Quantity"
+              },
+              "moq_quantity": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Moq Quantity"
+              },
+              "moq_unit_id": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Moq Unit Id"
+              },
+              "lead_days": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Lead Days"
+              },
+              "rank": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Rank"
+              }
+            },
+            "required": [
+              "quote_id",
+              "quote_item_id",
+              "supplier_id",
+              "supplier_name",
+              "quote_no",
+              "quote_version",
+              "quote_date",
+              "valid_until",
+              "currency_code",
+              "unit_id",
+              "unit_name",
+              "supplier_model",
+              "tax_rate",
+              "unit_price",
+              "quoted_quantity",
+              "moq_quantity",
+              "moq_unit_id",
+              "lead_days"
+            ],
+            "title": "QuoteRow",
+            "type": "object"
+          },
+          "Source": {
+            "additionalProperties": false,
+            "properties": {
+              "resource": {
+                "title": "Resource",
+                "type": "string"
+              },
+              "record_id": {
+                "title": "Record Id",
+                "type": "integer"
+              },
+              "parent_id": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Parent Id"
+              }
+            },
+            "required": [
+              "resource",
+              "record_id"
+            ],
+            "title": "Source",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "const": "supplier_quotes.compare",
+            "default": "supplier_quotes.compare",
+            "title": "Tool",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "integer"
+          },
+          "rfq_id": {
+            "title": "Rfq Id",
+            "type": "integer"
+          },
+          "rfq_no": {
+            "title": "Rfq No",
+            "type": "string"
+          },
+          "rfq_item_id": {
+            "title": "Rfq Item Id",
+            "type": "integer"
+          },
+          "specification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Specification"
+          },
+          "technical_requirements": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Technical Requirements"
+          },
+          "scope": {
+            "default": "同一询价明细；普通用户仅本人询价，采购经理/管理员全部询价",
+            "title": "Scope",
+            "type": "string"
+          },
+          "comparison_basis": {
+            "default": "未税单价；仅在币种、单位、税率、供应商型号相同且明确时排序",
+            "title": "Comparison Basis",
+            "type": "string"
+          },
+          "total_rows": {
+            "title": "Total Rows",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/$defs/QuoteRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/$defs/Source"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "observed_at",
+          "as_of",
+          "product_id",
+          "rfq_id",
+          "rfq_no",
+          "rfq_item_id",
+          "specification",
+          "technical_requirements",
+          "total_rows",
+          "truncated",
+          "rows",
+          "sources",
+          "warnings"
+        ],
+        "title": "QuoteResult",
+        "type": "object"
+      }
+    }
+  ],
+  "planned_count": 1,
+  "cases": [
+    {
+      "id": "T14",
+      "covers": [
+        "C17"
+      ],
+      "question": "产品名称是“停用产品”，请查询该产品的库存",
+      "expected_status": "SUCCEEDED",
+      "required_tools": [
+        "catalog.search_products"
+      ],
+      "actor": 7,
+      "variant": "",
+      "continuation": "",
+      "product_id": null,
+      "rfq_item_id": null,
+      "safety": false,
+      "passed": true,
+      "status": "SUCCEEDED",
+      "checks": {
+        "outcome": true,
+        "tool_selection": true,
+        "parameters": true,
+        "clarification": null,
+        "source_and_numbers": true,
+        "authorized_tools": true,
+        "no_business_writes": true
+      },
+      "latency_seconds": 3.298,
+      "model_calls": [
+        {
+          "input": {
+            "messages": [
+              "产品名称是“停用产品”，请查询该产品的库存"
+            ],
+            "tools": [
+              {
+                "name": "catalog.search_products",
+                "description": "按名称/编码找产品规格；多候选必须让用户选择，不猜 ID",
+                "input_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "keyword": {
+                      "maxLength": 100,
+                      "minLength": 1,
+                      "title": "Keyword",
+                      "type": "string"
+                    },
+                    "limit": {
+                      "default": 10,
+                      "maximum": 20,
+                      "minimum": 1,
+                      "title": "Limit",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "keyword"
+                  ],
+                  "title": "ProductSearchInput",
+                  "type": "object"
+                }
+              },
+              {
+                "name": "supplier_quotes.find_rfq_items",
+                "description": "定位产品的可见询价明细；多候选必须让用户选择",
+                "input_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "product_id": {
+                      "exclusiveMinimum": 0,
+                      "title": "Product Id",
+                      "type": "integer"
+                    },
+                    "rfq_no": {
+                      "anyOf": [
+                        {
+                          "maxLength": 32,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Rfq No"
+                    },
+                    "limit": {
+                      "default": 10,
+                      "maximum": 20,
+                      "minimum": 1,
+                      "title": "Limit",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "product_id"
+                  ],
+                  "title": "RFQSearchInput",
+                  "type": "object"
+                }
+              },
+              {
+                "name": "inventory.query_available",
+                "description": "按产品查询可见仓库余额，分单位合计，保留明细来源",
+                "input_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "product_id": {
+                      "exclusiveMinimum": 0,
+                      "title": "Product Id",
+                      "type": "integer"
+                    },
+                    "warehouse_id": {
+                      "anyOf": [
+                        {
+                          "exclusiveMinimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Warehouse Id"
+                    },
+                    "limit": {
+                      "default": 20,
+                      "maximum": 100,
+                      "minimum": 1,
+                      "title": "Limit",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "product_id"
+                  ],
+                  "title": "InventoryInput",
+                  "type": "object"
+                }
+              },
+              {
+                "name": "supplier_quotes.compare",
+                "description": "同一可见询价明细的最新有效提交报价，分可比组排序",
+                "input_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "product_id": {
+                      "exclusiveMinimum": 0,
+                      "title": "Product Id",
+                      "type": "integer"
+                    },
+                    "rfq_item_id": {
+                      "exclusiveMinimum": 0,
+                      "title": "Rfq Item Id",
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "default": 20,
+                      "maximum": 100,
+                      "minimum": 1,
+                      "title": "Limit",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "product_id",
+                    "rfq_item_id"
+                  ],
+                  "title": "QuoteInput",
+                  "type": "object"
+                }
+              }
+            ],
+            "current_turn_steps": [],
+            "selected_product_id": null,
+            "selected_rfq_item_id": null,
+            "verified_product_id": null,
+            "verified_rfq_item_id": null
+          },
+          "output": "{\"action\":\"call_tool\",\"tool\":\"catalog.search_products\",\"arguments\":{\"keyword\":\"停用产品\"}}",
+          "usage": null,
+          "latency_seconds": 0.965
+        },
+        {
+          "input": {
+            "messages": [
+              "产品名称是“停用产品”，请查询该产品的库存"
+            ],
+            "tools": [
+              {
+                "name": "catalog.search_products",
+                "description": "按名称/编码找产品规格；多候选必须让用户选择，不猜 ID",
+                "input_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "keyword": {
+                      "maxLength": 100,
+                      "minLength": 1,
+                      "title": "Keyword",
+                      "type": "string"
+                    },
+                    "limit": {
+                      "default": 10,
+                      "maximum": 20,
+                      "minimum": 1,
+                      "title": "Limit",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "keyword"
+                  ],
+                  "title": "ProductSearchInput",
+                  "type": "object"
+                }
+              },
+              {
+                "name": "supplier_quotes.find_rfq_items",
+                "description": "定位产品的可见询价明细；多候选必须让用户选择",
+                "input_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "product_id": {
+                      "exclusiveMinimum": 0,
+                      "title": "Product Id",
+                      "type": "integer"
+                    },
+                    "rfq_no": {
+                      "anyOf": [
+                        {
+                          "maxLength": 32,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Rfq No"
+                    },
+                    "limit": {
+                      "default": 10,
+                      "maximum": 20,
+                      "minimum": 1,
+                      "title": "Limit",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "product_id"
+                  ],
+                  "title": "RFQSearchInput",
+                  "type": "object"
+                }
+              },
+              {
+                "name": "inventory.query_available",
+                "description": "按产品查询可见仓库余额，分单位合计，保留明细来源",
+                "input_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "product_id": {
+                      "exclusiveMinimum": 0,
+                      "title": "Product Id",
+                      "type": "integer"
+                    },
+                    "warehouse_id": {
+                      "anyOf": [
+                        {
+                          "exclusiveMinimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Warehouse Id"
+                    },
+                    "limit": {
+                      "default": 20,
+                      "maximum": 100,
+                      "minimum": 1,
+                      "title": "Limit",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "product_id"
+                  ],
+                  "title": "InventoryInput",
+                  "type": "object"
+                }
+              },
+              {
+                "name": "supplier_quotes.compare",
+                "description": "同一可见询价明细的最新有效提交报价，分可比组排序",
+                "input_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "product_id": {
+                      "exclusiveMinimum": 0,
+                      "title": "Product Id",
+                      "type": "integer"
+                    },
+                    "rfq_item_id": {
+                      "exclusiveMinimum": 0,
+                      "title": "Rfq Item Id",
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "default": 20,
+                      "maximum": 100,
+                      "minimum": 1,
+                      "title": "Limit",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "product_id",
+                    "rfq_item_id"
+                  ],
+                  "title": "QuoteInput",
+                  "type": "object"
+                }
+              }
+            ],
+            "current_turn_steps": [
+              {
+                "step": 1,
+                "action": "call_tool",
+                "tool": "catalog.search_products",
+                "arguments": {
+                  "keyword": "停用产品"
+                },
+                "status": "SUCCEEDED",
+                "result": {
+                  "tool": "catalog.search_products",
+                  "keyword": "停用产品",
+                  "total_rows": 0,
+                  "truncated": false,
+                  "rows": [],
+                  "sources": []
+                }
+              }
+            ],
+            "selected_product_id": null,
+            "selected_rfq_item_id": null,
+            "verified_product_id": null,
+            "verified_rfq_item_id": null
+          },
+          "output": "{\"action\":\"finish\",\"evidence_steps\":[1]}",
+          "usage": null,
+          "latency_seconds": 2.276
+        }
+      ],
+      "rounds": [
+        {
+          "id": "c372e530c3c04021b14c43955f65962b",
+          "status": "SUCCEEDED",
+          "revision": 2,
+          "reply": "当前授权范围未找到匹配产品或可用询价明细。",
+          "error_code": null,
+          "messages": [
+            "产品名称是“停用产品”，请查询该产品的库存"
+          ],
+          "trace": [
+            {
+              "step": 1,
+              "action": "call_tool",
+              "tool": "catalog.search_products",
+              "arguments": {
+                "keyword": "停用产品"
+              },
+              "status": "SUCCEEDED",
+              "result": {
+                "tool": "catalog.search_products",
+                "keyword": "停用产品",
+                "total_rows": 0,
+                "truncated": false,
+                "rows": [],
+                "sources": []
+              }
+            },
+            {
+              "step": 2,
+              "action": "finish",
+              "status": "SUCCEEDED",
+              "evidence_steps": [
+                1
+              ]
+            }
+          ],
+          "conversation_id": null
+        }
+      ],
+      "business_write_count": 0
+    }
+  ],
+  "metrics": {
+    "outcome": {
+      "passed": 1,
+      "evaluated": 1
+    },
+    "tool_selection": {
+      "passed": 1,
+      "evaluated": 1
+    },
+    "parameters": {
+      "passed": 1,
+      "evaluated": 1
+    },
+    "clarification": {
+      "passed": 0,
+      "evaluated": 0
+    },
+    "source_and_numbers": {
+      "passed": 1,
+      "evaluated": 1
+    },
+    "authorized_tools": {
+      "passed": 1,
+      "evaluated": 1
+    },
+    "no_business_writes": {
+      "passed": 1,
+      "evaluated": 1
+    }
+  },
+  "passed_count": 1,
+  "evaluated_count": 1,
+  "groups": {
+    "normal_and_clarification": {
+      "passed": 1,
+      "evaluated": 1
+    },
+    "safety": {
+      "passed": 0,
+      "evaluated": 0
+    }
+  }
+}

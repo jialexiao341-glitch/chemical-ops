@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     meta: {
+      authority: ['quality.acceptances.read'],
       icon: 'lucide:shield-check',
       order: 5,
       title: '质量管理',

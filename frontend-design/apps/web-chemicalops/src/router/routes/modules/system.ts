@@ -7,6 +7,12 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     meta: {
+      authority: [
+        'system.users.read',
+        'system.roles.read',
+        'system.permissions.read',
+        'system.departments.read',
+      ],
       icon: 'lucide:settings',
       order: 99,
       title: '系统管理',

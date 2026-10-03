@@ -1,12 +1,21 @@
 import type { AgentApi } from '../../../api/ai/agent';
 import { describe, expect, it } from 'vitest';
-import { acceptTask, inventorySource, waitingCandidates, isReadonlyAgentQuestion, agentDisplayNumber, primaryTaskResults, agentSourcePreview } from './task-view';
+import { acceptTask, inventorySource, waitingCandidates, isReadonlyAgentQuestion, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS } from './task-view';
 
 const waiting: AgentApi.Task = { id: 'a', revision: 2, status: 'WAITING_INPUT', reply: '', error_code: null, messages: [], trace: [
   { step: 1, action: 'call_tool', status: 'SUCCEEDED', result: { tool: 'catalog.search_products', total_rows: 2, truncated: false, rows: [], sources: [] } },
 ] };
 
 describe('采购任务状态与来源', () => {
+  it('五种任务终态和过程态都提供明确的界面文案', () => {
+    expect(TASK_LABELS).toEqual({
+      RUNNING: '正在查询',
+      WAITING_INPUT: '等待补充',
+      SUCCEEDED: '查询完成',
+      FAILED: '已停止',
+      CANCELLED: '已取消',
+    });
+  });
   it('强制等待只展示最新候选，普通追问不能选择历史候选', () => {
     expect(waitingCandidates(waiting)?.tool).toBe('catalog.search_products');
     expect(waitingCandidates({ ...waiting, trace: [...waiting.trace, { step: 2, action: 'ask_user', status: 'WAITING_INPUT' }] })).toBeUndefined();

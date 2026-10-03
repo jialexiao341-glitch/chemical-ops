@@ -145,6 +145,11 @@ ROLE_SCOPES = {
     "SUPPLIER_PORTAL": {"supplier.portal.read", "supplier.portal.confirm"},
 }
 
+# 运营看板是内部账号的通用入口；外部供应商门户不授予内部运营汇总权限。
+for _role_code, _scope in ROLE_SCOPES.items():
+    if _role_code != "SUPPLIER_PORTAL":
+        _scope.add("dashboard.read")
+
 REVOKED_ROLE_PERMISSIONS = {
     "BUYER": {"procurement.orders.approve"},
 }

@@ -8,6 +8,7 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     meta: {
+      authority: ['operations.exceptions.read'],
       icon: 'lucide:siren',
       order: 6,
       title: '运营中心',

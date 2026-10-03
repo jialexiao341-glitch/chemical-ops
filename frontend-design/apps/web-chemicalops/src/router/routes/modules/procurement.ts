@@ -7,6 +7,11 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     meta: {
+      authority: [
+        'procurement.requests.read',
+        'procurement.rfqs.read',
+        'procurement.orders.read',
+      ],
       icon: 'lucide:shopping-cart',
       order: 3,
       title: '采购管理',

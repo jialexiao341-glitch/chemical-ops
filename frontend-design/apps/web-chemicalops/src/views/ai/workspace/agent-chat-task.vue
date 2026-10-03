@@ -129,7 +129,7 @@ function visibleWarnings(result: AgentApi.Result) {
   </article>
 </template>
 <style scoped>
-.agent-chat { color: hsl(var(--foreground)); font-size: 14px; line-height: 1.85; }
+.agent-chat { color: inherit; font-size: 14px; line-height: 1.85; }
 .agent-intro { margin: 12px 0; }
 .agent-prose { list-style: decimal; margin: 0 0 12px; padding-left: 24px; }
 .agent-prose li { padding-left: 3px; margin: 8px 0; }

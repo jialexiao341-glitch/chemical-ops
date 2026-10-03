@@ -6,6 +6,14 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     meta: {
+      authority: [
+        'warehouse.inventory.return.read',
+        'warehouse.deliveries.read',
+        'warehouse.inventory.read',
+        'warehouse.inventory.issue.read',
+        'warehouse.inventory.transfer.read',
+        'warehouse.inventory.stocktake.read',
+      ],
       icon: 'lucide:warehouse',
       order: 4,
       title: '仓储管理',
