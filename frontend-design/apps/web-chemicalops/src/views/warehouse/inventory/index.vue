@@ -88,6 +88,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     height: 'auto',
     keepSource: true,
     proxyConfig: {
+      autoLoad: false, // 来源条件准备完成后再提交，避免初次无筛选请求覆盖来源结果。
       ajax: {
         query: async ({ page }, formValues) => {
           return await getBalanceListApi({
@@ -170,7 +171,7 @@ onMounted(async () => {
     ...(sourceFilters.product_id ? { product_id: sourceFilters.product_id } : {}),
     ...(sourceFilters.warehouse_id ? { warehouse_id: sourceFilters.warehouse_id } : {}),
   });
-  gridApi.query();
+  await gridApi.formApi.submit();
 });
 
 watch(
@@ -182,7 +183,7 @@ watch(
         ...(sourceFilters.product_id ? { product_id: sourceFilters.product_id } : {}),
         ...(sourceFilters.warehouse_id ? { warehouse_id: sourceFilters.warehouse_id } : {}),
       });
-      gridApi.query();
+      await gridApi.formApi.submit();
     }
   },
 );

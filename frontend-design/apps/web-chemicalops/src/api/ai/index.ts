@@ -14,6 +14,8 @@ import { useAccessStore } from '@vben/stores';
 
 import { requestClient } from '#/api/request';
 
+export * from './agent';
+
 export namespace AiApi {
   /** 会话摘要 */
   export interface Conversation {

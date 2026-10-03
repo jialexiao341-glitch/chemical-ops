@@ -3,7 +3,7 @@
 import logging
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -67,6 +67,23 @@ async def agent_task_create(data: agent_runtime.TaskCreate, db: Session = Depend
 def agent_task_read(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """回看本人任务；再次检查当前权限和历史证据的资源范围。"""
     return agent_runtime.get_task(db, user, task_id)
+
+
+@router.post("/agent/tasks/start", response_model=agent_runtime.TaskRead, status_code=202, summary="启动采购任务并立即返回编号")
+def agent_task_start(data: agent_runtime.TaskCreate, background: BackgroundTasks,
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    state = agent_runtime.prepare_task(db, user, data)
+    background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
+    return agent_runtime.get_task(db, user, state.task_id)
+
+
+@router.post("/agent/tasks/{task_id}/continue/start", response_model=agent_runtime.TaskRead, status_code=202,
+             summary="补充采购任务并立即返回续跑状态")
+def agent_task_continue_start(task_id: str, data: agent_runtime.TaskContinue, background: BackgroundTasks,
+                              db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    state = agent_runtime.prepare_continue(db, user, task_id, data)
+    background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
+    return agent_runtime.get_task(db, user, state.task_id)
 
 
 @router.post("/agent/tasks/{task_id}/continue", response_model=agent_runtime.TaskRead, summary="补充信息并继续 Agent 任务")

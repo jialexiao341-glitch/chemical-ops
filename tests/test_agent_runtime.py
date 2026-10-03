@@ -9,6 +9,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select, text
+from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.config import Settings
@@ -293,6 +294,57 @@ def test_actual_model_adapter_uses_planner_prompt_and_json_protocol(task_db, mon
         transport=httpx.MockTransport(respond), **kwargs))
     assert start(task_db).status == 'SUCCEEDED'
     assert len(requests) == 3 and requests[-1]['max_tokens'] == 2048
+
+
+def test_background_api_returns_id_then_persists_wait_and_continues(task_db, model_script, monkeypatch):
+    """202 先返回编号；后台独立会话保存追问；刷新、版本续跑与取消沿用本人鉴权。"""
+    task_db.execute(text("CREATE TABLE sys_users (id INTEGER PRIMARY KEY, status TEXT)"))
+    task_db.execute(text("INSERT INTO sys_users VALUES (7, 'ACTIVE')"))
+    task_db.commit()
+    monkeypatch.setattr(runtime, 'SessionLocal', lambda: Session(task_db.bind))
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_db] = lambda: task_db
+    actions, _ = model_script
+    with TestClient(app) as client:
+        assert client.post('/ai/agent/tasks/start', json={'question': '查库存'}).status_code == 401
+        app.dependency_overrides[get_current_user] = lambda: USER
+        actions.append({'action': 'ask_user', 'question': '哪个产品？'})
+        response = client.post('/ai/agent/tasks/start', json={'question': '查库存'})
+        assert response.status_code == 202
+        started = response.json()
+        assert started['status'] == 'RUNNING' and started['revision'] == 0
+        waiting = client.get('/ai/agent/tasks/' + started['id']).json()
+        assert waiting['status'] == 'WAITING_INPUT'
+        actions.extend([tool('catalog.search_products', keyword='测试乙醇'),
+            tool('inventory.query_available', product_id=1), {'action': 'finish', 'evidence_steps': [3]}])
+        response = client.post('/ai/agent/tasks/' + started['id'] + '/continue/start', json={
+            'question': '测试乙醇', 'revision': waiting['revision']})
+        assert response.status_code == 202 and response.json()['status'] == 'RUNNING'
+        assert client.get('/ai/agent/tasks/' + started['id']).json()['status'] == 'SUCCEEDED'
+
+
+def test_cancel_before_background_starts_does_not_call_model(task_db, model_script, monkeypatch):
+    """后台启动前取消后，旧工作不得调用模型或覆盖终态。"""
+    monkeypatch.setattr(runtime, 'SessionLocal', lambda: Session(task_db.bind))
+    prepared = runtime.prepare_task(task_db, USER, runtime.TaskCreate(question='查测试乙醇'))
+    runtime.cancel_task(task_db, USER, prepared.task_id)
+    asyncio.run(runtime.run_prepared_task(prepared.task_id, USER.id, prepared.revision))
+    assert runtime.get_task(task_db, USER, prepared.task_id).status == 'CANCELLED'
+    assert model_script[1] == []
+
+
+def test_disabled_user_stops_background_before_model(task_db, model_script, monkeypatch):
+    """启动后用户停用，后台使用当前用户状态停止。"""
+    task_db.execute(text("CREATE TABLE sys_users (id INTEGER PRIMARY KEY, status TEXT)"))
+    task_db.execute(text("INSERT INTO sys_users VALUES (7, 'INACTIVE')"))
+    task_db.commit()
+    monkeypatch.setattr(runtime, 'SessionLocal', lambda: Session(task_db.bind))
+    prepared = runtime.prepare_task(task_db, USER, runtime.TaskCreate(question='查测试乙醇'))
+    asyncio.run(runtime.run_prepared_task(prepared.task_id, USER.id, prepared.revision))
+    result = runtime.get_task(task_db, USER, prepared.task_id)
+    assert result.status == 'FAILED' and result.error_code == 'PERMISSION_DENIED'
+    assert model_script[1] == []
 
 
 @pytest.mark.integration

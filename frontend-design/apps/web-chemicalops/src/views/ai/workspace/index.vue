@@ -770,6 +770,7 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
             <div>
               <span class="ai-toolbar-title">化运 AI 助手</span>
             </div>
+            <Button @click="router.push('/ai/agent')">采购只读任务</Button>
           </div>
           <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
             <div class="mb-2 flex items-center justify-between">
