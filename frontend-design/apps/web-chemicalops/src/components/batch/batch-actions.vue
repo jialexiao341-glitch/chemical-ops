@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { IconifyIcon } from '@vben/icons';
@@ -22,6 +22,13 @@ const { hasAccessByCodes } = useAccess();
 const busy = ref(false);
 const menuOpen = ref(false);
 const fileInput = ref<HTMLInputElement>();
+const canWrite = computed(
+  () => !props.writePermission || hasAccessByCodes([props.writePermission]),
+);
+const canImport = computed(() => props.importable && canWrite.value);
+const canDelete = computed(
+  () => props.deleteMode !== 'readonly' && canWrite.value,
+);
 
 function selectedIds(): number[] {
   const rows = props.gridApi.grid?.getCheckboxRecords?.() ?? [];
@@ -112,17 +119,15 @@ function onChooseImport() {
       <div class="batch-menu">
         <button class="batch-menu-item" type="button" @click="onExport">导出所选</button>
         <button
-          v-if="importable && (!writePermission || hasAccessByCodes([writePermission]))"
+          v-if="canImport"
           class="batch-menu-item"
           type="button"
           @click="onChooseImport"
         >导入 CSV</button>
-        <div class="batch-menu-divider"></div>
+        <div v-if="canImport && canDelete" class="batch-menu-divider"></div>
         <button
-          v-if="!writePermission || hasAccessByCodes([writePermission])"
+          v-if="canDelete"
           class="batch-menu-item batch-menu-danger"
-          :disabled="deleteMode === 'readonly'"
-          :title="deleteMode === 'readonly' ? '已生效记录或流水不可删除' : ''"
           type="button"
           @click="onDelete"
         >{{ deleteMode === 'master' ? '停用所选' : deleteMode === 'draft' ? '删除所选草稿' : '删除所选' }}</button>

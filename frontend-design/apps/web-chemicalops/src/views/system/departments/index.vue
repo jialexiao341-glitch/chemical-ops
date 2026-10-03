@@ -5,6 +5,7 @@ import type {
 } from '#/adapter/vxe-table';
 import type { SystemDepartmentApi } from '#/api';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -17,6 +18,8 @@ import { useColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'SystemDepartment' });
+const { hasAccessByCodes } = useAccess();
+const canWriteDepartments = hasAccessByCodes(['system.departments.write']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -97,7 +100,7 @@ function onRefresh() {
     <FormDrawer @success="onRefresh" />
     <Grid table-title="组织架构">
       <template #toolbar-tools>
-        <Button type="primary" @click="formDrawerApi.setData(null).open()">
+        <Button v-if="canWriteDepartments" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
           新增部门
         </Button>

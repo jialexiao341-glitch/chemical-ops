@@ -8,6 +8,7 @@ import type { QualityAcceptanceApi } from '#/api';
 import { onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -24,6 +25,8 @@ import ResultDrawer from './modules/result.vue';
 
 defineOptions({ name: 'AcceptanceList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
+const canWriteAcceptances = hasAccessByCodes(['quality.acceptances.write']);
 
 const [Create, createApi] = useVbenModal({
   connectedComponent: CreateModal,
@@ -126,7 +129,7 @@ watch(
     <ReportReview @continue="(record: QualityAcceptanceApi.Acceptance) => resultApi.setData(record).open()" />
     <Grid table-title="质量验收">
       <template #toolbar-tools>
-        <Button type="primary" @click="createApi.open()">
+        <Button v-if="canWriteAcceptances" type="primary" @click="createApi.open()">
           <Plus class="size-5" />
           创建验收
         </Button>

@@ -17,7 +17,7 @@ from app.core.db import get_db
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.ai import agent_runtime as runtime, agent_tools as tools
 from app.modules.ai.controller import router
-from app.modules.ai.model import AIAgentTask, AIMessage, AIConversation
+from app.modules.ai.model import AIAgentTask, AIConversationState, AIMessage, AIConversation
 from app.modules.products.model import Product
 from tests.conftest import login
 from tests.test_agent_read_tools import tool_db
@@ -351,6 +351,7 @@ def test_disabled_user_stops_background_before_model(task_db, model_script, monk
 def chat_task_db(task_db, monkeypatch):
     for ddl in (
         "CREATE TABLE ai_conversations (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, business_scene TEXT, permission_snapshot JSON, status TEXT, pinned BOOLEAN DEFAULT 0, last_message_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE ai_conversation_state (id INTEGER PRIMARY KEY, conversation_id INTEGER UNIQUE, thread_id TEXT UNIQUE, memory_state JSON, query_plan JSON, query_trace JSON, permission_snapshot JSON, attachment_refs JSON, state_version INTEGER DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE ai_messages (id INTEGER PRIMARY KEY, conversation_id INTEGER, message_role TEXT, content TEXT, citations JSON, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE sys_users (id INTEGER PRIMARY KEY, status TEXT)",
         "INSERT INTO sys_users VALUES (7, 'ACTIVE')",
@@ -363,7 +364,7 @@ def chat_task_db(task_db, monkeypatch):
 
 
 def test_chat_turns_persist_and_background_updates_latest_reply(chat_task_db, model_script):
-    actions, _ = model_script
+    actions, contexts = model_script
     state = runtime.prepare_chat_task(chat_task_db, USER, runtime.ChatTaskCreate(question='帮我查库存'))
     result = runtime.get_task(chat_task_db, USER, state.task_id)
     assert result.conversation_id is not None
@@ -373,17 +374,35 @@ def test_chat_turns_persist_and_background_updates_latest_reply(chat_task_db, mo
     waiting = runtime.get_task(chat_task_db, USER, state.task_id)
     first_reply = chat_task_db.scalar(select(AIMessage).where(AIMessage.message_role == 'ASSISTANT'))
     assert first_reply.content == '请补充产品名称'
+    memory = chat_task_db.scalar(select(AIConversationState)).memory_state
+    assert memory['goal']['status'] == 'waiting_input'
+    assert memory['pending']['slot'] == 'product_identity'
+    assert memory['recent_context'][-1] == {'role': 'assistant', 'text': '请补充产品名称'}
     actions.extend([tool('catalog.search_products', keyword='测试乙醇'),
         tool('inventory.query_available', product_id=1), {'action': 'finish', 'evidence_steps': [3]}])
     resumed = runtime.prepare_chat_continue(chat_task_db, USER, state.task_id,
         runtime.TaskContinue(question='测试乙醇', revision=waiting.revision))
     asyncio.run(runtime.run_prepared_task(resumed.task_id, USER.id, resumed.revision))
+    assert [entry['role'] for entry in contexts[1]['recent_task_memory']['recent_context']] == ['user', 'assistant', 'user']
+    assert contexts[1]['recent_task_memory']['recent_context'][1]['text'] == '请补充产品名称'
+    assert contexts[1]['recent_task_memory']['pending'] is None
     chat_task_db.expire_all()
     replies = chat_task_db.scalars(select(AIMessage).where(AIMessage.message_role == 'ASSISTANT').order_by(AIMessage.id)).all()
     assert len(replies) == 2 and replies[0].content == '请补充产品名称'
     assert '80.000000 千克' in replies[1].content
     assert replies[1].citations == [{'type': 'agent_task', 'task_id': state.task_id}]
     assert len(chat_task_db.scalars(select(AIConversation)).all()) == 1
+    memory = chat_task_db.scalar(select(AIConversationState)).memory_state
+    assert memory['turn'] == 2 and memory['goal']['status'] == 'succeeded'
+    assert memory['focus']['product_name'] == '测试乙醇' and memory['focus']['resolution'] == 'resolved'
+    assert [entry['role'] for entry in memory['recent_context']] == ['user', 'assistant', 'user', 'assistant']
+    actions.append({'action': 'ask_user', 'question': '您想查看乙醇的哪项信息？'})
+    next_turn = runtime.prepare_chat_task(chat_task_db, USER, runtime.ChatTaskCreate(
+        question='它现在还有库存吗？', conversation_id=state.chat['conversation_id']))
+    asyncio.run(runtime.run_prepared_task(next_turn.task_id, USER.id, next_turn.revision))
+    assert contexts[4]['recent_task_memory']['focus']['product_name'] == '测试乙醇'
+    assert contexts[4]['recent_task_memory']['recent_context'][-2]['text'].startswith('测试乙醇：当前授权仓库内账面可用量')
+    assert contexts[4]['messages'] == ['它现在还有库存吗？']
 
 
 def test_foreign_chat_cannot_create_task_or_messages(chat_task_db):
@@ -438,6 +457,8 @@ def test_chat_history_rechecks_permissions_and_cancel_updates_reply(chat_task_db
     chat_task_db.commit()
     runtime.cancel_task(chat_task_db, USER, state.task_id)
     assert messages(cid, limit=100, db=chat_task_db, user=USER).items[-1].content == '任务已取消。'
+    memory = chat_task_db.scalar(select(AIConversationState)).memory_state
+    assert memory['goal']['status'] == 'cancelled' and memory['pending'] is None
 
 
 @pytest.mark.integration

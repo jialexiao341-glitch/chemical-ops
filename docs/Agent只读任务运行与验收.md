@@ -1,6 +1,6 @@
 # 采购 Agent：只读任务运行与验收
 
-> 版本：v1.3｜日期：2026-10-03｜范围：只读任务后端与工作台、固定模型样本及新增阶段 0～3 工具证据矩阵；本地开发环境验证。
+> 版本：v1.4｜日期：2026-10-03｜范围：只读任务后端与工作台、固定模型样本及新增阶段 0～3 工具证据矩阵；本地开发环境验证。
 
 ## 1. 本次交付
 
@@ -61,18 +61,38 @@
 - 总超时可中断异步模型等待；同步数据库查询不能靠 `asyncio.timeout` 强行终止，工具完成后检查总耗时。单条 SQL/连接超时需在数据库驱动和数据库侧设置，示例中的 `AGENT_TOOL_TIMEOUT_SECONDS` 尚未实现为独立 SQL 超时。
 - `AGENT_ENABLED=false` 拒绝工具目录、执行和任务运行。现有任务仍遵守访问鉴权；读取依赖工具目录，因此关闭时也不能回看完整历史。`AGENT_ALLOW_WRITE_TOOLS` 不会新增写工具。
 
+### 4.1 会话短期记忆 JSON
+
+迁移 `037_ai_conversation_memory_state.sql` 在 `ai_conversation_state.memory_state` 保存每个会话的短期状态；Agent 任务快照也保存同一状态，供等待补充时恢复。字段结构为：
+
+```json
+{
+  "schema_version": 1,
+  "turn": 2,
+  "goal": {"intent": "inventory_query", "description": "查询乙醇的库存", "last_user_input": "它还有库存吗？", "status": "running"},
+  "focus": {"entity_type": "product", "user_mention": "乙醇", "product_name": "无水乙醇", "product_code": "P-ETH", "resolution": "resolved", "candidates": []},
+  "slots": {"warehouse": null, "unit": null, "limit": null},
+  "pending": null,
+  "recent_context": [{"role": "user", "text": "乙醇的库存？"}, {"role": "assistant", "text": "请提供产品名称或编码。"}],
+  "evidence_ref": {"task_id": "任务引用", "trace_steps": [1]},
+  "updated_at": "2026-10-03T...Z"
+}
+```
+
+规划器用焦点实体、待补充问题和最近最多 8 条对话片段解析“它/刚才那个”等指代；候选只保存名称、编码和规格，不把旧产品 ID 当作可执行授权。历史对话/证据引用仅提供上下文，库存、报价及权限每轮仍由工具重新查询和鉴权。完成、等待、失败、取消都会同步相应状态。运行时回归 26 项通过，覆盖隔离 SQLite 的续问/新任务继承，以及本机 MySQL 认证任务 API。迁移 037 已先完成逻辑备份再应用；真实模型行为及浏览器路径未验证。
+
 等待任务通过数据库快照可继续，但运行进程重启/被取消时可能留下 `RUNNING`；工作台 start 接口使用进程内 FastAPI BackgroundTasks 和独立 SQLAlchemy 会话；当前没有持久化队列、租约回收或自动重跑 API。可取消遗留任务后重新发起，不能宣称已完成故障恢复或写操作幂等。
 
 ## 5. 迁移与验证
 
-新增迁移 `036_ai_agent_tasks.sql`，同步 `database/schema.sql`；部署需先按项目迁移运行器升级到 036。本地开发库于 2026-10-03 升级前完成 MySQL 逻辑备份并成功应用迁移。
+迁移 `036_ai_agent_tasks.sql` 创建任务表；迁移 `037_ai_conversation_memory_state.sql` 为会话状态增加短期记忆 JSON 列。部署需先按项目迁移运行器升级到 037。本机于 2026-10-03 完成 MySQL 逻辑备份并应用迁移 037；认证任务 API 集成回归通过。
 
 ```powershell
-.venv/Scripts/python.exe scripts/migrate_database.py upgrade --target 036
+.venv/Scripts/python.exe scripts/migrate_database.py upgrade --target 037
 .venv/Scripts/python.exe -m pytest tests/test_agent_runtime.py tests/test_agent_read_tools.py tests/test_ai_query_catalog_expansion.py tests/test_ai_drafts.py tests/test_ai_service.py -q --tb=short
 ```
 
-2026-10-03：**84 项通过**（工具 29、运行时 19、既有相关回归 36），一条 Starlette/AnyIO 弃用提示。覆盖四工具串联、多产品/多询价追问、补充续跑、未知/写工具、伪造选择、证据来源、预算、异常脱敏、任务隐私、权限撤销、截断合计范围、取消后的旧响应和真实模型 HTTP 适配协议。工具/多数运行时测试使用隔离 SQLite 与权限/模型替身；另有一个认证任务 API 测试在本地 MySQL 事务中验证迁移表、JSON 轨迹及续跑，测试后回滚。
+2026-10-03 本轮短期记忆回归：`tests/test_agent_runtime.py` **26 项通过**，包含同一会话等待补充续问、完成后启动新 Agent 任务继承 JSON 记忆，以及 MySQL 认证任务 API。其余全量基线 84 项为此前有日期结果，未在本轮重跑；本轮有一条 Starlette/AnyIO 弃用提示。
 
 未重跑全量后端、前端构建或完整 RAG。测试替身验证控制流和后端规则，不代表真实模型工具选择准确率、采购任务成功率、生产组织权限或实际采购效果。
 

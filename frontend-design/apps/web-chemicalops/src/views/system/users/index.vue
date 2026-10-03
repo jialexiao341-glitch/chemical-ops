@@ -5,6 +5,7 @@ import type {
 } from '#/adapter/vxe-table';
 import type { SystemUserApi } from '#/api';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -17,6 +18,8 @@ import { useColumns, useGridFormSchema } from './data';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'SystemUser' });
+const { hasAccessByCodes } = useAccess();
+const canWriteUsers = hasAccessByCodes(['system.users.write']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -115,7 +118,7 @@ function onRefresh() {
     <FormDrawer @success="onRefresh" />
     <Grid table-title="系统用户">
       <template #toolbar-tools>
-        <Button type="primary" @click="formDrawerApi.setData(null).open()">
+        <Button v-if="canWriteUsers" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
           新增用户
         </Button>

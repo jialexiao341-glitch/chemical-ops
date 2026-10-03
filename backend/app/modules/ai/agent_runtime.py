@@ -18,7 +18,7 @@ from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.ai import agent_tools as tools, service
-from app.modules.ai.model import AIAgentTask, AIMessage
+from app.modules.ai.model import AIAgentTask, AIConversationState, AIMessage
 from app.modules.ai.schema import AIChatMessage, AIChatRequest
 from app.modules.inventory.model import Warehouse
 from app.modules.rfqs.model import RFQ
@@ -34,6 +34,7 @@ PLANNER_PROMPT = """你是 ChemicalOps 只读采购 Agent 的下一步规划器�
 每轮先 catalog.search_products 定位产品；产品 ID 只能来自本轮定位或用户明确选择。
 用户补充/选择后开始新一轮，selected_product_id/selected_rfq_item_id 只是待核验选择。
 即使用户选了 ID，每一轮仍必须先 search_products，再按需 find_rfq_items，不能直接查询库存/报价。
+用户使用“它/他/这个产品/刚才那个”等指代时，先结合 recent_task_memory、messages 和本轮输入解析最近提到的产品；若本轮明确给出新名称/编码，以新内容为准。沿用的是检索关键词，不是旧产品 ID 或旧库存/报价事实；仍须本轮重新检索并核验。之前检索无结果时，追问要说明仍在查哪个产品，并请用户给目录中的准确名称/编码，不能把代词当成检索词。
 verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使用这些值作为后续工具参数。
 查报价先 supplier_quotes.find_rfq_items 定位可见询价明细；不能猜ID或选多候选中的第一项。
 多个产品/询价候选由服务端暂停。只读查询不需要用户提供采购用途或采购数量。
@@ -113,6 +114,7 @@ class RunState:
     action: CallAction | AskAction | FinishAction | None = None
     seen_calls: set[str] = field(default_factory=set)
     chat: dict | None = None
+    memory_state: dict = field(default_factory=dict)
 
 
 class GraphState(TypedDict):
@@ -126,6 +128,127 @@ class TaskInterrupted(Exception):
 def _now() -> datetime:
     """持久化统一使用 UTC 无时区时间，避免部署主机时区影响任务记录。"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _new_memory_state(question: str) -> dict:
+    intent = _intent_from_question(question) or "unknown"
+    return {
+        "schema_version": 1,
+        "turn": 0,
+        "goal": {"intent": intent, "description": question[:1000], "last_user_input": question[:1000], "status": "running"},
+        "focus": {"entity_type": "product", "user_mention": None, "product_name": None,
+                  "product_code": None, "resolution": "unresolved", "candidates": []},
+        "slots": {"warehouse": None, "unit": None, "limit": None},
+        "pending": None,
+        "recent_context": [],
+        "evidence_ref": {"task_id": None, "trace_steps": []},
+        "updated_at": _now().isoformat() + "Z",
+    }
+
+
+def _intent_from_question(question: str) -> str | None:
+    inventory = any(word in question for word in ("库存", "现货", "可用量"))
+    quotes = any(word in question for word in ("报价", "询价", "供应商"))
+    if inventory and quotes:
+        return "inventory_and_quotes_query"
+    if inventory:
+        return "inventory_query"
+    if quotes:
+        return "supplier_quote_query"
+    return None
+
+
+def _append_memory_context(memory: dict, role: str, text: str) -> None:
+    context = memory.setdefault("recent_context", [])
+    entry = {"role": role, "text": text[:1200]}
+    if not context or context[-1] != entry:
+        context.append(entry)
+    memory["recent_context"] = context[-8:]
+
+
+def _sync_memory_state(state: RunState) -> dict:
+    memory = state.memory_state or _new_memory_state(state.messages[0] if state.messages else "")
+    memory["schema_version"] = 1
+    memory["turn"] = max(memory.get("turn", 0), len(state.messages))
+    memory["goal"] = {
+        **memory.get("goal", {}),
+        "last_user_input": (state.messages[-1] if state.messages else "")[:1000],
+        "status": state.status.lower(),
+    }
+    latest_search = next(
+        (entry for entry in reversed(state.trace) if entry.get("tool") == "catalog.search_products"), None
+    )
+    if latest_search:
+        result = latest_search.get("result") or {}
+        rows = result.get("rows", [])
+        selected = next((row for row in rows if row.get("product_id") == state.verified_product), None)
+        resolution = (
+            "search_failed" if latest_search.get("status") != "SUCCEEDED" else
+            "resolved" if selected else
+            "not_found" if result.get("total_rows", 0) == 0 else "needs_selection"
+        )
+        focus = memory.setdefault("focus", {})
+        focus.update({
+            "entity_type": "product",
+            "user_mention": (latest_search.get("arguments") or {}).get("keyword"),
+            "product_name": selected.get("product_name") if selected else None,
+            "product_code": selected.get("product_code") if selected else None,
+            "resolution": resolution,
+            "candidates": [
+                {key: row.get(key) for key in ("product_name", "product_code", "model")}
+                for row in rows[:5]
+            ],
+        })
+    latest_tool = next((entry for entry in reversed(state.trace) if entry.get("action") == "call_tool"), None)
+    if latest_tool:
+        if memory["goal"].get("intent") in {None, "unknown"}:
+            memory["goal"]["intent"] = "inventory_query" if latest_tool.get("tool") == "inventory.query_available" else (
+                "supplier_quote_query" if latest_tool.get("tool", "").startswith("supplier_quotes.") else "unknown"
+            )
+        if latest_tool.get("tool") == "inventory.query_available":
+            memory["goal"]["intent"] = memory["goal"].get("intent") or "inventory_query"
+        arguments = latest_tool.get("arguments") or {}
+        slots = memory.setdefault("slots", {})
+        if "warehouse_id" in arguments:
+            slots["warehouse"] = arguments["warehouse_id"]
+        if "limit" in arguments:
+            slots["limit"] = arguments["limit"]
+    last_question = next(
+        (entry.get("question") for entry in reversed(state.trace) if entry.get("action") == "ask_user"), None
+    )
+    if state.status == "WAITING_INPUT" and last_question:
+        latest_result = latest_search.get("result") if latest_search else None
+        memory["pending"] = {
+            "slot": "product_identity" if memory.get("focus", {}).get("resolution") != "resolved" else "query_detail",
+            "question": last_question[:1000],
+            "reason": "catalog_no_match" if latest_search and latest_search.get("status") == "SUCCEEDED" and latest_result and latest_result.get("total_rows", 0) == 0 else "needs_clarification",
+        }
+    elif state.status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+        memory["pending"] = None
+    memory["evidence_ref"] = {
+        "task_id": state.task_id,
+        "trace_steps": [entry.get("step") for entry in state.trace[-12:] if entry.get("action") == "call_tool"],
+    }
+    memory["updated_at"] = _now().isoformat() + "Z"
+    state.memory_state = memory
+    return memory
+
+
+def _save_conversation_memory(db: Session, user: User, conversation_id: int, memory: dict) -> None:
+    row = db.scalar(
+        select(AIConversationState)
+        .where(AIConversationState.conversation_id == conversation_id)
+        .with_for_update()
+    )
+    if row is None:
+        row = AIConversationState(
+            conversation_id=conversation_id,
+            thread_id=f"ai:{user.id}:{conversation_id}",
+            state_version=1,
+        )
+        db.add(row)
+    row.memory_state = json.loads(json.dumps(memory, ensure_ascii=False))
+    row.updated_at = _now()
 
 
 def _load(db: Session, user: User, task_id: str) -> AIAgentTask:
@@ -175,11 +298,13 @@ def get_task(db: Session, user: User, task_id: str) -> TaskRead:
 
 def _persist(db: Session, user: User, state: RunState) -> None:
     """用版本号和 RUNNING 状态更新快照，防重复继续或取消后的旧运行覆盖状态。"""
+    memory = _sync_memory_state(state)
     count = db.execute(update(AIAgentTask).where(AIAgentTask.id == state.task_id,
         AIAgentTask.user_id == user.id, AIAgentTask.revision == state.revision,
         AIAgentTask.status == "RUNNING").values(
         payload={"messages": state.messages, "trace": state.trace,
                  "chat": state.chat,
+                 "memory_state": memory,
                  "turn_start": state.turn_start,
                  "selected_product": state.selected_product or state.verified_product,
                  "selected_rfq_item": state.selected_rfq_item or state.verified_rfq_item}, status=state.status,
@@ -192,6 +317,7 @@ def _persist(db: Session, user: User, state: RunState) -> None:
         db.execute(update(AIMessage).where(AIMessage.id == state.chat["assistant_message_id"],
             AIMessage.conversation_id == state.chat["conversation_id"]).values(
             content=state.reply or "正在查询业务数据…"))
+        _save_conversation_memory(db, user, state.chat["conversation_id"], memory)
     db.commit()
     state.revision += 1
 
@@ -210,6 +336,7 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
     context = json.dumps({"messages": state.messages,
         "tools": [{k: item[k] for k in ("name", "description", "input_schema")} for item in catalog],
         "current_turn_steps": state.trace[state.turn_start:],
+        "recent_task_memory": state.memory_state,
         "selected_product_id": state.selected_product, "selected_rfq_item_id": state.selected_rfq_item,
         "verified_product_id": state.verified_product, "verified_rfq_item_id": state.verified_rfq_item,
     }, ensure_ascii=False)
@@ -282,6 +409,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
             current.status, current.reply = "WAITING_INPUT", current.action.question
             current.trace.append({"step": len(current.trace) + 1, "action": "ask_user", "status": "WAITING_INPUT",
                                   "question": current.reply})
+            _append_memory_context(current.memory_state, "assistant", current.reply)
             _persist(db, user, current)
         elif isinstance(current.action, FinishAction):
             entries = [entry for entry in current.trace[current.turn_start:]
@@ -295,6 +423,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
             current.reply, current.status = _summary(entries), "SUCCEEDED"
             current.trace.append({"step": len(current.trace) + 1, "action": "finish", "status": "SUCCEEDED",
                                   "evidence_steps": current.action.evidence_steps})
+            _append_memory_context(current.memory_state, "assistant", current.reply)
             _persist(db, user, current)
         return {"data": current}
 
@@ -360,6 +489,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
             "DATABASE_ERROR" if isinstance(exc, SQLAlchemyError) else str(exc) if str(exc) in codes else "RUNTIME_ERROR")
         state.reply = "本次只读任务已停止，请核对权限、输入或服务状态后重新发起。"
         state.trace.append({"step": len(state.trace) + 1, "action": "stop", "status": "FAILED", "error_code": state.error_code})
+        _append_memory_context(state.memory_state, "assistant", state.reply)
         db.rollback()
         try:
             _persist(db, user, state)
@@ -376,9 +506,10 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
     if "catalog.search_products" not in catalog or not catalog & {"inventory.query_available", "supplier_quotes.compare"}:
         raise AuthorizationError("采购 Agent 需要产品读取权限及库存或询价读取权限")
     task_id = uuid4().hex
-    state = RunState(task_id, 0, [data.question], [], 0)
+    state = RunState(task_id, 0, [data.question], [], 0, memory_state=_new_memory_state(data.question))
     db.add(AIAgentTask(id=task_id, user_id=user.id, status="RUNNING", revision=0,
-        payload={"messages": state.messages, "trace": [], "turn_start": 0}, reply="", created_at=_now(), updated_at=_now()))
+        payload={"messages": state.messages, "trace": [], "turn_start": 0,
+                 "memory_state": state.memory_state}, reply="", created_at=_now(), updated_at=_now()))
     db.flush()
     if commit:
         db.commit()
@@ -423,7 +554,8 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
         db.rollback()
         raise DuplicateResourceError("任务已被其他请求继续或取消")
     state = RunState(task.id, data.revision + 1, messages,
-        list(task.payload["trace"]), len(task.payload["trace"]), product, rfq_item, chat=task.payload.get("chat"))
+        list(task.payload["trace"]), len(task.payload["trace"]), product, rfq_item,
+        chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {})
     if commit:
         db.commit()
     return state
@@ -431,8 +563,31 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
 
 def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, conversation_id: int | None) -> None:
     """同一事务保存会话、输入及任务引用；聊天历史不复制业务证据。"""
+    continuing = state.chat is not None
     conversation = service._ensure_conversation(db, user, AIChatRequest(
         conversation_id=conversation_id, messages=[AIChatMessage(role="user", content=question)]))
+    stored_state = db.scalar(
+        select(AIConversationState)
+        .where(AIConversationState.conversation_id == conversation.id)
+        .with_for_update()
+    )
+    stored_memory = stored_state.memory_state if stored_state else None
+    if stored_memory:
+        state.memory_state = json.loads(json.dumps(stored_memory, ensure_ascii=False))
+    if not state.memory_state:
+        state.memory_state = _new_memory_state(question)
+    memory = state.memory_state
+    memory["schema_version"] = 1
+    memory["turn"] = int(memory.get("turn", 0)) + 1
+    goal = memory.setdefault("goal", {})
+    if not continuing:
+        goal["description"] = question[:1000]
+    goal["intent"] = _intent_from_question(question) or goal.get("intent", "unknown")
+    goal["last_user_input"] = question[:1000]
+    goal["status"] = "running"
+    memory["pending"] = None
+    _append_memory_context(memory, "user", question)
+    memory["updated_at"] = _now().isoformat() + "Z"
     reference = [{"type": "agent_task", "task_id": state.task_id}]
     db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=question, citations=reference))
     assistant = AIMessage(conversation_id=conversation.id, message_role="ASSISTANT",
@@ -441,7 +596,8 @@ def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, c
     db.flush()
     state.chat = {"conversation_id": conversation.id, "assistant_message_id": assistant.id}
     task = _load(db, user, state.task_id)
-    task.payload = {**task.payload, "chat": state.chat}
+    task.payload = {**task.payload, "chat": state.chat, "memory_state": memory}
+    _save_conversation_memory(db, user, conversation.id, memory)
     conversation.last_message_at = _now()
     conversation.updated_at = _now()
     db.commit()
@@ -481,7 +637,7 @@ async def run_prepared_task(task_id: str, user_id: int, revision: int) -> None:
             return
         state = RunState(task_id, revision, task.payload["messages"], list(task.payload["trace"]),
             task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"),
-            chat=task.payload.get("chat"))
+            chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {})
         if db.scalar(select(User.status).where(User.id == user_id)) != "ACTIVE":
             state.status, state.error_code, state.reply = "FAILED", "PERMISSION_DENIED", "用户状态已变化，任务停止。"
             try:
@@ -496,10 +652,16 @@ def cancel_task(db: Session, user: User, task_id: str) -> TaskRead:
     """取消本人的运行/等待任务；版本变更阻止旧运行者覆盖取消状态。"""
     task = _load(db, user, task_id)
     if task.status in {"RUNNING", "WAITING_INPUT"}:
+        memory = task.payload.get("memory_state") or _new_memory_state("")
+        memory.setdefault("goal", {})["status"] = "cancelled"
+        memory["pending"] = None
+        _append_memory_context(memory, "assistant", "任务已取消。")
         count = db.execute(update(AIAgentTask).where(AIAgentTask.id == task.id, AIAgentTask.user_id == user.id,
             AIAgentTask.revision == task.revision, AIAgentTask.status.in_(("RUNNING", "WAITING_INPUT"))).values(
-            status="CANCELLED", revision=task.revision + 1, reply="任务已取消。", updated_at=_now())).rowcount
+            status="CANCELLED", revision=task.revision + 1, reply="任务已取消。",
+            payload={**task.payload, "memory_state": memory}, updated_at=_now())).rowcount
         if count == 1 and task.payload.get("chat"):
             db.execute(update(AIMessage).where(AIMessage.id == task.payload["chat"]["assistant_message_id"]).values(content="任务已取消。"))
+            _save_conversation_memory(db, user, task.payload["chat"]["conversation_id"], memory)
         db.commit()
     return get_task(db, user, task_id)

@@ -219,7 +219,10 @@ export function useColumns(
           onClick: onActionClick,
         },
         name: 'CellOperation',
-        options: ['edit', 'delete'],
+        options: [
+          { code: 'edit', auth: 'system.users.write' },
+          { code: 'delete', auth: 'system.users.write' },
+        ],
       },
       field: 'operation',
       fixed: 'right',

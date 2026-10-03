@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { useVbenDrawer, useVbenModal } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 
 import {
   Alert,
@@ -44,6 +45,8 @@ import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight
 
 const emit = defineEmits(['success']);
 const router = useRouter();
+const { hasAccessByCodes } = useAccess();
+const canWriteExceptions = hasAccessByCodes(['operations.exceptions.write']);
 
 /**
  * 运营异常详情：基本信息 + 状态推进 + 指派 + 处理任务与处理记录。
@@ -132,7 +135,7 @@ const [Drawer, drawerApi] = useVbenDrawer<
       const exception = await reload(data.id);
       ownerId.value = exception?.owner_id ?? undefined;
       // 负责人下拉按需加载一次
-      if (userOptions.value.length === 0) {
+      if (canWriteExceptions && userOptions.value.length === 0) {
         const users = await getUserListApi({ page: 1, page_size: 100 });
         userOptions.value = users.items
           .filter((item) => !item.status || item.status === 'ACTIVE')
@@ -179,7 +182,7 @@ const statusActions = computed<Array<{ label: string; status: string }>>(
         { label: '重新打开', status: 'PROCESSING' },
       ],
     };
-    return targets[current] ?? [];
+    return canWriteExceptions ? (targets[current] ?? []) : [];
   },
 );
 
@@ -359,6 +362,9 @@ const taskColumns = [
 
 function taskActions(task: OperationExceptionApi.Task) {
   const actions: Array<{ label: string; value: string }> = [];
+  if (!canWriteExceptions) {
+    return actions;
+  }
   if (task.status === 'OPEN') {
     actions.push({ label: '开始处理', value: 'start' });
     actions.push({ label: '取消', value: 'cancel' });
@@ -485,7 +491,7 @@ defineExpose({ drawerApi });
 
         <!-- 指派负责人 -->
         <div
-          v-if="!isTerminal"
+          v-if="canWriteExceptions && !isTerminal"
           class="flex flex-wrap items-end gap-3 rounded-md border p-3"
         >
           <div class="min-w-[260px] flex-1">
@@ -598,7 +604,7 @@ defineExpose({ drawerApi });
                 </div>
               </li>
             </ul>
-            <div class="flex gap-2">
+            <div v-if="canWriteExceptions" class="flex gap-2">
               <Input.TextArea
                 v-model:value="commentText"
                 :maxlength="2000"

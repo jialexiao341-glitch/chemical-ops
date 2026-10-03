@@ -4,6 +4,7 @@ import type { IssueRequestApi } from '#/api';
 
 import { ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -24,6 +25,9 @@ import DetailDrawer from './modules/detail.vue';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'IssueRequestList' });
+const { hasAccessByCodes } = useAccess();
+const canWriteIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.write']);
+const canApproveIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.approve']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -117,7 +121,7 @@ function run(
     <Detail />
     <Grid table-title="库存领用">
       <template #toolbar-tools>
-        <Button type="primary" @click="formDrawerApi.setData(null).open()">
+        <Button v-if="canWriteIssueRequests" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
           新建领用申请
         </Button>
@@ -125,7 +129,7 @@ function run(
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteIssueRequests && ['DRAFT', 'REJECTED'].includes(row.status)"
             size="small"
             type="link"
             @click="formDrawerApi.setData(row).open()"
@@ -136,7 +140,7 @@ function run(
             详情
           </Button>
           <Button
-            v-if="['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteIssueRequests && ['DRAFT', 'REJECTED'].includes(row.status)"
             size="small"
             type="link"
             @click="
@@ -153,7 +157,7 @@ function run(
             提交
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED'"
+            v-if="row.status === 'SUBMITTED' && canApproveIssueRequests"
             size="small"
             type="link"
             @click="
@@ -170,7 +174,7 @@ function run(
             审批通过
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED'"
+            v-if="row.status === 'SUBMITTED' && canApproveIssueRequests"
             danger
             size="small"
             type="link"
@@ -179,7 +183,7 @@ function run(
             驳回
           </Button>
           <Button
-            v-if="row.status === 'APPROVED'"
+            v-if="row.status === 'APPROVED' && canWriteIssueRequests"
             size="small"
             type="link"
             @click="
@@ -196,7 +200,7 @@ function run(
             执行出库
           </Button>
           <Button
-            v-if="['DRAFT', 'REJECTED', 'SUBMITTED'].includes(row.status)"
+            v-if="canWriteIssueRequests && ['DRAFT', 'REJECTED', 'SUBMITTED'].includes(row.status)"
             danger
             size="small"
             type="link"

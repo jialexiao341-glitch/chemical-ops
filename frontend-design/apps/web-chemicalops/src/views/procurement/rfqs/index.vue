@@ -8,6 +8,7 @@ import type { RfqApi } from '#/api';
 import { onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -22,6 +23,8 @@ import Form from './modules/form.vue';
 
 defineOptions({ name: 'RfqList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
+const canWriteRfqs = hasAccessByCodes(['procurement.rfqs.write']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -113,7 +116,7 @@ watch(
     <Detail @success="gridApi.query()" />
     <Grid table-title="询价与报价">
       <template #toolbar-tools>
-        <Button type="primary" @click="formDrawerApi.setData(null).open()">
+        <Button v-if="canWriteRfqs" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
           新建询价单
         </Button>

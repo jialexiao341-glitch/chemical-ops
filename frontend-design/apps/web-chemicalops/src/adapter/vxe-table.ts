@@ -233,6 +233,12 @@ setupVbenVxeTable({
             return hasAccessByCodes(
               Array.isArray(opt.auth) ? opt.auth : [opt.auth],
             );
+          })
+          .map((opt) => {
+            const buttonOption = { ...opt };
+            delete buttonOption.auth;
+            delete buttonOption.show;
+            return buttonOption;
           });
 
         function renderBtn(opt: Recordable<any>, listen = true) {

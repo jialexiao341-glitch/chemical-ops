@@ -63,6 +63,7 @@ class AIConversationState(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     conversation_id: Mapped[int] = mapped_column(ForeignKey("ai_conversations.id"), nullable=False, unique=True)
     thread_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    memory_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     query_plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     query_trace: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     permission_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)

@@ -4,6 +4,7 @@ import type { StocktakeApi } from '#/api';
 
 import { onMounted, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -25,6 +26,9 @@ import DetailDrawer from './modules/detail.vue';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'StocktakeList' });
+const { hasAccessByCodes } = useAccess();
+const canWriteStocktakes = hasAccessByCodes(['warehouse.inventory.stocktake.write']);
+const canApproveStocktakes = hasAccessByCodes(['warehouse.inventory.stocktake.approve']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -127,7 +131,7 @@ onMounted(async () => {
     <Detail />
     <Grid table-title="库存盘点">
       <template #toolbar-tools>
-        <Button type="primary" @click="formDrawerApi.setData(null).open()">
+        <Button v-if="canWriteStocktakes" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
           新建盘点申请
         </Button>
@@ -135,7 +139,7 @@ onMounted(async () => {
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteStocktakes && ['DRAFT', 'REJECTED'].includes(row.status)"
             size="small"
             type="link"
             @click="formDrawerApi.setData(row).open()"
@@ -146,7 +150,7 @@ onMounted(async () => {
             详情
           </Button>
           <Button
-            v-if="['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteStocktakes && ['DRAFT', 'REJECTED'].includes(row.status)"
             size="small"
             type="link"
             @click="
@@ -160,7 +164,7 @@ onMounted(async () => {
             提交
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED'"
+            v-if="row.status === 'SUBMITTED' && canApproveStocktakes"
             size="small"
             type="link"
             @click="
@@ -174,7 +178,7 @@ onMounted(async () => {
             审批通过
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED'"
+            v-if="row.status === 'SUBMITTED' && canApproveStocktakes"
             danger
             size="small"
             type="link"
@@ -183,7 +187,7 @@ onMounted(async () => {
             驳回
           </Button>
           <Button
-            v-if="row.status === 'APPROVED'"
+            v-if="row.status === 'APPROVED' && canWriteStocktakes"
             size="small"
             type="link"
             @click="
@@ -197,7 +201,7 @@ onMounted(async () => {
             执行盘点
           </Button>
           <Button
-            v-if="['DRAFT', 'REJECTED', 'SUBMITTED'].includes(row.status)"
+            v-if="canWriteStocktakes && ['DRAFT', 'REJECTED', 'SUBMITTED'].includes(row.status)"
             danger
             size="small"
             type="link"

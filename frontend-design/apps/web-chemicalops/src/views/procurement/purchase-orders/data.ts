@@ -95,6 +95,7 @@ export function useColumns(
           {
             code: 'edit',
             text: '编辑',
+            auth: 'procurement.orders.write',
             show: (row: PurchaseOrderApi.PurchaseOrder) =>
               row.status === 'DRAFT',
           },
@@ -102,30 +103,35 @@ export function useColumns(
           {
             code: 'submit',
             text: '提交审批',
+            auth: 'procurement.orders.write',
             show: (row: PurchaseOrderApi.PurchaseOrder) =>
               row.status === 'DRAFT',
           },
           {
             code: 'approve',
             text: '审批通过',
+            auth: 'procurement.orders.approve',
             show: (row: PurchaseOrderApi.PurchaseOrder) =>
               row.status === 'APPROVING',
           },
           {
             code: 'reject',
             text: '驳回',
+            auth: 'procurement.orders.approve',
             show: (row: PurchaseOrderApi.PurchaseOrder) =>
               row.status === 'APPROVING',
           },
           {
             code: 'place',
             text: '正式下单',
+            auth: 'procurement.orders.write',
             show: (row: PurchaseOrderApi.PurchaseOrder) =>
               row.status === 'APPROVED',
           },
           {
             code: 'cancel',
             text: '取消',
+            auth: 'procurement.orders.write',
             show: (row: PurchaseOrderApi.PurchaseOrder) =>
               ['APPROVED', 'APPROVING', 'DRAFT'].includes(row.status),
           },

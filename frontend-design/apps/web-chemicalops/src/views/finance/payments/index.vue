@@ -5,6 +5,7 @@ import type { FinanceApi } from '#/api';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -25,6 +26,9 @@ import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-det
 
 defineOptions({ name: 'PaymentList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
+const canWritePayments = hasAccessByCodes(['finance.payments.write']);
+const canApprovePayments = hasAccessByCodes(['finance.payments.approve']);
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
 const [Create, createApi] = useVbenModal({
@@ -174,7 +178,7 @@ watch(
     <Create @success="gridApi.query()" />
     <Grid table-title="付款管理">
       <template #toolbar-tools>
-        <Button type="primary" @click="createApi.open()">
+        <Button v-if="canWritePayments" type="primary" @click="createApi.open()">
           <Plus class="size-5" />
           发起付款
         </Button>
@@ -182,7 +186,7 @@ watch(
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="row.status === 'REQUESTED'"
+            v-if="row.status === 'REQUESTED' && canApprovePayments"
             size="small"
             type="link"
             @click="runApprove(row)"
@@ -190,7 +194,7 @@ watch(
             审批通过
           </Button>
           <Button
-            v-if="row.status === 'REQUESTED'"
+            v-if="row.status === 'REQUESTED' && canApprovePayments"
             danger
             size="small"
             type="link"
@@ -199,7 +203,7 @@ watch(
             驳回
           </Button>
           <Button
-            v-if="row.status === 'APPROVED'"
+            v-if="row.status === 'APPROVED' && canWritePayments"
             size="small"
             type="link"
             @click="openPaid(row)"

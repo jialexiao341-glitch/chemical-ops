@@ -3,6 +3,7 @@ import type { PurchaseRequestApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { message } from 'antdv-next';
@@ -25,6 +26,8 @@ const emit = defineEmits(['success']);
 const id = ref<number>();
 const items = ref<RequestItemRow[]>([]);
 const submitting = ref(false);
+const { hasAccessByCodes } = useAccess();
+const canReadDepartments = hasAccessByCodes(['system.departments.read']);
 
 const [Form, formApi] = useVbenForm({
   layout: 'vertical',
@@ -52,24 +55,31 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'priority',
       label: '优先级',
     },
-    {
-      component: 'ApiSelect',
-      componentProps: {
-        allowClear: true,
-        api: async () => {
-          const res = await getDepartmentListApi({ page: 1, page_size: 100 });
-          return res.items.map((item) => ({
-            label: item.department_name,
-            value: item.id,
-          }));
-        },
-        class: 'w-full',
-        placeholder: '请选择申请部门',
-        showSearch: true,
-      },
-      fieldName: 'department_id',
-      label: '申请部门',
-    },
+    ...(canReadDepartments
+      ? [
+          {
+            component: 'ApiSelect',
+            componentProps: {
+              allowClear: true,
+              api: async () => {
+                const res = await getDepartmentListApi({
+                  page: 1,
+                  page_size: 100,
+                });
+                return res.items.map((item) => ({
+                  label: item.department_name,
+                  value: item.id,
+                }));
+              },
+              class: 'w-full',
+              placeholder: '请选择申请部门',
+              showSearch: true,
+            },
+            fieldName: 'department_id',
+            label: '申请部门',
+          },
+        ]
+      : []),
     {
       component: 'DatePicker',
       componentProps: { class: 'w-full', valueFormat: 'YYYY-MM-DD' },
@@ -215,6 +225,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | PurchaseRequestApi.PurchaseRequ
     try {
       const payload = {
         ...values,
+        ...(canReadDepartments ? {} : { department_id: undefined }),
         items: items.value.map((item) => ({
           budget_price: item.budget_price ?? undefined,
           expected_date: item.expected_date ?? undefined,
@@ -266,7 +277,9 @@ const [Drawer, drawerApi] = useVbenDrawer<null | PurchaseRequestApi.PurchaseRequ
       formApi.setValues({
         budget_amount: data.budget_amount ?? undefined,
         currency_code: data.currency_code ?? 'CNY',
-        department_id: data.department_id ?? undefined,
+        ...(canReadDepartments
+          ? { department_id: data.department_id ?? undefined }
+          : {}),
         expected_date: data.expected_date ?? undefined,
         priority: data.priority,
         purpose: data.purpose,

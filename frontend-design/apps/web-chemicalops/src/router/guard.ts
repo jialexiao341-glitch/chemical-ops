@@ -9,6 +9,10 @@ import { accessRoutes, coreRouteNames } from '#/router/routes';
 import { useAuthStore } from '#/store';
 
 import { generateAccess } from './access';
+import {
+  filterRoutesByVisibleData,
+  getEmptyReadOnlyWarehousePaths,
+} from './scoped-feature-visibility';
 
 /**
  * 通用守卫配置
@@ -98,26 +102,37 @@ function setupAccessGuard(router: Router) {
     // 因此这里把角色码和权限码一起参与匹配，二者取并集。
     const accessCodes = accessStore.accessCodes ?? [];
     const authorities = [...new Set([...userRoles, ...accessCodes])];
+    const hiddenWarehousePaths =
+      await getEmptyReadOnlyWarehousePaths(accessCodes);
+    const routesForUser = filterRoutesByVisibleData(
+      accessRoutes,
+      hiddenWarehousePaths,
+    );
 
     // 生成菜单和路由
     const { accessibleMenus, accessibleRoutes } = await generateAccess({
       roles: authorities,
       router,
       // 则会在菜单中显示，但是访问会被重定向到403
-      routes: accessRoutes,
+      routes: routesForUser,
     });
 
     // 保存菜单信息和路由信息
     accessStore.setAccessMenus(accessibleMenus);
     accessStore.setAccessRoutes(accessibleRoutes);
     accessStore.setIsAccessChecked(true);
-    const redirectPath = (from.query.redirect ??
+    const requestedPath = (from.query.redirect ??
       (to.path === preferences.app.defaultHomePath
         ? userInfo.homePath || preferences.app.defaultHomePath
         : to.fullPath)) as string;
+    const decodedRequestedPath = decodeURIComponent(requestedPath);
+    const requestedRoutePath = decodedRequestedPath.split(/[?#]/, 1)[0] ?? '';
+    const redirectPath = hiddenWarehousePaths.has(requestedRoutePath)
+      ? userInfo.homePath || preferences.app.defaultHomePath
+      : decodedRequestedPath;
 
     return {
-      ...router.resolve(decodeURIComponent(redirectPath)),
+      ...router.resolve(redirectPath),
       replace: true,
     };
   });

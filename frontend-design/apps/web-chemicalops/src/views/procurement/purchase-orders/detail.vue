@@ -203,7 +203,7 @@ onMounted(load);
               核对财务差异
             </Button>
             <Button
-              v-if="order.status === 'DRAFT'"
+              v-if="order.status === 'DRAFT' && hasAccessByCodes(['procurement.orders.write'])"
               :loading="acting"
               type="primary"
               @click="
@@ -213,7 +213,7 @@ onMounted(load);
               提交审批
             </Button>
             <Button
-              v-if="order.status === 'APPROVING'"
+              v-if="order.status === 'APPROVING' && hasAccessByCodes(['procurement.orders.approve'])"
               :loading="acting"
               type="primary"
               @click="
@@ -223,7 +223,7 @@ onMounted(load);
               审批通过
             </Button>
             <Button
-              v-if="order.status === 'APPROVING'"
+              v-if="order.status === 'APPROVING' && hasAccessByCodes(['procurement.orders.approve'])"
               :loading="acting"
               danger
               @click="
@@ -233,7 +233,7 @@ onMounted(load);
               驳回
             </Button>
             <Button
-              v-if="order.status === 'APPROVED'"
+              v-if="order.status === 'APPROVED' && hasAccessByCodes(['procurement.orders.write'])"
               :loading="acting"
               type="primary"
               @click="
@@ -243,7 +243,7 @@ onMounted(load);
               正式下单
             </Button>
             <Button
-              v-if="['APPROVED', 'APPROVING', 'DRAFT'].includes(order.status)"
+              v-if="['APPROVED', 'APPROVING', 'DRAFT'].includes(order.status) && hasAccessByCodes(['procurement.orders.write'])"
               :loading="acting"
               danger
               @click="cancelApi.setData(orderPayload).open()"

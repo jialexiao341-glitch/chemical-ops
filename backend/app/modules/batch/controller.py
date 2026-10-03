@@ -104,6 +104,52 @@ def _rows(db: Session, spec: Resource, ids: list[int]) -> list:
     return rows
 
 
+def _authorize_row_scope(db: Session, user: User, name: str, rows: list, *, write: bool = False) -> None:
+    """复用业务详情查询的数据范围，防止批量接口通过猜测 ID 越权。"""
+    if name == "procurement.requests":
+        from app.modules.purchase_requests.service import get_request
+        for row in rows:
+            get_request(db, user, row.id)
+    elif name == "procurement.rfqs":
+        from app.modules.rfqs.service import get_rfq
+        for row in rows:
+            try:
+                get_rfq(db, user, row.id)
+            except BusinessValidationError:
+                raise ResourceNotFoundError(f"询价单 {row.id} 不存在") from None
+    elif name == "procurement.orders":
+        from app.modules.purchase_orders.service import get_order, read_order
+        for row in rows:
+            (get_order if write else read_order)(db, user, row.id)
+    elif name == "warehouse.deliveries":
+        from app.modules.deliveries.service import get_delivery
+        for row in rows:
+            get_delivery(db, user, row.id)
+    elif name.startswith("finance."):
+        from app.modules.finance import service
+        getter = {
+            "finance.reconciliations": service.get_reconciliation,
+            "finance.invoices": service.get_invoice,
+            "finance.payments": service.get_payment,
+            "finance.settlements": service.get_settlement,
+        }.get(name)
+        if getter:
+            for row in rows:
+                getter(db, user, row.id)
+    elif name == "warehouse.inventory.issues":
+        from app.modules.inventory.service import get_issue_request
+        for row in rows:
+            get_issue_request(db, user, row.id)
+    elif name == "warehouse.inventory.transfers":
+        from app.modules.inventory.service import get_transfer_request
+        for row in rows:
+            get_transfer_request(db, user, row.id)
+    elif name == "warehouse.inventory.stocktakes":
+        from app.modules.inventory.service import get_stocktake_request
+        for row in rows:
+            get_stocktake_request(db, user, row.id)
+
+
 @router.post("/{name}/delete", summary="批量停用主数据或删除草稿")
 def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, int | str]:
     spec = _resource(name)
@@ -114,6 +160,7 @@ def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db),
         raise BusinessValidationError("所选记录包含重复 ID")
 
     rows = _rows(db, spec, selection.ids)
+    _authorize_row_scope(db, user, name, rows, write=True)
     if spec.delete_mode == "draft" and any(row.status != "DRAFT" for row in rows):
         raise BusinessValidationError("只能批量删除草稿；请取消选择已提交或已生效记录")
     if spec.delete_mode == "master" and name == "system.users" and user.id in selection.ids:
@@ -158,6 +205,7 @@ def batch_export(name: str, selection: Selection, db: Session = Depends(get_db),
     spec = _resource(name)
     _authorize(db, user, spec.read_permission)
     rows = _rows(db, spec, selection.ids)
+    _authorize_row_scope(db, user, name, rows)
     excluded = {"password_hash", "token_version", "avatar", "avatar_base64"}
     columns = [column.key for column in spec.model.__table__.columns if column.key not in excluded and not isinstance(getattr(rows[0], column.key), bytes)]
     output = io.StringIO()

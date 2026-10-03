@@ -1,0 +1,98 @@
+{
+  "captured_on": "2026-10-03 Asia/Shanghai",
+  "environment": {
+    "kind": "local development database",
+    "dialect": "mysql+pymysql",
+    "host": "127.0.0.1",
+    "database": "chemicalops"
+  },
+  "method": "Read-only SELECT from Role, Permission, RolePermission, User and UserRole; compared with ROLE_SCOPES in scripts/seed_demo_accounts.py.",
+  "role_count": 12,
+  "all_roles_match_seed": true,
+  "roles": [
+    {
+      "role_code": "BUYER",
+      "account": "buyer",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "master.chemicals.read", "master.products.read", "master.suppliers.read", "master.suppliers.write", "operations.exceptions.read", "procurement.orders.read", "procurement.orders.write", "procurement.requests.read", "procurement.requests.write", "procurement.rfqs.compare", "procurement.rfqs.quote", "procurement.rfqs.read", "procurement.rfqs.write", "system.notifications.read", "system.notifications.write", "warehouse.deliveries.read", "warehouse.inventory.issue.read", "warehouse.inventory.read", "warehouse.inventory.stocktake.read", "warehouse.inventory.transfer.read"]
+    },
+    {
+      "role_code": "FINANCE_CLERK",
+      "account": "finance_clerk",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "finance.invoices.read", "finance.invoices.write", "finance.payments.read", "finance.payments.write", "finance.reconciliations.read", "finance.reconciliations.write", "finance.settlements.read", "finance.settlements.write", "master.suppliers.read", "procurement.orders.read", "quality.acceptances.read", "system.files.attach", "system.files.download", "system.files.read", "system.files.write", "warehouse.deliveries.read"]
+    },
+    {
+      "role_code": "FINANCE_MANAGER",
+      "account": "finance_manager",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "finance.invoices.read", "finance.invoices.verify", "finance.invoices.write", "finance.payments.approve", "finance.payments.read", "finance.payments.write", "finance.reconciliations.read", "finance.reconciliations.write", "finance.settlements.approve", "finance.settlements.read", "finance.settlements.write", "master.suppliers.read", "procurement.orders.read", "quality.acceptances.read", "system.files.attach", "system.files.download", "system.files.read", "system.files.write", "warehouse.deliveries.read"]
+    },
+    {
+      "role_code": "FINANCE_VIEWER",
+      "account": "finance_viewer",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "master.chemicals.read", "master.products.read", "master.suppliers.read", "operations.exceptions.read", "procurement.orders.read", "procurement.requests.read", "procurement.rfqs.read", "quality.acceptances.read", "system.notifications.read", "system.notifications.write", "warehouse.deliveries.read", "warehouse.inventory.issue.read", "warehouse.inventory.read", "warehouse.inventory.stocktake.read", "warehouse.inventory.transfer.read"]
+    },
+    {
+      "role_code": "MANAGEMENT_VIEWER",
+      "account": "management_viewer",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "master.chemicals.read", "master.products.read", "master.suppliers.read", "operations.exceptions.read", "procurement.orders.read", "procurement.requests.read", "procurement.rfqs.read", "quality.acceptances.read", "system.notifications.read", "system.notifications.write", "warehouse.deliveries.read", "warehouse.inventory.issue.read", "warehouse.inventory.read", "warehouse.inventory.stocktake.read", "warehouse.inventory.transfer.read"]
+    },
+    {
+      "role_code": "PROCUREMENT_MANAGER",
+      "account": "procurement_manager",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "master.chemicals.read", "master.chemicals.write", "master.products.read", "master.products.write", "master.suppliers.read", "master.suppliers.write", "operations.exceptions.read", "operations.exceptions.write", "procurement.orders.approve", "procurement.orders.read", "procurement.orders.write", "procurement.replenishment.approve", "procurement.replenishment.read", "procurement.replenishment.write", "procurement.requests.approve", "procurement.requests.read", "procurement.requests.write", "procurement.rfqs.compare", "procurement.rfqs.quote", "procurement.rfqs.read", "procurement.rfqs.write", "quality.acceptances.read", "quality.acceptances.write", "system.files.attach", "system.files.download", "system.files.read", "system.files.write", "system.notifications.read", "system.notifications.write", "warehouse.deliveries.read", "warehouse.deliveries.write", "warehouse.inventory.cost.write", "warehouse.inventory.freeze.write", "warehouse.inventory.issue.approve", "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.read", "warehouse.inventory.return.approve", "warehouse.inventory.return.read", "warehouse.inventory.return.write", "warehouse.inventory.stocktake.approve", "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.transfer.approve", "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.write"]
+    },
+    {
+      "role_code": "QUALITY",
+      "account": "quality_inspector",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "master.chemicals.read", "master.products.read", "master.suppliers.read", "operations.exceptions.read", "operations.exceptions.write", "quality.acceptances.read", "quality.acceptances.write", "system.notifications.read", "system.notifications.write", "warehouse.inventory.issue.read", "warehouse.inventory.stocktake.read", "warehouse.inventory.transfer.read"]
+    },
+    {
+      "role_code": "QUALITY_MANAGER",
+      "account": "quality_manager",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "master.products.read", "quality.acceptances.read", "quality.acceptances.review", "quality.acceptances.write", "system.files.download", "system.files.read", "system.notifications.read"]
+    },
+    {
+      "role_code": "SUPPLIER_PORTAL",
+      "account": "supplier_portal_demo",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["supplier.portal.confirm", "supplier.portal.read"]
+    },
+    {
+      "role_code": "SYS_ADMIN",
+      "account": "system_admin",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "finance.invoices.read", "finance.invoices.verify", "finance.invoices.write", "finance.payments.approve", "finance.payments.read", "finance.payments.write", "finance.reconciliations.read", "finance.reconciliations.write", "finance.settlements.approve", "finance.settlements.read", "finance.settlements.write", "master.chemicals.read", "master.chemicals.write", "master.products.read", "master.products.write", "master.suppliers.read", "master.suppliers.write", "operations.exceptions.read", "operations.exceptions.write", "procurement.orders.approve", "procurement.orders.read", "procurement.orders.write", "procurement.replenishment.approve", "procurement.replenishment.read", "procurement.replenishment.write", "procurement.requests.approve", "procurement.requests.read", "procurement.requests.write", "procurement.rfqs.compare", "procurement.rfqs.quote", "procurement.rfqs.read", "procurement.rfqs.write", "quality.acceptances.read", "quality.acceptances.review", "quality.acceptances.write", "supplier.portal.confirm", "supplier.portal.read", "system.departments.read", "system.departments.write", "system.files.attach", "system.files.download", "system.files.read", "system.files.write", "system.notifications.read", "system.notifications.write", "system.permissions.read", "system.permissions.write", "system.roles.read", "system.roles.write", "system.users.read", "system.users.write", "warehouse.deliveries.read", "warehouse.deliveries.write", "warehouse.inventory.cost.write", "warehouse.inventory.freeze.write", "warehouse.inventory.issue.approve", "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.read", "warehouse.inventory.return.approve", "warehouse.inventory.return.read", "warehouse.inventory.return.write", "warehouse.inventory.stocktake.approve", "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.transfer.approve", "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.write"]
+    },
+    {
+      "role_code": "TECHNICAL",
+      "account": "technical_engineer",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "master.chemicals.read", "master.chemicals.write", "master.products.read", "master.products.write", "system.notifications.read", "system.notifications.write", "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write"]
+    },
+    {
+      "role_code": "WAREHOUSE",
+      "account": "warehouse_receiver",
+      "status": "ACTIVE",
+      "matches_seed": true,
+      "permission_codes": ["dashboard.read", "master.products.read", "master.suppliers.read", "operations.exceptions.read", "operations.exceptions.write", "system.files.attach", "system.files.download", "system.files.read", "system.files.write", "system.notifications.read", "system.notifications.write", "warehouse.deliveries.read", "warehouse.deliveries.write", "warehouse.inventory.cost.write", "warehouse.inventory.freeze.write", "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.read", "warehouse.inventory.return.read", "warehouse.inventory.return.write", "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.write"]
+    }
+  ]
+}

@@ -66,10 +66,12 @@ export function useColumns(
           {
             code: 'review',
             text: '核对报告',
+            auth: 'quality.acceptances.read',
           },
           {
             code: 'result',
             text: '录入结果',
+            auth: 'quality.acceptances.write',
             // PENDING（刚创建）和 REINSPECTION（复检中）可录入；
             // 已出最终结果（PASSED/PARTIAL/FAILED）的不允许直接改判
             show: (row: QualityAcceptanceApi.Acceptance) =>

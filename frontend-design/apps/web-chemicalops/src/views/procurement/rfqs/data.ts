@@ -89,12 +89,14 @@ export function useColumns(
           {
             code: 'edit',
             text: '编辑',
+            auth: 'procurement.rfqs.write',
             show: (row: RfqApi.Rfq) => row.status === 'DRAFT',
           },
           { code: 'detail', text: '详情与比价' },
           {
             code: 'send',
             text: '发送询价',
+            auth: 'procurement.rfqs.write',
             show: (row: RfqApi.Rfq) => row.status === 'DRAFT',
           },
         ],

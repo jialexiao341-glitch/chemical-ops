@@ -134,6 +134,7 @@ export function useColumns(
           { code: 'location-advice', text: '库位提示' },
           {
             code: 'toggle-freeze',
+            auth: 'warehouse.inventory.freeze.write',
             text: (row: InventoryApi.InventoryBalance) =>
               row.status === 'FROZEN' ? '解冻' : '冻结',
           },

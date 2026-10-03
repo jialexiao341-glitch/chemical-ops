@@ -88,6 +88,7 @@ export function useColumns(
           {
             code: 'edit',
             text: '编辑',
+            auth: 'procurement.requests.write',
             show: (row: PurchaseRequestApi.PurchaseRequest) =>
               row.status === 'DRAFT' || row.status === 'REJECTED',
           },
@@ -98,24 +99,28 @@ export function useColumns(
           {
             code: 'submit',
             text: '提交',
+            auth: 'procurement.requests.write',
             show: (row: PurchaseRequestApi.PurchaseRequest) =>
               row.status === 'DRAFT' || row.status === 'REJECTED',
           },
           {
             code: 'approve',
             text: '审批通过',
+            auth: 'procurement.requests.approve',
             show: (row: PurchaseRequestApi.PurchaseRequest) =>
               row.status === 'SUBMITTED' || row.status === 'APPROVING',
           },
           {
             code: 'reject',
             text: '驳回',
+            auth: 'procurement.requests.approve',
             show: (row: PurchaseRequestApi.PurchaseRequest) =>
               row.status === 'SUBMITTED' || row.status === 'APPROVING',
           },
           {
             code: 'cancel',
             text: '取消',
+            auth: 'procurement.requests.write',
             show: (row: PurchaseRequestApi.PurchaseRequest) =>
               !['APPROVED', 'CANCELLED'].includes(row.status),
           },

@@ -88,6 +88,7 @@ export function useColumns(
             code: 'receive',
             disabled: (row: DeliveryApi.Delivery) =>
               row.status !== 'IN_TRANSIT',
+            auth: 'warehouse.deliveries.write',
             text: '确认收货',
           },
         ],

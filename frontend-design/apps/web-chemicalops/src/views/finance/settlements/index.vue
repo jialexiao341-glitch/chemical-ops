@@ -5,6 +5,7 @@ import type { FinanceApi } from '#/api';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -24,6 +25,9 @@ import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-det
 
 defineOptions({ name: 'SettlementList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
+const canWriteSettlements = hasAccessByCodes(['finance.settlements.write']);
+const canApproveSettlements = hasAccessByCodes(['finance.settlements.approve']);
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
 const [Create, createApi] = useVbenModal({
@@ -139,7 +143,7 @@ watch(
     <Create @success="gridApi.query()" />
     <Grid table-title="采购结算">
       <template #toolbar-tools>
-        <Button type="primary" @click="createApi.open()">
+        <Button v-if="canWriteSettlements" type="primary" @click="createApi.open()">
           <Plus class="size-5" />
           创建结算单
         </Button>
@@ -147,7 +151,7 @@ watch(
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="row.status === 'DRAFT'"
+            v-if="row.status === 'DRAFT' && canApproveSettlements"
             size="small"
             type="link"
             @click="runConfirm(row)"
@@ -155,7 +159,7 @@ watch(
             确认结算
           </Button>
           <Button
-            v-if="row.status === 'DRAFT'"
+            v-if="row.status === 'DRAFT' && canWriteSettlements"
             danger
             size="small"
             type="link"

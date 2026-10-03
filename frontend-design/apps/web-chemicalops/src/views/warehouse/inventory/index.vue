@@ -8,6 +8,7 @@ import type { InventoryApi } from '#/api';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -32,6 +33,8 @@ import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight
 defineOptions({ name: 'InventoryList' });
 const route = useRoute();
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
+const { hasAccessByCodes } = useAccess();
+const canWriteInventory = hasAccessByCodes(['warehouse.inventory.write']);
 
 function getAiInventoryFilters() {
   const raw = route.query.ai_filters;
@@ -198,7 +201,7 @@ watch(
     <Logs />
     <Grid table-title="库存余额">
       <template #toolbar-tools>
-        <Button type="primary" @click="inboundApi.open()">
+        <Button v-if="canWriteInventory" type="primary" @click="inboundApi.open()">
           <Plus class="size-5" />
           库存入库
         </Button>

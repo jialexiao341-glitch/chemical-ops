@@ -8,6 +8,7 @@ import type { PurchaseRequestApi } from '#/api';
 import { onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -25,6 +26,8 @@ import Form from './modules/form.vue';
 
 defineOptions({ name: 'PurchaseRequestList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
+const canWriteRequests = hasAccessByCodes(['procurement.requests.write']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -83,10 +86,12 @@ function onActionClick({
   const payload = { id: row.id, requestNo: row.request_no ?? '' };
   switch (code) {
     case 'approve': {
+      if (!hasAccessByCodes(['procurement.requests.approve'])) return;
       approveApi.setData({ ...payload, action: 'approve' }).open();
       break;
     }
     case 'cancel': {
+      if (!canWriteRequests) return;
       cancelApi.setData(payload).open();
       break;
     }
@@ -95,14 +100,17 @@ function onActionClick({
       break;
     }
     case 'edit': {
+      if (!canWriteRequests) return;
       formDrawerApi.setData(row).open();
       break;
     }
     case 'reject': {
+      if (!hasAccessByCodes(['procurement.requests.approve'])) return;
       approveApi.setData({ ...payload, action: 'reject' }).open();
       break;
     }
     case 'submit': {
+      if (!canWriteRequests) return;
       onSubmit(row);
       break;
     }
@@ -161,7 +169,7 @@ watch(
     <Cancel @success="gridApi.query()" />
     <Grid table-title="采购申请">
       <template #toolbar-tools>
-        <Button type="primary" @click="formDrawerApi.setData(null).open()">
+        <Button v-if="canWriteRequests" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
           新建采购申请
         </Button>

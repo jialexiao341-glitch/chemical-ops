@@ -8,6 +8,7 @@ import type { DeliveryApi } from '#/api';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -25,6 +26,8 @@ import ReceiveModal from './modules/receive.vue';
 
 defineOptions({ name: 'DeliveryList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
+const canWriteDeliveries = hasAccessByCodes(['warehouse.deliveries.write']);
 
 const [Create, createApi] = useVbenModal({
   connectedComponent: CreateModal,
@@ -127,7 +130,7 @@ watch(
     <Receive @success="gridApi.query()" />
     <Grid table-title="到货与收货">
       <template #toolbar-tools>
-        <Button type="primary" @click="createApi.open()">
+        <Button v-if="canWriteDeliveries" type="primary" @click="createApi.open()">
           <Plus class="size-5" />
           登记到货计划
         </Button>

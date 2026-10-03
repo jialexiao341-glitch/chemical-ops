@@ -206,19 +206,27 @@ async function onCreateOrder() {
   }
 }
 
-const canSend = computed(() => detail.value?.status === 'DRAFT');
+const canSend = computed(
+  () =>
+    detail.value?.status === 'DRAFT' &&
+    hasAccessByCodes(['procurement.rfqs.write']),
+);
 /** 后端只在 SENT / RESPONDING 状态接受报价 */
 const canQuote = computed(() =>
-  ['RESPONDING', 'SENT'].includes(detail.value?.status ?? ''),
+  ['RESPONDING', 'SENT'].includes(detail.value?.status ?? '') &&
+  hasAccessByCodes(['procurement.rfqs.quote']),
 );
 const canCompare = computed(
   () =>
-    (detail.value?.quotes?.length ?? 0) > 0 && detail.value?.status !== 'CLOSED',
+    (detail.value?.quotes?.length ?? 0) > 0 &&
+    detail.value?.status !== 'CLOSED' &&
+    hasAccessByCodes(['procurement.rfqs.compare']),
 );
 const canCreateOrder = computed(
   () =>
     !!comparison.value?.selected_quote_id &&
-    comparison.value?.status === 'CONFIRMED',
+    comparison.value?.status === 'CONFIRMED' &&
+    hasAccessByCodes(['procurement.orders.write']),
 );
 
 const itemColumns = [
@@ -523,7 +531,7 @@ defineExpose({ drawerApi });
                   </template>
                   <template v-else-if="column.key === '__action'">
                     <Button
-                      v-if="comparison?.status !== 'CONFIRMED'"
+                      v-if="comparison?.status !== 'CONFIRMED' && hasAccessByCodes(['procurement.rfqs.compare'])"
                       size="small"
                       type="link"
                       @click="onSelectQuote(record)"

@@ -197,7 +197,11 @@ export function useColumns(
           onClick: onActionClick,
         },
         name: 'CellOperation',
-        options: [{ code: 'standard', text: '检测标准' }, 'edit', 'delete'],
+        options: [
+          { code: 'standard', text: '检测标准', auth: 'master.products.write' },
+          { code: 'edit', auth: 'master.products.write' },
+          { code: 'delete', auth: 'master.products.write' },
+        ],
         props: { renderMode: 'menu' },
       },
       field: 'operation',
