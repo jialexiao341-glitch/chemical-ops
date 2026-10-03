@@ -15,6 +15,7 @@ from app.modules.ai import briefing as briefing_service
 from app.modules.ai import drafts as drafts_service
 from app.modules.ai import nl_filters as nl_filters_service
 from app.modules.ai import service
+from app.modules.ai import agent_tools
 from app.modules.ai import text2sql as text2sql_service
 from app.modules.ai.text2sql import Text2SQLRequest, Text2SQLResponse
 from app.modules.ai.schema import (
@@ -38,6 +39,20 @@ from app.modules.system.model import User
 
 router = APIRouter(prefix="/ai", tags=["AI 助手"])
 LOGGER = logging.getLogger('chemicalops.ai.http')
+
+
+@router.get("/agent/tools", summary="列出当前用户可用的只读 Agent 工具")
+def agent_tool_catalog(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict[str, object]]:
+    """返回认证用户可见的只读工具目录；无权限工具不出现在返回结果中。"""
+    return agent_tools.list_tools(db, user)
+
+
+@router.post("/agent/tools/execute", response_model=agent_tools.InventoryResult | agent_tools.QuoteResult,
+             summary="执行白名单内的只读 Agent 工具")
+def agent_tool_execute(data: agent_tools.ToolCall, db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    """通过统一护栏执行一个只读工具；身份来自 JWT，不接受请求指定执行人。"""
+    return agent_tools.execute_tool(db, user, data)
 
 
 @router.post("/text2sql", response_model=Text2SQLResponse, summary="自然语言只读查询")
