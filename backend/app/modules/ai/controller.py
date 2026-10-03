@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
+from app.core.errors import AuthorizationError, ResourceNotFoundError, BusinessValidationError
 from app.core.observability import get_request_id, metrics, observe_duration
 from app.modules.ai import briefing as briefing_service
 from app.modules.ai import drafts as drafts_service
@@ -73,6 +74,22 @@ def agent_task_read(task_id: str, db: Session = Depends(get_db), user: User = De
 def agent_task_start(data: agent_runtime.TaskCreate, background: BackgroundTasks,
                      db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     state = agent_runtime.prepare_task(db, user, data)
+    background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
+    return agent_runtime.get_task(db, user, state.task_id)
+
+
+@router.post("/agent/chat/start", response_model=agent_runtime.TaskRead, status_code=202, summary="在聊天会话中启动只读任务")
+def agent_chat_start(data: agent_runtime.ChatTaskCreate, background: BackgroundTasks,
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    state = agent_runtime.prepare_chat_task(db, user, data)
+    background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
+    return agent_runtime.get_task(db, user, state.task_id)
+
+
+@router.post("/agent/chat/{task_id}/continue", response_model=agent_runtime.TaskRead, status_code=202, summary="聊天补充并继续只读任务")
+def agent_chat_continue(task_id: str, data: agent_runtime.TaskContinue, background: BackgroundTasks,
+                        db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    state = agent_runtime.prepare_chat_continue(db, user, task_id, data)
     background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
     return agent_runtime.get_task(db, user, state.task_id)
 
@@ -192,6 +209,14 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
     result = []
     for item in items:
         citations = item.citations
+        agent_ref = next((c for c in (citations or []) if isinstance(c, dict) and c.get("type") == "agent_task"), None)
+        content = item.content
+        if agent_ref and item.message_role == "ASSISTANT":
+            # 先重查任务权限；不从历史消息绕过证据鉴权返回旧库存/价格摘要。
+            try:
+                agent_runtime.get_task(db, user, agent_ref["task_id"])
+            except (AuthorizationError, ResourceNotFoundError, BusinessValidationError):
+                content = "任务结果当前不可访问，请核对权限或服务状态。"
         if isinstance(citations, list):
             normalized = []
             for citation in citations:
@@ -219,7 +244,7 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
                 id=item.id,
                 conversation_id=item.conversation_id,
                 role=item.message_role.lower(),
-                content=item.content,
+                content=content,
                 citations=citations,
                 created_at=item.created_at,
             )

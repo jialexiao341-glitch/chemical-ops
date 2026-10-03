@@ -11,10 +11,11 @@ const routes: RouteRecordRaw[] = [
     meta: { hideInMenu: true, title: '采购只读任务' },
     name: 'AiAgentTask',
     path: '/ai/agent',
-    component: () => import('#/views/ai/agent/index.vue'),
+    redirect: '/ai/workspace',
   },
   {
     meta: {
+      fullPathKey: false,
       hideInMenu: false,
       icon: 'lucide:bot',
       order: 7,

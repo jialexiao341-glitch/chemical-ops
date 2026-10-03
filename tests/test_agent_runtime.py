@@ -17,7 +17,7 @@ from app.core.db import get_db
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.ai import agent_runtime as runtime, agent_tools as tools
 from app.modules.ai.controller import router
-from app.modules.ai.model import AIAgentTask
+from app.modules.ai.model import AIAgentTask, AIMessage, AIConversation
 from app.modules.products.model import Product
 from tests.conftest import login
 from tests.test_agent_read_tools import tool_db
@@ -345,6 +345,99 @@ def test_disabled_user_stops_background_before_model(task_db, model_script, monk
     result = runtime.get_task(task_db, USER, prepared.task_id)
     assert result.status == 'FAILED' and result.error_code == 'PERMISSION_DENIED'
     assert model_script[1] == []
+
+
+@pytest.fixture
+def chat_task_db(task_db, monkeypatch):
+    for ddl in (
+        "CREATE TABLE ai_conversations (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, business_scene TEXT, permission_snapshot JSON, status TEXT, pinned BOOLEAN DEFAULT 0, last_message_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE ai_messages (id INTEGER PRIMARY KEY, conversation_id INTEGER, message_role TEXT, content TEXT, citations JSON, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE sys_users (id INTEGER PRIMARY KEY, status TEXT)",
+        "INSERT INTO sys_users VALUES (7, 'ACTIVE')",
+    ):
+        task_db.execute(text(ddl))
+    task_db.commit()
+    monkeypatch.setattr(runtime.service, '_permission_snapshot', lambda db, user: {})
+    monkeypatch.setattr(runtime, 'SessionLocal', lambda: Session(task_db.bind))
+    return task_db
+
+
+def test_chat_turns_persist_and_background_updates_latest_reply(chat_task_db, model_script):
+    actions, _ = model_script
+    state = runtime.prepare_chat_task(chat_task_db, USER, runtime.ChatTaskCreate(question='帮我查库存'))
+    result = runtime.get_task(chat_task_db, USER, state.task_id)
+    assert result.conversation_id is not None
+    assert len(chat_task_db.scalars(select(AIMessage)).all()) == 2
+    actions.append({'action': 'ask_user', 'question': '请补充产品名称'})
+    asyncio.run(runtime.run_prepared_task(state.task_id, USER.id, state.revision))
+    waiting = runtime.get_task(chat_task_db, USER, state.task_id)
+    first_reply = chat_task_db.scalar(select(AIMessage).where(AIMessage.message_role == 'ASSISTANT'))
+    assert first_reply.content == '请补充产品名称'
+    actions.extend([tool('catalog.search_products', keyword='测试乙醇'),
+        tool('inventory.query_available', product_id=1), {'action': 'finish', 'evidence_steps': [3]}])
+    resumed = runtime.prepare_chat_continue(chat_task_db, USER, state.task_id,
+        runtime.TaskContinue(question='测试乙醇', revision=waiting.revision))
+    asyncio.run(runtime.run_prepared_task(resumed.task_id, USER.id, resumed.revision))
+    chat_task_db.expire_all()
+    replies = chat_task_db.scalars(select(AIMessage).where(AIMessage.message_role == 'ASSISTANT').order_by(AIMessage.id)).all()
+    assert len(replies) == 2 and replies[0].content == '请补充产品名称'
+    assert '80.000000 千克' in replies[1].content
+    assert replies[1].citations == [{'type': 'agent_task', 'task_id': state.task_id}]
+    assert len(chat_task_db.scalars(select(AIConversation)).all()) == 1
+
+
+def test_foreign_chat_cannot_create_task_or_messages(chat_task_db):
+    state = runtime.prepare_chat_task(chat_task_db, USER, runtime.ChatTaskCreate(question='查库存'))
+    cid = runtime.get_task(chat_task_db, USER, state.task_id).conversation_id
+    with pytest.raises(BusinessValidationError):
+        runtime.prepare_chat_task(chat_task_db, SimpleNamespace(id=10), runtime.ChatTaskCreate(question='查库存', conversation_id=cid))
+    assert len(chat_task_db.scalars(select(AIAgentTask)).all()) == 1
+    assert len(chat_task_db.scalars(select(AIMessage)).all()) == 2
+
+
+def test_chat_api_returns_conversation_and_reloadable_task(chat_task_db, model_script):
+    app = FastAPI()
+    app.include_router(router, prefix='/api/v1')
+    app.dependency_overrides[get_db] = lambda: chat_task_db
+    app.dependency_overrides[get_current_user] = lambda: USER
+    actions, _ = model_script
+    actions.append({'action': 'ask_user', 'question': '请补充产品名称'})
+    with TestClient(app) as api:
+        response = api.post('/api/v1/ai/agent/chat/start', json={'question': '帮我查库存'})
+        assert response.status_code == 202
+        task = response.json()
+        history = api.get(f"/api/v1/ai/conversations/{task['conversation_id']}/messages").json()
+        assert history['items'][-1]['content'] == '请补充产品名称'
+        assert history['items'][-1]['citations'][0]['task_id'] == task['id']
+        waiting = api.get(f"/api/v1/ai/agent/tasks/{task['id']}").json()
+        assert waiting['status'] == 'WAITING_INPUT'
+        actions.extend([tool('catalog.search_products', keyword='测试乙醇'),
+            tool('inventory.query_available', product_id=1), {'action': 'finish', 'evidence_steps': [3]}])
+        continued = api.post(f"/api/v1/ai/agent/chat/{task['id']}/continue", json={
+            'question': '测试乙醇', 'revision': waiting['revision']})
+        assert continued.status_code == 202
+        result = api.get(f"/api/v1/ai/agent/tasks/{task['id']}").json()
+        assert result['status'] == 'SUCCEEDED'
+
+
+def test_chat_history_rechecks_permissions_and_cancel_updates_reply(chat_task_db, model_script):
+    from app.modules.ai.controller import messages
+    state = runtime.prepare_chat_task(chat_task_db, USER, runtime.ChatTaskCreate(question='查库存'))
+    actions, _ = model_script
+    actions.extend([tool('catalog.search_products', keyword='测试乙醇'),
+        tool('inventory.query_available', product_id=1), {'action': 'ask_user', 'question': '当前余额80.000000，是否继续？'}])
+    asyncio.run(runtime.run_prepared_task(state.task_id, USER.id, state.revision))
+    cid = runtime.get_task(chat_task_db, USER, state.task_id).conversation_id
+    history = messages(cid, limit=100, db=chat_task_db, user=USER)
+    assert '80.000000' in history.items[-1].content
+    # 修改历史授权范围，不可从普通聊天历史接口读到旧库存摘要。
+    chat_task_db.execute(text('UPDATE warehouses SET manager_id=8 WHERE id=1'))
+    chat_task_db.commit()
+    assert '80.000000' not in messages(cid, limit=100, db=chat_task_db, user=USER).items[-1].content
+    chat_task_db.execute(text('UPDATE warehouses SET manager_id=7 WHERE id=1'))
+    chat_task_db.commit()
+    runtime.cancel_task(chat_task_db, USER, state.task_id)
+    assert messages(cid, limit=100, db=chat_task_db, user=USER).items[-1].content == '任务已取消。'
 
 
 @pytest.mark.integration

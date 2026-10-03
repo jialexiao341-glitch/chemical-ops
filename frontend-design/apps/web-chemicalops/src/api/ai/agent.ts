@@ -91,6 +91,7 @@ export namespace AgentApi {
   }
   export interface Task {
     id: string;
+    conversation_id?: null | number;
     status: 'CANCELLED' | 'FAILED' | 'RUNNING' | 'SUCCEEDED' | 'WAITING_INPUT';
     revision: number;
     reply: string;
@@ -118,4 +119,11 @@ export function continueAgentTaskApi(id: string, data: AgentApi.Continue) {
 }
 export function cancelAgentTaskApi(id: string) {
   return requestClient.post<AgentApi.Task>(`/ai/agent/tasks/${encodeURIComponent(id)}/cancel`);
+}
+
+export function createAgentChatApi(question: string, conversationId?: number) {
+  return requestClient.post<AgentApi.Task>('/ai/agent/chat/start', { question, conversation_id: conversationId });
+}
+export function continueAgentChatApi(id: string, data: AgentApi.Continue) {
+  return requestClient.post<AgentApi.Task>(`/ai/agent/chat/${encodeURIComponent(id)}/continue`, data);
 }

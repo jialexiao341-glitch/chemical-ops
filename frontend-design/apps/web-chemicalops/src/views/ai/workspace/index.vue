@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { AiApi } from '#/api';
+import type { AgentApi, AiApi } from '#/api';
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -10,6 +10,7 @@ import { Button, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
 
 import {
   deleteConversationApi,
+  createAgentChatApi, continueAgentChatApi, continueAgentTaskApi, getAgentTaskApi, cancelAgentTaskApi,
   createPurchaseRequestApi,
   generateBriefingApi,
   getAIMessagesApi,
@@ -24,6 +25,8 @@ import { formatDateTime } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
 
 import QueryCharts from './query-charts.vue';
+import AgentChatTask from './agent-chat-task.vue';
+import { acceptTask, isReadonlyAgentQuestion } from './task-view';
 import assistantLogo from './chemicalops-ai.svg';
 
 defineOptions({ name: 'AiWorkspace' });
@@ -33,6 +36,9 @@ const route = useRoute();
 /** 聊天界面的一条消息 */
 interface UiMessage {
   content: string;
+  agentTaskId?: string;
+  agentTask?: AgentApi.Task;
+  agentError?: string;
   citations?: any[];
   id: string;
   /** 后端 Text2SQL 查询链路，仅助手消息可能携带 */
@@ -118,12 +124,103 @@ const filterDatasetOptions = AI_FILTER_TARGETS.filter(
   value: dataset,
 }));
 const slashCommands = [
+  { description: '在聊天中查库存、核对产品规格和供应商报价', icon: 'filter', label: '采购只读查询', value: 'agent' },
   { description: '用自然语言设置条件，并带入业务列表', icon: 'filter', label: '自然语言筛选', value: 'filter' },
   { description: '整理采购信息，核对后创建草稿', icon: 'draft', label: '采购申请草稿', value: 'purchase-draft' },
   { description: '查看本次生成的运营晨报', icon: 'briefing', label: '生成运营晨报', value: 'briefing' },
   { description: '确认接收对象后生成并推送晨报', icon: 'send', label: '生成并推送', value: 'briefing-push' },
 ] as const;
 
+const agentMode = ref(false);
+let chatEpoch = 0;
+const agentReads = new Map<string, number>();
+let agentTimer: ReturnType<typeof setTimeout> | undefined;
+const currentAgent = computed(() => messages.value.at(-1)?.agentTask);
+function stopAgentPolling() { if (agentTimer) clearTimeout(agentTimer); }
+function resetChatWork() { chatEpoch += 1; stopAgentPolling(); agentMode.value = false; }
+function applyAgent(task: AgentApi.Task, id: string, epoch: number) {
+  if (epoch !== chatEpoch) return;
+  messages.value = messages.value.map((item) => item.id === id && acceptTask(item.agentTask, task)
+    ? { ...item, agentTask: task, agentTaskId: task.id, agentError: undefined, content: '', streaming: false } : item);
+}
+function scheduleAgentPolling() {
+  stopAgentPolling();
+  if (messages.value.some((item) => item.agentTask?.status === 'RUNNING')) {
+    agentTimer = setTimeout(async () => {
+      await Promise.all(messages.value.filter((item) => item.agentTask?.status === 'RUNNING').map((item) => refreshAgent(item)));
+      scheduleAgentPolling();
+    }, 2000);
+  }
+}
+async function refreshAgent(item: UiMessage) {
+  if (!item.agentTaskId) return;
+  const epoch = chatEpoch;
+  const generation = (agentReads.get(item.agentTaskId) ?? 0) + 1;
+  agentReads.set(item.agentTaskId, generation);
+  try {
+    const task = await getAgentTaskApi(item.agentTaskId);
+    if (agentReads.get(item.agentTaskId) === generation) applyAgent(task, item.id, epoch);
+  }
+  catch {
+    if (epoch === chatEpoch && agentReads.get(item.agentTaskId) === generation) messages.value = messages.value.map((entry) => entry.role === 'assistant' && entry.agentTaskId === item.agentTaskId
+      ? { ...entry, agentTask: undefined, content: '', streaming: false, agentError: '任务无法读取，请核对登录、权限或服务状态后重试。' } : entry);
+  } finally { if (epoch === chatEpoch) scheduleAgentPolling(); }
+}
+async function sendAgent(text: string, continuation?: AgentApi.Continue) {
+  if (sending.value) return;
+  const previous = currentAgent.value;
+  if (previous?.status === 'RUNNING') { message.info('正在查询，可先取消当前任务。'); return; }
+  const epoch = ++chatEpoch;
+  stopAgentPolling();
+  const assistantId = nextId();
+  messages.value = messages.value.map((item) => item.agentTask
+    ? { ...item, content: item.agentTask.reply, agentTask: undefined } : item);
+  messages.value.push({ content: text, id: nextId(), role: 'user', agentTaskId: previous?.id },
+    { content: '', id: assistantId, role: 'assistant', streaming: true });
+  sending.value = true;
+  inputText.value = '';
+  agentMode.value = false;
+  scrollToBottom();
+  try {
+    const task = continuation && previous
+      ? await (previous.conversation_id ? continueAgentChatApi : continueAgentTaskApi)(previous.id, continuation)
+      : await createAgentChatApi(text, activeConversationId.value);
+    if (epoch !== chatEpoch) return;
+    applyAgent(task, assistantId, epoch);
+    activeConversationId.value = task.conversation_id ?? activeConversationId.value;
+    messages.value = messages.value.map((item) => item.id === assistantId || item.id === messages.value.at(-2)?.id
+      ? { ...item, agentTaskId: task.id } : item);
+    if (task.conversation_id) await router.replace({ query: { conversation: String(task.conversation_id) } });
+    void loadConversations();
+    scheduleAgentPolling();
+  } catch {
+    if (epoch === chatEpoch) {
+      messages.value = messages.value.map((item) => item.id === assistantId
+        ? { ...item, streaming: false, content: '未取得任务结果，请重新打开会话核对最新状态后操作。' } : item);
+      void loadConversations();
+    }
+  } finally {
+    if (epoch === chatEpoch) { sending.value = false; scrollToBottom(); }
+  }
+}
+async function continueAgent(item: UiMessage, data: AgentApi.Continue) {
+  if (item.agentTask?.id !== currentAgent.value?.id) return;
+  await sendAgent(data.question, data);
+}
+async function cancelAgent(item: UiMessage) {
+  if (!item.agentTaskId || sending.value) return;
+  const epoch = chatEpoch;
+  sending.value = true;
+  stopAgentPolling();
+  const generation = (agentReads.get(item.agentTaskId) ?? 0) + 1;
+  agentReads.set(item.agentTaskId, generation);
+  try {
+    const task = await cancelAgentTaskApi(item.agentTaskId);
+    if (agentReads.get(item.agentTaskId) === generation) applyAgent(task, item.id, epoch);
+  }
+  catch { if (epoch === chatEpoch) message.error('未确认取消结果，请刷新任务核对。'); }
+  if (epoch === chatEpoch) { sending.value = false; scheduleAgentPolling(); }
+}
 let messageSeed = 0;
 function nextId() {
   messageSeed += 1;
@@ -155,6 +252,8 @@ async function openConversation(conversation: AiApi.Conversation) {
     message.warning('正在回复中，请稍候');
     return;
   }
+  resetChatWork();
+  const epoch = chatEpoch;
   activeConversationId.value = conversation.id;
   menuConversationId.value = undefined;
   sidebarExpanded.value = false;
@@ -162,7 +261,9 @@ async function openConversation(conversation: AiApi.Conversation) {
   historyLoading.value = true;
   try {
     const res = await getAIMessagesApi(conversation.id);
+    if (epoch !== chatEpoch) return;
     messages.value = res.items.map((item) => ({
+      agentTaskId: item.citations?.find((citation: any) => citation.type === 'agent_task')?.task_id,
       content: item.content,
       citations: Array.isArray(item.citations) ? item.citations : [],
       id: String(item.id),
@@ -172,9 +273,16 @@ async function openConversation(conversation: AiApi.Conversation) {
         : [],
       role: item.role === 'user' ? 'user' : 'assistant',
     }));
+    // 一项任务只在最新助手回复中展示可交互结果，旧轮保留原追问文字。
+    const latest = new Map<string, UiMessage>();
+    for (const item of messages.value) if (item.role === 'assistant' && item.agentTaskId) latest.set(item.agentTaskId, item);
+    await Promise.all([...latest.values()].map((item) => refreshAgent(item)));
+    if (epoch !== chatEpoch) return;
+    await router.replace({ query: { conversation: String(conversation.id) } });
+    scheduleAgentPolling();
     scrollToBottom();
   } finally {
-    historyLoading.value = false;
+    if (epoch === chatEpoch) historyLoading.value = false;
   }
 }
 
@@ -183,6 +291,9 @@ function newConversation() {
   if (sending.value) {
     return;
   }
+  resetChatWork();
+  historyLoading.value = false;
+  void router.replace({ path: '/ai/workspace', query: {} });
   activeConversationId.value = undefined;
   menuConversationId.value = undefined;
   sidebarExpanded.value = false;
@@ -256,7 +367,16 @@ async function removeConversation(conversation: AiApi.Conversation) {
 /** 发送消息并消费 SSE 流 */
 async function onSend() {
   const text = inputText.value.trim();
-  if (!text || sending.value) {
+  if (!text || sending.value || historyLoading.value) {
+    return;
+  }
+  if (currentAgent.value?.status === 'RUNNING') { message.info('正在查询，可先取消当前任务。'); return; }
+  if (currentAgent.value?.status === 'WAITING_INPUT') {
+    await sendAgent(text, { question: text, revision: currentAgent.value.revision });
+    return;
+  }
+  if (!draftMode.value && (agentMode.value || isReadonlyAgentQuestion(text))) {
+    await sendAgent(text);
     return;
   }
   if (draftMode.value) {
@@ -275,7 +395,7 @@ async function onSend() {
 
   // 后端要求 OpenAI 兼容格式：只传 user/assistant 文本历史
   const payload = history
-    .filter((item) => !item.streaming && !item.draftInteraction)
+    .filter((item) => !item.streaming && !item.draftInteraction && !item.agentTaskId)
     .map((item) => ({
       content: item.content,
       role: item.role as 'assistant' | 'user',
@@ -315,6 +435,7 @@ async function onSend() {
           streaming: false,
         });
         activeConversationId.value = payloadDone.conversation_id;
+        void router.replace({ query: { conversation: String(payloadDone.conversation_id) } });
         void loadConversations();
       },
       onError(errMessage) {
@@ -661,6 +782,13 @@ async function selectSlashCommand(command?: (typeof slashCommands)[number]['valu
   slashMenuOpen.value = false;
   inputText.value = '';
 
+  if (command === 'agent') {
+    if (currentAgent.value?.status === 'WAITING_INPUT' || currentAgent.value?.status === 'RUNNING') { message.info('请先完成或取消当前查询。'); return; }
+    agentMode.value = true;
+    draftMode.value = false;
+    return;
+  }
+  agentMode.value = false;
   if (command === 'filter') {
     filterPanelOpen.value = true;
     filterQuestion.value = '';
@@ -699,11 +827,35 @@ watch(
   { immediate: true },
 );
 
+watch(() => route.query.conversation, (value) => {
+  const id = Number(value);
+  if (id === activeConversationId.value || sending.value) return;
+  const conversation = conversations.value.find((item) => item.id === id);
+  if (conversation) void openConversation(conversation);
+  else if (!value && activeConversationId.value) newConversation();
+});
+
 onMounted(() => {
-  void loadConversations();
+  void loadConversations().then(async () => {
+    const id = Number(route.query.conversation);
+    const conversation = conversations.value.find((item) => item.id === id);
+    if (conversation) await openConversation(conversation);
+    else if (typeof route.query.task === 'string') {
+      // 旧独立页面收藏地址重定向到聊天，仅按本人任务 API 恢复。
+      const taskId = route.query.task;
+      const item: UiMessage = { id: nextId(), role: 'assistant', content: '', agentTaskId: taskId };
+      messages.value = [item];
+      await refreshAgent(item);
+      if (item.agentTaskId && messages.value[0]?.agentTask?.conversation_id) {
+        const task = messages.value[0].agentTask;
+        activeConversationId.value = task.conversation_id ?? undefined;
+      }
+      scheduleAgentPolling();
+    }
+  });
   document.addEventListener('click', closeHistoryMenu);
 });
-onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
+onUnmounted(() => { resetChatWork(); document.removeEventListener('click', closeHistoryMenu); });
 </script>
 
 <template>
@@ -770,7 +922,6 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
             <div>
               <span class="ai-toolbar-title">化运 AI 助手</span>
             </div>
-            <Button @click="router.push('/ai/agent')">采购只读任务</Button>
           </div>
           <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
             <div class="mb-2 flex items-center justify-between">
@@ -838,16 +989,18 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
               <div
                 v-else
                 class="ai-assistant-message min-w-0 px-4 py-3 text-sm"
-                :class="item.queryTrace?.rows?.length ? 'w-full max-w-[1100px]' : 'max-w-[85%]'"
+                :class="[item.queryTrace?.rows?.length || item.agentTask ? 'w-full max-w-[1100px]' : 'max-w-[85%]', { 'is-agent': item.agentTask }]"
               >
                 <div
-                  v-if="item.content"
+                  v-if="item.content && !item.agentTask"
                   class="chat-md [&_a]:text-blue-500 [&_a]:underline [&_code]:bg-black/20 [&_code]:rounded [&_code]:px-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:my-1"
                   v-html="renderMarkdown(item.content)"
                 ></div>
                 <span v-else-if="item.streaming" class="animate-pulse">
                   正在思考…
                 </span>
+                <AgentChatTask v-if="item.agentTask" :task="item.agentTask" :busy="sending" @continue="continueAgent(item, $event)" @cancel="cancelAgent(item)" @refresh="refreshAgent(item)" />
+                <div v-if="item.agentError" role="alert"><p>{{ item.agentError }}</p><Button size="small" @click="refreshAgent(item)">重试读取</Button></div>
                 <QueryCharts v-if="item.queryTrace?.rows?.length" :trace="item.queryTrace" />
                 <div v-if="item.draftProposal" class="mt-3 space-y-2 rounded-md border border-border/70 bg-background/70 p-3 text-xs">
                   <div class="font-medium">采购申请草稿预览 · 尚未保存</div>
@@ -1035,16 +1188,17 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
               class="ai-composer-input"
               :maxlength="2000"
               :rows="2"
-              :placeholder="draftMode ? '写明采购用途、物料、数量和单位…' : '给化运 AI 发送消息，输入 / 选择功能'"
+              :placeholder="currentAgent?.status === 'WAITING_INPUT' ? '补充产品名称、规格或询价编号…' : agentMode ? '描述要查询的库存或供应商报价…' : draftMode ? '写明采购用途、物料、数量和单位…' : '给化运 AI 发送消息，输入 / 选择功能'"
               @keydown="onTextKeydown"
               @input="onComposerInput"
             />
             <div class="ai-composer-actions">
               <div class="flex min-w-0 items-center gap-3">
-                <span class="ai-composer-hint">{{ draftMode ? '采购申请草稿模式' : 'Enter 发送 · Shift+Enter 换行' }}</span>
+                <span class="ai-composer-hint">{{ currentAgent?.status === 'WAITING_INPUT' ? '补充信息后继续当前查询' : agentMode ? '采购只读查询' : draftMode ? '采购申请草稿模式' : 'Enter 发送 · Shift+Enter 换行' }}</span>
+                <button v-if="agentMode" class="ai-mode-exit" type="button" @click="agentMode = false">退出只读查询</button>
                 <button v-if="draftMode" class="ai-mode-exit" type="button" @click="draftMode = false">退出草稿模式</button>
               </div>
-              <button class="ai-send" type="button" :disabled="sending || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend">
+              <button class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend">
                 <svg v-if="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
                 <span v-else class="ai-send-loading">···</span>
               </button>
@@ -1173,6 +1327,7 @@ onUnmounted(() => document.removeEventListener('click', closeHistoryMenu));
 .ai-message-row { max-width: 1100px; margin: 0 auto 20px; }
 .ai-user-message { border-radius: 16px 16px 4px 16px; background: #e8edff; color: #263568; line-height: 1.7; }
 .ai-assistant-message { border-radius: 4px 16px 16px; background: #f5f7fa; color: var(--ai-ink); line-height: 1.75; }
+.ai-assistant-message.is-agent { padding: 8px 0 12px; background: transparent; border-radius: 0; max-width: 760px; }
 .ai-composer-shell { width: 100%; padding: 12px clamp(20px, 5vw, 88px) 22px; }
 .ai-main.is-empty .ai-composer-shell { max-width: 1160px; margin: 24px auto auto; padding-bottom: 0; }
 .ai-composer { position: relative; max-width: 1100px; margin: 0 auto; padding: 12px 14px 10px; border: 1px solid #e0e5ed; border-radius: 22px; background: #fff; box-shadow: 0 10px 28px rgb(37 52 88 / 6%); transition: border-color .18s, box-shadow .18s; }

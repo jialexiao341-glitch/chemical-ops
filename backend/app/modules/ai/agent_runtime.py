@@ -18,7 +18,7 @@ from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.ai import agent_tools as tools, service
-from app.modules.ai.model import AIAgentTask
+from app.modules.ai.model import AIAgentTask, AIMessage
 from app.modules.ai.schema import AIChatMessage, AIChatRequest
 from app.modules.inventory.model import Warehouse
 from app.modules.rfqs.model import RFQ
@@ -61,6 +61,10 @@ class TaskContinue(TaskCreate):
     rfq_item_id: tools.PositiveID | None = None
 
 
+class ChatTaskCreate(TaskCreate):
+    conversation_id: tools.PositiveID | None = None
+
+
 class CallAction(tools.ToolCall):
     action: Literal["call_tool"]
 
@@ -86,6 +90,7 @@ class TaskRead(tools.ToolSchema):
     error_code: str | None
     messages: list[str]
     trace: list[dict]
+    conversation_id: int | None = None
 
 
 @dataclass
@@ -107,6 +112,7 @@ class RunState:
     failures: int = 0
     action: CallAction | AskAction | FinishAction | None = None
     seen_calls: set[str] = field(default_factory=set)
+    chat: dict | None = None
 
 
 class GraphState(TypedDict):
@@ -163,7 +169,8 @@ def get_task(db: Session, user: User, task_id: str) -> TaskRead:
     task = _load(db, user, task_id)
     _check_trace_access(db, user, task.payload["trace"])
     return TaskRead(id=task.id, status=task.status, revision=task.revision, reply=task.reply,
-        error_code=task.error_code, messages=task.payload["messages"], trace=task.payload["trace"])
+        error_code=task.error_code, messages=task.payload["messages"], trace=task.payload["trace"],
+        conversation_id=(task.payload.get("chat") or {}).get("conversation_id"))
 
 
 def _persist(db: Session, user: User, state: RunState) -> None:
@@ -172,6 +179,7 @@ def _persist(db: Session, user: User, state: RunState) -> None:
         AIAgentTask.user_id == user.id, AIAgentTask.revision == state.revision,
         AIAgentTask.status == "RUNNING").values(
         payload={"messages": state.messages, "trace": state.trace,
+                 "chat": state.chat,
                  "turn_start": state.turn_start,
                  "selected_product": state.selected_product or state.verified_product,
                  "selected_rfq_item": state.selected_rfq_item or state.verified_rfq_item}, status=state.status,
@@ -180,6 +188,10 @@ def _persist(db: Session, user: User, state: RunState) -> None:
     if count != 1:
         db.rollback()
         raise TaskInterrupted()
+    if state.chat:
+        db.execute(update(AIMessage).where(AIMessage.id == state.chat["assistant_message_id"],
+            AIMessage.conversation_id == state.chat["conversation_id"]).values(
+            content=state.reply or "正在查询业务数据…"))
     db.commit()
     state.revision += 1
 
@@ -356,7 +368,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
     return get_task(db, user, state.task_id)
 
 
-def prepare_task(db: Session, user: User, data: TaskCreate) -> RunState:
+def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = True) -> RunState:
     """先提交任务元数据，允许工作台立即取得编号并读取进度/取消。"""
     if not data.question.strip():
         raise BusinessValidationError("请描述需要查询的产品或采购问题")
@@ -367,7 +379,9 @@ def prepare_task(db: Session, user: User, data: TaskCreate) -> RunState:
     state = RunState(task_id, 0, [data.question], [], 0)
     db.add(AIAgentTask(id=task_id, user_id=user.id, status="RUNNING", revision=0,
         payload={"messages": state.messages, "trace": [], "turn_start": 0}, reply="", created_at=_now(), updated_at=_now()))
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     return state
 
 
@@ -376,7 +390,7 @@ async def create_task(db: Session, user: User, data: TaskCreate) -> TaskRead:
     return await _drive(db, user, prepare_task(db, user, data), get_settings())
 
 
-def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue) -> RunState:
+def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, *, commit: bool = True) -> RunState:
     """只继续本人等待补充的任务；选择只能来自候选，历史事实需本轮重新查询。"""
     task = _load(db, user, task_id)
     if not data.question.strip():
@@ -408,9 +422,48 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue) 
     if count != 1:
         db.rollback()
         raise DuplicateResourceError("任务已被其他请求继续或取消")
+    state = RunState(task.id, data.revision + 1, messages,
+        list(task.payload["trace"]), len(task.payload["trace"]), product, rfq_item, chat=task.payload.get("chat"))
+    if commit:
+        db.commit()
+    return state
+
+
+def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, conversation_id: int | None) -> None:
+    """同一事务保存会话、输入及任务引用；聊天历史不复制业务证据。"""
+    conversation = service._ensure_conversation(db, user, AIChatRequest(
+        conversation_id=conversation_id, messages=[AIChatMessage(role="user", content=question)]))
+    reference = [{"type": "agent_task", "task_id": state.task_id}]
+    db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=question, citations=reference))
+    assistant = AIMessage(conversation_id=conversation.id, message_role="ASSISTANT",
+        content="正在查询业务数据…", citations=reference)
+    db.add(assistant)
+    db.flush()
+    state.chat = {"conversation_id": conversation.id, "assistant_message_id": assistant.id}
+    task = _load(db, user, state.task_id)
+    task.payload = {**task.payload, "chat": state.chat}
+    conversation.last_message_at = _now()
+    conversation.updated_at = _now()
     db.commit()
-    return RunState(task.id, data.revision + 1, messages,
-        list(task.payload["trace"]), len(task.payload["trace"]), product, rfq_item)
+
+
+def prepare_chat_task(db: Session, user: User, data: ChatTaskCreate) -> RunState:
+    if data.conversation_id:
+        service._get_owned_conversation(db, user, data.conversation_id)
+    state = prepare_task(db, user, data, commit=False)
+    _attach_chat_turn(db, user, state, data.question, data.conversation_id)
+    return state
+
+
+def prepare_chat_continue(db: Session, user: User, task_id: str, data: TaskContinue) -> RunState:
+    task = _load(db, user, task_id)
+    chat = task.payload.get("chat")
+    if not chat:
+        raise BusinessValidationError("该任务未关联聊天会话")
+    service._get_owned_conversation(db, user, chat["conversation_id"])
+    state = prepare_continue(db, user, task_id, data, commit=False)
+    _attach_chat_turn(db, user, state, data.question, chat["conversation_id"])
+    return state
 
 
 async def continue_task(db: Session, user: User, task_id: str, data: TaskContinue) -> TaskRead:
@@ -427,7 +480,8 @@ async def run_prepared_task(task_id: str, user_id: int, revision: int) -> None:
         if task.status != "RUNNING" or task.revision != revision:
             return
         state = RunState(task_id, revision, task.payload["messages"], list(task.payload["trace"]),
-            task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"))
+            task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"),
+            chat=task.payload.get("chat"))
         if db.scalar(select(User.status).where(User.id == user_id)) != "ACTIVE":
             state.status, state.error_code, state.reply = "FAILED", "PERMISSION_DENIED", "用户状态已变化，任务停止。"
             try:
@@ -442,8 +496,10 @@ def cancel_task(db: Session, user: User, task_id: str) -> TaskRead:
     """取消本人的运行/等待任务；版本变更阻止旧运行者覆盖取消状态。"""
     task = _load(db, user, task_id)
     if task.status in {"RUNNING", "WAITING_INPUT"}:
-        db.execute(update(AIAgentTask).where(AIAgentTask.id == task.id, AIAgentTask.user_id == user.id,
+        count = db.execute(update(AIAgentTask).where(AIAgentTask.id == task.id, AIAgentTask.user_id == user.id,
             AIAgentTask.revision == task.revision, AIAgentTask.status.in_(("RUNNING", "WAITING_INPUT"))).values(
-            status="CANCELLED", revision=task.revision + 1, reply="任务已取消。", updated_at=_now()))
+            status="CANCELLED", revision=task.revision + 1, reply="任务已取消。", updated_at=_now())).rowcount
+        if count == 1 and task.payload.get("chat"):
+            db.execute(update(AIMessage).where(AIMessage.id == task.payload["chat"]["assistant_message_id"]).values(content="任务已取消。"))
         db.commit()
     return get_task(db, user, task_id)
