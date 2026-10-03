@@ -8,6 +8,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS sys_audit_logs;
 DROP TABLE IF EXISTS ai_action_approvals;
+DROP TABLE IF EXISTS ai_agent_tasks;
 DROP TABLE IF EXISTS ai_tool_calls;
 DROP TABLE IF EXISTS ai_run_steps;
 DROP TABLE IF EXISTS ai_runs;
@@ -1508,6 +1509,21 @@ CREATE TABLE price_forecast_items (
     CONSTRAINT fk_forecast_item_run FOREIGN KEY (run_id) REFERENCES price_forecast_runs (id),
     CONSTRAINT chk_forecast_item_price CHECK (predicted_price >= 0 AND (lower_bound IS NULL OR lower_bound >= 0) AND (upper_bound IS NULL OR upper_bound >= 0) AND (confidence IS NULL OR confidence BETWEEN 0 AND 1) AND (lower_bound IS NULL OR upper_bound IS NULL OR lower_bound <= upper_bound))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='价格预测明细';
+
+CREATE TABLE ai_agent_tasks (
+    id VARCHAR(32) NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    status VARCHAR(24) NOT NULL,
+    revision INT NOT NULL DEFAULT 0,
+    payload JSON NOT NULL,
+    reply TEXT NOT NULL,
+    error_code VARCHAR(64) NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    KEY ix_ai_agent_tasks_user_id (user_id),
+    CONSTRAINT fk_ai_agent_task_user FOREIGN KEY (user_id) REFERENCES sys_users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='只读采购 Agent 任务';
 
 CREATE TABLE ai_conversations (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',

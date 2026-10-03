@@ -16,6 +16,7 @@ from app.modules.ai import drafts as drafts_service
 from app.modules.ai import nl_filters as nl_filters_service
 from app.modules.ai import service
 from app.modules.ai import agent_tools
+from app.modules.ai import agent_runtime
 from app.modules.ai import text2sql as text2sql_service
 from app.modules.ai.text2sql import Text2SQLRequest, Text2SQLResponse
 from app.modules.ai.schema import (
@@ -47,12 +48,38 @@ def agent_tool_catalog(db: Session = Depends(get_db), user: User = Depends(get_c
     return agent_tools.list_tools(db, user)
 
 
-@router.post("/agent/tools/execute", response_model=agent_tools.InventoryResult | agent_tools.QuoteResult,
+@router.post("/agent/tools/execute", response_model=agent_tools.InventoryResult | agent_tools.QuoteResult | agent_tools.ProductSearchResult | agent_tools.RFQSearchResult,
              summary="执行白名单内的只读 Agent 工具")
 def agent_tool_execute(data: agent_tools.ToolCall, db: Session = Depends(get_db),
                        user: User = Depends(get_current_user)):
     """通过统一护栏执行一个只读工具；身份来自 JWT，不接受请求指定执行人。"""
     return agent_tools.execute_tool(db, user, data)
+
+
+@router.post("/agent/tasks", response_model=agent_runtime.TaskRead, summary="启动只读采购 Agent 任务")
+async def agent_task_create(data: agent_runtime.TaskCreate, db: Session = Depends(get_db),
+                            user: User = Depends(get_current_user)):
+    """按用户目标运行只读工具循环，返回任务 ID、状态、公开轨迹和来源。"""
+    return await agent_runtime.create_task(db, user, data)
+
+
+@router.get("/agent/tasks/{task_id}", response_model=agent_runtime.TaskRead, summary="查询本人 Agent 任务")
+def agent_task_read(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """回看本人任务；再次检查当前权限和历史证据的资源范围。"""
+    return agent_runtime.get_task(db, user, task_id)
+
+
+@router.post("/agent/tasks/{task_id}/continue", response_model=agent_runtime.TaskRead, summary="补充信息并继续 Agent 任务")
+async def agent_task_continue(task_id: str, data: agent_runtime.TaskContinue, db: Session = Depends(get_db),
+                              user: User = Depends(get_current_user)):
+    """按版本号继续等待任务；仅接受已返回候选中的产品/询价明细选择。"""
+    return await agent_runtime.continue_task(db, user, task_id, data)
+
+
+@router.post("/agent/tasks/{task_id}/cancel", response_model=agent_runtime.TaskRead, summary="取消本人 Agent 任务")
+def agent_task_cancel(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """取消运行或等待任务，并阻止旧运行者覆盖取消后的状态。"""
+    return agent_runtime.cancel_task(db, user, task_id)
 
 
 @router.post("/text2sql", response_model=Text2SQLResponse, summary="自然语言只读查询")

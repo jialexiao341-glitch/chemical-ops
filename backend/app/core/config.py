@@ -4,6 +4,8 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote_plus
 
+from pydantic import Field
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -92,6 +94,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 60
     llm_max_retries: int = 2
     agent_enabled: bool = True
+    agent_max_steps: int = Field(default=12, ge=1, le=24)
+    agent_task_timeout_seconds: int = Field(default=120, ge=1, le=300)
+    agent_context_max_chars: int = Field(default=18000, ge=2000, le=18000)
     agent_allow_write_tools: bool = False
     agent_save_input_content: bool = False
     agent_save_output_content: bool = False

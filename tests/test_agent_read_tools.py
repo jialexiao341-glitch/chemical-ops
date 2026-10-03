@@ -22,8 +22,8 @@ from app.modules.inventory import service as inventory_service
 def tool_db(monkeypatch):
     """建立隔离业务样本和角色权限替身；查询执行真实 SQL，测试后销毁数据库。"""
     roles = {9: ["SYS_ADMIN"], 10: ["PROCUREMENT_MANAGER"]}
-    permissions = {7: ["warehouse.inventory.read", "procurement.rfqs.read"],
-                   8: ["warehouse.inventory.read"], 10: ["warehouse.inventory.read", "procurement.rfqs.read"]}
+    permissions = {7: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"],
+                   8: ["warehouse.inventory.read"], 10: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"]}
     monkeypatch.setattr(tools, "get_settings", lambda: SimpleNamespace(agent_enabled=True))
     monkeypatch.setattr(tools, "get_user_role_codes", lambda _db, uid: roles.get(uid, []))
     monkeypatch.setattr(tools, "get_user_permission_codes", lambda _db, uid: permissions.get(uid, []))
@@ -32,7 +32,7 @@ def tool_db(monkeypatch):
     today = datetime.now(timezone(timedelta(hours=8))).date()
     with engine.begin() as conn:
         for ddl in (
-            "CREATE TABLE md_products (id INTEGER PRIMARY KEY, product_name TEXT, status TEXT)",
+            "CREATE TABLE md_products (id INTEGER PRIMARY KEY, product_name TEXT, status TEXT, product_code TEXT, model TEXT, packaging_spec TEXT, unit_id INTEGER)",
             "CREATE TABLE md_units (id INTEGER PRIMARY KEY, unit_name TEXT, status TEXT)",
             "CREATE TABLE warehouses (id INTEGER PRIMARY KEY, warehouse_name TEXT, manager_id INTEGER, status TEXT, warehouse_code TEXT, region TEXT, address TEXT, note TEXT, created_at DATETIME, updated_at DATETIME)",
             "CREATE TABLE inventory_batches (id INTEGER PRIMARY KEY, batch_no TEXT, expiry_date DATE)",
@@ -45,7 +45,7 @@ def tool_db(monkeypatch):
         ):
             conn.exec_driver_sql(ddl)
         for sql in (
-            "INSERT INTO md_products VALUES (1, '测试乙醇', 'ACTIVE'), (2, '停用产品', 'INACTIVE')",
+            "INSERT INTO md_products VALUES (1, '测试乙醇', 'ACTIVE', 'P-ETH', '分析纯', '20kg', 1), (2, '停用产品', 'INACTIVE', 'P-OFF', NULL, NULL, 1)",
             "INSERT INTO md_units VALUES (1, '千克', 'ACTIVE'), (2, '升', 'ACTIVE'), (3, '停用单位', 'INACTIVE')",
             "INSERT INTO warehouses (id, warehouse_name, manager_id, status) VALUES (1, '本人仓库', 7, 'ACTIVE'), (2, '其他仓库', 8, 'ACTIVE'), (3, '公共仓库', NULL, 'ACTIVE'), (4, '停用仓库', NULL, 'INACTIVE')",
             "INSERT INTO inventory_batches VALUES (1, '批次A', '2020-01-01'), (2, '批次B', NULL)",
@@ -247,3 +247,25 @@ def test_http_catalog_and_both_result_schemas(tool_db):
             result = response.json()
             assert result['tool'] == name and result['sources']
             assert isinstance(result['rows'][0].get('quantity', result['rows'][0].get('unit_price')), str)
+
+
+def test_product_lookup_returns_specs_and_escapes_sql_wildcards(tool_db):
+    """名称/编码定位返回具体规格，用户输入百分号不能变成全目录通配查询。"""
+    result = call(tool_db, name='catalog.search_products', keyword='P-ETH')
+    assert result.total_rows == 1 and result.rows[0].model == '分析纯'
+    assert result.sources[0].record_id == 1
+    assert call(tool_db, name='catalog.search_products', keyword='%').total_rows == 0
+
+
+def test_product_lookup_respects_product_read_permission(tool_db):
+    """库存读取权限不自动包含主数据目录读取权限。"""
+    with pytest.raises(AuthorizationError):
+        call(tool_db, name='catalog.search_products', actor_id=8, keyword='乙醇')
+
+
+def test_rfq_lookup_filters_requester_status_and_exact_number(tool_db):
+    """可见询价定位按原询价范围过滤，并支持用户明确提供的编号。"""
+    result = call(tool_db, name='supplier_quotes.find_rfq_items', product_id=1)
+    assert [row.rfq_item_id for row in result.rows] == [11]
+    assert call(tool_db, name='supplier_quotes.find_rfq_items', actor_id=10, product_id=1).total_rows == 2
+    assert call(tool_db, name='supplier_quotes.find_rfq_items', actor_id=10, product_id=1, rfq_no='RFQ-OTHER').rows[0].rfq_item_id == 21

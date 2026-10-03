@@ -317,10 +317,11 @@ def _build_messages(
     data: AIChatRequest,
     attachment_context: list[str] | None = None,
     image_parts: list[dict[str, object]] | None = None,
+    system_prompt: str | None = None,
 ) -> list[dict[str, object]]:
     """组装系统提示、会话消息和模型原生视觉图片块。"""
 
-    messages: list[dict[str, object]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict[str, object]] = [{"role": "system", "content": system_prompt or SYSTEM_PROMPT}]
     messages.extend(message.model_dump() for message in data.messages)
     if image_parts:
         for index in range(len(messages) - 1, -1, -1):
@@ -590,7 +591,7 @@ async def _run_text2sql_for_chat(
     return answer, citation, trace
 
 
-async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, str] | None = None, image_parts: list[dict[str, object]] | None = None) -> AIChatResponse:
+async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, str] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None) -> AIChatResponse:
     """调用配置的 OpenAI 兼容模型。"""
 
     _validate_read_only_request(data)
@@ -603,7 +604,7 @@ async def chat(data: AIChatRequest, settings: Settings | None = None, attachment
         raise BusinessValidationError(f"暂不支持的 AI 服务商：{runtime.llm_provider}")
 
     url = f"{runtime.openai_base_url.rstrip('/')}/chat/completions"
-    payload = _build_llm_payload(runtime, _build_messages(data, attachment_context, image_parts), response_format=response_format)
+    payload = _build_llm_payload(runtime, _build_messages(data, attachment_context, image_parts, system_prompt), response_format=response_format)
     headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json"}
     attempts = max(0, runtime.llm_max_retries) + 1
     response: httpx.Response | None = None

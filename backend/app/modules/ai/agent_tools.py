@@ -1,4 +1,4 @@
-"""采购 Agent 的只读工具基础；工具选择循环在下一阶段接入。"""
+"""采购 Agent 的只读工具：定位业务对象、读取库存和比较报价。"""
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -45,10 +45,98 @@ class ToolCall(ToolSchema):
     arguments: dict[str, object]
 
 
+class ProductSearchInput(ToolSchema):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    keyword: str = Field(min_length=1, max_length=100)
+    limit: Annotated[int, Field(strict=True, ge=1, le=20)] = 10
+
+
+class RFQSearchInput(ToolSchema):
+    product_id: PositiveID
+    rfq_no: str | None = Field(default=None, min_length=1, max_length=32)
+    limit: Annotated[int, Field(strict=True, ge=1, le=20)] = 10
+
+
+class ProductCandidate(ToolSchema):
+    product_id: int
+    product_code: str
+    product_name: str
+    model: str | None
+    packaging_spec: str | None
+    unit_id: int
+    unit_name: str
+
+
+class ProductSearchResult(ToolSchema):
+    tool: Literal["catalog.search_products"] = "catalog.search_products"
+    keyword: str
+    total_rows: int
+    truncated: bool
+    rows: list[ProductCandidate]
+    sources: list["Source"]
+
+
+class RFQCandidate(ToolSchema):
+    rfq_item_id: int
+    rfq_id: int
+    rfq_no: str
+    product_id: int
+    specification: str | None
+    technical_requirements: str | None
+
+
+class RFQSearchResult(ToolSchema):
+    tool: Literal["supplier_quotes.find_rfq_items"] = "supplier_quotes.find_rfq_items"
+    product_id: int
+    total_rows: int
+    truncated: bool
+    rows: list[RFQCandidate]
+    sources: list["Source"]
+
+
 class Source(ToolSchema):
     resource: str
     record_id: int
     parent_id: int | None = None
+
+
+def search_products(db: Session, user: User, arguments: ProductSearchInput) -> ProductSearchResult:
+    """按名称或编码查启用产品，返回规格候选；多个命中由 Runtime 追问选择。
+
+    统一执行入口要求产品读取权限；关键词使用绑定参数并转义 LIKE 通配符。
+    不做名称到 CAS 的猜测，不把首个模糊命中直接当用户指定的产品。
+    """
+    base = select(
+        Product.id.label("product_id"), Product.product_code, Product.product_name,
+        Product.model, Product.packaging_spec, Product.unit_id, Unit.unit_name,
+    ).join(Unit, Unit.id == Product.unit_id).where(
+        Product.status == "ACTIVE", Unit.status == "ACTIVE",
+        Product.product_name.contains(arguments.keyword, autoescape=True) |
+        Product.product_code.contains(arguments.keyword, autoescape=True),
+    )
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    rows = db.execute(base.order_by(Product.id).limit(arguments.limit)).mappings().all()
+    return ProductSearchResult(keyword=arguments.keyword, total_rows=total,
+        truncated=total > arguments.limit, rows=[ProductCandidate(**row) for row in rows],
+        sources=[Source(resource="md_products", record_id=row["product_id"]) for row in rows])
+
+
+def find_rfq_items(db: Session, user: User, arguments: RFQSearchInput) -> RFQSearchResult:
+    """定位产品的当前可见询价明细；不把其他用户询价或历史关闭单作为候选。"""
+    _product(db, arguments.product_id)
+    base = select(RFQItem.id.label("rfq_item_id"), RFQ.id.label("rfq_id"), RFQ.rfq_no,
+        RFQItem.product_id, RFQItem.specification, RFQItem.technical_requirements,
+    ).join(RFQ, RFQ.id == RFQItem.rfq_id).where(
+        RFQItem.product_id == arguments.product_id, RFQ.status.in_(("SENT", "RESPONDING")))
+    if not set(get_user_role_codes(db, user.id)) & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        base = base.where(RFQ.requester_id == user.id)
+    if arguments.rfq_no is not None:
+        base = base.where(RFQ.rfq_no == arguments.rfq_no)
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    rows = db.execute(base.order_by(RFQ.id.desc(), RFQItem.id).limit(arguments.limit)).mappings().all()
+    return RFQSearchResult(product_id=arguments.product_id, total_rows=total,
+        truncated=total > arguments.limit, rows=[RFQCandidate(**row) for row in rows],
+        sources=[Source(resource="rfq_items", record_id=row["rfq_item_id"], parent_id=row["rfq_id"]) for row in rows])
 
 
 class InventoryRow(ToolSchema):
@@ -82,6 +170,7 @@ class InventoryResult(ToolSchema):
     total_rows: int
     truncated: bool
     totals: list[InventoryTotal]
+    scope_warehouse_ids: list[int] = Field(default_factory=list)
     rows: list[InventoryRow]
     sources: list[Source]
     warnings: list[str]
@@ -178,6 +267,8 @@ def query_inventory(db: Session, user: User, arguments: InventoryInput) -> Inven
         Unit, Unit.id == InventoryBalance.unit_id
     ).where(*conditions).group_by(InventoryBalance.unit_id, Unit.unit_name)).mappings().all()
     rows = db.execute(base.order_by(InventoryBalance.id).limit(arguments.limit)).mappings().all()
+    scope_warehouse_ids = list(db.scalars(select(InventoryBalance.warehouse_id).join(
+        Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(*conditions).distinct()))
     warnings = ["可用量沿用余额状态口径；过期批次、停用单位等仍需原业务流程核查，不代表可直接领用。"]
     if total == 0:
         warnings.append("当前授权范围无库存记录，不能据此推断企业没有库存。")
@@ -188,6 +279,7 @@ def query_inventory(db: Session, user: User, arguments: InventoryInput) -> Inven
         product_name=product.product_name, warehouse_id=arguments.warehouse_id,
         total_rows=total, truncated=total > arguments.limit,
         totals=[InventoryTotal(**row) for row in totals],
+        scope_warehouse_ids=scope_warehouse_ids,
         rows=[InventoryRow(**row) for row in rows],
         sources=[Source(resource="inventory_balances", record_id=row["balance_id"]) for row in rows],
         warnings=warnings,
@@ -287,6 +379,10 @@ class ToolSpec:
 
 TOOLS = {
     spec.name: spec for spec in (
+        ToolSpec("catalog.search_products", "按名称/编码找产品规格；多候选必须让用户选择，不猜 ID",
+                 "master.products.read", ProductSearchInput, ProductSearchResult, search_products),
+        ToolSpec("supplier_quotes.find_rfq_items", "定位产品的可见询价明细；多候选必须让用户选择",
+                 "procurement.rfqs.read", RFQSearchInput, RFQSearchResult, find_rfq_items),
         ToolSpec("inventory.query_available", "按产品查询可见仓库余额，分单位合计，保留明细来源",
                  "warehouse.inventory.read", InventoryInput, InventoryResult, query_inventory),
         ToolSpec("supplier_quotes.compare", "同一可见询价明细的最新有效提交报价，分可比组排序",
@@ -312,7 +408,7 @@ def list_tools(db: Session, user: User) -> list[dict[str, object]]:
             for spec in TOOLS.values() if admin or spec.permission in permissions]
 
 
-def execute_tool(db: Session, user: User, call: ToolCall) -> InventoryResult | QuoteResult:
+def execute_tool(db: Session, user: User, call: ToolCall) -> InventoryResult | QuoteResult | ProductSearchResult | RFQSearchResult:
     """统一执行入口：白名单、当前权限、参数 Schema、资源范围、输出 Schema。
 
     用户身份只取自认证上下文；拒绝模型夹带的身份、SQL 和其他未登记参数。

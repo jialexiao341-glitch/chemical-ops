@@ -2,11 +2,27 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
+
+
+class AIAgentTask(Base):
+    """个人只读 Agent 任务；保存公开动作/结果，不保存模型思维链或提示词。"""
+
+    __tablename__ = "ai_agent_tasks"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    revision: Mapped[int] = mapped_column(nullable=False, default=0)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    reply: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class AIConversation(Base):
