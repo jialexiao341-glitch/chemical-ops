@@ -155,8 +155,9 @@ export function useGridFormSchema(): VbenFormSchema[] {
 /** 列表列定义 */
 export function useColumns(
   onActionClick: OnActionClickFn<ProductApi.Product>,
+  canManageProducts: boolean,
 ): VxeTableGridColumns {
-  return [
+  const columns: VxeTableGridColumns = [
     { field: 'product_code', width: 140, title: '产品编码' },
     { field: 'product_name', minWidth: 160, title: '产品名称' },
     { field: 'model', width: 140, title: '规格型号' },
@@ -184,7 +185,10 @@ export function useColumns(
       title: '状态',
       width: 90,
     },
-    {
+  ];
+
+  if (canManageProducts) {
+    columns.push({
       align: 'center',
       cellRender: {
         attrs: {
@@ -200,6 +204,8 @@ export function useColumns(
       fixed: 'right',
       title: '操作',
       width: 130,
-    },
-  ];
+    });
+  }
+
+  return columns;
 }

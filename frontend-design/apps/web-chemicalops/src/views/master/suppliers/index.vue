@@ -26,6 +26,7 @@ defineOptions({ name: 'SupplierList' });
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const route = useRoute();
 const { hasAccessByCodes } = useAccess();
+const canManageSuppliers = hasAccessByCodes(['master.suppliers.write']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -133,7 +134,7 @@ watch(
     <FormDrawer @success="onRefresh" />
     <Grid table-title="供应商主数据">
       <template #toolbar-tools>
-        <Button type="primary" @click="formDrawerApi.setData(null).open()">
+        <Button v-if="canManageSuppliers" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
           新增供应商
         </Button>

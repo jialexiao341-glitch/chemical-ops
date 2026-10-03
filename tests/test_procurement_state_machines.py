@@ -11,6 +11,8 @@ from app.modules.products.model import Product
 from app.modules.purchase_requests.model import Unit
 from app.modules.suppliers.model import Supplier
 from app.modules.rfqs.model import SupplierQuote
+from app.core.security import hash_password
+from app.modules.system.model import User
 from .conftest import login
 
 
@@ -332,3 +334,26 @@ def test_role_permissions_separate_procurement_warehouse_quality_and_admin(
     ).status_code == 403
     assert client.get("/api/v1/system/users", headers=manager).status_code == 403
     assert client.get("/api/v1/system/users", headers=login(client, "system_admin", demo_password)).status_code == 200
+
+
+def test_buyer_can_read_but_cannot_update_product_master_data(
+    client: TestClient, db_session, demo_password: str
+) -> None:
+    """采购员保留采购所需的产品读取权限，但不能修改产品主数据。"""
+
+    product = db_session.scalar(select(Product).where(Product.status == "ACTIVE").order_by(Product.id))
+    buyer_user = db_session.scalar(select(User).where(User.username == "buyer"))
+    if product is None or buyer_user is None:
+        pytest.skip("测试数据库需要采购员账号和至少一个启用的产品")
+    # 登录只使用当前测试事务中的临时口令；测试结束后事务回滚，不改动演示账号口令。
+    buyer_user.password_hash = hash_password(demo_password)
+    db_session.flush()
+    buyer = login(client, "buyer", demo_password)
+
+    assert client.get("/api/v1/products", headers=buyer).status_code == 200
+    denied = client.patch(
+        f"/api/v1/products/{product.id}",
+        headers=buyer,
+        json={"model": "无权限修改"},
+    )
+    assert denied.status_code == 403

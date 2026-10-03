@@ -115,7 +115,7 @@ ROLE_SCOPES = {
         "procurement.replenishment.read", "procurement.replenishment.write", "procurement.replenishment.approve",
     },
     "BUYER": {
-        "master.chemicals.read", "master.products.read", "master.products.write",
+        "master.chemicals.read", "master.products.read",
         "master.suppliers.read", "master.suppliers.write",
         "procurement.requests.read", "procurement.requests.write",
         "procurement.rfqs.read", "procurement.rfqs.write", "procurement.rfqs.quote", "procurement.rfqs.compare",
@@ -151,7 +151,7 @@ for _role_code, _scope in ROLE_SCOPES.items():
         _scope.add("dashboard.read")
 
 REVOKED_ROLE_PERMISSIONS = {
-    "BUYER": {"procurement.orders.approve"},
+    "BUYER": {"procurement.orders.approve", "master.products.write"},
 }
 
 ROLE_NAMES = {

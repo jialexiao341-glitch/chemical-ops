@@ -6,6 +6,7 @@ import type {
 import type { ProductApi } from '#/api';
 
 import { Page, useVbenDrawer } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { Plus } from '@vben/icons';
 
 import { Button, message } from 'antdv-next';
@@ -18,6 +19,8 @@ import Form from './modules/form.vue';
 import QualityStandard from './modules/quality-standard.vue';
 
 defineOptions({ name: 'ProductList' });
+const { hasAccessByCodes } = useAccess();
+const canManageProducts = hasAccessByCodes(['master.products.write']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -34,7 +37,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns(onActionClick),
+    columns: useColumns(onActionClick, canManageProducts),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -112,7 +115,7 @@ function onRefresh() {
     <StandardDrawer />
     <Grid table-title="产品规格">
       <template #toolbar-tools>
-        <Button type="primary" @click="formDrawerApi.setData(null).open()">
+        <Button v-if="canManageProducts" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
           新增产品规格
         </Button>

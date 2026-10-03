@@ -4,7 +4,7 @@ import type { Recordable } from '@vben/types';
 
 import type { ComponentPropsMap, ComponentType } from './component';
 
-import { defineComponent, h } from 'vue';
+import { defineComponent, h, ref, type Ref } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { useAccess } from '@vben/access';
@@ -24,6 +24,22 @@ import { $t } from '#/locales';
 import BatchActions from '#/components/batch/batch-actions.vue';
 
 import { useVbenForm } from './form';
+
+const operationMenuOpenStates = new WeakMap<object, Map<string, Ref<boolean>>>();
+
+function getOperationMenuOpenState(row: object, field: string): Ref<boolean> {
+  let rowStates = operationMenuOpenStates.get(row);
+  if (!rowStates) {
+    rowStates = new Map();
+    operationMenuOpenStates.set(row, rowStates);
+  }
+  let open = rowStates.get(field);
+  if (!open) {
+    open = ref(false);
+    rowStates.set(field, open);
+  }
+  return open;
+}
 
 setupVbenVxeTable({
   configVxeTable: (vxeUI) => {
@@ -147,6 +163,8 @@ setupVbenVxeTable({
      */
     vxeUI.renderer.add('CellOperation', {
       renderTableDefault({ attrs, options, props: rawProps }, { column, row }) {
+        const { hasAccessByCodes } = useAccess();
+        const menuOpen = getOperationMenuOpenState(row, String(column.field));
         const {
           dropdownProps,
           menuButtonProps,
@@ -209,7 +227,13 @@ setupVbenVxeTable({
             });
             return optBtn;
           })
-          .filter((opt) => opt.show !== false);
+          .filter((opt) => {
+            if (opt.show === false) return false;
+            if (!opt.auth) return true;
+            return hasAccessByCodes(
+              Array.isArray(opt.auth) ? opt.auth : [opt.auth],
+            );
+          });
 
         function renderBtn(opt: Recordable<any>, listen = true) {
           return h(
@@ -219,11 +243,13 @@ setupVbenVxeTable({
               ...opt,
               icon: undefined,
               onClick: listen
-                ? () =>
+                ? () => {
+                    menuOpen.value = false;
                     attrs?.onClick?.({
                       code: opt.code,
                       row,
-                    })
+                    });
+                  }
                 : undefined,
             },
             {
@@ -267,6 +293,7 @@ setupVbenVxeTable({
                 }
               },
               onConfirm: () => {
+                menuOpen.value = false;
                 attrs?.onClick?.({
                   code: opt.code,
                   row,
@@ -342,13 +369,18 @@ setupVbenVxeTable({
                     h(
                       Dropdown,
                       {
+                        ...dropdownProps,
                         getPopupContainer: () => document.body,
+                        open: menuOpen.value,
+                        onOpenChange: (open: boolean) => {
+                          menuOpen.value = open;
+                          dropdownProps?.onOpenChange?.(open);
+                        },
                         placement:
                           column.align === 'left'
                             ? 'bottomLeft'
                             : 'bottomRight',
                         trigger: ['click'],
-                        ...dropdownProps,
                       },
                       {
                         default: () =>

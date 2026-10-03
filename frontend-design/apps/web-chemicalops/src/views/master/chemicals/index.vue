@@ -20,6 +20,7 @@ import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight
 defineOptions({ name: 'ChemicalList' });
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const { hasAccessByCodes } = useAccess();
+const canManageChemicals = hasAccessByCodes(['master.chemicals.write']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -115,7 +116,7 @@ function onRefresh() {
     <FormDrawer @success="onRefresh" />
     <Grid table-title="化学品主数据">
       <template #toolbar-tools>
-        <Button type="primary" @click="onCreate">
+        <Button v-if="canManageChemicals" type="primary" @click="onCreate">
           <Plus class="size-5" />
           新增化学品
         </Button>
