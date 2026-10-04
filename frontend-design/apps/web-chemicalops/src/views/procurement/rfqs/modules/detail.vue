@@ -230,37 +230,38 @@ const canCreateOrder = computed(
 );
 
 const itemColumns = [
-  { key: 'line_no', title: '行号', width: 70 },
-  { key: 'requested_name', title: '物料', minWidth: 160 },
-  { key: 'specification', title: '规格', width: 140 },
-  { key: 'quantity', title: '数量', width: 110, align: 'right' as const },
-  { key: 'required_delivery_date', title: '要求到货', width: 120 },
+  { key: 'line_no', dataIndex: 'line_no', title: '行号', width: 70 },
+  { key: 'requested_name', dataIndex: 'requested_name', title: '物料', minWidth: 160 },
+  { key: 'specification', dataIndex: 'specification', title: '规格', width: 140 },
+  { key: 'quantity', dataIndex: 'quantity', title: '数量', width: 110, align: 'right' as const },
+  { key: 'required_delivery_date', dataIndex: 'required_delivery_date', title: '要求到货', width: 120 },
 ];
 
 const quoteColumns = [
-  { key: 'quote_no', title: '报价单号', minWidth: 170 },
-  { key: 'supplier_id', title: '供应商', minWidth: 160 },
-  { key: 'quote_version', title: '版本', width: 70 },
-  { key: 'quote_date', title: '报价日期', width: 120 },
-  { key: 'valid_until', title: '有效期至', width: 120 },
-  { key: 'status', title: '状态', width: 100 },
+  { key: 'quote_no', dataIndex: 'quote_no', title: '报价单号', minWidth: 170 },
+  { key: 'supplier_id', dataIndex: 'supplier_id', title: '供应商', minWidth: 160 },
+  { key: 'quote_version', dataIndex: 'quote_version', title: '版本', width: 70 },
+  { key: 'quote_date', dataIndex: 'quote_date', title: '报价日期', width: 120 },
+  { key: 'valid_until', dataIndex: 'valid_until', title: '有效期至', width: 120 },
+  { key: 'status', dataIndex: 'status', title: '状态', width: 100 },
 ];
 
 const comparisonColumns = [
-  { key: 'supplier_id', title: '供应商', minWidth: 160 },
+  { key: 'supplier_id', dataIndex: 'supplier_id', title: '供应商', minWidth: 160 },
   {
     key: 'quoted_unit_price',
+    dataIndex: 'quoted_unit_price',
     title: '单价',
     width: 140,
     align: 'right' as const,
   },
-  { key: 'total_amount', title: '金额', width: 140, align: 'right' as const },
-  { key: 'lead_days', title: '交期(天)', width: 100 },
-  { key: 'moq_quantity', title: '最小起订量', width: 120 },
-  { key: 'payment_terms', title: '付款条件', width: 140 },
-  { key: 'rank_no', title: '排名', width: 90 },
-  { key: 'selection_flag', title: '中选', width: 90 },
-  { key: '__action', title: '操作', width: 120 },
+  { key: 'total_amount', dataIndex: 'total_amount', title: '金额', width: 140, align: 'right' as const },
+  { key: 'lead_days', dataIndex: 'lead_days', title: '交期(天)', width: 100 },
+  { key: 'moq_quantity', dataIndex: 'moq_quantity', title: '最小起订量', width: 120 },
+  { key: 'payment_terms', dataIndex: 'payment_terms', title: '付款条件', width: 140 },
+  { key: 'rank_no', dataIndex: 'rank_no', title: '排名', width: 90 },
+  { key: 'selection_flag', dataIndex: 'selection_flag', title: '中选', width: 90 },
+  { key: '__action', dataIndex: '__action', title: '操作', width: 120 },
 ];
 
 /** 用当前比价快照按价格与交期权重生成临时情景排序。 */

@@ -133,6 +133,16 @@ const itemColumns = [
   { key: 'status', title: '明细状态', width: 110 },
 ];
 
+function itemCellValue(
+  record: PurchaseOrderApi.OrderItem,
+  key?: number | string,
+) {
+  if (key == null) {
+    return '-';
+  }
+  return (record as unknown as Record<string, unknown>)[String(key)] ?? '-';
+}
+
 async function load() {
   const id = Number(route.params.id);
   if (!id) {
@@ -336,6 +346,9 @@ onMounted(load);
                 <Tag :color="LINE_STATUS_DICT.color(record.status)">
                   {{ LINE_STATUS_DICT.label(record.status) }}
                 </Tag>
+              </template>
+              <template v-else>
+                {{ itemCellValue(record, column.key) }}
               </template>
             </template>
           </Table>

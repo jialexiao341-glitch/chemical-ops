@@ -351,9 +351,29 @@ def test_buyer_can_read_but_cannot_update_product_master_data(
     buyer = login(client, "buyer", demo_password)
 
     assert client.get("/api/v1/products", headers=buyer).status_code == 200
+    assert client.get("/api/v1/suppliers", headers=buyer).status_code == 200
     denied = client.patch(
         f"/api/v1/products/{product.id}",
         headers=buyer,
         json={"model": "无权限修改"},
     )
     assert denied.status_code == 403
+    assert client.patch(
+        "/api/v1/suppliers/1",
+        headers=buyer,
+        json={"supplier_name": "无权限修改"},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/purchase-orders/1/approve",
+        headers=buyer,
+        json={"opinion": "越权审批检查"},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/rfqs/1/comparison",
+        headers=buyer,
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/rfqs/1/select-quote",
+        headers=buyer,
+        json={"comparison_id": 1, "quote_id": 1, "selection_reason": "越权定标检查"},
+    ).status_code == 403

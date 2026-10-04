@@ -13,6 +13,7 @@ import re
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import text
@@ -157,6 +158,31 @@ def main() -> None:
                     where = " AND ".join(f"`{key}` = :key_{key}" for key in keys)
                     db.execute(text(f"UPDATE `{table}` SET {assignments} WHERE {where}"),
                                {**{f"key_{key}": row[key] for key in keys}, **changed})
+        # The final volume-generated request was written with a fixed L suffix,
+        # although its structured NaOH line uses the product's kg unit.
+        unit_row = db.execute(text("""
+            SELECT pr.id, pr.purpose, pri.id AS item_id, pri.technical_requirements,
+                   pri.quantity, u.unit_name
+            FROM purchase_requests pr
+            JOIN purchase_request_items pri ON pri.request_id = pr.id
+            JOIN md_units u ON u.id = pri.unit_id
+            WHERE pr.request_no = 'PR-2026-0456' AND pri.line_no = 1
+        """)).mappings().first()
+        if unit_row:
+            quantity = format(Decimal(str(unit_row["quantity"])).normalize(), "f")
+            old_fragment = f"{quantity} L；"
+            new_fragment = f"{quantity} {unit_row['unit_name']}；"
+            for table, row_id, column in (
+                ("purchase_requests", unit_row["id"], "purpose"),
+                ("purchase_request_items", unit_row["item_id"], "technical_requirements"),
+            ):
+                value = unit_row[column]
+                revised = value.replace(old_fragment, new_fragment, 1) if value and old_fragment in value else value
+                if revised != value:
+                    counts["purchase_request_unit_copy"] += 1
+                    if args.apply:
+                        db.execute(text(f"UPDATE `{table}` SET `{column}`=:value WHERE id=:id"),
+                                   {"value": revised, "id": row_id})
         qa_rows = db.execute(text("""
             SELECT q.id, q.acceptance_no, q.result, q.certificate_complete, q.conclusion, q.test_result,
                    p.product_name, d.actual_arrival_date, di.planned_quantity, di.actual_quantity

@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from add_business_cases_20260929 import check_backup
 from expand_curated_dataset import PRODUCTS, PRODUCT_NAMES
-from extend_curated_dataset import PurchaseRequest, SessionLocal, get_settings, main_seed, verify
+from extend_curated_dataset import PurchaseRequest, SessionLocal, Unit, get_settings, main_seed, verify
 from app.modules.inventory.model import Warehouse, WarehouseLocation
 from app.modules.products.model import Product
 from app.modules.suppliers.model import Supplier
@@ -109,16 +109,25 @@ def add_master_data(db) -> Counter[str]:
     return counts
 
 
-def cases() -> tuple[tuple[int, str, int, int, str, str, int], ...]:
+def cases(db) -> tuple[tuple[int, str, int, int, str, str, int], ...]:
     result = []
+    codes = {product_code((index * 7 + index // 9) % 30) for index in range(120)}
+    product_units = dict(db.execute(
+        select(Product.product_code, Unit.unit_name)
+        .join(Unit, Product.unit_id == Unit.id)
+        .where(Product.product_code.in_(codes))
+    ).all())
     for index, number in enumerate(range(337, 457)):
         product_index = (index * 7 + index // 9) % 30
         base_code, base_price = PRODUCTS[product_index % len(PRODUCTS)]
         code = product_code(product_index)
+        unit_name = product_units.get(code)
+        if not unit_name:
+            raise RuntimeError(f"Missing active product unit for {code}")
         quantity = 24 + (index * 43 + index // 11 * 7) % 157
         unit_price = base_price + index % 9 - 4
         background = (
-            f"{CONTEXTS[index % len(CONTEXTS)]}{PRODUCT_NAMES[base_code]} {quantity} L；"
+            f"{CONTEXTS[index % len(CONTEXTS)]}{PRODUCT_NAMES[base_code]} {quantity} {unit_name}；"
             "按产品规格核对包装、批号和随货资料"
         )
         result.append((number, code, quantity, unit_price, background, STAGES[index % len(STAGES)], index % 3))
@@ -139,9 +148,9 @@ def main() -> None:
             raise SystemExit("A recent --backup is required")
         check_backup(args.backup, settings.mysql_database)
 
-    batch = cases()
-    numbers = {f"PR-2026-{number:04d}" for number, *_ in batch}
     with SessionLocal() as db:
+        batch = cases(db)
+        numbers = {f"PR-2026-{number:04d}" for number, *_ in batch}
         found = set(db.scalars(select(PurchaseRequest.request_no).where(PurchaseRequest.request_no.in_(numbers))).all())
         if found == numbers:
             print(json.dumps({"already_applied": True, "case_count": len(batch)}))

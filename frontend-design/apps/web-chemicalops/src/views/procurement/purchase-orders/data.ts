@@ -48,8 +48,8 @@ export function useColumns(
     },
     {
       field: 'supplier_id',
-      formatter: ({ cellValue }: { cellValue: any }) =>
-        resolveSupplier(cellValue),
+      formatter: ({ row }: { row: PurchaseOrderApi.PurchaseOrder }) =>
+        resolveSupplier(row.supplier_id),
       minWidth: 180,
       title: '供应商',
     },

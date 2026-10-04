@@ -17,6 +17,22 @@ def test_buyer_can_read_but_cannot_write_product_master_data() -> None:
     assert "master.products.write" in REVOKED_ROLE_PERMISSIONS["BUYER"]
 
 
+def test_supplier_master_maintenance_and_order_approval_belong_to_manager() -> None:
+    buyer_scope = ROLE_SCOPES["BUYER"]
+    manager_scope = ROLE_SCOPES["PROCUREMENT_MANAGER"]
+
+    assert "master.suppliers.read" in buyer_scope
+    assert "master.suppliers.write" not in buyer_scope
+    assert "master.suppliers.write" in REVOKED_ROLE_PERMISSIONS["BUYER"]
+    assert "master.suppliers.write" in manager_scope
+    assert "procurement.orders.approve" not in buyer_scope
+    assert "procurement.orders.approve" in manager_scope
+    assert "procurement.rfqs.compare" not in buyer_scope
+    assert "procurement.rfqs.compare" in REVOKED_ROLE_PERMISSIONS["BUYER"]
+    assert "procurement.rfqs.compare" in manager_scope
+    assert {"procurement.rfqs.write", "procurement.rfqs.quote", "procurement.orders.write"} <= buyer_scope
+
+
 def test_technical_role_can_manage_personal_issue_requests_but_not_warehouse_operations() -> None:
     technical_scope = ROLE_SCOPES["TECHNICAL"]
     personal_issue_permissions = {

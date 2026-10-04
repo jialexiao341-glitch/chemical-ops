@@ -129,9 +129,9 @@ ROLE_SCOPES = {
     },
     "BUYER": {
         "master.chemicals.read", "master.products.read",
-        "master.suppliers.read", "master.suppliers.write",
+        "master.suppliers.read",
         "procurement.requests.read", "procurement.requests.write",
-        "procurement.rfqs.read", "procurement.rfqs.write", "procurement.rfqs.quote", "procurement.rfqs.compare",
+        "procurement.rfqs.read", "procurement.rfqs.write", "procurement.rfqs.quote",
         "procurement.orders.read", "procurement.orders.write",
         "warehouse.deliveries.read",
         "warehouse.inventory.read",
@@ -171,7 +171,10 @@ for _role_code, _scope in ROLE_SCOPES.items():
         _scope.add("ai.workspace.read")
 
 REVOKED_ROLE_PERMISSIONS = {
-    "BUYER": {"procurement.orders.approve", "master.products.write"},
+    "BUYER": {
+        "procurement.orders.approve", "procurement.rfqs.compare",
+        "master.products.write", "master.suppliers.write",
+    },
     "TECHNICAL": {
         "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write",
         "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write",

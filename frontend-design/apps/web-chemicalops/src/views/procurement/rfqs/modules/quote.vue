@@ -142,9 +142,9 @@ const totalAmount = computed(() =>
 );
 
 const columns = [
-  { key: 'requestedName', title: '物料', minWidth: 160 },
-  { key: 'requestedQuantity', title: '询价数量', width: 110 },
-  { key: 'unitName', title: '单位', width: 80 },
+  { key: 'requestedName', dataIndex: 'requestedName', title: '物料', minWidth: 160 },
+  { key: 'requestedQuantity', dataIndex: 'requestedQuantity', title: '询价数量', width: 110 },
+  { key: 'unitName', dataIndex: 'unitName', title: '单位', width: 80 },
   { key: 'supplier_model', title: '供应商型号', width: 150 },
   { key: 'quoted_quantity', title: '报价数量', width: 140 },
   { key: 'unit_price', title: '单价', width: 140 },
