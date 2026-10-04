@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { NotificationItem } from '@vben/layouts';
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { AuthenticationLoginExpiredModal } from '@vben/common-ui';
@@ -30,6 +30,9 @@ const notifications = ref<NotificationItem[]>([]);
 const unreadCount = ref(0);
 
 const showDot = computed(() => unreadCount.value > 0);
+const canReadNotifications = computed(() =>
+  (accessStore.accessCodes ?? []).includes('system.notifications.read'),
+);
 
 /** 顶部用户菜单：只保留与当前系统相关的入口 */
 const menus = computed(() => [
@@ -47,13 +50,15 @@ const menus = computed(() => [
     icon: 'lucide:user-round',
     text: '个人中心',
   },
-  {
-    handler: () => {
-      router.push({ name: 'NotificationCenter' });
-    },
-    icon: 'lucide:bell',
-    text: '站内通知',
-  },
+  ...(canReadNotifications.value
+    ? [{
+        handler: () => {
+          router.push({ name: 'NotificationCenter' });
+        },
+        icon: 'lucide:bell',
+        text: '站内通知',
+      }]
+    : []),
 ]);
 
 const avatar = computed(
@@ -137,7 +142,18 @@ const handleClick = (item: NotificationItem) => {
   }
 };
 
-onMounted(loadNotifications);
+watch(
+  canReadNotifications,
+  (allowed) => {
+    if (allowed) {
+      void loadNotifications();
+    } else {
+      notifications.value = [];
+      unreadCount.value = 0;
+    }
+  },
+  { immediate: true },
+);
 
 watch(
   () => ({
@@ -190,6 +206,7 @@ watch(
     </template>
     <template #notification>
       <Notification
+        v-if="canReadNotifications"
         :dot="showDot"
         :notifications="notifications"
         @clear="handleNoticeClear"

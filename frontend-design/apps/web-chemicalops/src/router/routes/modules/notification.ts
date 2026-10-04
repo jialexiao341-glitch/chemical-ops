@@ -9,6 +9,7 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     meta: {
+      authority: ['system.notifications.read'],
       hideInMenu: true,
       icon: 'lucide:bell',
       order: 98,

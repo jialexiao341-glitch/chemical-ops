@@ -4,18 +4,18 @@ import type { RouteRecordRaw } from 'vue-router';
  * AI 工作台。
  *
  * 工作台导航仅对内部账号显示。具体业务数据仍由后端按业务权限校验；
- * 此处的 dashboard.read 仅作为演示账号的内部账号标记，不替代 API 鉴权。
+ * ai.workspace.read 控制工作台入口，不替代各业务 API 鉴权。
  */
 const routes: RouteRecordRaw[] = [
   {
-    meta: { authority: ['dashboard.read'], hideInMenu: true, title: '采购只读任务' },
+    meta: { authority: ['ai.workspace.read'], hideInMenu: true, title: '采购只读任务' },
     name: 'AiAgentTask',
     path: '/ai/agent',
     redirect: '/ai/workspace',
   },
   {
     meta: {
-      authority: ['dashboard.read'],
+      authority: ['ai.workspace.read'],
       fullPathKey: false,
       hideInMenu: false,
       icon: 'lucide:bot',

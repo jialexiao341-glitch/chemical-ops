@@ -63,7 +63,7 @@
 
 ### 4.1 会话短期记忆 JSON
 
-迁移 `037_ai_conversation_memory_state.sql` 在 `ai_conversation_state.memory_state` 保存每个会话的短期状态；Agent 任务快照也保存同一状态，供等待补充时恢复。字段结构为：
+迁移 `037_ai_conversation_memory_state.sql` 在 `ai_conversation_state.memory_state` 保存每个会话的短期状态；Agent 任务快照也保存同一状态，供等待补充时恢复。新 Agent 任务还会从已鉴权的本人会话读取最近 8 条消息，补足普通化学品问答与业务 Agent 之间的指代上下文（例如先问乙醇资料，再问“它的库存”）。若上下文中只有一个明确对象，应以该名称发起本轮产品检索；若存在多个可能对象，应请用户确认。这些历史消息只用于解析检索关键词；产品仍需本轮目录检索，旧 ID、库存/报价事实不会被当作本轮证据。该补充逻辑本次尚未验证。字段结构为：
 
 ```json
 {

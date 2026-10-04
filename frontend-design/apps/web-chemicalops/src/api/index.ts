@@ -9,3 +9,4 @@ export * from './dashboard';
 export * from './operations';
 export * from './ai';
 export * from './insights';
+export * from './supplier-portal';

@@ -44,7 +44,9 @@ from app.modules.suppliers.controller import router as suppliers_router
 from app.modules.finance.controller import router as finance_router
 from app.modules.inventory_returns.controller import router as inventory_returns_router
 from app.modules.replenishments.controller import router as replenishments_router
+from app.modules.supplier_portal.controller import rfqs_router as supplier_portal_rfqs_router
 from app.modules.supplier_portal.controller import router as supplier_portal_router
+from app.modules.supplier_portal.controller import collaboration_router as supplier_portal_collaboration_router
 from app.modules.files.controller import router as files_router
 from app.modules.inventory_cost.controller import router as inventory_cost_router
 from app.modules.jobs.controller import router as jobs_router
@@ -443,6 +445,8 @@ app.include_router(finance_router, prefix=settings.api_prefix)
 app.include_router(inventory_returns_router, prefix=settings.api_prefix)
 app.include_router(replenishments_router, prefix=settings.api_prefix)
 app.include_router(supplier_portal_router, prefix=settings.api_prefix)
+app.include_router(supplier_portal_rfqs_router, prefix=settings.api_prefix)
+app.include_router(supplier_portal_collaboration_router, prefix=settings.api_prefix)
 app.include_router(files_router, prefix=settings.api_prefix)
 app.include_router(inventory_cost_router, prefix=settings.api_prefix)
 app.include_router(jobs_router, prefix=settings.api_prefix)

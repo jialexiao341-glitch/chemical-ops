@@ -174,14 +174,26 @@ def create_quote(db: Session, user: User, rfq_id: int, data: SupplierQuoteCreate
     """录入一份供应商报价，并更新供应商响应状态。"""
 
     rfq = get_rfq(db, user, rfq_id)
+    return create_quote_for_supplier(db, user, rfq, data.supplier_id, data)
+
+
+def create_quote_for_supplier(
+    db: Session,
+    user: User,
+    rfq: RFQ,
+    supplier_id: int,
+    data: SupplierQuoteCreate,
+) -> RFQ:
+    """为已邀请的供应商创建一版报价；调用方负责授权询价范围。"""
+
     if rfq.status not in {"SENT", "RESPONDING"}:
         raise BusinessValidationError("当前询价单不接受供应商报价")
-    supplier = crud.get_supplier(db, data.supplier_id)
+    supplier = crud.get_supplier(db, supplier_id)
     if supplier is None:
         raise ResourceNotFoundError("供应商不存在")
     if supplier.status != "ACTIVE":
         raise BusinessValidationError("供应商已停用，不能录入报价")
-    invitation = crud.get_invitation(db, rfq.id, data.supplier_id)
+    invitation = crud.get_invitation(db, rfq.id, supplier_id)
     if invitation is None:
         raise BusinessValidationError("该供应商未被邀请参与本次询价")
     item_ids = {item.id for item in rfq.items}
@@ -199,13 +211,13 @@ def create_quote(db: Session, user: User, rfq_id: int, data: SupplierQuoteCreate
                 raise BusinessValidationError(f"最小起订量单位 {item.moq_unit_id} 不存在或已停用")
     existing_version = db.scalar(
         select(SupplierQuote.quote_version)
-        .where(SupplierQuote.rfq_id == rfq.id, SupplierQuote.supplier_id == data.supplier_id)
+        .where(SupplierQuote.rfq_id == rfq.id, SupplierQuote.supplier_id == supplier_id)
         .order_by(SupplierQuote.quote_version.desc())
     )
     quote = SupplierQuote(
-        quote_no=f"TEMP-Q-{rfq.id}-{data.supplier_id}-{int(_now().timestamp())}",
+        quote_no=f"TEMP-Q-{rfq.id}-{supplier_id}-{int(_now().timestamp())}",
         rfq_id=rfq.id,
-        supplier_id=data.supplier_id,
+        supplier_id=supplier_id,
         quote_version=(existing_version or 0) + 1,
         quote_date=data.quote_date or date.today(),
         valid_until=data.valid_until,

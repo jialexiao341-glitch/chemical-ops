@@ -107,6 +107,13 @@ export const DELIVERY_STATUS_DICT = buildDict([
   { color: 'error', label: '异常', value: 'EXCEPTION' },
 ]);
 
+/** 供应商质量资料状态 */
+export const SUPPLIER_QUALITY_DOCUMENT_STATUS_DICT = buildDict([
+  { color: 'processing', label: '已提交', value: 'SUBMITTED' },
+  { color: 'success', label: '已接收', value: 'ACCEPTED' },
+  { color: 'error', label: '需补充', value: 'REJECTED' },
+]);
+
 /** 质量验收结果 */
 export const ACCEPTANCE_RESULT_DICT = buildDict([
   // 后端创建验收时初始态为 PENDING（尚未录入结果）
@@ -143,6 +150,10 @@ export const COMPARISON_STATUS_DICT = buildDict([
 export const RFQ_SUPPLIER_RESPONSE_DICT = buildDict([
   { color: 'warning', label: '待响应', value: 'PENDING' },
   { color: 'success', label: '已响应', value: 'RESPONDED' },
+  // 兼容已有演示数据中的报价响应状态。
+  { color: 'success', label: '已报价', value: 'QUOTED' },
+  { color: 'error', label: '已拒绝', value: 'DECLINED' },
+  { color: 'default', label: '已过期', value: 'EXPIRED' },
 ]);
 
 /** 通用单据审批流状态（领用/调拨/盘点/退货/补货） */

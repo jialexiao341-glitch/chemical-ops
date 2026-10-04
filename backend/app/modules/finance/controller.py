@@ -30,10 +30,22 @@ from app.modules.finance.schema import (
     SettlementPage,
     SettlementRead,
 )
+from app.modules.supplier_portal.schema import SupplierReconciliationMessageCreate, SupplierReconciliationMessagePage, SupplierReconciliationMessageRead
+from app.modules.supplier_portal import service as supplier_portal_service
 from app.modules.system.model import User
 
 
 router = APIRouter(prefix="/finance", tags=["财务管理"])
+
+
+@router.get("/reconciliations/{reconciliation_id}/supplier-messages", response_model=SupplierReconciliationMessagePage, summary="查看供应商对账协同留言")
+def list_supplier_messages(reconciliation_id: int, page: int = Query(default=1, ge=1), page_size: int = Query(default=100, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(require_permission("finance.reconciliations.read"))):
+    return supplier_portal_service.finance_list_reconciliation_messages(db, user, reconciliation_id, page=page, page_size=page_size)
+
+
+@router.post("/reconciliations/{reconciliation_id}/supplier-messages", response_model=SupplierReconciliationMessageRead, status_code=status.HTTP_201_CREATED, summary="回复供应商对账协同留言")
+def add_supplier_message(reconciliation_id: int, data: SupplierReconciliationMessageCreate, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.reconciliations.write"))):
+    return supplier_portal_service.finance_add_reconciliation_message(db, user, reconciliation_id, data)
 
 
 @router.get("/invoices/{invoice_id}/matches", response_model=InvoiceMatchRead, summary="查看发票行匹配和历史版本")

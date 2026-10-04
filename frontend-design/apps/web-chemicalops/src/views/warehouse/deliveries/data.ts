@@ -59,7 +59,8 @@ export function useColumns(
     },
     {
       field: 'actual_arrival_date',
-      formatter: ({ cellValue }: { cellValue: any }) => formatDate(cellValue),
+      formatter: ({ cellValue, row }: { cellValue: any; row: any }) =>
+        cellValue ? formatDate(cellValue) : row.status === 'IN_TRANSIT' ? '待到货' : '未登记',
       title: '实际到货',
       width: 120,
     },

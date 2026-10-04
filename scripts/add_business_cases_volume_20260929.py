@@ -60,6 +60,7 @@ def add_master_data(db) -> Counter[str]:
             supplier_code=f"SUP-2026-{1001 + index}",
             supplier_name=f"{region}{specialty}供应中心{index + 1:02d}",
             country_code="CN", region=region,
+            address=f"演示地址：{region}试剂配送区", cooperation_level="B",
             business_scope=f"{specialty}采购与配送",
             payment_terms="验收后按合同约定结算",
             default_lead_days=4 + index % 9,
@@ -78,6 +79,7 @@ def add_master_data(db) -> Counter[str]:
             product_code=product_code(index), product_name=base.product_name,
             chemical_id=base.chemical_id, category_id=base.category_id,
             model=f"{base.model or '常规'}-{package}", packaging_spec=package,
+            purity_value=base.purity_value, purity_unit=base.purity_unit,
             unit_id=base.unit_id, parameter_json={"certificate_required": True},
             version_no=1, status="ACTIVE",
         )
@@ -89,6 +91,7 @@ def add_master_data(db) -> Counter[str]:
             db.add(SupplierProduct(
                 supplier_id=supplier.id, product_id=product.id,
                 supplier_model=f"{base.model or '常规'}-{5 * (2 ** (index % 3))}L",
+                supplied_purity=product.purity_value,
                 moq_quantity=10 + option * 5, moq_unit_id=product.unit_id,
                 standard_lead_days=supplier.default_lead_days,
                 capacity_note="分批交付需按订单确认", status="ACTIVE",

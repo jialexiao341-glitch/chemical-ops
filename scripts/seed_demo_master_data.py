@@ -64,6 +64,10 @@ def main() -> None:
                         supplier_code=supplier_code,
                         supplier_name=supplier_name,
                         country_code="CN",
+                        address="演示地址：本地试剂配送区",
+                        business_scope="开发演示：实验室试剂及配套耗材配送",
+                        cooperation_level="B",
+                        payment_terms="开发演示：验收对账后30天付款",
                         status="ACTIVE",
                     )
                 )
@@ -79,7 +83,7 @@ def main() -> None:
             db.add(Product(chemical_id=chemical.id, unit_id=unit.id, **DEMO_PRODUCT))
         warehouse = db.scalar(select(Warehouse).where(Warehouse.warehouse_code == DEMO_WAREHOUSE[0]))
         if warehouse is None:
-            warehouse = Warehouse(warehouse_code=DEMO_WAREHOUSE[0], warehouse_name=DEMO_WAREHOUSE[1], status="ACTIVE")
+            warehouse = Warehouse(warehouse_code=DEMO_WAREHOUSE[0], warehouse_name=DEMO_WAREHOUSE[1], address=f"演示地址：研发园区 {DEMO_WAREHOUSE[0]} 仓储区", status="ACTIVE")
             db.add(warehouse)
             db.flush()
         location = db.scalar(

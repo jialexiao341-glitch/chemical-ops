@@ -20,6 +20,7 @@ from app.modules.operation_exceptions.model import OperationException
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.replenishments.model import ReplenishmentRequest
+from app.modules.supplier_portal.model import SupplierPortalAccount, SupplierQualityDocument
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.file_model import SysFile, SysFileAttachment
@@ -34,6 +35,7 @@ RESOURCE_MODELS = {
     "FINANCE_INVOICE": FinanceInvoice,
     "INVENTORY_RETURN": InventoryReturnRequest,
     "REPLENISHMENT": ReplenishmentRequest,
+    "SUPPLIER_QUALITY_DOCUMENT": SupplierQualityDocument,
 }
 
 RESOURCE_READ_PERMISSIONS = {
@@ -44,6 +46,7 @@ RESOURCE_READ_PERMISSIONS = {
     "FINANCE_INVOICE": "finance.invoices.read",
     "INVENTORY_RETURN": "warehouse.inventory.return.read",
     "REPLENISHMENT": "procurement.replenishment.read",
+    "SUPPLIER_QUALITY_DOCUMENT": "supplier.portal.quality.read",
 }
 
 _GENERIC_MIME_TYPES = {"", "application/octet-stream", "binary/octet-stream"}
@@ -209,6 +212,12 @@ def _can_access_resource_instance(db: Session, user: User, resource_type: str, r
         return resource.applicant_id == user.id or bool(role_codes & {"PROCUREMENT_MANAGER", "WAREHOUSE"})
     if resource_type == "FINANCE_INVOICE":
         return True
+    if resource_type == "SUPPLIER_QUALITY_DOCUMENT":
+        account = db.scalar(select(SupplierPortalAccount).where(
+            SupplierPortalAccount.user_id == user.id,
+            SupplierPortalAccount.status == "ACTIVE",
+        ))
+        return account is not None and account.supplier_id == resource.supplier_id
     return False
 
 

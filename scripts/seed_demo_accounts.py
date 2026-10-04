@@ -75,12 +75,24 @@ PERMISSIONS = (
     ("procurement.replenishment.approve", "审批供应商补货", "API", "procurement.replenishment", "approve"),
     ("supplier.portal.read", "查询供应商门户订单", "API", "supplier.portal", "read"),
     ("supplier.portal.confirm", "确认供应商采购订单", "API", "supplier.portal", "confirm"),
+    ("supplier.portal.rfq.read", "查询受邀供应商询价", "API", "supplier.portal.rfq", "read"),
+    ("supplier.portal.rfq.quote", "提交受邀供应商报价", "API", "supplier.portal.rfq", "quote"),
+    ("supplier.portal.delivery.read", "查询供应商交期更新", "API", "supplier.portal.delivery", "read"),
+    ("supplier.portal.delivery.update", "更新供应商预计交期", "API", "supplier.portal.delivery", "update"),
+    ("supplier.portal.shipment.read", "查询供应商发货通知", "API", "supplier.portal.shipment", "read"),
+    ("supplier.portal.shipment.submit", "提交供应商发货通知", "API", "supplier.portal.shipment", "submit"),
+    ("supplier.portal.quality.read", "查询供应商质量资料", "API", "supplier.portal.quality", "read"),
+    ("supplier.portal.quality.submit", "提交供应商质量资料", "API", "supplier.portal.quality", "submit"),
+    ("supplier.portal.reconciliation.read", "查询供应商对账记录", "API", "supplier.portal.reconciliation", "read"),
+    ("supplier.portal.reconciliation.respond", "确认或争议供应商对账", "API", "supplier.portal.reconciliation", "respond"),
+    ("supplier.portal.reconciliation.message", "提交供应商对账留言", "API", "supplier.portal.reconciliation", "message"),
     ("system.files.read", "查看文件元数据", "API", "system.files", "read"),
     ("system.files.download", "下载文件", "API", "system.files", "download"),
     ("system.files.write", "上传文件", "API", "system.files", "write"),
     ("system.files.attach", "关联业务附件", "API", "system.files", "attach"),
     ("warehouse.inventory.cost.write", "执行 FIFO 成本出库", "API", "warehouse.inventory.cost", "write"),
     ("dashboard.read", "查看运营 Dashboard", "API", "dashboard", "read"),
+    ("ai.workspace.read", "访问 AI 工作台", "API", "ai.workspace", "read"),
 )
 
 DEPARTMENTS = (
@@ -142,13 +154,22 @@ ROLE_SCOPES = {
     "FINANCE_CLERK": {"finance.reconciliations.read", "finance.reconciliations.write", "finance.invoices.read", "finance.invoices.write", "finance.payments.read", "finance.payments.write", "finance.settlements.read", "finance.settlements.write", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "system.files.read", "system.files.download", "system.files.write", "system.files.attach"},
     "FINANCE_MANAGER": {"finance.reconciliations.read", "finance.reconciliations.write", "finance.invoices.read", "finance.invoices.write", "finance.invoices.verify", "finance.payments.read", "finance.payments.write", "finance.payments.approve", "finance.settlements.read", "finance.settlements.write", "finance.settlements.approve", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "system.files.read", "system.files.download", "system.files.write", "system.files.attach", "dashboard.read"},
     "MANAGEMENT_VIEWER": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.requests.read", "procurement.rfqs.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "warehouse.inventory.read", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "system.notifications.read", "system.notifications.write", "dashboard.read"},
-    "SUPPLIER_PORTAL": {"supplier.portal.read", "supplier.portal.confirm"},
+    "SUPPLIER_PORTAL": {
+        "supplier.portal.read", "supplier.portal.confirm",
+        "supplier.portal.rfq.read", "supplier.portal.rfq.quote",
+        "supplier.portal.delivery.read", "supplier.portal.delivery.update",
+        "supplier.portal.shipment.read", "supplier.portal.shipment.submit",
+        "supplier.portal.quality.read", "supplier.portal.quality.submit",
+        "supplier.portal.reconciliation.read", "supplier.portal.reconciliation.respond",
+        "supplier.portal.reconciliation.message", "dashboard.read",
+    },
 }
 
-# 运营看板是内部账号的通用入口；外部供应商门户不授予内部运营汇总权限。
+# 运营看板对所有演示角色开放；AI 工作台仅对内部演示角色开放。
 for _role_code, _scope in ROLE_SCOPES.items():
+    _scope.add("dashboard.read")
     if _role_code != "SUPPLIER_PORTAL":
-        _scope.add("dashboard.read")
+        _scope.add("ai.workspace.read")
 
 REVOKED_ROLE_PERMISSIONS = {
     "BUYER": {"procurement.orders.approve", "master.products.write"},

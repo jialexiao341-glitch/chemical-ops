@@ -4,7 +4,7 @@ import argparse
 import csv
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -25,6 +25,9 @@ from app.modules.system.model import User
 
 CASES = [('FULL', '全额匹配待复核'), ('SPLIT', '分两张发票开票'), ('MULTI', '一张发票匹配多个产品行'), ('AMOUNT', '匹配合计不符待处理'), ('TAX', '税额差异待说明'), ('REJECT', '驳回后重新录入')]
 NOTE = '开发模拟：用于发票行匹配演示，非真实交易、验收或开票，不产生库存和资金流水。'
+INVOICE_DATE = date(2026, 9, 30)
+ORDER_DATE = INVOICE_DATE - timedelta(days=7)
+ARRIVAL_DATE = INVOICE_DATE - timedelta(days=1)
 
 
 def main():
@@ -53,17 +56,17 @@ def main():
                     raise RuntimeError(f'{po_no} 已存在但缺少对账链路，请人工核查，脚本不覆盖')
                 manifest.append({'case': label, 'po_no': po_no, 'order_id': existing.id, 'reconciliation_id': rec.id, 'reconciliation_no': rec.reconciliation_no})
                 continue
-            order = PurchaseOrder(po_no=po_no, supplier_id=supplier.id, buyer_id=clerk.id, department_id=clerk.department_id, order_amount=Decimal('2130'), currency_code='CNY', status='COMPLETED', note=NOTE)
+            order = PurchaseOrder(po_no=po_no, supplier_id=supplier.id, buyer_id=clerk.id, department_id=clerk.department_id, order_amount=Decimal('2130'), currency_code='CNY', order_date=ORDER_DATE, expected_arrival_date=ARRIVAL_DATE, delivery_address='开发演示：研发园区收货区', status='COMPLETED', note=NOTE)
             db.add(order); db.flush()
             lines = []
             for number, (product, quantity, price, tax) in enumerate(zip(products, [10, 5], [100, 200], [13, 0]), 1):
-                row = PurchaseOrderItem(po_id=order.id, line_no=number, product_id=product.id, product_name_snapshot=product.product_name, unit_id=product.unit_id, order_quantity=quantity, received_quantity=quantity, unit_price=price, tax_rate=tax)
+                row = PurchaseOrderItem(po_id=order.id, line_no=number, product_id=product.id, product_name_snapshot=product.product_name, supplier_model_snapshot=product.model, planned_arrival_date=ARRIVAL_DATE, unit_id=product.unit_id, order_quantity=quantity, received_quantity=quantity, unit_price=price, tax_rate=tax)
                 db.add(row); lines.append(row)
             db.flush()
-            delivery = Delivery(delivery_no=f'DLV-SIMINV-{code}', po_id=order.id, supplier_id=supplier.id, status='ACCEPTED', note=NOTE)
+            delivery = Delivery(delivery_no=f'DLV-SIMINV-{code}', po_id=order.id, supplier_id=supplier.id, shipment_date=ARRIVAL_DATE - timedelta(days=1), expected_arrival_date=ARRIVAL_DATE, actual_arrival_date=ARRIVAL_DATE, logistics_company='开发演示物流', tracking_no=f'DEMO-DLV-SIMINV-{code}', status='ACCEPTED', note=NOTE)
             db.add(delivery); db.flush()
             for row in lines:
-                db.add(DeliveryItem(delivery_id=delivery.id, po_item_id=row.id, line_no=row.line_no, product_id=row.product_id, unit_id=row.unit_id, planned_quantity=row.order_quantity, actual_quantity=row.order_quantity, batch_no=f'SIMINV-{code}-{row.line_no}'))
+                db.add(DeliveryItem(delivery_id=delivery.id, po_item_id=row.id, line_no=row.line_no, product_id=row.product_id, unit_id=row.unit_id, package_spec=products[row.line_no - 1].packaging_spec, planned_quantity=row.order_quantity, actual_quantity=row.order_quantity, batch_no=f'SIMINV-{code}-{row.line_no}'))
             db.flush()
             real_commit = db.commit
             db.commit = db.flush
