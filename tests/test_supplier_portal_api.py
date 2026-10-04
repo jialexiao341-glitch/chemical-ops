@@ -167,13 +167,21 @@ def test_supplier_eta_and_shipment_notice_are_scoped_and_quantity_checked(client
     assert "剩余可发数量不足" in rejected.json()["detail"]
 
 
-def test_supplier_quality_document_upload_and_download_are_binding_scoped(client: TestClient, db_session, demo_password: str, monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("storage_backend", ["local", "minio"])
+def test_supplier_quality_document_upload_and_download_are_binding_scoped(client: TestClient, db_session, demo_password: str, monkeypatch, tmp_path, request, storage_backend) -> None:
     """供应商能提交并下载本方订单质量文件，未绑定供应商账号不能借文件编号访问。"""
 
     from app.modules.files import service as file_service
+    from app.modules.system.file_model import SysFile
+    import os
 
-    monkeypatch.setattr(file_service, "_storage_backend", lambda: "local")
-    monkeypatch.setattr(file_service, "storage_root", lambda: tmp_path)
+    if storage_backend == "minio":
+        if os.environ.get("REAL_MINIO_ACCEPTANCE") != "1":
+            pytest.skip("真实 MinIO 验收需显式设置 REAL_MINIO_ACCEPTANCE=1")
+        assert file_service._storage_backend() == "minio"
+    else:
+        monkeypatch.setattr(file_service, "_storage_backend", lambda: "local")
+        monkeypatch.setattr(file_service, "storage_root", lambda: tmp_path)
     supplier_id = db_session.scalar(select(Supplier.id).where(Supplier.status == "ACTIVE").limit(1))
     buyer_id = db_session.scalar(select(User.id).where(User.username == "buyer"))
     role_id = db_session.scalar(select(Role.id).where(Role.role_code == "SUPPLIER_PORTAL"))
@@ -198,6 +206,12 @@ def test_supplier_quality_document_upload_and_download_are_binding_scoped(client
         files={"file": ("coa.txt", b"COA: batch verified", "text/plain")})
     assert submitted.status_code == 201, submitted.text
     document_id = submitted.json()["id"]
+    if storage_backend == "minio":
+        stored = db_session.get(SysFile, submitted.json()["file_id"])
+        object_key = stored.object_key
+        request.addfinalizer(lambda: file_service._delete_object(object_key))
+        metadata = file_service._minio_client().stat_object(file_service._minio_bucket_for_key(object_key), object_key)
+        assert metadata.size == len(b"COA: batch verified")
     listed = client.get("/api/v1/supplier-portal/quality-documents", headers=portal)
     assert listed.status_code == 200, listed.text
     assert any(item["id"] == document_id for item in listed.json()["items"])

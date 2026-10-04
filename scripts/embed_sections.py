@@ -36,7 +36,7 @@ from app.modules.doc_kb.embedding import embed_texts  # noqa: E402
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection  # noqa: E402
 
 
-def load_parsed_sections(cas_list: list[str] | None = None) -> list[dict[str, Any]]:
+def load_parsed_sections(cas_list: list[str] | None = None, doc_type: str | None = None) -> list[dict[str, Any]]:
     """读取质检通过的章节（含中文名），供向量化。"""
 
     db = SessionLocal()
@@ -59,6 +59,8 @@ def load_parsed_sections(cas_list: list[str] | None = None) -> list[dict[str, An
         )
         if cas_list:
             statement = statement.where(AiDocumentSection.cas_no.in_(cas_list))
+        if doc_type:
+            statement = statement.where(AiDocumentSection.doc_type == doc_type)
         rows = db.execute(statement).all()
         return [
             {
@@ -79,7 +81,7 @@ def load_parsed_sections(cas_list: list[str] | None = None) -> list[dict[str, An
 
 
 async def run(args: argparse.Namespace) -> None:
-    sections = load_parsed_sections(args.cas or None)
+    sections = load_parsed_sections(args.cas or None, args.doc_type)
     if not sections:
         print("没有可向量化的 PARSED 章节（先跑 scripts/parse_tds_msds.py）")
         return
@@ -136,6 +138,7 @@ async def run(args: argparse.Namespace) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="知识库章节向量化并写入 Qdrant")
     parser.add_argument("--cas", nargs="*", help="只向量化指定 CAS 的章节")
+    parser.add_argument("--doc-type", choices=("msds", "tds"), help="只向量化指定类型")
     parser.add_argument("--batch", type=int, default=32, help="每批文本数，默认 32")
     parser.add_argument("--recreate", action="store_true", help="删除并重建集合（换 embedding 模型后使用）")
     return parser.parse_args(argv)

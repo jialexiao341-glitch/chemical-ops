@@ -45,6 +45,7 @@ PERMISSIONS = (
     ("warehouse.inventory.issue.read", "查看库存领用", "API", "warehouse.inventory.issue", "read"),
     ("warehouse.inventory.issue.write", "管理库存领用", "API", "warehouse.inventory.issue", "write"),
     ("warehouse.inventory.issue.approve", "审批库存领用", "API", "warehouse.inventory.issue", "approve"),
+    ("warehouse.inventory.issue.execute", "执行库存出库", "API", "warehouse.inventory.issue", "execute"),
     ("warehouse.inventory.transfer.read", "查看库存调拨", "API", "warehouse.inventory.transfer", "read"),
     ("warehouse.inventory.transfer.write", "管理库存调拨", "API", "warehouse.inventory.transfer", "write"),
     ("warehouse.inventory.transfer.approve", "审批库存调拨", "API", "warehouse.inventory.transfer", "approve"),
@@ -115,7 +116,7 @@ ROLE_SCOPES = {
         "warehouse.deliveries.read", "warehouse.deliveries.write",
         "quality.acceptances.read", "quality.acceptances.write",
         "warehouse.inventory.read", "warehouse.inventory.write",
-        "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.issue.approve",
+        "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.issue.approve", "warehouse.inventory.issue.execute",
         "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.transfer.approve",
         "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.stocktake.approve",
         "warehouse.inventory.freeze.write",
@@ -143,11 +144,9 @@ ROLE_SCOPES = {
     "TECHNICAL": {
         "master.chemicals.read", "master.chemicals.write", "master.products.read", "master.products.write",
         "warehouse.inventory.issue.read", "warehouse.inventory.issue.write",
-        "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write",
-        "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write",
         "system.notifications.read", "system.notifications.write",
     },
-    "WAREHOUSE": {"master.products.read", "master.suppliers.read", "warehouse.deliveries.read", "warehouse.deliveries.write", "warehouse.inventory.read", "warehouse.inventory.write", "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.freeze.write", "warehouse.inventory.return.read", "warehouse.inventory.return.write", "operations.exceptions.read", "operations.exceptions.write", "system.notifications.read", "system.notifications.write", "system.files.read", "system.files.download", "system.files.write", "system.files.attach", "warehouse.inventory.cost.write"},
+    "WAREHOUSE": {"master.products.read", "master.suppliers.read", "warehouse.deliveries.read", "warehouse.deliveries.write", "warehouse.inventory.read", "warehouse.inventory.write", "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.issue.execute", "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.freeze.write", "warehouse.inventory.return.read", "warehouse.inventory.return.write", "operations.exceptions.read", "operations.exceptions.write", "system.notifications.read", "system.notifications.write", "system.files.read", "system.files.download", "system.files.write", "system.files.attach", "warehouse.inventory.cost.write"},
     "QUALITY": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "quality.acceptances.read", "quality.acceptances.write", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "operations.exceptions.write", "system.notifications.read", "system.notifications.write"},
     "QUALITY_MANAGER": {"master.products.read", "quality.acceptances.read", "quality.acceptances.write", "quality.acceptances.review", "system.files.read", "system.files.download", "system.notifications.read"},
     "FINANCE_VIEWER": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.requests.read", "procurement.rfqs.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "warehouse.inventory.read", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "system.notifications.read", "system.notifications.write", "dashboard.read"},
@@ -173,6 +172,10 @@ for _role_code, _scope in ROLE_SCOPES.items():
 
 REVOKED_ROLE_PERMISSIONS = {
     "BUYER": {"procurement.orders.approve", "master.products.write"},
+    "TECHNICAL": {
+        "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write",
+        "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write",
+    },
 }
 
 ROLE_NAMES = {

@@ -277,7 +277,9 @@ export function getSupplierQualityDocumentsApi(params: SupplierPortalApi.ListPar
 }
 
 export function submitSupplierQualityDocumentApi(data: FormData) {
-  return requestClient.post<SupplierPortalApi.QualityDocument>('/supplier-portal/quality-documents', data);
+  return requestClient.post<SupplierPortalApi.QualityDocument>('/supplier-portal/quality-documents', data, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
 }
 
 export function downloadSupplierQualityDocumentApi(id: number) {

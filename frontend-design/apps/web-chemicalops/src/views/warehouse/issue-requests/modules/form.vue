@@ -4,24 +4,22 @@ import type { IssueRequestApi } from '#/api';
 import { computed, nextTick, ref } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
+import { useUserStore } from '@vben/stores';
 
 import { message } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
 import {
   createIssueApi,
-  getBalanceListApi,
   getDepartmentListApi,
-  getLocationListApi,
-  getProductListApi,
-  getUnitListApi,
-  getWarehouseListApi,
+  getIssueOptionsApi,
   updateIssueApi,
 } from '#/api';
 import ItemsEditor from '#/components/items-editor/index.vue';
 import { formatQuantity } from '#/utils/format';
 
 const emit = defineEmits(['success']);
+const isTechnicalRole = useUserStore().userInfo?.roles?.includes('TECHNICAL') ?? false;
 
 /** 领用明细的编辑行；批次选项直接来自库存余额（含库位与可用量） */
 interface IssueItemRow {
@@ -73,24 +71,28 @@ const [Form, formApi] = useVbenForm({
       label: '领用用途',
       rules: 'required',
     },
-    {
-      component: 'ApiSelect',
-      componentProps: {
-        allowClear: true,
-        api: async () => {
-          const res = await getDepartmentListApi({ page: 1, page_size: 100 });
-          return res.items.map((item) => ({
-            label: item.department_name,
-            value: item.id,
-          }));
-        },
-        class: 'w-full',
-        placeholder: '默认申请人所在部门',
-        showSearch: true,
-      },
-      fieldName: 'department_id',
-      label: '领用部门',
-    },
+    ...(!isTechnicalRole
+      ? [
+          {
+            component: 'ApiSelect' as const,
+            componentProps: {
+              allowClear: true,
+              api: async () => {
+                const res = await getDepartmentListApi({ page: 1, page_size: 100 });
+                return res.items.map((item) => ({
+                  label: item.department_name,
+                  value: item.id,
+                }));
+              },
+              class: 'w-full',
+              placeholder: '默认申请人所在部门',
+              showSearch: true,
+            },
+            fieldName: 'department_id',
+            label: '领用部门',
+          },
+        ]
+      : []),
   ],
 });
 
@@ -176,7 +178,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | IssueRequestApi.IssueRequest>({
     }
     const values = await formApi.getValues<any>();
     const payload: IssueRequestApi.Payload = {
-      department_id: values.department_id ?? undefined,
+      department_id: isTechnicalRole ? undefined : values.department_id ?? undefined,
       items: items.value.map((item) => ({
         batch_id: Number(item.batch_id),
         location_id: Number(item.location_id),
@@ -212,56 +214,18 @@ const [Drawer, drawerApi] = useVbenDrawer<null | IssueRequestApi.IssueRequest>({
     id.value = data?.id;
     items.value = [];
 
-    // 批次选项：拉库存余额 + 主数据名称拼 label
+    // 仅获取提交领用申请所需的可用库存选项。
     if (balanceOptions.value.length === 0) {
-      const [balances, products, warehouses, units] = await Promise.all([
-        getBalanceListApi({ page: 1, page_size: 100 }),
-        getProductListApi({ page: 1, page_size: 100 }),
-        getWarehouseListApi(),
-        getUnitListApi(),
-      ]);
-      const productMap = new Map(
-        products.items.map((item) => [item.id, item.product_name]),
-      );
-      const warehouseMap = new Map(
-        warehouses.map((item) => [item.id, item.warehouse_name]),
-      );
-      const unitMap = new Map(units.map((item) => [item.id, item.unit_name]));
-      // 库位名按仓库逐个拉取（仓库数量很少）
-      const locationMaps = await Promise.all(
-        warehouses.map(async (warehouse) => {
-          const locations = await getLocationListApi(warehouse.id);
-          return new Map(
-            locations.map((location) => [location.id, location.location_name]),
-          );
-        }),
-      );
-      const locationName = (locationId: number, warehouseId: number) => {
-        const index = warehouses.findIndex((w) => w.id === warehouseId);
-        return locationMaps[index]?.get(locationId) ?? `#${locationId}`;
-      };
+      const balances = await getIssueOptionsApi();
 
       balanceOptions.value = [];
       balanceMap.value.clear();
-      for (const balance of balances.items) {
-        if (balance.status !== 'AVAILABLE') {
-          continue;
-        }
-        const available =
-          Number(balance.quantity) - Number(balance.locked_quantity ?? 0);
+      for (const balance of balances) {
+        const available = Number(balance.available_quantity);
         if (available <= 0) {
           continue;
         }
-        const productName =
-          productMap.get(balance.product_id) ?? `#${balance.product_id}`;
-        const warehouseName =
-          warehouseMap.get(balance.warehouse_id) ?? `#${balance.warehouse_id}`;
-        const label = `${productName} @ ${warehouseName}/${locationName(
-          balance.location_id,
-          balance.warehouse_id,
-        )} 批次${balance.batch_id} 可用${formatQuantity(available)} ${
-          unitMap.get(balance.unit_id) ?? ''
-        }`.trim();
+        const label = `${balance.product_name} @ ${balance.warehouse_name}/${balance.location_name} 批次${balance.batch_no} 可用${formatQuantity(available)} ${balance.unit_name}`.trim();
         balanceOptions.value.push({ label, value: balance.id });
         balanceMap.value.set(balance.id, {
           available: String(available),
@@ -316,7 +280,7 @@ defineExpose({ drawerApi });
         <div class="mb-3 flex items-center justify-between">
           <span class="font-medium">领用明细</span>
           <span class="text-muted-foreground text-xs">
-            批次来自库存台账的可用余额
+            仅显示当前可申请的库存批次
           </span>
         </div>
         <ItemsEditor

@@ -52,10 +52,11 @@ def classify_object(bucket: str, key: str) -> tuple[str, str] | None:
     name = key.rsplit("/", 1)[-1]
     if bucket == MSDS_BUCKET_SUFFIX and name.endswith(".html"):
         return name[: -len(".html")], "msds"
-    if bucket == TDS_BUCKET_SUFFIX and name.endswith(".pdf"):
-        return name[: -len(".pdf")], "tds"
     if bucket == TDS_BUCKET_SUFFIX and name.endswith("-property.html"):
         return name[: -len("-property.html")], "property"
+    if bucket == TDS_BUCKET_SUFFIX and (name.endswith(".pdf") or name.endswith(".html")):
+        extension = ".pdf" if name.endswith(".pdf") else ".html"
+        return name[: -len(extension)], "tds"
     return None
 
 

@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import and_, case, desc, func, select
@@ -45,7 +46,7 @@ def update_scheduled_run(
     run: SchedulerJobRun,
     *,
     attempt_count: int | None = None,
-    result: dict[str, int] | None = None,
+    result: dict[str, Any] | None = None,
     error_type: str | None = None,
 ) -> None:
     """记录尝试次数及任务成功或失败结果。"""

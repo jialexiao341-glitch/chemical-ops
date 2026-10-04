@@ -37,7 +37,21 @@ function filterRoutesByVisibleChildren(
       continue;
     }
 
-    const children = filterRoutesByVisibleChildren(route.children, authorities);
+    let children = filterRoutesByVisibleChildren(route.children, authorities);
+    const isTechnicalApplicant =
+      authorities.includes('TECHNICAL') &&
+      authorities.includes('warehouse.inventory.issue.read') &&
+      !authorities.includes('warehouse.inventory.read');
+    if (route.name === 'Warehouse' && isTechnicalApplicant) {
+      children = children.map((child) =>
+        child.name === 'IssueRequestList'
+          ? {
+              ...child,
+              meta: { ...child.meta, title: '我的领用申请' },
+            }
+          : child,
+      );
+    }
     if (children.length === 0) {
       continue;
     }
@@ -46,6 +60,9 @@ function filterRoutesByVisibleChildren(
       (child) => !child.meta?.hideInMenu,
     );
     const meta = { ...route.meta };
+    if (route.name === 'Warehouse' && isTechnicalApplicant) {
+      meta.title = '研发协作';
+    }
 
     // Structural group permissions follow its accessible children; the child
     // route remains the source of truth for page access.

@@ -429,6 +429,22 @@ def extract_tds_pdf(cas: str, pdf_bytes: bytes) -> ParsedDoc:
     return doc
 
 
+def extract_tds_html(cas: str, html: str) -> ParsedDoc:
+    """TDS 站点退回 HTML 页面时，按单节保存正文以支持同一入库流程。"""
+
+    title = extract_title(html, "tds", cas)
+    doc = ParsedDoc(cas=cas, doc_type="tds", title=title)
+    content = cut_tail_boilerplate(html_to_text(html))
+    if content:
+        doc.sections = [ParsedSection(section_no=1, section_key="html-document", title=title or "Technical Data Sheet", content=content)]
+        doc.meta = extract_meta(content, title)
+    if not content:
+        doc.reasons.append("未解析出 HTML 正文")
+    elif len(content) < TDS_MIN_CHARS:
+        doc.reasons.append(f"正文过短(<{TDS_MIN_CHARS})")
+    return doc
+
+
 # ---------- 入库 ----------
 
 
@@ -511,7 +527,9 @@ def parse_document(cas: str, doc_type: str, content: bytes) -> ParsedDoc:
     if doc_type == "property":
         return extract_property(cas, content.decode("utf-8", errors="ignore"))
     if doc_type == "tds":
-        return extract_tds_pdf(cas, content)
+        if content.startswith(b"%PDF-"):
+            return extract_tds_pdf(cas, content)
+        return extract_tds_html(cas, content.decode("utf-8", errors="ignore"))
     doc = ParsedDoc(cas=cas, doc_type=doc_type)
     doc.reasons.append(f"未知文档类型 {doc_type}")
     return doc

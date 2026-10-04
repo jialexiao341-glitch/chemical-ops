@@ -99,6 +99,21 @@ def test_extract_msds_sections_and_meta():
     assert "13,5" in section9.content
 
 
+def test_parse_tds_html_source_into_previewable_section():
+    html = f"""<!doctype html><html><head><title>Acetone Technical Data Sheet</title></head>
+    <body><h1>Technical Data Sheet</h1><h2>Product information</h2>
+    <p>{'Acetone is a clear, volatile solvent used in coatings and chemical manufacturing. ' * 20}</p>
+    <footer>Recommended Products</footer></body></html>"""
+
+    doc = service.parse_document("67-64-1", "tds", html.encode())
+
+    assert doc.status == "PARSED", doc.reasons
+    assert doc.sections
+    assert doc.sections[0].section_key == "html-document"
+    assert "Acetone is a clear" in doc.sections[0].content
+    assert "Recommended Products" not in doc.sections[0].content
+
+
 def test_qc_msds_rejects_missing_core_section():
     broken = MSDS_FIXTURE.replace(
         "<h2 id=\"9\">SECTION 9: Physical and chemical properties</h2>\n<div>Flash point13 °C - closed cup Upper explosion limit: 13,5 %(V) Boiling point 78 °C</div>",

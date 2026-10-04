@@ -84,6 +84,23 @@ class InventoryBalanceRead(BaseModel):
     updated_at: datetime
 
 
+class InventoryIssueOptionRead(BaseModel):
+    """最小化的可领用库存选项，不返回通用库存台账字段。"""
+
+    id: int
+    product_id: int
+    product_name: str
+    warehouse_id: int
+    warehouse_name: str
+    location_id: int
+    location_name: str
+    batch_id: int
+    batch_no: str
+    unit_id: int
+    unit_name: str
+    available_quantity: Decimal
+
+
 class InventoryBalanceStatusChange(BaseModel):
     """冻结或解冻库存余额时提交的原因。"""
 

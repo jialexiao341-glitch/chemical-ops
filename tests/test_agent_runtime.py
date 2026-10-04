@@ -414,6 +414,41 @@ def test_foreign_chat_cannot_create_task_or_messages(chat_task_db):
     assert len(chat_task_db.scalars(select(AIMessage)).all()) == 2
 
 
+@pytest.mark.parametrize('intent', ['inventory', 'quotes'])
+def test_ordinary_chat_context_is_loaded_before_pronoun_task(chat_task_db, model_script, intent):
+    """普通问答首次进入 Agent：历史用于名称上下文，数值仍来自本轮工具。"""
+    conversation = AIConversation(user_id=USER.id, title='化学品问答', status='ACTIVE', permission_snapshot={})
+    chat_task_db.add(conversation)
+    chat_task_db.flush()
+    chat_task_db.add_all([
+        AIMessage(conversation_id=conversation.id, message_role='USER', content='测试乙醇有什么用途？'),
+        AIMessage(conversation_id=conversation.id, message_role='ASSISTANT', content='测试乙醇可用作溶剂。历史示例库存999999，价格999999，均不是当前业务事实。'),
+    ])
+    chat_task_db.commit()
+    assert chat_task_db.scalar(select(AIConversationState)) is None
+    actions, contexts = model_script
+    actions.append(tool('catalog.search_products', keyword='测试乙醇'))
+    if intent == 'inventory':
+        question = '它还有多少库存？'
+        actions.extend([tool('inventory.query_available', product_id=1), {'action': 'finish', 'evidence_steps': [2]}])
+    else:
+        question = '它的报价是多少？'
+        actions.extend([tool('supplier_quotes.find_rfq_items', product_id=1),
+                        tool('supplier_quotes.compare', product_id=1, rfq_item_id=11),
+                        {'action': 'finish', 'evidence_steps': [3]}])
+    state = runtime.prepare_chat_task(chat_task_db, USER, runtime.ChatTaskCreate(question=question, conversation_id=conversation.id))
+    asyncio.run(runtime.run_prepared_task(state.task_id, USER.id, state.revision))
+    result = runtime.get_task(chat_task_db, USER, state.task_id)
+    assert contexts[0]['recent_task_memory']['recent_context'] == [
+        {'role': 'user', 'text': '测试乙醇有什么用途？'},
+        {'role': 'assistant', 'text': '测试乙醇可用作溶剂。历史示例库存999999，价格999999，均不是当前业务事实。'},
+        {'role': 'user', 'text': question},
+    ]
+    assert result.status == 'SUCCEEDED' and not actions
+    assert '999999' not in result.reply
+    assert ('80.000000 千克' if intent == 'inventory' else '8.000000 CNY/千克') in result.reply
+
+
 def test_chat_api_returns_conversation_and_reloadable_task(chat_task_db, model_script):
     app = FastAPI()
     app.include_router(router, prefix='/api/v1')

@@ -14,6 +14,7 @@ from app.modules.inventory.schema import (
     InventoryBalanceStatusChange,
     InventoryBalanceStatusLogPage,
     InventoryIssueRequestCreate,
+    InventoryIssueOptionRead,
     InventoryIssueRequestPage,
     InventoryIssueRequestRead,
     InventoryIssueRequestUpdate,
@@ -124,6 +125,13 @@ def create_issue_request(data: InventoryIssueRequestCreate, db: Session = Depend
     return service.create_issue_request(db, user, data)
 
 
+@router.get("/issue-request-options", response_model=list[InventoryIssueOptionRead], summary="查询可申请领用的库存选项")
+def list_issue_request_options(db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.issue.read"))) -> list[InventoryIssueOptionRead]:
+    """仅返回领用申请所需的可选库存信息。"""
+
+    return service.list_issue_request_options(db)
+
+
 @router.get("/issue-requests", response_model=InventoryIssueRequestPage, summary="查询库存领用申请")
 def list_issue_requests(
     issue_status: str | None = Query(default=None, alias="status", pattern="^(DRAFT|SUBMITTED|APPROVED|REJECTED|CANCELLED|COMPLETED)$"),
@@ -181,7 +189,7 @@ def cancel_issue_request(issue_id: int, db: Session = Depends(get_db), user: Use
 
 
 @router.post("/issue-requests/{issue_id}/execute", response_model=InventoryIssueRequestRead, summary="执行库存出库")
-def execute_issue_request(issue_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.issue.write"))) -> InventoryIssueRequestRead:
+def execute_issue_request(issue_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.issue.execute"))) -> InventoryIssueRequestRead:
     """锁定库存并执行库存领用出库。"""
 
     return service.execute_issue_request(db, user, issue_id)

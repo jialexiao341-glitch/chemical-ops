@@ -42,6 +42,7 @@
     "@vueuse/core": "catalog:",
     "antdv-next": "catalog:",
     "dayjs": "catalog:",
+    "pdfjs-dist": "4.10.38",
     "pinia": "catalog:",
     "vue": "catalog:",
     "vue-router": "catalog:"

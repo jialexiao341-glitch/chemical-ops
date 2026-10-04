@@ -32,6 +32,16 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        name: 'TechnicalDocuments',
+        path: 'technical-documents',
+        component: () => import('#/views/master/technical-documents/index.vue'),
+        meta: {
+          authority: ['TECHNICAL', 'SYS_ADMIN'],
+          icon: 'lucide:files',
+          title: '技术资料',
+        },
+      },
+      {
         name: 'ProductList',
         path: 'products',
         component: () => import('#/views/master/products/index.vue'),

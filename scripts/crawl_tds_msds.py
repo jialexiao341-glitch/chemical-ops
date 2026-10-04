@@ -310,7 +310,7 @@ class HttpxFetcher:
         self._client.close()
 
 
-def crawl_cas(cas: str, fetch: Fetcher, gate: RobotsGate | None = None) -> CrawlResult:
+def crawl_cas(cas: str, fetch: Fetcher, gate: RobotsGate | None = None, doc_types: set[str] | None = None) -> CrawlResult:
     """抓取单个 CAS 的 MSDS 与 TDS 文档。"""
 
     result = CrawlResult(cas=cas)
@@ -326,15 +326,16 @@ def crawl_cas(cas: str, fetch: Fetcher, gate: RobotsGate | None = None) -> Crawl
 
     # MSDS PDF 直链（站点多数情况 404，拿到真 PDF 才收）
     msds_pdf: tuple[int, bytes] | None = None
-    pdf_url = f"{BASE_URL}/msds/{cas}.pdf"
-    if gate is None or gate.allowed(pdf_url):
-        pdf_status, pdf_body, _ = fetch.get(pdf_url)
-        msds_pdf = (pdf_status, pdf_body)
+    if doc_types is None or "msds" in doc_types:
+        pdf_url = f"{BASE_URL}/msds/{cas}.pdf"
+        if gate is None or gate.allowed(pdf_url):
+            pdf_status, pdf_body, _ = fetch.get(pdf_url)
+            msds_pdf = (pdf_status, pdf_body)
 
     # TDS：MSDS 页 title 取英文名 → slug → /tds-coa/{slug}.pdf，404 则回退 .htm
     tds_payload: tuple[str, bytes] | None = None
     name = extract_msds_title(msds_html)
-    if name:
+    if name and (doc_types is None or "tds" in doc_types):
         slug = slugify(name)
         if slug:
             pdf_tds_url = f"{BASE_URL}/tds-coa/{slug}.pdf"
@@ -364,7 +365,7 @@ def crawl_cas(cas: str, fetch: Fetcher, gate: RobotsGate | None = None) -> Crawl
             cb_candidates.append(token)
         if len(cb_candidates) >= 5:
             break
-    for token in cb_candidates[:5]:
+    for token in cb_candidates[:5] if doc_types is None else []:
         property_url = f"{BASE_URL}/ChemicalProductProperty_EN_{token}.htm"
         if gate is not None and not gate.allowed(property_url):
             continue
@@ -373,7 +374,19 @@ def crawl_cas(cas: str, fetch: Fetcher, gate: RobotsGate | None = None) -> Crawl
             property_payload = (property_url, prop_body)
             break
 
-    return build_documents(cas, msds_html, msds_pdf, tds_payload, property_payload)
+    result = build_documents(cas, msds_html, msds_pdf, tds_payload, property_payload)
+    if doc_types is not None:
+        requested_types = set(doc_types)
+        result.documents = [document for document in result.documents if document.doc_type in doc_types]
+        # 未选择的资料类型和工作区不支持的可选物性页不属于本次任务失败。
+        ignored_failure_terms = ["物性页"]
+        if "tds" not in requested_types:
+            ignored_failure_terms.append("TDS")
+        result.failures = [
+            failure for failure in result.failures
+            if not any(term in failure for term in ignored_failure_terms)
+        ]
+    return result
 
 
 # ---------- 存储实现 ----------
@@ -500,7 +513,7 @@ def crawl(args: argparse.Namespace) -> dict[str, int]:
                 print("  failed: CAS 格式不合法，已跳过")
                 continue
             try:
-                result = crawl_cas(cas, fetch, gate)
+                result = crawl_cas(cas, fetch, gate, set(args.doc_types) if args.doc_types else None)
             except httpx.HTTPError as exc:
                 stats["failed_cas"] += 1
                 failures.append(f"{cas}: 网络错误 {exc}")
@@ -576,6 +589,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS, help="单请求超时秒数，默认 20")
     parser.add_argument("--dry-run", action="store_true", help="只下载到本地 run 目录，不写 MinIO")
     parser.add_argument("--force", action="store_true", help="对象已存在时覆盖")
+    parser.add_argument("--doc-types", nargs="+", choices=("msds", "tds"), help="只抓取指定类型；默认沿用原脚本抓取范围")
     parser.add_argument("--ignore-robots", action="store_true", help="跳过 robots.txt 检查（不建议）")
     return parser.parse_args(argv)
 

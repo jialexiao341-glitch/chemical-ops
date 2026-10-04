@@ -52,6 +52,10 @@ def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session
     technical = login(client, "technical_engineer", demo_password)
     manager = login(client, "procurement_manager", demo_password)
     warehouse = login(client, "warehouse_receiver", demo_password)
+    options = client.get("/api/v1/inventory/issue-request-options", headers=technical)
+    assert options.status_code == 200
+    assert all("available_quantity" in item and "product_name" in item for item in options.json())
+    assert client.get("/api/v1/inventory/balances", headers=technical).status_code == 403
     body = {
         "purpose": "自动化测试领用",
         "items": [{
@@ -68,6 +72,7 @@ def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session
     issue_id = created.json()["id"]
     assert client.post(f"/api/v1/inventory/issue-requests/{issue_id}/submit", headers=technical).status_code == 200
     assert client.post(f"/api/v1/inventory/issue-requests/{issue_id}/approve", headers=manager).status_code == 200
+    assert client.post(f"/api/v1/inventory/issue-requests/{issue_id}/execute", headers=technical).status_code == 403
     executed = client.post(f"/api/v1/inventory/issue-requests/{issue_id}/execute", headers=warehouse)
     assert executed.status_code == 200
     assert executed.json()["status"] == "COMPLETED"

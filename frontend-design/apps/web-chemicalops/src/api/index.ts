@@ -10,3 +10,4 @@ export * from './operations';
 export * from './ai';
 export * from './insights';
 export * from './supplier-portal';
+export * from './technical-documents';

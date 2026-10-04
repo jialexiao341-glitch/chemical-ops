@@ -3,6 +3,20 @@ import type { PageQuery, PageResult } from '#/api/request';
 import { requestClient } from '#/api/request';
 
 export namespace IssueRequestApi {
+  export interface StockOption {
+    available_quantity: string;
+    batch_id: number;
+    batch_no: string;
+    id: number;
+    location_id: number;
+    location_name: string;
+    product_id: number;
+    product_name: string;
+    unit_id: number;
+    unit_name: string;
+    warehouse_id: number;
+    warehouse_name: string;
+  }
   /** 领用明细 */
   export interface IssueItem {
     batch_id: number;
@@ -56,6 +70,13 @@ export namespace IssueRequestApi {
   export interface ListParams extends PageQuery {
     status?: string;
   }
+}
+
+/** 获取创建领用申请所需的最小可用库存选项 */
+export async function getIssueOptionsApi() {
+  return requestClient.get<IssueRequestApi.StockOption[]>(
+    '/inventory/issue-request-options',
+  );
 }
 
 /** 分页查询库存领用申请 */

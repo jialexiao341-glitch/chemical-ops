@@ -189,6 +189,32 @@ def test_crawl_cas_reports_missing_msds_page():
     assert any("HTTP 404" in item for item in result.failures)
 
 
+def test_crawl_cas_can_select_only_tds_without_storing_supporting_msds_page():
+    fetcher = FakeFetcher({
+        "https://www.chemicalbook.com/MSDS/64-17-5.htm": (200, MSDS_HTML, "text/html"),
+        "https://www.chemicalbook.com/tds-coa/ethanol.pdf": (200, FAKE_PDF, "application/pdf"),
+    })
+
+    result = crawler.crawl_cas("64-17-5", fetcher, gate=None, doc_types={"tds"})
+
+    assert result.documents
+    assert {document.doc_type for document in result.documents} == {"tds"}
+    assert not any("/msds/64-17-5.pdf" in url for url in fetcher.requested)
+    assert not any("ChemicalProductProperty" in url for url in fetcher.requested)
+    assert not any("物性页" in failure for failure in result.failures)
+
+
+def test_crawl_cas_omits_unrequested_tds_and_property_warnings():
+    fetcher = FakeFetcher({
+        "https://www.chemicalbook.com/MSDS/64-17-5.htm": (200, MSDS_HTML, "text/html"),
+    })
+
+    result = crawler.crawl_cas("64-17-5", fetcher, gate=None, doc_types={"msds"})
+
+    assert {document.doc_type for document in result.documents} == {"msds"}
+    assert result.failures == []
+
+
 def test_crawl_skips_existing_unless_forced():
     store = FakeStore(existing={("chemicalops-msds", "64-17-5.html")})
     doc = crawler.Document(

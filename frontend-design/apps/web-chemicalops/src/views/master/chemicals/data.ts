@@ -130,7 +130,7 @@ export function useColumns(
     },
     {
       field: 'hazard_class',
-      formatter: ({ cellValue }: { cellValue?: null | string }) => cellValue || '待SDS确认',
+      formatter: ({ cellValue }: { cellValue?: null | string }) => cellValue || '待MSDS确认',
       width: 120,
       title: '危险类别',
     },

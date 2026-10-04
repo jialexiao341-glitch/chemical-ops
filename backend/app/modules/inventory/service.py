@@ -351,6 +351,42 @@ def list_issue_requests(db: Session, user: User, *, status: str | None, page: in
     return crud.list_issue_requests(db, applicant_id=applicant_id, status=status, page=page, page_size=page_size)
 
 
+def list_issue_request_options(db: Session) -> list[dict]:
+    """Return the minimum available-stock details needed to create an issue request."""
+
+    rows = db.execute(
+        select(
+            InventoryBalance.id,
+            InventoryBalance.product_id,
+            Product.product_name.label("product_name"),
+            InventoryBalance.warehouse_id,
+            Warehouse.warehouse_name.label("warehouse_name"),
+            InventoryBalance.location_id,
+            WarehouseLocation.location_name.label("location_name"),
+            InventoryBalance.batch_id,
+            InventoryBatch.batch_no.label("batch_no"),
+            InventoryBalance.unit_id,
+            Unit.unit_name.label("unit_name"),
+            (InventoryBalance.quantity - InventoryBalance.locked_quantity).label("available_quantity"),
+        )
+        .join(Product, Product.id == InventoryBalance.product_id)
+        .join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id)
+        .join(WarehouseLocation, WarehouseLocation.id == InventoryBalance.location_id)
+        .join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id)
+        .join(Unit, Unit.id == InventoryBalance.unit_id)
+        .where(
+            InventoryBalance.status == "AVAILABLE",
+            InventoryBalance.quantity > InventoryBalance.locked_quantity,
+            Product.status == "ACTIVE",
+            Warehouse.status == "ACTIVE",
+            WarehouseLocation.status == "ACTIVE",
+            InventoryBatch.status == "ACTIVE",
+        )
+        .order_by(Product.product_name, InventoryBatch.batch_no, Warehouse.warehouse_name)
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
 def get_issue_request(db: Session, user: User, issue_id: int) -> InventoryIssueRequest:
     """查询库存领用申请详情。"""
 

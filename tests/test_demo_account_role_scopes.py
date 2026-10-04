@@ -15,3 +15,22 @@ def test_buyer_can_read_but_cannot_write_product_master_data() -> None:
     assert "master.products.read" in buyer_scope
     assert "master.products.write" not in buyer_scope
     assert "master.products.write" in REVOKED_ROLE_PERMISSIONS["BUYER"]
+
+
+def test_technical_role_can_manage_personal_issue_requests_but_not_warehouse_operations() -> None:
+    technical_scope = ROLE_SCOPES["TECHNICAL"]
+    personal_issue_permissions = {
+        "warehouse.inventory.issue.read", "warehouse.inventory.issue.write",
+    }
+    warehouse_permissions = {
+        "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write",
+        "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write",
+    }
+
+    assert {"master.chemicals.read", "master.chemicals.write",
+            "master.products.read", "master.products.write"} <= technical_scope
+    assert personal_issue_permissions <= technical_scope
+    assert not (warehouse_permissions & technical_scope)
+    assert warehouse_permissions <= REVOKED_ROLE_PERMISSIONS["TECHNICAL"]
+    assert "warehouse.inventory.issue.approve" not in technical_scope
+    assert "warehouse.inventory.issue.execute" not in technical_scope

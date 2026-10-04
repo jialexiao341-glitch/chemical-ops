@@ -7,6 +7,7 @@ import { ref } from 'vue';
 import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import { Button, Input, message, Modal } from 'antdv-next';
 
@@ -28,6 +29,8 @@ defineOptions({ name: 'IssueRequestList' });
 const { hasAccessByCodes } = useAccess();
 const canWriteIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.write']);
 const canApproveIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.approve']);
+const canExecuteIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.execute']);
+const isTechnicalRole = useUserStore().userInfo?.roles?.includes('TECHNICAL') ?? false;
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -119,7 +122,7 @@ function run(
   <Page auto-content-height>
     <FormDrawer @success="gridApi.query()" />
     <Detail />
-    <Grid table-title="库存领用">
+    <Grid :table-title="isTechnicalRole ? '我的领用申请' : '库存领用'">
       <template #toolbar-tools>
         <Button v-if="canWriteIssueRequests" type="primary" @click="formDrawerApi.setData(null).open()">
           <Plus class="size-5" />
@@ -183,7 +186,7 @@ function run(
             驳回
           </Button>
           <Button
-            v-if="row.status === 'APPROVED' && canWriteIssueRequests"
+            v-if="row.status === 'APPROVED' && canExecuteIssueRequests"
             size="small"
             type="link"
             @click="
@@ -200,7 +203,7 @@ function run(
             执行出库
           </Button>
           <Button
-            v-if="canWriteIssueRequests && ['DRAFT', 'REJECTED', 'SUBMITTED'].includes(row.status)"
+            v-if="canWriteIssueRequests && ['DRAFT', 'REJECTED'].includes(row.status)"
             danger
             size="small"
             type="link"
