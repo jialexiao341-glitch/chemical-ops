@@ -73,34 +73,26 @@ def agent_task_read(task_id: str, db: Session = Depends(get_db), user: User = De
 @router.post("/agent/tasks/start", response_model=agent_runtime.TaskRead, status_code=202, summary="启动采购任务并立即返回编号")
 def agent_task_start(data: agent_runtime.TaskCreate, background: BackgroundTasks,
                      db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    state = agent_runtime.prepare_task(db, user, data)
-    background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
-    return agent_runtime.get_task(db, user, state.task_id)
+    return agent_runtime.schedule_async(db, user, background, agent_runtime.prepare_task, data)
 
 
 @router.post("/agent/chat/start", response_model=agent_runtime.TaskRead, status_code=202, summary="在聊天会话中启动只读任务")
 def agent_chat_start(data: agent_runtime.ChatTaskCreate, background: BackgroundTasks,
                      db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    state = agent_runtime.prepare_chat_task(db, user, data)
-    background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
-    return agent_runtime.get_task(db, user, state.task_id)
+    return agent_runtime.schedule_async(db, user, background, agent_runtime.prepare_chat_task, data)
 
 
 @router.post("/agent/chat/{task_id}/continue", response_model=agent_runtime.TaskRead, status_code=202, summary="聊天补充并继续只读任务")
 def agent_chat_continue(task_id: str, data: agent_runtime.TaskContinue, background: BackgroundTasks,
                         db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    state = agent_runtime.prepare_chat_continue(db, user, task_id, data)
-    background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
-    return agent_runtime.get_task(db, user, state.task_id)
+    return agent_runtime.schedule_async(db, user, background, agent_runtime.prepare_chat_continue, task_id, data)
 
 
 @router.post("/agent/tasks/{task_id}/continue/start", response_model=agent_runtime.TaskRead, status_code=202,
              summary="补充采购任务并立即返回续跑状态")
 def agent_task_continue_start(task_id: str, data: agent_runtime.TaskContinue, background: BackgroundTasks,
                               db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    state = agent_runtime.prepare_continue(db, user, task_id, data)
-    background.add_task(agent_runtime.run_prepared_task, state.task_id, user.id, state.revision)
-    return agent_runtime.get_task(db, user, state.task_id)
+    return agent_runtime.schedule_async(db, user, background, agent_runtime.prepare_continue, task_id, data)
 
 
 @router.post("/agent/tasks/{task_id}/continue", response_model=agent_runtime.TaskRead, summary="补充信息并继续 Agent 任务")

@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 from typing import Any
+import inspect
+import re
 
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
@@ -58,6 +60,60 @@ def upsert_sections(client: Any, rows: list[dict], *, name: str | None = None) -
     return len(points)
 
 
+def require_conditional_writes(client: Any):
+    """Fail before touching points if either server or SDK lacks conditional writes."""
+    version = client.info().version
+    match = re.match(r"(\d+)\.(\d+)", version)
+    if not match or tuple(map(int, match.groups())) < (1, 16):
+        raise BusinessValidationError("受保护向量写入要求 Qdrant >= 1.16")
+    if not {"update_filter", "update_mode"}.issubset(inspect.signature(client.upsert).parameters):
+        raise BusinessValidationError("请升级 qdrant-client 以支持条件写入")
+
+
+def document_filter(cas: str, doc_type: str, generation: int):
+    from qdrant_client.models import FieldCondition, Filter, IsEmptyCondition, MatchValue, PayloadField, Range
+    return Filter(must=[FieldCondition(key="cas_no", match=MatchValue(value=cas)),
+        FieldCondition(key="doc_type", match=MatchValue(value=doc_type)),
+        Filter(should=[FieldCondition(key="vector_generation", range=Range(lte=generation)),
+            IsEmptyCondition(is_empty=PayloadField(key="vector_generation"))])])
+
+
+def prepare_document_points(client, rows, *, cas, doc_type, generation, name=None):
+    """Create inert points without overwriting, then fence all older document points."""
+    from qdrant_client.models import PointStruct, UpdateMode, WriteOrdering
+    target = collection_name(name)
+    seeds = [PointStruct(id=row["id"], vector=[0.0] * len(row["vector"]),
+        payload={"cas_no": cas, "doc_type": doc_type, "vector_generation": 0, "index_pending": True}) for row in rows]
+    if seeds:
+        client.upsert(target, points=seeds, wait=True, ordering=WriteOrdering.STRONG, update_mode=UpdateMode.INSERT_ONLY)
+    selector = document_filter(cas, doc_type, generation)
+    selector.must[2].should[0].range.lte = None
+    selector.must[2].should[0].range.lt = generation
+    client.set_payload(target, {"vector_generation": generation, "index_pending": True},
+        points=selector, wait=True, ordering=WriteOrdering.STRONG)
+
+
+def conditional_upsert_sections(client, rows, *, cas, doc_type, generation, name=None):
+    from qdrant_client.models import FieldCondition, Filter, MatchValue, PointStruct, UpdateMode, WriteOrdering
+    points = [PointStruct(id=row["id"], vector=row["vector"],
+        payload={**row["payload"], "vector_generation": generation, "index_pending": False}) for row in rows]
+    if points:
+        client.upsert(collection_name(name), points=points, wait=True, ordering=WriteOrdering.STRONG,
+            update_mode=UpdateMode.UPDATE_ONLY,
+            update_filter=Filter(must=[FieldCondition(key="vector_generation", match=MatchValue(value=generation)),
+                FieldCondition(key="cas_no", match=MatchValue(value=cas)),
+                FieldCondition(key="doc_type", match=MatchValue(value=doc_type))]))
+    return len(points)
+
+
+def cleanup_document_points(client, valid_ids, *, cas, doc_type, generation, name=None):
+    from qdrant_client.models import HasIdCondition, WriteOrdering
+    selector = document_filter(cas, doc_type, generation)
+    if valid_ids:
+        selector.must_not = [HasIdCondition(has_id=list(valid_ids))]
+    client.delete(collection_name(name), points_selector=selector, wait=True, ordering=WriteOrdering.STRONG)
+
+
 def search_sections(
     client: Any,
     vector: list[float],
@@ -68,16 +124,14 @@ def search_sections(
 ) -> list[dict]:
     """向量近邻检索；cas_list 非空时只在这些 CAS 的章节内搜索。"""
 
-    from qdrant_client.models import FieldCondition, Filter, MatchAny
+    from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
     target = collection_name(name)
     if not client.collection_exists(target):
         return []
-    query_filter = None
+    query_filter = Filter(must_not=[FieldCondition(key="index_pending", match=MatchValue(value=True))])
     if cas_list:
-        query_filter = Filter(
-            must=[FieldCondition(key="cas_no", match=MatchAny(any=list(cas_list)))]
-        )
+        query_filter.must = [FieldCondition(key="cas_no", match=MatchAny(any=list(cas_list)))]
     response = client.query_points(
         target,
         query=vector,

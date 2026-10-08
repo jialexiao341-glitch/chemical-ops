@@ -427,7 +427,9 @@ class MinioStore:
     def put(self, bucket: str, key: str, content: bytes, content_type: str) -> None:
         from io import BytesIO
 
-        self._client.put_object(bucket, key, BytesIO(content), length=len(content), content_type=content_type)
+        from app.modules.task_queue.context import external_write
+        with external_write():
+            self._client.put_object(bucket, key, BytesIO(content), length=len(content), content_type=content_type)
 
 
 class LocalStore:

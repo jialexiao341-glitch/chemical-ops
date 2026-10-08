@@ -1,7 +1,5 @@
 """后台扫描任务 HTTP 接口。"""
 
-from uuid import uuid4
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -101,9 +99,7 @@ def start_technical_document_fetch(
         raise HTTPException(status_code=404, detail="未找到启用状态的化学品 CAS 号")
     if technical_documents.has_active_run(db, data.cas_no):
         raise HTTPException(status_code=409, detail="该 CAS 的资料任务仍在处理中")
-    run = technical_documents.create_pipeline_run(db, uuid4().hex)
-    background_tasks.add_task(technical_documents.execute_fetch, run.run_id, data.cas_no, data.doc_types)
-    return run
+    return technical_documents.schedule_pipeline(db, user, data, background_tasks, "fetch")
 
 
 @router.post("/technical-documents/ingest", response_model=SchedulerJobRunRead, summary="解析 MinIO 资料并写入结构化及向量知识库")
@@ -128,9 +124,7 @@ def start_technical_document_ingest(
     if missing_types:
         missing_label = "、".join(sorted(value.upper() for value in missing_types))
         raise HTTPException(status_code=409, detail=f"请先将 {missing_label} 文件拉取到 MinIO")
-    run = technical_documents.create_pipeline_run(db, uuid4().hex)
-    background_tasks.add_task(technical_documents.execute_ingest, run.run_id, data.cas_no, data.doc_types)
-    return run
+    return technical_documents.schedule_pipeline(db, user, data, background_tasks, "ingest")
 
 
 @router.post("/overdue-scan", response_model=dict[str, int], summary="扫描逾期到货")

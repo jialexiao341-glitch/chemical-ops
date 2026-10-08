@@ -37,7 +37,7 @@ async function reloadRuns() {
   } finally {
     loading.value = false;
   }
-  if (runs.value.some((run) => run.status === 'RUNNING')) {
+  if (runs.value.some((run) => ['QUEUED', 'RUNNING', 'RETRYING'].includes(run.status))) {
     if (!refreshTimer) refreshTimer = setInterval(() => { void reloadRuns(); }, 5000);
   } else {
     stopPolling();
@@ -45,6 +45,8 @@ async function reloadRuns() {
 }
 
 function runSummary(run: TechnicalDocumentRun) {
+  if (run.status === 'QUEUED') return '已接收，等待后台执行';
+  if (run.status === 'RETRYING') return '暂时未完成，等待自动重试';
   const data = run.result_json;
   if (run.error_type) {
     if (/StatementError|scheduler_job_runs|SQL:|not JSON serializable/i.test(run.error_type)) {
@@ -104,7 +106,7 @@ onBeforeUnmount(stopPolling);
           <article v-for="run in runs" :key="run.run_id" class="space-y-3 rounded-md border border-border bg-card p-4">
             <header class="flex flex-wrap items-center gap-2">
               <Tag class="m-0" :color="run.status === 'SUCCEEDED' ? 'success' : run.status === 'FAILED' ? 'error' : 'processing'">
-                {{ run.status === 'SUCCEEDED' ? '完成' : run.status === 'FAILED' ? '失败' : '处理中' }}
+                {{ run.status === 'SUCCEEDED' ? '完成' : run.status === 'FAILED' ? '失败' : run.status === 'QUEUED' ? '等待执行' : run.status === 'RETRYING' ? '等待重试' : '处理中' }}
               </Tag>
               <span class="text-base font-semibold">CAS {{ run.result_json?.cas_no || '任务启动中' }}</span>
               <Tag v-if="runAction(run)" class="m-0" color="blue">{{ runAction(run) }}</Tag>

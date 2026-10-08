@@ -45,6 +45,8 @@ def production_config_errors(settings: Settings) -> list[str]:
         return []
 
     errors: list[str] = []
+    if settings.task_queue_enabled and _is_placeholder(settings.rabbitmq_password):
+        errors.append("RABBITMQ_PASSWORD 必须配置为非占位密码")
     if settings.debug:
         errors.append("DEBUG 必须为 false")
     if len(settings.jwt_secret_key.strip()) < 32 or _is_placeholder(settings.jwt_secret_key):

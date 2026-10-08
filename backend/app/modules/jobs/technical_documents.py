@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
@@ -165,9 +166,8 @@ def list_pipeline_runs(db: Session, *, limit: int = 50) -> list[SchedulerJobRun]
 def has_active_run(db: Session, cas: str) -> bool:
     statement = (
         select(SchedulerJobRun)
-        .where(SchedulerJobRun.task_name == PIPELINE_NAME, SchedulerJobRun.status == "RUNNING")
+        .where(SchedulerJobRun.task_name == PIPELINE_NAME, SchedulerJobRun.status.in_(("QUEUED", "RUNNING", "RETRYING")))
         .order_by(desc(SchedulerJobRun.started_at))
-        .limit(100)
     )
     runs = db.scalars(statement).all()
     return any((run.result_json or {}).get("cas_no") == cas for run in runs)
@@ -175,6 +175,31 @@ def has_active_run(db: Session, cas: str) -> bool:
 
 def create_pipeline_run(db: Session, run_id: str) -> SchedulerJobRun:
     return start_scheduled_run(db, run_id, task_name=PIPELINE_NAME)
+
+
+def schedule_pipeline(db, user, data, background_tasks, action):
+    """Persist task parameters at acceptance, with one queue delivery intent."""
+    queued = get_settings().technical_document_execution_mode == "rabbitmq"
+    from uuid import uuid4
+    run = start_scheduled_run(db, uuid4().hex, task_name=PIPELINE_NAME, commit=False)
+    run.status = "QUEUED" if queued else "RUNNING"
+    run.result_json = {"action": action, "cas_no": data.cas_no, "doc_types": data.doc_types, "stages": []}
+    try:
+        if queued:
+            from app.modules.task_queue.service import enqueue
+            enqueue(db, task_type=f"documents.{action}", business_id=run.run_id,
+                    actor_id=user.id, generation=0,
+                    payload={"cas_no": data.cas_no, "doc_types": data.doc_types},
+                    resource_key=f"documents:{data.cas_no}")
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        from fastapi import HTTPException
+        raise HTTPException(status_code=409, detail="该 CAS 的资料任务仍在处理中") from None
+    if not queued:
+        target = execute_fetch if action == "fetch" else execute_ingest
+        background_tasks.add_task(target, run.run_id, data.cas_no, data.doc_types)
+    return run
 
 
 def _execute_commands(run_id: str, cas: str, doc_types: list[str], action: str, commands: list[tuple[str, list[str]]]) -> None:

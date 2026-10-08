@@ -222,6 +222,7 @@ def test_store_and_load_roundtrip_idempotent(db_session):
     assert doc1.parse_status == "PARSED"
     assert doc1.name_zh == "乙醇"
     assert doc1.section_count == 16
+    original_ids = {section.section_no: section.id for section in service.load_sections(db_session, cas, "msds")}
 
     # 幂等：重复入库不产生重复章节
     service.store_parsed(
@@ -246,6 +247,7 @@ def test_store_and_load_roundtrip_idempotent(db_session):
 
     loaded = service.load_sections(db_session, cas, "msds")
     assert len(loaded) == 16
+    assert {section.section_no: section.id for section in loaded} == original_ids
     assert any("Flash point" in section.content for section in loaded)
 
 

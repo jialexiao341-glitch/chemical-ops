@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +31,12 @@ if str(ROOT / "backend") not in sys.path:
 from sqlalchemy import select  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
+from app.core.errors import BusinessValidationError  # noqa: E402
 from app.core.db import SessionLocal  # noqa: E402
 from app.modules.doc_kb import vector_store  # noqa: E402
 from app.modules.doc_kb.embedding import embed_texts  # noqa: E402
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection  # noqa: E402
+from app.modules.task_queue import context, service  # noqa: E402
 
 
 def load_parsed_sections(cas_list: list[str] | None = None, doc_type: str | None = None) -> list[dict[str, Any]]:
@@ -44,6 +47,7 @@ def load_parsed_sections(cas_list: list[str] | None = None, doc_type: str | None
         statement = (
             select(
                 AiDocumentSection.id,
+                AiDocumentSection.document_id,
                 AiDocumentSection.cas_no,
                 AiDocumentSection.doc_type,
                 AiDocumentSection.section_no,
@@ -65,6 +69,7 @@ def load_parsed_sections(cas_list: list[str] | None = None, doc_type: str | None
         return [
             {
                 "id": row.id,
+                "document_id": row.document_id,
                 "cas_no": row.cas_no,
                 "doc_type": row.doc_type,
                 "section_no": row.section_no,
@@ -80,11 +85,22 @@ def load_parsed_sections(cas_list: list[str] | None = None, doc_type: str | None
         db.close()
 
 
+@contextmanager
+def protected_write(document_id, generation, source_hash):
+    with SessionLocal() as db:
+        context.guard(db)
+        document = db.scalar(select(AiDocument).where(AiDocument.id == document_id).with_for_update())
+        if not document or (document.meta_json or {}).get("vector_generation") != generation or document.sha256 != source_hash:
+            raise service.ExecutionLost("Document generation changed")
+        yield
+        context.guard(db)
+        db.commit()
+
+
 async def run(args: argparse.Namespace) -> None:
+    if context.identity() and args.recreate:
+        raise ValueError("队列任务禁止重建整个集合")
     sections = load_parsed_sections(args.cas or None, args.doc_type)
-    if not sections:
-        print("没有可向量化的 PARSED 章节（先跑 scripts/parse_tds_msds.py）")
-        return
     settings = get_settings()
     print(
         f"sections={len(sections)} model={settings.embedding_model} "
@@ -92,41 +108,58 @@ async def run(args: argparse.Namespace) -> None:
     )
 
     client = vector_store.get_client()
+    vector_store.require_conditional_writes(client)
     started = time.perf_counter()
     total_points = 0
-    first_vector: list[float] | None = None
-
-    for offset in range(0, len(sections), args.batch):
-        batch = sections[offset : offset + args.batch]
-        vectors = await embed_texts([item["content"] for item in batch], settings)
-        if first_vector is None:
-            first_vector = vectors[0]
-            vector_store.ensure_collection(
-                client, len(first_vector), recreate=args.recreate
-            )
-            print(f"collection_ready dim={len(first_vector)} recreate={args.recreate}")
-        rows = [
-            {
-                "id": item["id"],
-                "vector": vector,
-                "payload": {
-                    "cas_no": item["cas_no"],
-                    "doc_type": item["doc_type"],
-                    "section_no": item["section_no"],
-                    "section_key": item["section_key"],
-                    "title": item["title"],
-                    "name_zh": item["name_zh"],
-                    "content": item["content"],
-                    "char_count": item["char_count"],
-                    "model": settings.embedding_model,
-                },
-            }
-            for item, vector in zip(batch, vectors)
-        ]
-        total_points += vector_store.upsert_sections(client, rows)
-        done = min(offset + args.batch, len(sections))
-        elapsed = time.perf_counter() - started
-        print(f"  [{done}/{len(sections)}] upserted ({elapsed:.1f}s)")
+    with SessionLocal() as db:
+        statement = select(AiDocument.id)
+        if args.cas:
+            statement = statement.where(AiDocument.cas_no.in_(args.cas))
+        if args.doc_type:
+            statement = statement.where(AiDocument.doc_type == args.doc_type)
+        document_ids = list(db.scalars(statement).all())
+    recreate = args.recreate
+    for document_id in document_ids:
+        with SessionLocal() as db:
+            context.guard(db)
+            document = db.scalar(select(AiDocument).where(AiDocument.id == document_id).with_for_update())
+            generation = (document.meta_json or {}).get("vector_generation", 0) + 1
+            document.meta_json = {**(document.meta_json or {}), "vector_generation": generation}
+            cas, doc_type, source_hash = document.cas_no, document.doc_type, document.sha256
+            db.commit()
+        selected = [item for item in sections if item["document_id"] == document_id]
+        for offset in range(0, len(selected), args.batch):
+            batch = selected[offset : offset + args.batch]
+            vectors = await embed_texts([item["content"] for item in batch], settings)
+            with protected_write(document_id, generation, source_hash):
+                vector_store.ensure_collection(client, len(vectors[0]), recreate=recreate)
+            recreate = False
+            rows = [
+                {
+                    "id": item["id"],
+                    "vector": vector,
+                    "payload": {
+                        "cas_no": item["cas_no"],
+                        "doc_type": item["doc_type"],
+                        "section_no": item["section_no"],
+                        "section_key": item["section_key"],
+                        "title": item["title"],
+                        "name_zh": item["name_zh"],
+                        "content": item["content"],
+                        "char_count": item["char_count"],
+                        "model": settings.embedding_model,
+                    },
+                }
+                for item, vector in zip(batch, vectors)
+            ]
+            with protected_write(document_id, generation, source_hash):
+                vector_store.prepare_document_points(client, rows, cas=cas, doc_type=doc_type, generation=generation)
+            with protected_write(document_id, generation, source_hash):
+                total_points += vector_store.conditional_upsert_sections(client, rows, cas=cas, doc_type=doc_type, generation=generation)
+        with protected_write(document_id, generation, source_hash):
+            if client.collection_exists(vector_store.collection_name()):
+                vector_store.cleanup_document_points(client, [item["id"] for item in selected],
+                    cas=cas, doc_type=doc_type, generation=generation)
 
     elapsed = time.perf_counter() - started
     print(
@@ -148,7 +181,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     if args.batch < 1:
         raise SystemExit("--batch 必须大于 0")
-    asyncio.run(run(args))
+    try:
+        asyncio.run(run(args))
+    except BusinessValidationError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(78) from None
 
 
 if __name__ == "__main__":

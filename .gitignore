@@ -31,3 +31,7 @@ storage/
 
 # 本地构建辅助缓存（含预下载的大体积 tarball）
 .cache/
+
+# Local agent skills and OpenSpec files
+/.agents/skills/
+/openspec/

@@ -23,6 +23,7 @@ from app.modules.ai.schema import AIChatMessage, AIChatRequest
 from app.modules.inventory.model import Warehouse
 from app.modules.rfqs.model import RFQ
 from app.modules.system.model import User
+from app.modules.task_queue import context as execution_context
 
 
 PLANNER_PROMPT = """你是 ChemicalOps 只读采购 Agent 的下一步规划器。只输出 JSON。
@@ -301,6 +302,11 @@ def get_task(db: Session, user: User, task_id: str) -> TaskRead:
 def _persist(db: Session, user: User, state: RunState) -> None:
     """用版本号和 RUNNING 状态更新快照，防重复继续或取消后的旧运行覆盖状态。"""
     memory = _sync_memory_state(state)
+    try:
+        execution = execution_context.guard(db)
+    except Exception:
+        db.rollback()
+        raise TaskInterrupted() from None
     count = db.execute(update(AIAgentTask).where(AIAgentTask.id == state.task_id,
         AIAgentTask.user_id == user.id, AIAgentTask.revision == state.revision,
         AIAgentTask.status == "RUNNING").values(
@@ -320,15 +326,34 @@ def _persist(db: Session, user: User, state: RunState) -> None:
             AIMessage.conversation_id == state.chat["conversation_id"]).values(
             content=state.reply or "正在查询业务数据…"))
         _save_conversation_memory(db, user, state.chat["conversation_id"], memory)
+    if execution:
+        execution.business_revision = state.revision + 1
+        execution.checkpoint = {**execution.checkpoint, "decisions": state.decisions,
+                                "failures": state.failures, "seen_calls": sorted(state.seen_calls),
+                                "verified_product": state.verified_product,
+                                "verified_rfq_item": state.verified_rfq_item}
+        if state.status != "RUNNING":
+            from app.modules.task_queue import service as queue_service
+            db.flush()  # Preserve the terminal checkpoint before the fresh locking read.
+            queue_service.finish(db, execution.id, execution.fencing_token,
+                                 status=state.status, error_code=state.error_code)
     db.commit()
     state.revision += 1
 
 
 def _assert_running(db: Session, user: User, state: RunState) -> None:
     """短暂读取任务当前版本并释放锁；网络等待和工具执行期间不持有行锁。"""
+    try:
+        execution = execution_context.guard(db)
+    except Exception:
+        db.rollback()
+        raise TaskInterrupted() from None
+    active = not execution or db.scalar(select(User.status).where(User.id == user.id)) == "ACTIVE"
     task = db.execute(select(AIAgentTask.status, AIAgentTask.revision).where(
         AIAgentTask.id == state.task_id, AIAgentTask.user_id == user.id).with_for_update()).first()
     db.commit()
+    if not active:
+        raise AuthorizationError("用户已停用")
     if task is None or task.status != "RUNNING" or task.revision != state.revision:
         raise TaskInterrupted()
 
@@ -404,6 +429,8 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
         if current.decisions >= settings.agent_max_steps:
             raise BusinessValidationError("STEP_LIMIT")
         catalog = _check_trace_access(db, user, current.trace)
+        if execution_context.identity() and not catalog:
+            raise AuthorizationError("当前没有可用的任务工具权限")
         current.decisions += 1
         current.action = await _decide(current, catalog, settings)
         _assert_running(db, user, current)
@@ -483,6 +510,10 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
     except TaskInterrupted:
         return get_task(db, user, state.task_id)
     except Exception as exc:
+        from app.modules.task_queue.errors import transient
+        if execution_context.identity() and transient(exc):
+            db.rollback()
+            raise  # Queue adapter persists a bounded retry from the last checkpoint.
         state.status = "FAILED"
         codes = {"STEP_LIMIT", "CONTEXT_LIMIT", "INVALID_EVIDENCE", "INCOMPLETE_TASK", "REPEATED_TOOL", "TOOL_ERRORS"}
         state.error_code = ("TASK_TIMEOUT" if isinstance(exc, TimeoutError) else
@@ -563,7 +594,7 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
     return state
 
 
-def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, conversation_id: int | None) -> None:
+def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, conversation_id: int | None, *, commit: bool = True) -> None:
     """同一事务保存会话、输入及任务引用；聊天历史不复制业务证据。"""
     continuing = state.chat is not None
     conversation = service._ensure_conversation(db, user, AIChatRequest(
@@ -615,25 +646,28 @@ def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, c
     _save_conversation_memory(db, user, conversation.id, memory)
     conversation.last_message_at = _now()
     conversation.updated_at = _now()
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
-def prepare_chat_task(db: Session, user: User, data: ChatTaskCreate) -> RunState:
+def prepare_chat_task(db: Session, user: User, data: ChatTaskCreate, *, commit: bool = True) -> RunState:
     if data.conversation_id:
         service._get_owned_conversation(db, user, data.conversation_id)
     state = prepare_task(db, user, data, commit=False)
-    _attach_chat_turn(db, user, state, data.question, data.conversation_id)
+    _attach_chat_turn(db, user, state, data.question, data.conversation_id, commit=commit)
     return state
 
 
-def prepare_chat_continue(db: Session, user: User, task_id: str, data: TaskContinue) -> RunState:
+def prepare_chat_continue(db: Session, user: User, task_id: str, data: TaskContinue, *, commit: bool = True) -> RunState:
     task = _load(db, user, task_id)
     chat = task.payload.get("chat")
     if not chat:
         raise BusinessValidationError("该任务未关联聊天会话")
     service._get_owned_conversation(db, user, chat["conversation_id"])
     state = prepare_continue(db, user, task_id, data, commit=False)
-    _attach_chat_turn(db, user, state, data.question, chat["conversation_id"])
+    _attach_chat_turn(db, user, state, data.question, chat["conversation_id"], commit=commit)
     return state
 
 
@@ -653,6 +687,14 @@ async def run_prepared_task(task_id: str, user_id: int, revision: int) -> None:
         state = RunState(task_id, revision, task.payload["messages"], list(task.payload["trace"]),
             task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"),
             chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {})
+        execution = execution_context.guard(db)
+        if execution:
+            state.decisions = execution.checkpoint.get("decisions", 0)
+            state.failures = execution.checkpoint.get("failures", 0)
+            state.seen_calls = set(execution.checkpoint.get("seen_calls", []))
+            state.verified_product = execution.checkpoint.get("verified_product")
+            state.verified_rfq_item = execution.checkpoint.get("verified_rfq_item")
+            db.commit()
         if db.scalar(select(User.status).where(User.id == user_id)) != "ACTIVE":
             state.status, state.error_code, state.reply = "FAILED", "PERMISSION_DENIED", "用户状态已变化，任务停止。"
             try:
@@ -678,5 +720,31 @@ def cancel_task(db: Session, user: User, task_id: str) -> TaskRead:
         if count == 1 and task.payload.get("chat"):
             db.execute(update(AIMessage).where(AIMessage.id == task.payload["chat"]["assistant_message_id"]).values(content="任务已取消。"))
             _save_conversation_memory(db, user, task.payload["chat"]["conversation_id"], memory)
+        if count == 1 and get_settings().agent_execution_mode == "rabbitmq":
+            from sqlalchemy import delete
+            from app.modules.task_queue.model import TaskExecution, TaskResourceLock
+            executions = list(db.scalars(select(TaskExecution).where(
+                TaskExecution.business_id == task_id, TaskExecution.task_type == "agent.run",
+                TaskExecution.actor_id == user.id, TaskExecution.status.in_(("QUEUED", "RUNNING", "RETRYING")))
+                .with_for_update()).all())
+            for execution in executions:
+                execution.status = "CANCELLED"
+                execution.fencing_token += 1
+                execution.lease_until = None
+                db.execute(delete(TaskResourceLock).where(TaskResourceLock.execution_id == execution.id))
         db.commit()
     return get_task(db, user, task_id)
+
+
+def schedule_async(db, user, background, prepare, *args):
+    queued = get_settings().agent_execution_mode == "rabbitmq"
+    state = prepare(db, user, *args, commit=not queued)
+    if queued:
+        from app.modules.task_queue.service import enqueue
+        enqueue(db, task_type="agent.run", business_id=state.task_id, actor_id=user.id,
+                generation=state.revision, revision=state.revision, payload={},
+                resource_key=f"agent:{state.task_id}")
+        db.commit()
+    else:
+        background.add_task(run_prepared_task, state.task_id, user.id, state.revision)
+    return get_task(db, user, state.task_id)

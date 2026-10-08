@@ -460,9 +460,12 @@ def store_parsed(
     name_zh: str | None = None,
     sha256: str | None = None,
 ) -> AiDocument:
-    """幂等入库：同 (cas, doc_type) 覆盖更新，章节先删后插；质检不过则清空章节。"""
+    """按文档与章节位置稳定更新；质检不过或消失的章节删除。"""
 
-    document = db.scalar(select(AiDocument).where(AiDocument.cas_no == cas, AiDocument.doc_type == doc_type))
+    from app.modules.task_queue.context import guard
+    guard(db)
+
+    document = db.scalar(select(AiDocument).where(AiDocument.cas_no == cas, AiDocument.doc_type == doc_type).with_for_update())
     if document is None:
         document = AiDocument(cas_no=cas, doc_type=doc_type, source_bucket=bucket, object_key=object_key)
         db.add(document)
@@ -476,14 +479,24 @@ def store_parsed(
     sections = parsed.sections if parsed.status == "PARSED" else []
     document.section_count = len(sections)
     document.char_count = sum(section.char_count for section in sections)
-    document.meta_json = parsed.meta or None
+    internal_generation = (document.meta_json or {}).get("vector_generation", 0)
+    document.meta_json = {**parsed.meta, "vector_generation": internal_generation}
     document.sha256 = sha256
     db.flush()
 
-    db.execute(delete(AiDocumentSection).where(AiDocumentSection.document_id == document.id))
+    existing = list(db.scalars(select(AiDocumentSection).where(AiDocumentSection.document_id == document.id)).all())
+    by_key = {}
+    for row in existing:
+        key = (row.section_no, row.section_key if row.section_no is None else None)
+        if key in by_key:
+            db.delete(row)  # Repair historical duplicates in this document only.
+        else:
+            by_key[key] = row
     for section in sections:
-        db.add(
-            AiDocumentSection(
+        key = (section.section_no, section.section_key if section.section_no is None else None)
+        row = by_key.pop(key, None)
+        if row is None:
+            row = AiDocumentSection(
                 document_id=document.id,
                 cas_no=cas,
                 doc_type=doc_type,
@@ -493,7 +506,15 @@ def store_parsed(
                 content=section.content,
                 char_count=section.char_count,
             )
-        )
+            db.add(row)
+        else:
+            row.section_key = section.section_key
+            row.title = section.title
+            row.content = section.content
+            row.char_count = section.char_count
+    for row in by_key.values():
+        db.delete(row)
+    guard(db)
     db.commit()
     db.refresh(document)
     return document

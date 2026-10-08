@@ -36,6 +36,17 @@ def test_fetch_requires_each_requested_type_to_be_available_in_minio():
     ) == []
 
 
+def test_queue_waiting_and_retrying_are_active_without_recent_run_limit(monkeypatch):
+    """排队和重试参与 CAS 互斥，不以固定最近 100 条作为安全边界。"""
+    from app.modules.jobs import technical_documents as queued_documents
+    class Database:
+        def scalars(self, statement):
+            sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+            assert "LIMIT" not in sql and "QUEUED" in sql and "RETRYING" in sql
+            return type("Rows", (), {"all": lambda self: [type("Run", (), {"result_json": {"cas_no": "64-17-5"}})()]})()
+    assert queued_documents.has_active_run(Database(), "64-17-5")
+
+
 def test_partial_fetch_is_recorded_as_failed_with_available_files_preserved(monkeypatch):
     class Run:
         run_id = "run-1"

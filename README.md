@@ -66,6 +66,8 @@ Copy-Item .env.example .env
 
 编辑 `.env` 配置 MySQL、JWT 和管理员账号。按需配置模型、MinIO、Qdrant 等服务。不要提交 `.env` 或真实凭据。
 
+可选的 RabbitMQ 单机部署、独立投递器与两类 Worker 启动参见 [消息任务运行说明](docs/RabbitMQ任务运行说明.md)。两类执行模式默认保持 `in_process`；仅启动 RabbitMQ 不会改变业务执行路径，启用前需启动任务进程并处理旧模式在途任务。
+
 ```powershell
 python scripts/init_database.py
 ```

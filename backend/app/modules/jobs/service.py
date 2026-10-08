@@ -31,12 +31,15 @@ def list_job_runs(db: Session, *, limit: int = 50) -> list[SchedulerJobRun]:
     return list(db.scalars(select(SchedulerJobRun).order_by(desc(SchedulerJobRun.started_at), desc(SchedulerJobRun.id)).limit(limit)).all())
 
 
-def start_scheduled_run(db: Session, run_id: str, *, task_name: str = "overdue_scan") -> SchedulerJobRun:
+def start_scheduled_run(db: Session, run_id: str, *, task_name: str = "overdue_scan", commit: bool = True) -> SchedulerJobRun:
     """在开始业务处理前持久化一次后台执行记录。"""
 
     run = SchedulerJobRun(run_id=run_id, task_name=task_name, status="RUNNING", attempt_count=0)
     db.add(run)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(run)
     return run
 
@@ -48,6 +51,7 @@ def update_scheduled_run(
     attempt_count: int | None = None,
     result: dict[str, Any] | None = None,
     error_type: str | None = None,
+    commit: bool = True,
 ) -> None:
     """记录尝试次数及任务成功或失败结果。"""
 
@@ -62,7 +66,10 @@ def update_scheduled_run(
         run.status = "FAILED"
         run.error_type = error_type[:128]
         run.finished_at = datetime.now()
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def scan_overdue_deliveries(db: Session, actor: User) -> dict[str, int]:
