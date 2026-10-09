@@ -66,7 +66,7 @@ Copy-Item .env.example .env
 
 编辑 `.env` 配置 MySQL、JWT 和管理员账号。按需配置模型、MinIO、Qdrant 等服务。不要提交 `.env` 或真实凭据。
 
-可选的 MySQL 持久任务队列与两类独立 Worker 启动参见 [数据库任务队列运行说明](docs/数据库任务队列运行说明.md)。两类执行模式默认保持 `in_process`；启动 Worker 并处理旧模式在途任务后，可按需切换为 `database`，无需消息中间件。
+资料与 Agent 默认使用 MySQL 持久任务队列（`database`），无需消息中间件。开发启动入口自动启动对应的独立 Worker；生产部署及显式回退 `in_process` 见 [数据库任务队列运行说明](docs/数据库任务队列运行说明.md)。
 
 ```powershell
 python scripts/init_database.py
@@ -81,7 +81,7 @@ python scripts/migrate_database.py upgrade
 
 ### 启动服务
 
-后端终端：
+后端终端（开发入口同时启动 API、资料 Worker 和 Agent Worker；退出时一并停止）：
 
 ```powershell
 .\.venv\Scripts\Activate.ps1

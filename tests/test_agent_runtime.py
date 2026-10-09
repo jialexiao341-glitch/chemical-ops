@@ -30,7 +30,7 @@ USER = SimpleNamespace(id=7)
 def task_db(tool_db, monkeypatch):
     """复用真实 SQL 的隔离业务样本，额外建立任务表和有限预算配置。"""
     AIAgentTask.__table__.create(tool_db.bind)
-    monkeypatch.setattr(runtime, "get_settings", lambda: Settings(_env_file=None, openai_api_key="test-key"))
+    monkeypatch.setattr(runtime, "get_settings", lambda: Settings(_env_file=None, agent_execution_mode="in_process", openai_api_key="test-key"))
     return tool_db
 
 
@@ -169,20 +169,20 @@ def test_repeat_call_and_step_limit_stop(task_db, model_script, monkeypatch):
     actions, _ = model_script
     actions.extend([tool('catalog.search_products', keyword='测试乙醇')] * 2)
     assert start(task_db).error_code == 'REPEATED_TOOL'
-    monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(_env_file=None, agent_max_steps=1))
+    monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(_env_file=None, agent_execution_mode="in_process", agent_max_steps=1))
     actions.append(tool('catalog.search_products', keyword='测试乙醇'))
     assert start(task_db).error_code == 'STEP_LIMIT'
 
 
 def test_context_and_time_budget_stop(task_db, model_script, monkeypatch):
     """超出上下文或模型等待预算时安全停止，不能无限积累上下文/等待。"""
-    monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(_env_file=None, agent_context_max_chars=2000))
+    monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(_env_file=None, agent_execution_mode="in_process", agent_context_max_chars=2000))
     assert start(task_db).error_code == 'CONTEXT_LIMIT'
     async def slow(*_args, **_kwargs):
         """模拟外部模型长时间未响应。"""
         await asyncio.sleep(2)
     monkeypatch.setattr(runtime.service, 'chat', slow)
-    monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(_env_file=None, agent_task_timeout_seconds=1))
+    monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(_env_file=None, agent_execution_mode="in_process", agent_task_timeout_seconds=1))
     assert start(task_db).error_code == 'TASK_TIMEOUT'
 
 

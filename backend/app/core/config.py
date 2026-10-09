@@ -76,8 +76,8 @@ class Settings(BaseSettings):
     business_alerts_scheduler_enabled: bool = False
     idempotency_required: bool = False
 
-    technical_document_execution_mode: Literal["in_process", "database"] = "in_process"
-    agent_execution_mode: Literal["in_process", "database"] = "in_process"
+    technical_document_execution_mode: Literal["in_process", "database"] = "database"
+    agent_execution_mode: Literal["in_process", "database"] = "database"
     task_poll_interval_seconds: float = Field(default=1.0, ge=0.1, le=60)
     task_max_attempts: int = Field(default=3, ge=1, le=10)
     task_lease_seconds: int = Field(default=60, ge=15)

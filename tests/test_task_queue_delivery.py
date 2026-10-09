@@ -140,7 +140,7 @@ def test_document_queue_drains_before_returning_to_legacy_path(db, monkeypatch):
     from fastapi import BackgroundTasks
     from app.modules.jobs import technical_documents
     from app.modules.task_queue import adapters
-    settings = Settings(_env_file=None, technical_document_execution_mode="database")
+    settings = Settings(_env_file=None, technical_document_execution_mode="database", agent_execution_mode="in_process")
     monkeypatch.setattr(technical_documents, "get_settings", lambda: settings)
     request = SimpleNamespace(cas_no="rollout-test", doc_types=["msds"])
     queued_background = BackgroundTasks()

@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[4]
 
 
 async def database(factory, operation):
-    """DB waits run outside the event loop so AMQP and sibling leases keep ticking."""
+    """DB waits run outside the event loop so sibling leases keep ticking."""
     def call():
         with factory() as db:
             return operation(db)

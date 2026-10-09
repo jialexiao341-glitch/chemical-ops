@@ -1,4 +1,4 @@
-"""Queue configuration must be explicit without changing existing defaults."""
+"""Database queues are the default; in-process execution is an explicit fallback."""
 
 import pytest
 from pydantic import ValidationError
@@ -11,10 +11,10 @@ def settings(**values):
     return Settings(_env_file=None, **values)
 
 
-def test_default_does_not_require_a_broker():
+def test_default_enables_database_queues_without_a_broker():
     config = settings()
-    assert not config.task_queue_enabled
-    assert config.technical_document_execution_mode == config.agent_execution_mode == "in_process"
+    assert config.task_queue_enabled
+    assert config.technical_document_execution_mode == config.agent_execution_mode == "database"
 
 
 def test_transport_logs_redact_clear_and_encoded_credentials():
@@ -28,11 +28,11 @@ def test_transport_logs_redact_clear_and_encoded_credentials():
 
 
 @pytest.mark.parametrize("mode", ["technical_document_execution_mode", "agent_execution_mode"])
-def test_each_queue_can_be_enabled_independently(mode):
-    config = settings(**{mode: "database"})
+def test_each_queue_can_fall_back_independently(mode):
+    config = settings(**{mode: "in_process"})
     assert config.task_queue_enabled
     other = "agent_execution_mode" if mode.startswith("technical") else "technical_document_execution_mode"
-    assert getattr(config, other) == "in_process"
+    assert getattr(config, other) == "database"
 
 
 @pytest.mark.parametrize("values", [
