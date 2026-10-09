@@ -31,7 +31,8 @@ PERMISSIONS = (
     ("procurement.rfqs.read", "查看询价单", "API", "procurement.rfqs", "read"),
     ("procurement.rfqs.write", "管理询价单", "API", "procurement.rfqs", "write"),
     ("procurement.rfqs.quote", "录入供应商报价", "API", "procurement.rfqs", "quote"),
-    ("procurement.rfqs.compare", "生成比价和定标", "API", "procurement.rfqs", "compare"),
+    ("procurement.rfqs.compare", "生成报价比较", "API", "procurement.rfqs", "compare"),
+    ("procurement.rfqs.award", "确认中选报价", "API", "procurement.rfqs", "award"),
     ("procurement.orders.read", "查看采购订单", "API", "procurement.orders", "read"),
     ("procurement.orders.write", "管理采购订单", "API", "procurement.orders", "write"),
     ("procurement.orders.approve", "审批采购订单", "API", "procurement.orders", "approve"),
@@ -41,6 +42,7 @@ PERMISSIONS = (
     ("quality.acceptances.write", "管理质量验收", "API", "quality.acceptances", "write"),
     ("quality.acceptances.review", "复核质量报告", "API", "quality.acceptances", "review"),
     ("warehouse.inventory.read", "查看库存", "API", "warehouse.inventory", "read"),
+    ("warehouse.inventory.expiry.read", "查看库存有效期预警", "API", "warehouse.inventory.expiry", "read"),
     ("warehouse.inventory.write", "执行库存入库", "API", "warehouse.inventory", "write"),
     ("warehouse.inventory.issue.read", "查看库存领用", "API", "warehouse.inventory.issue", "read"),
     ("warehouse.inventory.issue.write", "管理库存领用", "API", "warehouse.inventory.issue", "write"),
@@ -92,8 +94,35 @@ PERMISSIONS = (
     ("system.files.write", "上传文件", "API", "system.files", "write"),
     ("system.files.attach", "关联业务附件", "API", "system.files", "attach"),
     ("warehouse.inventory.cost.write", "执行 FIFO 成本出库", "API", "warehouse.inventory.cost", "write"),
+    ("warehouse.inventory.cost.read", "查看库存成本", "API", "warehouse.inventory.cost", "read"),
+    ("master.chemicals.delete", "删除化学品", "API", "master.chemicals", "delete"),
+    ("master.products.delete", "删除产品", "API", "master.products", "delete"),
+    ("master.suppliers.deactivate", "停用供应商", "API", "master.suppliers", "deactivate"),
+    ("master.chemicals.import", "导入化学品", "API", "master.chemicals", "import"),
+    ("master.products.import", "导入产品", "API", "master.products", "import"),
+    ("master.suppliers.import", "导入供应商", "API", "master.suppliers", "import"),
     ("dashboard.read", "查看运营 Dashboard", "API", "dashboard", "read"),
     ("ai.workspace.read", "访问 AI 工作台", "API", "ai.workspace", "read"),
+)
+
+# Batch export permissions are deliberately separate from list access. The
+# role baseline grants these only to SYS_ADMIN until the role matrix says otherwise.
+_BATCH_RESOURCES = (
+    "master.chemicals", "master.products", "master.suppliers", "system.users",
+    "system.departments", "system.roles", "system.permissions", "procurement.requests",
+    "procurement.rfqs", "procurement.orders", "warehouse.deliveries",
+    "warehouse.inventory.balances", "warehouse.inventory.transactions",
+    "warehouse.inventory.issues", "warehouse.inventory.transfers",
+    "warehouse.inventory.stocktakes", "quality.acceptances", "finance.reconciliations",
+    "finance.invoices", "finance.payments", "finance.settlements", "operations.exceptions",
+)
+_SUPPLIER_EXPORT_RESOURCES = (
+    "supplier.portal", "supplier.portal.rfq", "supplier.portal.delivery",
+    "supplier.portal.shipment", "supplier.portal.quality", "supplier.portal.reconciliation",
+)
+PERMISSIONS += tuple(
+    (f"{resource}.export", f"导出{resource}", "API", resource, "export")
+    for resource in (*_BATCH_RESOURCES, *_SUPPLIER_EXPORT_RESOURCES)
 )
 
 DEPARTMENTS = (
@@ -108,24 +137,20 @@ DEPARTMENTS = (
 ROLE_SCOPES = {
     "SYS_ADMIN": {code for code, *_ in PERMISSIONS},
     "PROCUREMENT_MANAGER": {
-        "master.chemicals.read", "master.chemicals.write", "master.products.read", "master.products.write",
+        "master.chemicals.read", "master.products.read",
         "master.suppliers.read", "master.suppliers.write",
         "procurement.requests.read", "procurement.requests.write", "procurement.requests.approve",
-        "procurement.rfqs.read", "procurement.rfqs.write", "procurement.rfqs.quote", "procurement.rfqs.compare",
+        "procurement.rfqs.read", "procurement.rfqs.write", "procurement.rfqs.quote", "procurement.rfqs.compare", "procurement.rfqs.award",
         "procurement.orders.read", "procurement.orders.write", "procurement.orders.approve",
-        "warehouse.deliveries.read", "warehouse.deliveries.write",
-        "quality.acceptances.read", "quality.acceptances.write",
-        "warehouse.inventory.read", "warehouse.inventory.write",
-        "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.issue.approve", "warehouse.inventory.issue.execute",
-        "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.transfer.approve",
-        "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.stocktake.approve",
-        "warehouse.inventory.freeze.write",
+        "warehouse.deliveries.read",
+        "quality.acceptances.read",
+        "warehouse.inventory.read", "warehouse.inventory.expiry.read",
         "operations.exceptions.read", "operations.exceptions.write",
         "system.notifications.read", "system.notifications.write",
-        "system.files.read", "system.files.download", "system.files.write", "system.files.attach", "warehouse.inventory.cost.write",
+        "system.files.read", "system.files.download", "system.files.write", "system.files.attach",
         "dashboard.read",
-        "warehouse.inventory.return.read", "warehouse.inventory.return.write", "warehouse.inventory.return.approve",
-        "procurement.replenishment.read", "procurement.replenishment.write", "procurement.replenishment.approve",
+        "warehouse.inventory.return.read", "warehouse.inventory.return.approve",
+        "procurement.replenishment.read", "procurement.replenishment.write", "procurement.replenishment.approve", "master.suppliers.import",
     },
     "BUYER": {
         "master.chemicals.read", "master.products.read",
@@ -134,25 +159,22 @@ ROLE_SCOPES = {
         "procurement.rfqs.read", "procurement.rfqs.write", "procurement.rfqs.quote",
         "procurement.orders.read", "procurement.orders.write",
         "warehouse.deliveries.read",
-        "warehouse.inventory.read",
-        "warehouse.inventory.issue.read",
-        "warehouse.inventory.transfer.read",
-        "warehouse.inventory.stocktake.read",
+        "procurement.rfqs.compare", "warehouse.inventory.expiry.read", "warehouse.inventory.return.read",
         "operations.exceptions.read",
         "system.notifications.read", "system.notifications.write",
     },
     "TECHNICAL": {
-        "master.chemicals.read", "master.chemicals.write", "master.products.read", "master.products.write",
+        "master.chemicals.read", "master.chemicals.write", "master.chemicals.import", "master.products.read", "master.products.write", "master.products.import",
         "warehouse.inventory.issue.read", "warehouse.inventory.issue.write",
         "system.notifications.read", "system.notifications.write",
     },
-    "WAREHOUSE": {"master.products.read", "master.suppliers.read", "warehouse.deliveries.read", "warehouse.deliveries.write", "warehouse.inventory.read", "warehouse.inventory.write", "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.issue.execute", "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.freeze.write", "warehouse.inventory.return.read", "warehouse.inventory.return.write", "operations.exceptions.read", "operations.exceptions.write", "system.notifications.read", "system.notifications.write", "system.files.read", "system.files.download", "system.files.write", "system.files.attach", "warehouse.inventory.cost.write"},
-    "QUALITY": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "quality.acceptances.read", "quality.acceptances.write", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "operations.exceptions.write", "system.notifications.read", "system.notifications.write"},
-    "QUALITY_MANAGER": {"master.products.read", "quality.acceptances.read", "quality.acceptances.write", "quality.acceptances.review", "system.files.read", "system.files.download", "system.notifications.read"},
-    "FINANCE_VIEWER": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.requests.read", "procurement.rfqs.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "warehouse.inventory.read", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "system.notifications.read", "system.notifications.write", "dashboard.read"},
-    "FINANCE_CLERK": {"finance.reconciliations.read", "finance.reconciliations.write", "finance.invoices.read", "finance.invoices.write", "finance.payments.read", "finance.payments.write", "finance.settlements.read", "finance.settlements.write", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "system.files.read", "system.files.download", "system.files.write", "system.files.attach"},
-    "FINANCE_MANAGER": {"finance.reconciliations.read", "finance.reconciliations.write", "finance.invoices.read", "finance.invoices.write", "finance.invoices.verify", "finance.payments.read", "finance.payments.write", "finance.payments.approve", "finance.settlements.read", "finance.settlements.write", "finance.settlements.approve", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "system.files.read", "system.files.download", "system.files.write", "system.files.attach", "dashboard.read"},
-    "MANAGEMENT_VIEWER": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.requests.read", "procurement.rfqs.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "warehouse.inventory.read", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "system.notifications.read", "system.notifications.write", "dashboard.read"},
+    "WAREHOUSE": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "warehouse.deliveries.write", "quality.acceptances.read", "warehouse.inventory.read", "warehouse.inventory.expiry.read", "warehouse.inventory.write", "warehouse.inventory.issue.read", "warehouse.inventory.issue.write", "warehouse.inventory.issue.execute", "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write", "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write", "warehouse.inventory.freeze.write", "warehouse.inventory.return.read", "warehouse.inventory.return.write", "procurement.replenishment.read", "operations.exceptions.read", "operations.exceptions.write", "system.notifications.read", "system.notifications.write", "system.files.read", "system.files.download", "system.files.write", "system.files.attach", "warehouse.inventory.cost.write"},
+    "QUALITY": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "quality.acceptances.write", "warehouse.inventory.read", "warehouse.inventory.expiry.read", "warehouse.inventory.return.read", "operations.exceptions.read", "operations.exceptions.write", "system.notifications.read", "system.notifications.write"},
+    "QUALITY_MANAGER": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "quality.acceptances.write", "quality.acceptances.review", "warehouse.inventory.read", "warehouse.inventory.expiry.read", "warehouse.inventory.return.read", "operations.exceptions.read", "operations.exceptions.write", "procurement.replenishment.read", "system.files.read", "system.files.download", "system.notifications.read"},
+    "FINANCE_VIEWER": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "warehouse.inventory.read", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "procurement.replenishment.read", "finance.reconciliations.read", "finance.invoices.read", "finance.payments.read", "finance.settlements.read", "system.notifications.read", "system.notifications.write", "dashboard.read"},
+    "FINANCE_CLERK": {"finance.reconciliations.read", "finance.reconciliations.write", "finance.invoices.read", "finance.invoices.write", "finance.payments.read", "finance.payments.write", "finance.settlements.read", "finance.settlements.write", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "procurement.replenishment.read", "system.files.read", "system.files.download", "system.files.write", "system.files.attach"},
+    "FINANCE_MANAGER": {"finance.reconciliations.read", "finance.reconciliations.write", "finance.invoices.read", "finance.invoices.write", "finance.invoices.verify", "finance.payments.read", "finance.payments.write", "finance.payments.approve", "finance.settlements.read", "finance.settlements.write", "finance.settlements.approve", "master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "warehouse.inventory.read", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "procurement.replenishment.read", "system.files.read", "system.files.download", "system.files.write", "system.files.attach", "dashboard.read"},
+    "MANAGEMENT_VIEWER": {"master.chemicals.read", "master.products.read", "master.suppliers.read", "procurement.requests.read", "procurement.rfqs.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read", "warehouse.inventory.read", "warehouse.inventory.expiry.read", "warehouse.inventory.issue.read", "warehouse.inventory.transfer.read", "warehouse.inventory.stocktake.read", "operations.exceptions.read", "procurement.replenishment.read", "finance.reconciliations.read", "finance.invoices.read", "finance.payments.read", "finance.settlements.read", "system.notifications.read", "system.notifications.write", "dashboard.read"},
     "SUPPLIER_PORTAL": {
         "supplier.portal.read", "supplier.portal.confirm",
         "supplier.portal.rfq.read", "supplier.portal.rfq.quote",
@@ -169,17 +191,6 @@ for _role_code, _scope in ROLE_SCOPES.items():
     _scope.add("dashboard.read")
     if _role_code != "SUPPLIER_PORTAL":
         _scope.add("ai.workspace.read")
-
-REVOKED_ROLE_PERMISSIONS = {
-    "BUYER": {
-        "procurement.orders.approve", "procurement.rfqs.compare",
-        "master.products.write", "master.suppliers.write",
-    },
-    "TECHNICAL": {
-        "warehouse.inventory.transfer.read", "warehouse.inventory.transfer.write",
-        "warehouse.inventory.stocktake.read", "warehouse.inventory.stocktake.write",
-    },
-}
 
 ROLE_NAMES = {
     "SYS_ADMIN": "系统管理员",
@@ -267,15 +278,16 @@ def main() -> None:
         for role_code, scope in ROLE_SCOPES.items():
             role = roles[role_code]
             bound_ids = set(db.scalars(select(RolePermission.permission_id).where(RolePermission.role_id == role.id)).all())
+            desired_ids = {permissions[permission_code].id for permission_code in scope}
             for permission_code in scope:
                 permission_id = permissions[permission_code].id
                 if permission_id not in bound_ids:
                     db.add(RolePermission(role_id=role.id, permission_id=permission_id))
-            for permission_code in REVOKED_ROLE_PERMISSIONS.get(role_code, set()):
-                permission_id = permissions[permission_code].id
+            stale_ids = bound_ids - desired_ids
+            if stale_ids:
                 db.query(RolePermission).filter(
                     RolePermission.role_id == role.id,
-                    RolePermission.permission_id == permission_id,
+                    RolePermission.permission_id.in_(stale_ids),
                 ).delete(synchronize_session=False)
 
         created_users = []

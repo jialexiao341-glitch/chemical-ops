@@ -17,7 +17,10 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.core.db import engine, get_db  # noqa: E402
+from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
+from app.modules.system.model import User  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 
 
 class TestSession(Session):
@@ -82,7 +85,18 @@ def demo_password():
 
 
 def login(client: TestClient, username: str, password: str) -> dict[str, str]:
-    """登录演示账号并返回 Bearer 请求头。"""
+    """在当前回滚事务内临时设置测试口令，再登录并返回 Bearer 请求头。"""
+
+    # 不假设本机演示账号散列与测试配置相同，也不持久化任何测试口令。
+    override = app.dependency_overrides.get(get_db)
+    if override is not None:
+        session_generator = override()
+        db = next(session_generator)
+        user = db.scalar(select(User).where(User.username == username))
+        if user is not None:
+            user.password_hash = hash_password(password)
+            db.flush()
+        session_generator.close()
 
     response = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200, response.text

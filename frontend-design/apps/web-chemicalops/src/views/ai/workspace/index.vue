@@ -5,6 +5,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 
 import { Button, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
 
@@ -32,6 +33,37 @@ import assistantLogo from './chemicalops-ai.svg';
 defineOptions({ name: 'AiWorkspace' });
 const router = useRouter();
 const route = useRoute();
+const { hasAccessByCodes, hasAccessByRoles } = useAccess();
+const canCreatePurchaseDraft = hasAccessByCodes(['procurement.requests.write']);
+const canPushBriefing = hasAccessByRoles(['SYS_ADMIN', 'PROCUREMENT_MANAGER']);
+
+const AI_DATASET_READ_PERMISSIONS: Record<string, string> = {
+  accepted_orders_finance_gaps: 'finance.reconciliations.read',
+  approved_requests_without_rfq: 'procurement.requests.read',
+  deliveries: 'warehouse.deliveries.read',
+  exceptions: 'operations.exceptions.read',
+  finance_invoices: 'finance.invoices.read',
+  finance_payments: 'finance.payments.read',
+  finance_reconciliations: 'finance.reconciliations.read',
+  finance_settlements: 'finance.settlements.read',
+  inventory: 'warehouse.inventory.read',
+  inventory_by_batch: 'warehouse.inventory.read',
+  inventory_movement_trace: 'warehouse.inventory.read',
+  inventory_transactions: 'warehouse.inventory.read',
+  purchase_orders: 'procurement.orders.read',
+  purchase_requests: 'procurement.requests.read',
+  quality_acceptances: 'quality.acceptances.read',
+  rfqs: 'procurement.rfqs.read',
+  supplier_quote_delivery_profile: 'master.suppliers.read',
+  supplier_quotes: 'procurement.rfqs.read',
+  suppliers: 'master.suppliers.read',
+  weekly_order_risks: 'procurement.orders.read',
+};
+
+function canReadDataset(dataset?: string) {
+  const permission = dataset ? AI_DATASET_READ_PERMISSIONS[dataset] : undefined;
+  return Boolean(permission && hasAccessByCodes([permission]));
+}
 
 /** 聊天界面的一条消息 */
 interface UiMessage {
@@ -110,26 +142,29 @@ const canApplyFilters = computed(() => {
   const target = AI_FILTER_TARGETS.find(
     (item) => item.dataset === filterResult.value?.dataset,
   );
-  if (!target) return false;
+  if (!target || !canReadDataset(target.dataset)) return false;
   return (
     Object.entries(filterDraft.value).some(
       ([key, value]) => Boolean(target.fields[key] && value.trim()),
     ) || Boolean(target.keyword && filterKeyword.value.trim())
   );
 });
-const filterDatasetOptions = AI_FILTER_TARGETS.filter(
-  (item) => item.dataset !== 'inventory',
-).map(({ dataset, label }) => ({
-  label,
-  value: dataset,
-}));
-const slashCommands = [
+const filterDatasetOptions = computed(() =>
+  AI_FILTER_TARGETS
+    .filter((item) => item.dataset !== 'inventory' && canReadDataset(item.dataset))
+    .map(({ dataset, label }) => ({ label, value: dataset })),
+);
+const slashCommands = computed(() => [
   { description: '在聊天中查库存、核对产品规格和供应商报价', icon: 'filter', label: '采购只读查询', value: 'agent' },
-  { description: '用自然语言设置条件，并带入业务列表', icon: 'filter', label: '自然语言筛选', value: 'filter' },
-  { description: '整理采购信息，核对后创建草稿', icon: 'draft', label: '采购申请草稿', value: 'purchase-draft' },
+  ...(filterDatasetOptions.value.length ? [{ description: '用自然语言设置条件，并带入业务列表', icon: 'filter', label: '自然语言筛选', value: 'filter' as const }] : []),
+  ...(canCreatePurchaseDraft ? [{ description: '整理采购信息，核对后创建草稿', icon: 'draft', label: '采购申请草稿', value: 'purchase-draft' as const }] : []),
   { description: '查看本次生成的运营晨报', icon: 'briefing', label: '生成运营晨报', value: 'briefing' },
-  { description: '确认接收对象后生成并推送晨报', icon: 'send', label: '生成并推送', value: 'briefing-push' },
-] as const;
+  ...(canPushBriefing ? [{ description: '确认接收对象后生成并推送晨报', icon: 'send', label: '生成并推送', value: 'briefing-push' as const }] : []),
+]);
+
+function visibleSourceRecords(item: UiMessage) {
+  return (item.sourceRecords ?? []).filter((record) => canReadDataset(record.dataset));
+}
 
 const agentMode = ref(false);
 let chatEpoch = 0;
@@ -380,6 +415,7 @@ async function onSend() {
     return;
   }
   if (draftMode.value) {
+    if (!canCreatePurchaseDraft) { draftMode.value = false; message.error('你没有创建采购申请草稿的权限。'); return; }
     await previewPurchaseRequestDraft(text);
     return;
   }
@@ -489,6 +525,7 @@ async function previewPurchaseRequestDraft(text: string) {
 }
 
 function confirmCreatePurchaseDraft(item: UiMessage) {
+  if (!canCreatePurchaseDraft) { message.error('你没有创建采购申请草稿的权限。'); return; }
   const proposal = item.draftProposal;
   if (!proposal || item.draftCreatedRequestNo) return;
   const itemSummary = proposal.display_items
@@ -561,20 +598,27 @@ function safeCitationUrl(value: unknown): string | undefined {
 }
 
 function openDataset(dataset: string) {
+  if (!canReadDataset(dataset)) return;
   const paths: Record<string, string> = {
     accepted_orders_finance_gaps: '/finance/reconciliations',
     approved_requests_without_rfq: '/procurement/requests',
     deliveries: '/warehouse/deliveries',
     exceptions: '/operations/exceptions',
+    finance_invoices: '/finance/invoices',
+    finance_payments: '/finance/payments',
     finance_reconciliations: '/finance/reconciliations',
+    finance_settlements: '/finance/settlements',
     inventory: '/warehouse/inventory',
     inventory_by_batch: '/warehouse/inventory',
     inventory_movement_trace: '/warehouse/inventory',
+    inventory_transactions: '/warehouse/transactions',
     purchase_orders: '/procurement/orders',
     purchase_requests: '/procurement/requests',
     quality_acceptances: '/quality/acceptances',
+    rfqs: '/procurement/rfqs',
     suppliers: '/master/suppliers',
     supplier_quote_delivery_profile: '/master/suppliers',
+    supplier_quotes: '/procurement/rfqs',
     weekly_order_risks: '/procurement/orders',
   };
   const path = paths[dataset];
@@ -582,6 +626,14 @@ function openDataset(dataset: string) {
 }
 
 function openSourceRecord(record: NonNullable<UiMessage['sourceRecords']>[number]) {
+  if (!canReadDataset(record.dataset)) return;
+  if (record.dataset === 'rfqs' && record.record_id) {
+    void router.push({
+      path: '/procurement/rfqs',
+      query: { ai_record_id: String(record.record_id) },
+    });
+    return;
+  }
   if (record.dataset === 'purchase_orders' && record.record_id) {
     void router.push({
       name: 'PurchaseOrderDetail',
@@ -625,13 +677,6 @@ function openSourceRecord(record: NonNullable<UiMessage['sourceRecords']>[number
     });
     return;
   }
-  if (record.dataset === 'rfqs' && record.record_id) {
-    void router.push({
-      path: '/procurement/rfqs',
-      query: { ai_record_id: String(record.record_id) },
-    });
-    return;
-  }
   const recordFilters = record.filters ?? {};
   const { keywords, ...filters } = recordFilters;
   void router.push({
@@ -647,6 +692,7 @@ function openSourceRecord(record: NonNullable<UiMessage['sourceRecords']>[number
 }
 
 async function generateBriefing(push: boolean) {
+  if (push && !canPushBriefing) { message.error('你没有推送运营晨报的权限。'); return; }
   try {
     const result = await generateBriefingApi(push);
     if (result.pushed) {
@@ -663,6 +709,7 @@ async function generateBriefing(push: boolean) {
 }
 
 function confirmBriefingPush() {
+  if (!canPushBriefing) { message.error('你没有推送运营晨报的权限。'); return; }
   Modal.confirm({
     content: '晨报将发送给系统管理员和采购经理，是否继续？',
     okText: '确认推送',
@@ -673,6 +720,7 @@ function confirmBriefingPush() {
 
 async function parseListFilters() {
   if (!filterQuestion.value.trim() || filterParsing.value) return;
+  if (!canReadDataset(filterDataset.value)) { message.error('你没有读取该业务列表的权限。'); return; }
   filterParsing.value = true;
   filterResult.value = undefined;
   try {
@@ -701,7 +749,7 @@ function applyListFilters() {
   const target = AI_FILTER_TARGETS.find(
     (item) => item.dataset === filterResult.value?.dataset,
   );
-  if (!target || !filterResult.value) return;
+  if (!target || !filterResult.value || !canReadDataset(target.dataset)) return;
 
   const filters: Record<string, string> = {};
   const unsupported: string[] = [];
@@ -734,7 +782,7 @@ function onTextKeydown(event: KeyboardEvent) {
       event.preventDefault();
       const direction = event.key === 'ArrowDown' ? 1 : -1;
       slashMenuActiveIndex.value =
-        (slashMenuActiveIndex.value + direction + slashCommands.length) % slashCommands.length;
+        (slashMenuActiveIndex.value + direction + slashCommands.value.length) % slashCommands.value.length;
       return;
     }
     if (event.key === 'Escape') {
@@ -744,7 +792,7 @@ function onTextKeydown(event: KeyboardEvent) {
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      selectSlashCommand(slashCommands[slashMenuActiveIndex.value]?.value);
+      selectSlashCommand(slashCommands.value[slashMenuActiveIndex.value]?.value);
       return;
     }
   }
@@ -778,9 +826,13 @@ function onComposerInput(event: Event) {
   }
 }
 
-async function selectSlashCommand(command?: (typeof slashCommands)[number]['value']) {
+async function selectSlashCommand(command?: 'agent' | 'briefing' | 'briefing-push' | 'filter' | 'purchase-draft') {
   slashMenuOpen.value = false;
   inputText.value = '';
+
+  if (command === 'filter' && !filterDatasetOptions.value.length) return;
+  if (command === 'purchase-draft' && !canCreatePurchaseDraft) return;
+  if (command === 'briefing-push' && !canPushBriefing) return;
 
   if (command === 'agent') {
     if (currentAgent.value?.status === 'WAITING_INPUT' || currentAgent.value?.status === 'RUNNING') { message.info('请先完成或取消当前查询。'); return; }
@@ -790,6 +842,9 @@ async function selectSlashCommand(command?: (typeof slashCommands)[number]['valu
   }
   agentMode.value = false;
   if (command === 'filter') {
+    if (!filterDatasetOptions.value.some((option) => option.value === filterDataset.value)) {
+      filterDataset.value = filterDatasetOptions.value[0]?.value ?? '';
+    }
     filterPanelOpen.value = true;
     filterQuestion.value = '';
     filterResult.value = undefined;
@@ -1001,8 +1056,8 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                 </span>
                 <AgentChatTask v-if="item.agentTask" :task="item.agentTask" :busy="sending" @continue="continueAgent(item, $event)" @cancel="cancelAgent(item)" @refresh="refreshAgent(item)" />
                 <div v-if="item.agentError" role="alert"><p>{{ item.agentError }}</p><Button size="small" @click="refreshAgent(item)">重试读取</Button></div>
-                <QueryCharts v-if="item.queryTrace?.rows?.length" :trace="item.queryTrace" />
-                <div v-if="item.draftProposal" class="mt-3 space-y-2 rounded-md border border-border/70 bg-background/70 p-3 text-xs">
+                <QueryCharts v-if="item.queryTrace?.rows?.length && canReadDataset(item.queryTrace.dataset)" :trace="item.queryTrace" />
+                <div v-if="item.draftProposal && canCreatePurchaseDraft" class="mt-3 space-y-2 rounded-md border border-border/70 bg-background/70 p-3 text-xs">
                   <div class="font-medium">采购申请草稿预览 · 尚未保存</div>
                   <div>用途：{{ item.draftProposal.draft.purpose }}</div>
                   <div>优先级：{{ item.draftProposal.draft.priority || 'NORMAL' }} · 币种：{{ item.draftProposal.draft.currency_code || 'CNY' }}</div>
@@ -1030,7 +1085,7 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                   </div>
                 </div>
                 <div
-                  v-if="item.queryTrace"
+                v-if="item.queryTrace && canReadDataset(item.queryTrace.dataset)"
                   class="border-border/50 mt-2 border-t pt-2 text-xs opacity-80"
                 >
                   <div class="mb-2 rounded-md border border-border/70 bg-background/70 p-2">
@@ -1043,7 +1098,7 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                         </span>
                       </div>
                       <Button
-                        v-if="item.queryTrace.dataset"
+                        v-if="canReadDataset(item.queryTrace.dataset)"
                         size="small"
                         type="link"
                         @click="openDataset(item.queryTrace.dataset)"
@@ -1093,13 +1148,13 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                     >{{ item.queryTrace.sql }}</pre>
                   </template>
                 </div>
-                <details v-if="item.sourceRecords?.length" class="mt-2 border-t border-border/50 pt-2">
+                <details v-if="visibleSourceRecords(item).length" class="mt-2 border-t border-border/50 pt-2">
                   <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">
-                    来源记录（{{ item.sourceRecords.length }}）
+                    来源记录（{{ visibleSourceRecords(item).length }}）
                   </summary>
                   <div class="mt-2 space-y-1">
                     <div
-                      v-for="(record, index) in item.sourceRecords"
+                      v-for="(record, index) in visibleSourceRecords(item)"
                       :key="`${record.dataset}-${record.record_id ?? index}`"
                       class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-xs"
                     >

@@ -106,6 +106,7 @@ async function submitDispute() {
 
 <template>
   <SupplierRecordList
+    export-permission="supplier.portal.reconciliation.export"
     v-model:keyword="keyword"
     v-model:status="status"
     :columns="columns"

@@ -1,5 +1,8 @@
 """文件上传、下载和附件关联测试。"""
 
+import shutil
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -13,9 +16,23 @@ from .conftest import login
 pytestmark = pytest.mark.integration
 
 
-def test_upload_download_and_attach_file(client: TestClient, db_session, demo_password: str) -> None:
+def _use_local_storage(monkeypatch, tmp_path, request) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    local_root = project_root / ".pytest-file-storage" / tmp_path.name
+    assert project_root.resolve() in local_root.resolve().parents
+    settings = service.get_settings().model_copy(
+        update={"file_storage_backend": "local", "file_storage_root": str(local_root)}
+    )
+    monkeypatch.setattr(service, "get_settings", lambda: settings)
+    request.addfinalizer(lambda: shutil.rmtree(local_root, ignore_errors=True))
+
+
+def test_upload_download_and_attach_file(
+    client: TestClient, db_session, demo_password: str, monkeypatch, tmp_path, request
+) -> None:
     """验证文件元数据、下载和业务附件去重。"""
 
+    _use_local_storage(monkeypatch, tmp_path, request)
     manager = login(client, "procurement_manager", demo_password)
     order_id = db_session.scalar(select(PurchaseOrder.id).order_by(PurchaseOrder.id))
     assert order_id is not None
@@ -60,9 +77,12 @@ def test_upload_download_and_attach_file(client: TestClient, db_session, demo_pa
     assert private_listing.json()["items"][0]["file_id"] != private_upload.json()["id"]
 
 
-def test_linked_file_requires_business_resource_permission(client: TestClient, db_session, demo_password: str) -> None:
+def test_linked_file_requires_business_resource_permission(
+    client: TestClient, db_session, demo_password: str, monkeypatch, tmp_path, request
+) -> None:
     """具备通用文件权限但没有采购订单权限的用户不能通过文件 ID 绕过资源权限。"""
 
+    _use_local_storage(monkeypatch, tmp_path, request)
     procurement_manager = login(client, "procurement_manager", demo_password)
     order_id = db_session.scalar(select(PurchaseOrder.id).order_by(PurchaseOrder.id))
     assert order_id is not None

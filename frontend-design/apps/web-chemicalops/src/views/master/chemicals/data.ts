@@ -166,7 +166,7 @@ export function useColumns(
             show: () => canViewMsdsImpact,
           },
           { code: 'edit', auth: 'master.chemicals.write' },
-          { code: 'delete', auth: 'master.chemicals.write' },
+          { code: 'delete', auth: 'master.chemicals.delete' },
         ],
         props: { renderMode: 'menu' },
       },

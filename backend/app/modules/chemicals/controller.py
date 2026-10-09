@@ -56,7 +56,7 @@ def update_chemical(
 
 
 @router.delete("/{chemical_id}", response_model=ChemicalRead, summary="停用化学品")
-def delete_chemical(chemical_id: int, db: Session = Depends(get_db), _: object = Depends(require_permission("master.chemicals.write"))) -> ChemicalRead:
+def delete_chemical(chemical_id: int, db: Session = Depends(get_db), _: object = Depends(require_permission("master.chemicals.delete"))) -> ChemicalRead:
     """软删除化学品，将状态修改为 INACTIVE，不物理删除历史数据。"""
 
     return service.delete_chemical(db, chemical_id)

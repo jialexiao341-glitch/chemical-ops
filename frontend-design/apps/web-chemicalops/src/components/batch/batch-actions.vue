@@ -16,6 +16,9 @@ const props = defineProps<{
   importable?: boolean;
   resource: string;
   writePermission?: string;
+  exportPermission?: string;
+  importPermission?: string;
+  deletePermission?: string;
 }>();
 
 const { hasAccessByCodes } = useAccess();
@@ -25,9 +28,17 @@ const fileInput = ref<HTMLInputElement>();
 const canWrite = computed(
   () => !props.writePermission || hasAccessByCodes([props.writePermission]),
 );
-const canImport = computed(() => props.importable && canWrite.value);
+const canExport = computed(() => hasAccessByCodes([props.exportPermission ?? `${props.resource}.export`]));
+const canImport = computed(
+  () => props.importable && canWrite.value && hasAccessByCodes([props.importPermission ?? `${props.resource}.import`]),
+);
 const canDelete = computed(
-  () => props.deleteMode !== 'readonly' && canWrite.value,
+  () => props.deleteMode !== 'readonly'
+    && hasAccessByCodes([props.deletePermission ?? (
+      props.deleteMode === 'master'
+        ? props.resource === 'master.suppliers' ? 'master.suppliers.deactivate' : `${props.resource}.delete`
+        : props.writePermission ?? `${props.resource}.write`
+    )]),
 );
 
 function selectedIds(): number[] {
@@ -113,11 +124,11 @@ function onChooseImport() {
 </script>
 
 <template>
-  <Dropdown :open="menuOpen" :trigger="['click']" placement="bottomRight" @open-change="menuOpen = $event">
+  <Dropdown v-if="canExport || canImport || canDelete" :open="menuOpen" :trigger="['click']" placement="bottomRight" @open-change="menuOpen = $event">
     <Button :disabled="busy" class="batch-trigger">批量操作 <IconifyIcon class="size-4 text-slate-500" icon="lucide:chevron-down" /></Button>
     <template #popupRender>
       <div class="batch-menu">
-        <button class="batch-menu-item" type="button" @click="onExport">导出所选</button>
+        <button v-if="canExport" class="batch-menu-item" type="button" @click="onExport">导出所选</button>
         <button
           v-if="canImport"
           class="batch-menu-item"

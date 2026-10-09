@@ -47,6 +47,10 @@ const emit = defineEmits(['success']);
 const router = useRouter();
 const { hasAccessByCodes } = useAccess();
 const canWriteExceptions = hasAccessByCodes(['operations.exceptions.write']);
+const canReadInventory = hasAccessByCodes(['warehouse.inventory.read']);
+const canReadAiWorkspace = hasAccessByCodes(['ai.workspace.read']);
+const canCreatePurchaseDraft = hasAccessByCodes(['ai.workspace.read'])
+  && hasAccessByCodes(['procurement.requests.write']);
 
 /**
  * 运营异常详情：基本信息 + 状态推进 + 指派 + 处理任务与处理记录。
@@ -415,7 +419,7 @@ defineExpose({ drawerApi });
         />
         <div class="flex flex-wrap gap-2">
           <Button
-            v-if="detail.id"
+            v-if="detail.id && canReadAiWorkspace"
             @click="insightDrawer?.open('exception-action', detail.id)"
           >
             查看处置建议
@@ -458,7 +462,7 @@ defineExpose({ drawerApi });
           <DescriptionsItem label="来源">
             {{ detail.source_type }} #{{ detail.source_id }}
             <Button
-              v-if="['INVENTORY_BATCH', 'PRODUCT'].includes(detail.source_type)"
+              v-if="canReadInventory && ['INVENTORY_BATCH', 'PRODUCT'].includes(detail.source_type)"
               size="small"
               type="link"
               @click="openInventorySource"
@@ -466,7 +470,7 @@ defineExpose({ drawerApi });
               {{ detail.source_type === 'INVENTORY_BATCH' ? '查看批次库存' : '查看产品库存' }}
             </Button>
             <Button
-              v-if="detail.exception_type === 'INVENTORY_EXPIRY' && detail.source_type === 'INVENTORY_BATCH'"
+              v-if="canCreatePurchaseDraft && detail.exception_type === 'INVENTORY_EXPIRY' && detail.source_type === 'INVENTORY_BATCH'"
               size="small"
               type="link"
               @click="openPurchaseDraftFromAlert"

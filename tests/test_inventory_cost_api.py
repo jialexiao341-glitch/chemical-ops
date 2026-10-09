@@ -3,9 +3,10 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from decimal import Decimal
 
 from app.modules.inventory.model import InventoryBalance
+from app.core.security import hash_password
+from app.modules.system.model import User
 
 from .conftest import login
 
@@ -18,6 +19,10 @@ def test_fifo_outbound_request_is_idempotent(client: TestClient, db_session, dem
 
     balance = db_session.scalar(select(InventoryBalance).where(InventoryBalance.quantity > 0).order_by(InventoryBalance.id).limit(1))
     assert balance is not None
+    warehouse_user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    assert warehouse_user is not None
+    warehouse_user.password_hash = hash_password(demo_password)
+    db_session.flush()
     headers = login(client, "warehouse_receiver", demo_password)
     body = {"request_no": "TEST-FIFO-001", "product_id": balance.product_id, "warehouse_id": balance.warehouse_id, "location_id": balance.location_id, "unit_id": balance.unit_id, "quantity": "0.000001", "note": "FIFO 测试"}
     first = client.post("/api/v1/inventory/fifo-outbounds", headers=headers, json=body)
@@ -25,12 +30,18 @@ def test_fifo_outbound_request_is_idempotent(client: TestClient, db_session, dem
     second = client.post("/api/v1/inventory/fifo-outbounds", headers=headers, json=body)
     assert second.status_code == 201, second.text
     assert second.json()["id"] == first.json()["id"]
-    assert Decimal(second.json()["total_cost"]) == Decimal(first.json()["total_cost"])
+    assert first.json()["total_cost"] is None
+    assert second.json()["total_cost"] is None
+    assert all(item["unit_cost"] is None and item["total_cost"] is None for item in second.json()["allocations"])
 
 
-def test_expiry_alert_endpoint_validates_window(client: TestClient, demo_password: str) -> None:
+def test_expiry_alert_endpoint_validates_window(client: TestClient, db_session, demo_password: str) -> None:
     """有效期预警接口接受合法天数并返回规范列表。"""
 
+    warehouse_user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    assert warehouse_user is not None
+    warehouse_user.password_hash = hash_password(demo_password)
+    db_session.flush()
     headers = login(client, "warehouse_receiver", demo_password)
     response = client.get("/api/v1/inventory/expiry-alerts?days=30", headers=headers)
     assert response.status_code == 200, response.text

@@ -1,10 +1,11 @@
 <script lang="ts" setup>
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
-import { nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { Button, Dropdown, message } from 'antdv-next';
+import { useAccess } from '@vben/access';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 
 const props = defineProps<{
@@ -21,6 +22,7 @@ const props = defineProps<{
   statusOptions: { label: string; value: string }[];
   scrollX?: number;
   fetchRecords: () => Promise<void>;
+  exportPermission?: string;
 }>();
 
 const emit = defineEmits<{
@@ -32,6 +34,10 @@ const emit = defineEmits<{
 }>();
 
 const batchOpen = ref(false);
+const { hasAccessByCodes } = useAccess();
+const canExportSelection = computed(
+  () => !!props.exportPermission && hasAccessByCodes([props.exportPermission]),
+);
 const menuRowId = ref<number>();
 const initialStatus = props.status;
 const [Grid, gridApi] = useVbenVxeGrid({
@@ -50,7 +56,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     ],
   },
   gridOptions: {
-    columns: getColumns(props.columns),
+    columns: getColumns(props.columns, canExportSelection.value),
     fit: true,
     height: 'auto',
     keepSource: true,
@@ -112,9 +118,10 @@ watch(() => props.rows, (rows) => { void gridApi.grid?.loadData(rows); });
 watch(() => props.total, (total) => gridApi.setGridOptions({ pagerConfig: { total } }));
 watch(() => props.loading, (loading) => gridApi.setLoading(Boolean(loading)));
 watch(() => props.columns, (columns) => gridApi.setGridOptions({ columns: getColumns(columns) }));
+watch(canExportSelection, (allowed) => gridApi.setGridOptions({ columns: getColumns(props.columns, allowed) }));
 
-function getColumns(columns: typeof props.columns): VxeTableGridOptions['columns'] {
-  return [{ type: 'checkbox', width: 48, align: 'center' }, ...columns.map((column) => ({
+function getColumns(columns: typeof props.columns, allowSelection = canExportSelection.value): VxeTableGridOptions['columns'] {
+  return [...(allowSelection ? [{ type: 'checkbox' as const, width: 48, align: 'center' as const }] : []), ...columns.map((column) => ({
     field: column.key, title: column.title,
     width: column.key === '__action' ? column.width : undefined,
     minWidth: column.key === '__action' ? undefined : column.width,
@@ -128,7 +135,7 @@ function getColumns(columns: typeof props.columns): VxeTableGridOptions['columns
   <Page auto-content-height>
     <Grid :table-title="title">
       <template #toolbar-tools>
-        <Dropdown :open="batchOpen" :trigger="['click']" placement="bottomRight" @open-change="batchOpen = $event">
+        <Dropdown v-if="canExportSelection" :open="batchOpen" :trigger="['click']" placement="bottomRight" @open-change="batchOpen = $event">
           <Button class="inline-flex items-center gap-2">批量操作 <IconifyIcon class="size-4 text-slate-500" icon="lucide:chevron-down" /></Button>
           <template #popupRender>
             <div class="supplier-record-menu">

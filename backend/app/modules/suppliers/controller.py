@@ -62,7 +62,7 @@ def update_supplier(
 
 
 @router.delete("/{supplier_id}", response_model=SupplierRead, summary="停用供应商")
-def delete_supplier(supplier_id: int, db: Session = Depends(get_db), _: object = Depends(require_permission("master.suppliers.write"))) -> SupplierRead:
+def delete_supplier(supplier_id: int, db: Session = Depends(get_db), _: object = Depends(require_permission("master.suppliers.deactivate"))) -> SupplierRead:
     """软删除供应商，将状态修改为 INACTIVE，不物理删除采购历史。"""
 
     return service.delete_supplier(db, supplier_id)

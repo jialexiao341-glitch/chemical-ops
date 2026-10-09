@@ -219,11 +219,19 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
 
 
 def test_operation_exception_task_and_close_state_machine(
-    client: TestClient, demo_password: str
+    client: TestClient, db_session, demo_password: str
 ) -> None:
     """验证异常、处理任务、处理记录和关闭说明的状态约束。"""
 
+    admin_user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    manager_user = db_session.scalar(select(User).where(User.username == "procurement_manager"))
+    assert admin_user is not None and manager_user is not None
+    # 仅在当前回滚事务中设置测试口令，不修改本地演示账号。
+    admin_user.password_hash = hash_password(demo_password)
+    manager_user.password_hash = hash_password(demo_password)
+    db_session.flush()
     manager = login(client, "procurement_manager", demo_password)
+    admin = login(client, "system_admin", demo_password)
     created = client.post(
         "/api/v1/operation-exceptions",
         headers=manager,
@@ -244,6 +252,9 @@ def test_operation_exception_task_and_close_state_machine(
         f"/api/v1/operation-exceptions/{exception_id}", headers=manager, json={"status": "CLOSED"}
     )
     assert missing_note.status_code == 400
+    after_missing_note = client.get(f"/api/v1/operation-exceptions/{exception_id}", headers=manager)
+    assert after_missing_note.status_code == 200
+    assert after_missing_note.json()["status"] == "OPEN"
 
     task_response = client.post(
         f"/api/v1/operation-exceptions/{exception_id}/tasks",
@@ -271,6 +282,9 @@ def test_operation_exception_task_and_close_state_machine(
         json={"status": "COMPLETED"},
     )
     assert no_completion_note.status_code == 400
+    task_list = client.get(f"/api/v1/operation-exceptions/{exception_id}/tasks", headers=manager)
+    assert task_list.status_code == 200
+    assert next(item for item in task_list.json()["items"] if item["id"] == task_id)["status"] == "PROCESSING"
     comment = client.post(
         f"/api/v1/operation-exceptions/{exception_id}/tasks/{task_id}/comments",
         headers=manager,
@@ -302,19 +316,36 @@ def test_operation_exception_task_and_close_state_machine(
     assert client.patch(
         f"/api/v1/operation-exceptions/{exception_id}", headers=manager, json={"status": "PROCESSING"}
     ).status_code == 400
+    assert client.patch(
+        f"/api/v1/operation-exceptions/{exception_id}", headers=admin, json={"status": "PROCESSING"}
+    ).status_code == 400
+    after_invalid_transitions = client.get(
+        f"/api/v1/operation-exceptions/{exception_id}", headers=admin
+    )
+    assert after_invalid_transitions.status_code == 200
+    assert after_invalid_transitions.json()["status"] == "CLOSED"
 
 
 def test_role_permissions_separate_procurement_warehouse_quality_and_admin(
-    client: TestClient, demo_password: str
+    client: TestClient, db_session, demo_password: str
 ) -> None:
     """确认只读财务角色不能写业务，仓库和质量角色权限边界明确。"""
+
+    for username in (
+        "finance_viewer", "warehouse_receiver", "quality_inspector",
+        "procurement_manager", "system_admin",
+    ):
+        user = db_session.scalar(select(User).where(User.username == username))
+        assert user is not None
+        user.password_hash = hash_password(demo_password)
+    db_session.flush()
 
     viewer = login(client, "finance_viewer", demo_password)
     warehouse = login(client, "warehouse_receiver", demo_password)
     quality = login(client, "quality_inspector", demo_password)
     manager = login(client, "procurement_manager", demo_password)
 
-    assert client.get("/api/v1/rfqs", headers=viewer).status_code == 200
+    assert client.get("/api/v1/rfqs", headers=viewer).status_code == 403
     assert client.post(
         "/api/v1/rfqs",
         headers=viewer,
@@ -368,9 +399,12 @@ def test_buyer_can_read_but_cannot_update_product_master_data(
         headers=buyer,
         json={"opinion": "越权审批检查"},
     ).status_code == 403
+    comparison = client.post("/api/v1/rfqs/1/comparison", headers=buyer)
+    assert comparison.status_code != 403
     assert client.post(
-        "/api/v1/rfqs/1/comparison",
+        "/api/v1/rfqs/1/select-quote",
         headers=buyer,
+        json={"comparison_id": 1, "quote_id": 1, "selection_reason": "越权定标测试"},
     ).status_code == 403
     assert client.post(
         "/api/v1/rfqs/1/select-quote",

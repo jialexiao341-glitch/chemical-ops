@@ -46,7 +46,7 @@ def list_products(
 
 
 @router.get("/units", response_model=list[UnitRead], summary="查询计量单位")
-def list_units(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> list[UnitRead]:
+def list_units(db: Session = Depends(get_db), _: User = Depends(require_permission("master.products.read"))) -> list[UnitRead]:
     """返回计量单位字典，避免前端直接使用单位 ID 或写死单位名称。"""
 
     return crud.list_units(db)
@@ -93,7 +93,7 @@ def update_product(
 
 
 @router.delete("/{product_id}", response_model=ProductRead, summary="停用产品")
-def delete_product(product_id: int, db: Session = Depends(get_db), _: object = Depends(require_permission("master.products.write"))) -> ProductRead:
+def delete_product(product_id: int, db: Session = Depends(get_db), _: object = Depends(require_permission("master.products.delete"))) -> ProductRead:
     """软删除产品，将状态修改为 INACTIVE。"""
 
     return service.delete_product(db, product_id)

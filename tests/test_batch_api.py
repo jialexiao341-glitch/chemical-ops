@@ -5,6 +5,16 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from tests.conftest import login
+from app.modules.batch.controller import EXPORT_COLUMNS, RESOURCES
+
+
+def test_batch_export_columns_are_explicit_and_never_include_auth_secrets() -> None:
+    assert set(EXPORT_COLUMNS) == set(RESOURCES)
+    forbidden = {"password_hash", "token_version", "avatar", "avatar_base64"}
+    for resource_name, columns in EXPORT_COLUMNS.items():
+        model_columns = {column.key for column in RESOURCES[resource_name].model.__table__.columns}
+        assert set(columns) <= model_columns
+        assert not forbidden.intersection(columns)
 
 
 def test_batch_requires_login(client: TestClient) -> None:

@@ -49,8 +49,8 @@ const warehouseFeatureProbes: ScopedFeatureProbe[] = [
   },
   {
     path: '/warehouse/expiry-alerts',
-    read: 'warehouse.inventory.read',
-    writes: ['warehouse.inventory.write'],
+    read: 'warehouse.inventory.expiry.read',
+    writes: [],
     hasVisibleData: async () => (await getExpiryAlertsApi()).length > 0,
   },
   {

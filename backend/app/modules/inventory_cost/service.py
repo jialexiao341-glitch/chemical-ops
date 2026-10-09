@@ -119,11 +119,14 @@ def create_fifo_outbound(db: Session, user: User, data: FifoOutboundCreate) -> I
     return _require_request(db, request.id)
 
 
-def list_expiry_alerts(db: Session, *, days: int):
+def list_expiry_alerts(db: Session, *, days: int, warehouse_ids: set[int] | None = None):
     """查询未来指定天数内到期且仍有库存的批次。"""
     today = date.today()
     deadline = date.fromordinal(today.toordinal() + days)
-    rows = db.execute(select(InventoryBatch, InventoryBalance).join(InventoryBalance, InventoryBalance.batch_id == InventoryBatch.id).where(InventoryBatch.expiry_date.is_not(None), InventoryBatch.expiry_date <= deadline, InventoryBalance.quantity > 0).order_by(InventoryBatch.expiry_date, InventoryBatch.id)).all()
+    query = select(InventoryBatch, InventoryBalance).join(InventoryBalance, InventoryBalance.batch_id == InventoryBatch.id).where(InventoryBatch.expiry_date.is_not(None), InventoryBatch.expiry_date <= deadline, InventoryBalance.quantity > 0)
+    if warehouse_ids is not None:
+        query = query.where(InventoryBalance.warehouse_id.in_(warehouse_ids))
+    rows = db.execute(query.order_by(InventoryBatch.expiry_date, InventoryBatch.id)).all()
     result = []
     for batch, balance in rows:
         days_remaining = (batch.expiry_date - today).days

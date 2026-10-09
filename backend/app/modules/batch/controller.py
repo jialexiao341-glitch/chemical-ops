@@ -46,12 +46,13 @@ class Resource:
     read_permission: str
     write_permission: str | None = None
     delete_mode: str = "readonly"  # master / draft / permission / readonly
+    delete_permission: str | None = None
 
 
 RESOURCES: dict[str, Resource] = {
-    "master.chemicals": Resource(Chemical, "master.chemicals.read", "master.chemicals.write", "master"),
-    "master.products": Resource(Product, "master.products.read", "master.products.write", "master"),
-    "master.suppliers": Resource(Supplier, "master.suppliers.read", "master.suppliers.write", "master"),
+    "master.chemicals": Resource(Chemical, "master.chemicals.read", "master.chemicals.write", "master", "master.chemicals.delete"),
+    "master.products": Resource(Product, "master.products.read", "master.products.write", "master", "master.products.delete"),
+    "master.suppliers": Resource(Supplier, "master.suppliers.read", "master.suppliers.write", "master", "master.suppliers.deactivate"),
     "system.users": Resource(User, "system.users.read", "system.users.write", "master"),
     "system.departments": Resource(Department, "system.departments.read", "system.departments.write", "master"),
     "system.roles": Resource(Role, "system.roles.read", "system.roles.write", "master"),
@@ -148,12 +149,25 @@ def _authorize_row_scope(db: Session, user: User, name: str, rows: list, *, writ
         from app.modules.inventory.service import get_stocktake_request
         for row in rows:
             get_stocktake_request(db, user, row.id)
+    elif name in {"warehouse.inventory.balances", "warehouse.inventory.transactions"}:
+        from app.modules.inventory.service import accessible_warehouse_ids
+        allowed_warehouses = accessible_warehouse_ids(db, user)
+        if allowed_warehouses is not None and any(row.warehouse_id not in allowed_warehouses for row in rows):
+            raise ResourceNotFoundError("所选记录不存在")
+    elif name == "quality.acceptances":
+        from app.modules.quality_acceptances.service import get_acceptance
+        for row in rows:
+            get_acceptance(db, user, row.id)
+    elif name == "operations.exceptions":
+        from app.modules.operation_exceptions.service import get_exception
+        for row in rows:
+            get_exception(db, user, row.id)
 
 
 @router.post("/{name}/delete", summary="批量停用主数据或删除草稿")
 def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, int | str]:
     spec = _resource(name)
-    _authorize(db, user, spec.write_permission)
+    _authorize(db, user, spec.delete_permission or spec.write_permission)
     if spec.delete_mode == "readonly":
         raise BusinessValidationError("已生效记录和流水不可删除")
     if len(set(selection.ids)) != len(selection.ids):
@@ -200,14 +214,42 @@ def _csv_value(value: object) -> str:
     return "'" + text if text.startswith(("=", "+", "-", "@")) else text
 
 
+EXPORT_COLUMNS: dict[str, tuple[str, ...]] = {
+    "master.chemicals": ("id", "chemical_name", "english_name", "alias_text", "cas_no", "chemical_formula", "molecular_weight", "hazard_class", "source_text", "status", "created_at", "updated_at"),
+    "master.products": ("id", "product_code", "product_name", "chemical_id", "category_id", "model", "purity_value", "purity_unit", "packaging_spec", "unit_id", "safety_stock_quantity", "parameter_json", "version_no", "status", "created_at", "updated_at"),
+    "master.suppliers": ("id", "supplier_code", "supplier_name", "unified_credit_code", "country_code", "region", "address", "business_scope", "cooperation_level", "payment_terms", "default_lead_days", "status", "note", "created_at", "updated_at"),
+    "system.users": ("id", "username", "display_name", "department_id", "email", "phone", "status", "last_login_at", "created_at", "updated_at"),
+    "system.departments": ("id", "parent_id", "department_code", "department_name", "manager_id", "status", "created_at", "updated_at"),
+    "system.roles": ("id", "role_code", "role_name", "description", "status", "created_at", "updated_at"),
+    "system.permissions": ("id", "permission_code", "permission_name", "permission_type", "resource", "action", "description", "created_at", "updated_at"),
+    "procurement.requests": ("id", "request_no", "applicant_id", "department_id", "purpose", "priority", "budget_amount", "currency_code", "expected_date", "status", "submitted_at", "approved_at", "rejected_at", "cancelled_at", "cancel_reason", "created_at", "updated_at"),
+    "procurement.rfqs": ("id", "rfq_no", "source_request_id", "requester_id", "quote_deadline", "requested_delivery_date", "delivery_requirements", "status", "sent_at", "closed_at", "created_at", "updated_at"),
+    "procurement.orders": ("id", "po_no", "supplier_id", "source_comparison_id", "source_quote_id", "source_request_id", "department_id", "buyer_id", "order_amount", "currency_code", "delivery_address", "order_date", "expected_arrival_date", "status", "supplier_confirmed_at", "approved_at", "cancelled_at", "cancel_reason", "note", "created_at", "updated_at"),
+    "warehouse.deliveries": ("id", "delivery_no", "po_id", "supplier_id", "shipment_date", "expected_arrival_date", "actual_arrival_date", "logistics_company", "tracking_no", "status", "received_by", "received_at", "note", "created_at", "updated_at"),
+    "warehouse.inventory.balances": ("id", "warehouse_id", "location_id", "product_id", "batch_id", "unit_id", "quantity", "locked_quantity", "status", "created_at", "updated_at"),
+    "warehouse.inventory.transactions": ("id", "transaction_no", "transaction_type", "warehouse_id", "location_id", "product_id", "batch_id", "unit_id", "quantity", "delivery_item_id", "source_type", "source_id", "operator_id", "note", "created_at"),
+    "warehouse.inventory.issues": ("id", "issue_no", "applicant_id", "department_id", "purpose", "status", "approved_by", "approved_at", "rejected_at", "reject_reason", "cancelled_at", "completed_at", "created_at", "updated_at"),
+    "warehouse.inventory.transfers": ("id", "transfer_no", "applicant_id", "purpose", "status", "approved_by", "approved_at", "rejected_at", "reject_reason", "cancelled_at", "completed_at", "created_at", "updated_at"),
+    "warehouse.inventory.stocktakes": ("id", "stocktake_no", "applicant_id", "warehouse_id", "location_id", "purpose", "status", "approved_by", "approved_at", "rejected_at", "reject_reason", "cancelled_at", "completed_at", "created_at", "updated_at"),
+    "quality.acceptances": ("id", "acceptance_no", "delivery_id", "inspector_id", "result", "inspection_time", "test_result", "certificate_complete", "report_file_id", "conclusion", "created_at", "updated_at"),
+    "finance.reconciliations": ("id", "reconciliation_no", "po_id", "supplier_id", "currency_code", "amount_precision", "total_amount", "status", "created_by", "confirmed_by", "confirmed_at", "closed_at", "cancelled_at", "cancel_reason", "note", "created_at", "updated_at"),
+    "finance.invoices": ("id", "invoice_no", "reconciliation_id", "po_id", "supplier_id", "invoice_code", "invoice_number", "invoice_date", "amount_excl_tax", "tax_amount", "amount_incl_tax", "currency_code", "status", "source_file_id", "submitted_by", "verified_by", "verified_at", "reject_reason", "note", "created_at", "updated_at"),
+    "finance.payments": ("id", "payment_no", "reconciliation_id", "po_id", "supplier_id", "amount", "currency_code", "payment_method", "status", "requested_by", "approved_by", "paid_by", "approved_at", "paid_at", "transaction_ref", "reject_reason", "note", "created_at", "updated_at"),
+    "finance.settlements": ("id", "settlement_no", "reconciliation_id", "po_id", "supplier_id", "settlement_amount", "currency_code", "status", "created_by", "confirmed_by", "confirmed_at", "cancelled_at", "cancel_reason", "note", "created_at", "updated_at"),
+    "operations.exceptions": ("id", "exception_no", "exception_type", "source_type", "source_id", "po_id", "delivery_id", "delivery_item_id", "responsible_department_id", "owner_id", "severity", "description", "status", "due_at", "closed_by", "closed_at", "closing_note", "created_at", "updated_at"),
+}
+
+
 @router.post("/{name}/export", summary="将选中记录导出为 CSV")
 def batch_export(name: str, selection: Selection, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Response:
     spec = _resource(name)
     _authorize(db, user, spec.read_permission)
+    _authorize(db, user, f"{name}.export")
     rows = _rows(db, spec, selection.ids)
     _authorize_row_scope(db, user, name, rows)
-    excluded = {"password_hash", "token_version", "avatar", "avatar_base64"}
-    columns = [column.key for column in spec.model.__table__.columns if column.key not in excluded and not isinstance(getattr(rows[0], column.key), bytes)]
+    columns = EXPORT_COLUMNS.get(name)
+    if not columns:
+        raise BusinessValidationError("该功能区暂不支持导出")
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(columns)
@@ -234,6 +276,7 @@ async def batch_import(name: str, file: UploadFile = File(...), db: Session = De
     _authorize(db, user, spec.write_permission)
     if name not in IMPORT_MODELS:
         raise BusinessValidationError("该功能区暂不支持导入")
+    _authorize(db, user, f"{name}.import")
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise BusinessValidationError("请上传 CSV 文件")
     content = await file.read(2_000_001)

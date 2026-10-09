@@ -200,7 +200,7 @@ export function useColumns(
         options: [
           { code: 'standard', text: '检测标准', auth: 'master.products.write' },
           { code: 'edit', auth: 'master.products.write' },
-          { code: 'delete', auth: 'master.products.write' },
+          { code: 'delete', auth: 'master.products.delete' },
         ],
         props: { renderMode: 'menu' },
       },

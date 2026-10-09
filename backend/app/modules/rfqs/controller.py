@@ -120,7 +120,7 @@ def select_quote(
     rfq_id: int,
     data: QuoteSelection,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("procurement.rfqs.compare")),
+    user: User = Depends(require_permission("procurement.rfqs.award")),
 ) -> RFQRead:
     """确认中选报价并关闭询价单。"""
 

@@ -532,7 +532,7 @@ defineExpose({ drawerApi });
                   </template>
                   <template v-else-if="column.key === '__action'">
                     <Button
-                      v-if="comparison?.status !== 'CONFIRMED' && hasAccessByCodes(['procurement.rfqs.compare'])"
+                      v-if="comparison?.status !== 'CONFIRMED' && hasAccessByCodes(['procurement.rfqs.award'])"
                       size="small"
                       type="link"
                       @click="onSelectQuote(record)"

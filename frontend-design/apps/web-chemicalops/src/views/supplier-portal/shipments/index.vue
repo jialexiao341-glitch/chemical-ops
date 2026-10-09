@@ -114,6 +114,7 @@ onMounted(loadOrders);
 
 <template>
   <SupplierRecordList
+    export-permission="supplier.portal.shipment.export"
     v-model:keyword="keyword"
     v-model:status="status"
     :columns="columns"

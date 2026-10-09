@@ -62,7 +62,7 @@ const routes: RouteRecordRaw[] = [
         path: 'expiry-alerts',
         component: () => import('#/views/warehouse/expiry-alerts/index.vue'),
         meta: {
-          authority: ['warehouse.inventory.read'],
+          authority: ['warehouse.inventory.expiry.read'],
           icon: 'lucide:calendar-clock',
           title: '有效期预警',
         },

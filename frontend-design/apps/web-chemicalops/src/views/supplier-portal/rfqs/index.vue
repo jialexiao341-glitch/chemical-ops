@@ -53,6 +53,7 @@ function openDetail(rfq: SupplierPortalApi.RfqListItem) { void router.push({ nam
 
 <template>
   <SupplierRecordList
+    export-permission="supplier.portal.rfq.export"
     v-model:keyword="keyword"
     v-model:status="status"
     :columns="columns"

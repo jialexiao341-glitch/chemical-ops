@@ -25,8 +25,8 @@ class FifoAllocationRead(BaseModel):
     cost_layer_id: int
     batch_id: int
     quantity: Decimal
-    unit_cost: Decimal
-    total_cost: Decimal
+    unit_cost: Decimal | None = None
+    total_cost: Decimal | None = None
 
 
 class FifoOutboundRead(BaseModel):
@@ -40,7 +40,7 @@ class FifoOutboundRead(BaseModel):
     unit_id: int
     requested_quantity: Decimal
     issued_quantity: Decimal
-    total_cost: Decimal
+    total_cost: Decimal | None = None
     currency_code: str
     status: str
     operator_id: int

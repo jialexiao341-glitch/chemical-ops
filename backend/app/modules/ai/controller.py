@@ -39,7 +39,11 @@ from app.modules.doc_kb.model import AiDocument, AiDocumentSection
 from app.modules.system.model import User
 
 
-router = APIRouter(prefix="/ai", tags=["AI 助手"])
+router = APIRouter(
+    prefix="/ai",
+    tags=["AI 助手"],
+    dependencies=[Depends(require_permission("ai.workspace.read"))],
+)
 LOGGER = logging.getLogger('chemicalops.ai.http')
 
 

@@ -169,7 +169,7 @@ export function useColumns(
             show: () => canViewPerformance,
           },
           { code: 'edit', auth: 'master.suppliers.write' },
-          { code: 'delete', auth: 'master.suppliers.write' },
+          { code: 'delete', auth: 'master.suppliers.deactivate' },
         ],
         props: { renderMode: 'menu' },
       },
