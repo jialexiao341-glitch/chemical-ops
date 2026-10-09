@@ -151,7 +151,10 @@ def build_project_reply(question: str) -> str:
         PROJECT_EXAMPLES["库存"][0],
         PROJECT_EXAMPLES["到货"][0],
     )
-    if any(marker in normalized for marker in ("案例", "示例", "怎么问", "如何问")):
+    if any(
+        marker in normalized
+        for marker in ("案例", "示例", "怎么问", "如何问", "可以问", "能问", "咨询什么")
+    ):
         opening = "可以。你可以参考下面这些问法："
     elif any(marker in normalized for marker in ("能帮我", "可以帮我", "能做什么")):
         opening = "我可以帮你做这些事情，直接用自然语言提问就行："

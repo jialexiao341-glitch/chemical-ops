@@ -14,6 +14,7 @@ from app.modules.ai.text2sql import QueryPlan, _unit_metadata, build_statement
 INTENT_CASES = (
     ("greeting", "你好", Intent.GREETING),
     ("project_help", "你有什么功能", Intent.PROJECT),
+    ("procurement_capability_question", "我可以问你什么采购的问题呢？", Intent.PROJECT),
     ("purchase_query", "查询本月采购订单金额", Intent.QUERY),
     ("delivery_query", "本周哪些到货逾期", Intent.QUERY),
     ("inventory_query", "乙醇各仓库批次库存", Intent.QUERY),
