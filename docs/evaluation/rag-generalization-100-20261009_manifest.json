@@ -1,0 +1,34 @@
+{
+  "suite": "chemicalops-rag-generalization100-v1",
+  "created_date": "2026-10-09",
+  "case_count": 100,
+  "kinds": {
+    "answerable": 60,
+    "no_evidence": 24,
+    "needs_target": 16
+  },
+  "categories": {
+    "new_field_relative_density": 6,
+    "new_field_vapour_pressure": 6,
+    "new_field_autoignition": 6,
+    "new_field_surface_tension": 6,
+    "alias_question": 12,
+    "cross_source_new_fields": 8,
+    "two_chemical_comparison": 8,
+    "new_chemical": 4,
+    "new_field_ph": 4,
+    "absent_chemical": 8,
+    "unavailable_actual_measurement": 8,
+    "missing_requested_source": 8,
+    "missing_or_multiple_unspecified_targets": 16
+  },
+  "question_overlap_with_previous": 0,
+  "new_answerable_cas": [
+    "7664-93-9"
+  ],
+  "annotation": "Rule-generated from parsed SQL sections; evidence hashes frozen before retrieval; not human blind annotation.",
+  "scope": "New questions, fields and combinations. Most chemicals/documents overlap with the previous suite; only sulfuric acid is new among answerable chemicals. No production retriever changes in this evaluation.",
+  "source_quality": "Original documents may contain inconsistent chemical data. Results measure source-text retrieval, not independently verified physical properties. Suspect ethylene-oxide/hydrogen-sulfide sections and sulfuric-acid flash point excluded from new answer keys.",
+  "gold_sha256": "d3c32d285cabf0543c8949a130c7efc177be14f0ad0ecd625176db6c7f82488a",
+  "previous_gold_sha256": "f86d80bbb02812c0a0e4fff6e08913eb087ce96e8e1f84d76245689470b0ac50"
+}

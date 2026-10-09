@@ -12,6 +12,8 @@ import math
 import re
 import statistics
 import sys
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
@@ -28,7 +30,7 @@ from app.modules.ai.schema import AIChatMessage, AIChatRequest  # noqa: E402
 from app.modules.ai.service import _classify_chat_intent, chat  # noqa: E402
 from app.modules.doc_kb import retrieve as retrieve_module  # noqa: E402
 from app.modules.doc_kb.embedding import embed_texts  # noqa: E402
-from app.modules.doc_kb.model import AiDocumentSection  # noqa: E402
+from app.modules.doc_kb.model import AiDocument, AiDocumentSection  # noqa: E402
 from app.modules.doc_kb.retrieve import no_doc_hits_reply  # noqa: E402
 
 
@@ -45,12 +47,52 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
-    path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+    # Keep the previous checkpoint intact if writing is interrupted or a reader
+    # holds the destination file open on Windows.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=path.name + ".", suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def rebind_missing_evidence(cases: list[dict], db: Session) -> tuple[list[dict], list[dict]]:
+    """仅迁移失效 ID：CAS、文档类型和内容 SHA 全部一致才允许重新绑定。"""
+    rebound = json.loads(json.dumps(cases))
+    changes = []
+    for case in rebound:
+        if case["kind"] != "answerable":
+            continue
+        hashes = case.get("evidence_sha256_by_section") or {str(case["gold_section_ids"][0]): case["evidence_sha256"]}
+        for index, old_id in enumerate(case["gold_section_ids"]):
+            expected = hashes[str(old_id)]
+            if db.get(AiDocumentSection, old_id) is not None:
+                continue  # 内容变化仍由严格校验拒绝，不能自动替换预期。
+            candidates = list(db.scalars(select(AiDocumentSection).join(AiDocument).where(
+                AiDocumentSection.cas_no == case["cas_no"], AiDocument.parse_status == "PARSED")))
+            matched = [s for s in candidates if hashlib.sha256(s.content.encode()).hexdigest() == expected
+                       and (len(case["gold_section_ids"]) > 1 or s.doc_type == case["gold_doc_type"])]
+            if len(matched) != 1:
+                raise RuntimeError(f"Cannot uniquely rebind evidence: {case['id']} section {old_id}")
+            section = matched[0]
+            case["gold_section_ids"][index] = section.id
+            if "evidence_sha256_by_section" in case:
+                case["evidence_sha256_by_section"][str(section.id)] = case["evidence_sha256_by_section"].pop(str(old_id))
+            if index == 0:
+                case["gold_document_id"] = section.document_id
+            changes.append({"case_id": case["id"], "old_section_id": old_id, "section_id": section.id,
+                            "evidence_sha256": expected})
+    return rebound, changes
 
 
 def number_tokens(text: str) -> list[str]:
     text = text.translate(str.maketrans({"−": "-", "–": "-", "—": "-", "，": ".", "．": "."}))
-    values = re.findall(r"(?<![\w])[-+]?\d+(?:[.,]\d+)?(?![\w])", text)
+    values = re.findall(r"(?<![A-Za-z0-9_])[-+]?\d+(?:[.,]\d+)?(?![A-Za-z0-9_])", text)
     result = []
     for value in values:
         value = value.replace(",", ".")
@@ -68,6 +110,11 @@ def fact_match(case: dict, answer: str) -> bool:
         return all(fact_match({"field": item["field"], "expected_value": item["value"]}, answer)
                    for item in case["expected_values"])
     expected = case["expected_value"]
+    if case["field"] == "ph" and "neutral" in expected.lower():
+        # A qualitative pH record may only contain a numeric temperature;
+        # matching that temperature alone must not count as a correct pH answer.
+        if not re.search(r"\bneutral\b|中性", answer, re.I):
+            return False
     if case["field"] == "molecular_formula":
         formula = re.sub(r"[^A-Za-z0-9]", "", expected.translate(SUBSCRIPTS)).lower()
         answer_normal = answer.translate(SUBSCRIPTS)
@@ -200,13 +247,19 @@ def summarize(cases: list[dict], rows: list[dict]) -> dict:
         return round(statistics.mean(values), 4) if values else None
 
     report = {
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "gold_sha256": hashlib.sha256(GOLD.read_bytes()).hexdigest(),
+        "retriever_sha256": hashlib.sha256(Path(retrieve_module.__file__).read_bytes()).hexdigest(),
+        "evaluator_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "embedding_model": get_settings().embedding_model,
+        "generation_model": get_settings().llm_model,
         "case_count": len(cases), "evaluated_count": len(rows), "answerable_count": len(answerable),
         "no_evidence_count": len(negatives), "needs_target_count": len(unclear),
         "retrieval": {key: mean(key, answerable) for key in ("recall_at_6", "precision_at_6", "rr_at_6", "ndcg_at_6")},
         "answer_fact_accuracy": mean("fact_match", answerable),
         "source_grounded_fact_accuracy": round(
             sum(bool(r.get("fact_match")) and r.get("recall_at_6") == 1 for r in answerable) / len(answerable), 4
-        ) if answerable else None,
+        ) if answerable and all("fact_match" in r for r in answerable) else None,
         "answer_text_citation_rate": mean("text_citation_present", answerable),
         "no_evidence_abstention_rate": mean("abstained", negatives),
         "needs_target_clarification_rate": mean("requested_target", unclear),
@@ -245,11 +298,17 @@ def summarize(cases: list[dict], rows: list[dict]) -> dict:
 def main() -> None:
     global GOLD, RESULTS, SUMMARY
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=("200", "hard60", "mixed200"), default="mixed200")
+    parser.add_argument("--suite", choices=("200", "hard60", "mixed200", "custom"), default="mixed200")
+    parser.add_argument("--expected-count", type=int, help="custom 题集必须明确指定预期数量")
     parser.add_argument("--retrieval-only", action="store_true")
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--force", action="store_true", help="discard checkpoints and run all cases again")
+    parser.add_argument("--output-prefix", type=Path, help="独立结果路径前缀，保留历史基线")
+    parser.add_argument("--gold", type=Path, help="使用已冻结的独立题集快照")
+    parser.add_argument("--rebind-missing-evidence", action="store_true", help="按内容SHA重绑定失效章节ID，另存题集与映射")
     args = parser.parse_args()
+    if args.suite == "custom" and (not args.gold or not args.output_prefix or not args.expected_count or args.expected_count < 1):
+        parser.error("custom requires --gold, --output-prefix and a positive --expected-count")
     if args.suite == "200":
         GOLD = ROOT / "docs" / "evaluation" / "rag_golden_200.jsonl"
         RESULTS = ROOT / "docs" / "evaluation" / "rag_eval_results_200.jsonl"
@@ -262,12 +321,33 @@ def main() -> None:
         GOLD = ROOT / "docs" / "evaluation" / "rag_golden_mixed200.jsonl"
         RESULTS = ROOT / "docs" / "evaluation" / "rag_eval_results_mixed200.jsonl"
         SUMMARY = ROOT / "docs" / "evaluation" / "rag_eval_summary_mixed200.json"
+    if args.output_prefix:
+        prefix = args.output_prefix.resolve()
+        prefix.parent.mkdir(parents=True, exist_ok=True)
+        RESULTS = prefix.with_name(prefix.name + "_results.jsonl")
+        SUMMARY = prefix.with_name(prefix.name + "_summary.json")
+    if args.gold:
+        GOLD = args.gold.resolve()
     if args.concurrency < 1 or args.concurrency > 8:
         raise SystemExit("concurrency must be 1..8")
     cases = read_jsonl(GOLD)
-    expected_count = 60 if args.suite == "hard60" else 200
+    expected_count = args.expected_count if args.suite == "custom" else 60 if args.suite == "hard60" else 200
     if len(cases) != expected_count or len({case["id"] for case in cases}) != expected_count:
         raise SystemExit(f"expected {args.suite} unique golden cases")
+    if args.rebind_missing_evidence:
+        if not args.output_prefix:
+            raise SystemExit("rebind requires an independent --output-prefix")
+        engine = create_engine(get_settings().resolved_database_url)
+        try:
+            with Session(engine) as db:
+                cases, mapping = rebind_missing_evidence(cases, db)
+        finally:
+            engine.dispose()
+        source_hash = hashlib.sha256(GOLD.read_bytes()).hexdigest()
+        GOLD = prefix.with_name(prefix.name + "_cases.jsonl")
+        write_jsonl(GOLD, cases)
+        prefix.with_name(prefix.name + "_evidence_mapping.json").write_text(
+            json.dumps({"source_gold_sha256": source_hash, "changes": mapping}, ensure_ascii=False, indent=2), encoding="utf-8")
     rows = asyncio.run(evaluate(cases, with_generation=not args.retrieval_only, concurrency=args.concurrency, force=args.force))
     print(json.dumps(summarize(cases, rows), ensure_ascii=False, indent=2))
 
