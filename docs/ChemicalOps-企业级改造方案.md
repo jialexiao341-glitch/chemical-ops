@@ -7,7 +7,7 @@
 
 ChemicalOps 面向中小型化工企业，建设采购履约与运营协同平台，兼顾全栈业务后端与场景化 Agent。确定性的服务端规则负责业务状态，AI 辅助检索、解释、草稿和流程编排。文中业务背景是设计场景，不宣称已开展真实企业生产试点。
 
-采用模块化单体 + 独立异步 Worker，复用 FastAPI、SQLAlchemy、MySQL、Vue 3、RabbitMQ、LangGraph、MinIO 和 Qdrant。先解决业务正确性，再推进任务长期运行、AI 产品化与生产试点。Redis 仅在缓存、限流等问题有测量依据时评估；不默认引入微服务、Kubernetes、Service Mesh 或多租户 SaaS。
+采用模块化单体 + 独立异步 Worker，复用 FastAPI、SQLAlchemy、MySQL、Vue 3、LangGraph、MinIO 和 Qdrant。先解决业务正确性，再推进任务长期运行、AI 产品化与生产试点。Redis 仅在缓存、限流等问题有测量依据时评估；不默认引入微服务、Kubernetes、Service Mesh 或多租户 SaaS。
 
 ## 2. 能力现状矩阵
 
@@ -25,13 +25,13 @@ ChemicalOps 面向中小型化工企业，建设采购履约与运营协同平�
 | RBAC、归属、供应商绑定 | 已实现且验证（专项） | `core/auth.py`、`purchase_orders/scope.py`、门户服务；[权限回归](evaluation/AI基础口径与权限回归-20260930.md)、[供应商验收](evaluation/供应商门户验收-20261004.md) | 11 类非管理员 1,740 次拒绝探测有记录；完整三级页面/按钮矩阵未覆盖，不能推导全部授权路径正确。 |
 | 四工具只读 Agent | 已实现且验证（专项） | `ai/agent_runtime.py`、`agent_tools.py`；[运行验收](Agent只读任务运行与验收.md)、[聊天集成模型评估](evaluation/Agent只读任务真实模型评估-聊天集成后-20261003.md) | 只读白名单和候选续跑已有；统一网关、风险级别、上下文预算需增量建设。 |
 | HITL | 部分实现 | `ai/drafts.py`、`test_ai_drafts.py`；候选选择和 WAITING_INPUT | 专用采购草稿预览确认已有，通用 Agent 写操作确认/执行状态未实现。 |
-| 持久执行与恢复 | 已实现且验证（可选路径） | `task_queue/*`、`jobs/technical_documents.py`、迁移 041；[RabbitMQ 验收](build-notes/RabbitMQ任务接入验收-20261008.md) | 默认仍为 in_process；Linux 仅进程监督验证；外部模型调用费用不保证零重复。 |
+| 持久执行与恢复 | 已实现且验证（可选路径） | `task_queue/*`、`jobs/technical_documents.py`、迁移 041/042；[数据库队列说明](数据库任务队列运行说明.md) | 默认仍为 in_process；Linux 仅进程监督验证；外部模型调用费用不保证零重复。 |
 | 名称解析、章节检索与来源 | 已实现且验证（专项） | `doc_kb/retrieve.py`、`service.py`、`vector_store.py`；[RAG 报告](evaluation/RAG混合评估报告-200条.md) | 结构化属性、单位和测试条件、学习式重排与真实样本质量需要单独验证。 |
 | MinerU / VL 与文件处理 | 部分实现 | `files/mineru.py`、`parser.py`，`scripts/parse_tds_msds.py`；`test_mineru_client.py`、资料链路测试 | 通用文件解析与技术资料链路入口不同；需统一触发、回退、质量门禁，不能把存在适配器视为全链路验收。 |
 | 文档生命周期、版本与主体隔离 | 部分实现 | 已有文件访问控制、原件/章节、hash 和索引代次；`doc_kb/model.py` | 索引代次不等于发布版本；业务复核、发布/停用、知识主体 ACL 与撤权索引联动尚需建设。 |
 | 幂等、安全门禁、健康与指标 | 已实现但未充分验证 | `core/idempotency.py`、`security.py`、`production.py`、`observability.py`、`files/scanner.py`；对应专项测试 | 需真实部署扫描、密钥轮换、业务副作用幂等、告警响应及跨进程链路演练。 |
 | 数据库迁移、备份/恢复、CI | 已实现但未充分验证 | `database/migrations`、`scripts/migrate_database.py`、`backup_mysql.py`、`restore_mysql.py`、`.github/workflows/ci.yml` | 当前是 SQL 迁移台账，未发现 Alembic 接管；CI 文件不等于最近运行成功，备份生成不等于已验证可恢复。 |
-| 全栈 Compose、CD、Grafana / OTel、生产试点 | 尚未实现（完整交付） | 已有 `deploy/docker-compose.rabbitmq.yml`、`docker-compose.minio.yml` 和前端镜像基础 | 本轮未发现完整部署、自动发布、仪表盘与 OTel 交付证据，P1/P3 新建集成及验收。 |
+| 全栈 Compose、CD、Grafana / OTel、生产试点 | 尚未实现（完整交付） | 已有 `docker-compose.minio.yml` 和前端镜像基础 | 本轮未发现完整部署、自动发布、仪表盘与 OTel 交付证据，P1/P3 新建集成及验收。 |
 
 ### 可核对指标及口径
 
@@ -39,7 +39,7 @@ ChemicalOps 面向中小型化工企业，建设采购履约与运营协同平�
 
 2026-09-28 RAG 固定 200 条合成题：149 可回答、39 应拒答、12 需追问。平均 Recall@6=86.24%、MRR@6=0.6842、nDCG@6=0.7290；全部证据召回与预期事实命中各为 127/149（85.23%），文本来源标识代理指标 128/149（85.91%），拒答 39/39、追问 12/12、生成错误 0。规则检查不等于逐句忠实度人工盲测，检索计时排除预计算 embedding。2026-09-30 名称回归修复 17 道定位失败题，149/149 是 CAS 目标识别，不更新上述召回或答案指标。
 
-环境与失败均以原报告为准：队列是本机 Windows、真实单节点 RabbitMQ/MySQL、临时 Qdrant 集合，模型/抓取/embedding 有替身；Agent 模型评估是隔离 SQLite + 真实模型 HTTP + 合成业务样本。供应商 2026-10-04 完整 pytest 复跑记录为 30 通过、1 失败、7 setup 错误，认证 401 使相关业务验证未完成；另有六页面、真实 MinIO 和本地模拟链路证据。测试文件存在不表示本次已运行。
+环境与失败均以原报告为准：旧队列验收是本机 Windows、真实单节点 RabbitMQ/MySQL、临时 Qdrant 集合，模型/抓取/embedding 有替身；Agent 模型评估是隔离 SQLite + 真实模型 HTTP + 合成业务样本。供应商 2026-10-04 完整 pytest 复跑记录为 30 通过、1 失败、7 setup 错误，认证 401 使相关业务验证未完成；另有六页面、真实 MinIO 和本地模拟链路证据。测试文件存在不表示本次已运行。
 
 ## 3. 目标业务边界与模块依赖
 
@@ -51,11 +51,11 @@ ChemicalOps 面向中小型化工企业，建设采购履约与运营协同平�
 | 库存 | inventory、inventory_returns、inventory_cost、replenishments | 批次、库位、余额、预留、冻结、流水和成本 | 引用质量放行；退货改变应付依据时由财务服务重建/复核来源。 |
 | 财务 | finance | 对账版本、应付、票行匹配、支付与核验审计 | 读取采购/质量/退货的来源快照，不能自行改实收和库存。 |
 | AI/知识 | ai、files、doc_kb | 任务、确认、证据、知识版本与 ACL | 通过工具和授权查询调用各域；禁止任意 SQL 或直接修改业务 ORM。 |
-| 公共基础/执行 | core、system、task_queue、jobs | 身份、幂等、审计、执行租约、outbox、配置 | 基础设施不定义质量放行或财务核验规则。 |
+| 公共基础/执行 | core、system、task_queue、jobs | 身份、幂等、审计、执行租约、持久任务、配置 | 基础设施不定义质量放行或财务核验规则。 |
 
 沿用 controller（API / Router）、schema、service、crud、model，不机械新增每一层。把用例编排和事务放在 Application Service；把复用状态/额度规则提取为 Domain Service；crud 承担 Repository 职责；broker、存储、模型和向量适配属于 Infrastructure。先抽离高风险跨域写入，普通只读 ORM 查询可过渡，但必须调用统一范围条件。
 
-每个用例只能有一个事务所有者；被调用领域方法用 flush，不自行 commit。数据库事务中不等待模型、远端存储或 RabbitMQ。审计和 outbox 与业务写入同事务保存；外部副作用使用事务后异步或可重试补偿，不能通过多次 commit 假装整体原子。
+每个用例只能有一个事务所有者；被调用领域方法用 flush，不自行 commit。数据库事务中不等待模型或远端存储。审计和执行记录与业务写入同事务保存；外部副作用使用事务后异步或可重试补偿，不能通过多次 commit 假装整体原子。
 
 ## 4. 领域模型、状态与异常闭环
 
@@ -118,22 +118,20 @@ HTTP Idempotency-Key 中间件是既有基础，不足以独自保证业务 Exac
 
 先开放采购申请草稿等可撤销操作；订单审批、库存执行、财务资金操作仍进入正式人工业务入口，不能把一次聊天确认等同审批权。写工具只调用领域服务，不能直接写 ORM。预览包含动作、对象、数量、金额、依据和风险；确认时再次核验当前用户、供应商/组织、业务状态、版本及额度。P0 规则不完整时，不以 Agent 补偿领域缺口。
 
-## 7. RabbitMQ 与持久任务
+## 7. MySQL 持久任务队列
 
 ```mermaid
 flowchart LR
-  API[API 用例] --> DB[(MySQL 业务任务 / 执行 / Outbox)]
-  DB --> D[Dispatcher]
-  D --> MQ[RabbitMQ 独立业务队列]
-  MQ --> W[资料 / Agent Worker]
+  API[API 用例] --> DB[(MySQL 业务任务 / 执行记录)]
+  DB --> W[资料 / Agent Worker 轮询领取]
   W --> CP[(Checkpoint / Result)]
   W --> DS[授权领域服务 / 受控外部适配]
   CP --> DB
 ```
 
-MySQL 是权威状态源，消息只携带执行标识和代次等最小信息。复用 publisher confirms、mandatory、持久消息、投递租约和失败路由。confirm 成功后未写 SENT 会再次发布，由 claim/业务幂等去重；ACK 是传输层状态，不代表业务事务提交。数据库提交后未 ACK 允许重投并返回已保存结果。
+MySQL 是权威状态源；API 同事务保存业务状态和执行记录，Worker 使用行锁和 SKIP LOCKED 领取到期任务，不再使用消息中间件、Dispatcher 或新的 outbox 投递记录。旧投递历史保留供追溯。
 
-已有有限执行重试为最多 3 次、退避 30/120 秒，资料阶段 timeout=900 秒（据 2026-10-08 验收），不是吞吐或 SLA 指标。投递重试不消耗执行次数；权限/参数等永久错误直接失败并进入失败队列。业务失败队列与 Broker DLX 分开记录原因和处置，不把“可读失败消息”称为完整死信运维。
+有限执行重试默认最多 3 次，退避 30/120 秒；权限/参数等永久错误直接失败，原因保存在执行记录 error_code 中。每个 Worker 分别限制资料/Agent 并发，轮询间隔可配置。历史 RabbitMQ 评测不等于当前数据库队列验收。
 
 Worker claim 成功取得租约及递增 fencing token；提交时再次检查租约、代次与任务 revision。取消、超时、DB 断连必须停止受监督子进程。过期恢复先证明旧进程停止；不能证明时隔离、告警并保留资源锁，不自动继续。清理锁须有人工处置证据，不能以删锁解决活进程竞争。
 
@@ -155,13 +153,13 @@ MySQL / Qdrant / MinIO 之间没有跨系统原子事务。文档使用源 hash�
 
 ## 9. 部署、迁移与可观测性
 
-第一阶段使用完整 Docker / Compose：前端及反向代理、API、Dispatcher、documents Worker、agent Worker、MySQL、RabbitMQ、MinIO、Qdrant；调度器按需求独立运行，监控作为可选 profile。开发/测试/生产使用独立配置、账号、库、vhost、桶和向量集合，固定镜像版本、资源限制、持久卷、健康检查及启动依赖。管理端口不默认对外开放，密钥经环境挂载/secret 注入，生产启动通过既有配置门禁。
+第一阶段使用完整 Docker / Compose：前端及反向代理、API、documents Worker、agent Worker、MySQL、MinIO、Qdrant；调度器按需求独立运行，监控作为可选 profile。开发/测试/生产使用独立配置、账号、库、桶和向量集合，固定镜像版本、资源限制、持久卷、健康检查及启动依赖。管理端口不默认对外开放，密钥经环境挂载/secret 注入，生产启动通过既有配置门禁。
 
 已有 SQL 迁移台账、校验及重复升级测试，先保留。Alembic 作为拟议管理方式：盘点现有 schema/041 等迁移和线上基线，记录决策；若接管则建立可验证 baseline，禁止在存量库重新执行全部历史 DDL。新旧工具不能同时写迁移台账；MySQL 非事务 DDL 采用可重入分步、扩展后收缩和备份恢复方案。禁止把 Alembic autogenerate 当作可靠回滚证明。
 
 现有 CI 含初始化/升级、pytest、编译、安全扫描、健康接口 smoke load 和前端检查/构建；尚未读取最近流水线结果。增加真实依赖服务的集成门禁、关键 E2E 和产物版本，CD 按测试→预发布→人工批准试点推进。发布前备份、兼容旧 Worker/快照，回滚先结束或隔离在途执行；数据不可逆时用恢复或前向修复。
 
-复用 JSON 日志、Request/Trace ID、Prometheus 文本指标和 live/ready。增建 Prometheus/Grafana 与 OTel 采集，连通 HTTP、outbox、消息、Worker、模型及工具调用。监控 API 错误/延迟、数据库慢查询和锁等待、队列深度/最老任务、投递失败/租约超时/失败隔离、Agent Token/节点耗时/错误率与文档索引延迟。ready 检查按功能启用的依赖，live 不因可恢复 Broker 故障反复重启。告警有责任人、阈值、去重、处置手册和恢复通知。
+复用 JSON 日志、Request/Trace ID、Prometheus 文本指标和 live/ready。增建 Prometheus/Grafana 与 OTel 采集，连通 HTTP、数据库任务、Worker、模型及工具调用。监控 API 错误/延迟、数据库慢查询和锁等待、队列深度/最老任务、领取失败/租约超时/失败隔离、Agent Token/节点耗时/错误率与文档索引延迟。ready 检查按功能启用的依赖，live 不因可恢复的任务执行故障反复重启。告警有责任人、阈值、去重、处置手册和恢复通知。
 
 MySQL SQL 备份与开发 JSONL.gz 备份格式分别管理，现有 `restore_mysql.py` 只接受 .sql，不能宣称可直接恢复验收记录中的 JSONL.gz。完整恢复覆盖 MySQL、MinIO 对象及引用一致性，Qdrant 可由已发布章节重建；保存清单/hash/版本，在独立库和桶演练核对单据、金额、权限、对象及索引。
 
@@ -172,7 +170,7 @@ MySQL SQL 备份与开发 JSONL.gz 备份格式分别管理，现有 `restore_my
 | 项目 | 建议目标 | 测量与前提 |
 | --- | --- | --- |
 | 普通业务 API | 50 并发下非文件/非模型读接口 p95≤500ms、状态写接口 p95≤1s，错误率<1% | 试点代表数据、固定硬件，持续 30 分钟；鉴权、数据库和业务约束均启用，记录 p99 和资源水位。 |
-| 持久任务接收/积压 | 接收 p95≤1s；健康 Broker 条件下投递等待 p95≤5s | 分开记录 API、outbox 等待、队列等待和执行；建议 10 个短任务/秒持续 30 分钟，再测实际资料与 Agent 并发。 |
+| 持久任务接收/积压 | 接收 p95≤1s；健康数据库及可用 Worker 条件下领取等待 p95≤5s | 分开记录 API、数据库队列等待和执行；建议 10 个短任务/秒持续 30 分钟，再测实际资料与 Agent 并发。 |
 | 可用性 | 试点月度目标 99.5% | 明确关键用户操作、监测窗口和维护口径；单节点部署仍有故障域，不能从健康 smoke 推导月度可用性。 |
 | 执行恢复 | 证明旧进程停止后，恢复到可执行状态≤5 分钟 | 覆盖租约过期、重投和告警；不含模型处理时间，无法证明停止时按隔离例外统计。 |
 | 数据恢复 | 建议 RPO≤24h、RTO≤2h | 基于日备份起步；在批准规模下测全链路恢复，若企业要求更低 RPO 再评估 binlog/PITR。 |
@@ -183,7 +181,7 @@ MySQL SQL 备份与开发 JSONL.gz 备份格式分别管理，现有 `restore_my
 | 阶段 | 当前问题与建设能力 | 主要模块/技术方案 | 依赖与风险 | 放行标准 |
 | --- | --- | --- | --- | --- |
 | P0 业务正确性 | 部分质量放行、预留来源、退货/冲销和授权组合不全 | 采购/履约/质量/库存/财务；统一状态规则、行级数量、锁与唯一键 | 先确定口径；历史回填、锁顺序、事务重构可能影响既有行为 | 主链路及负面/并发矩阵通过，历史财务回归不退化，浏览器代表流程核对。 |
-| P1 任务可靠性 | 队列已有专项证据，长期部署与副作用恢复不足 | task_queue/jobs/ai、Compose、迁移；复用 outbox/租约/监督并补全故障运维 | 依赖 P0 事务与幂等；数据库/Qdrant 不原子，Linux 完整 Worker 待验 | 真实依赖故障演练、受影响完整回归、启停/回滚及备份格式验证完成。 |
+| P1 任务可靠性 | 队列已有专项证据，长期部署与副作用恢复不足 | task_queue/jobs/ai、Compose、迁移；复用数据库任务/租约/监督并补全故障运维 | 依赖 P0 事务与幂等；数据库/Qdrant 不原子，Linux 完整 Worker 待验 | 真实依赖故障演练、受影响完整回归、启停/回滚及备份格式验证完成。 |
 | P2 AI 产品化 | 通用确认、预算、发布 ACL、真实样本缺口 | ai/files/doc_kb/前端；网关、确认快照、生命周期与质量门禁 | 写工具依赖 P0/P1；文档授权及模型波动，快照升级兼容 | 撤权/版本变化/重放拒绝正确，知识隔离有效，分层真实样本评测有证据。 |
 | P3 生产试点 | 无统一容量、恢复与真实角色交付证明 | 全栈、安全、监控、OTel、CD、E2E | 依赖 P0～P2；容量和恢复目标需确认，单节点故障风险显式记录 | 压测/安全/恢复/告警/发布回滚报告和真实角色签收；有失败则阻止相应能力放行。 |
 

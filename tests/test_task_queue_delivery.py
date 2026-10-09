@@ -1,21 +1,20 @@
 """Real isolated MySQL tests; never create queue tables in the business database."""
 
 from datetime import timedelta
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from dotenv import dotenv_values
-from sqlalchemy import create_engine, delete, select, text
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.task_queue.model import TaskExecution, TaskOutbox, TaskResourceLock
 from app.modules.task_queue import service
-from app.modules.task_queue import broker, dispatcher, worker
+from app.modules.task_queue import worker
 from app.core.config import Settings
 from app.modules.jobs.model import SchedulerJobRun
 from app.modules.jobs.service import start_scheduled_run
@@ -32,12 +31,12 @@ def queue_engine():
     engine = create_engine(URL.create("mysql+pymysql", username="root",
         password=config["MYSQL_ROOT_PASSWORD"], host=config.get("MYSQL_HOST", "127.0.0.1"),
         port=int(config.get("MYSQL_PORT", "3306")), database="chemicalops_mq_acceptance_20261008"))
-    migration = (ROOT / "database/migrations/041_async_task_dispatch.sql").read_text()
     with engine.begin() as connection:
         for _ in range(2):
-            for statement in migration.split(";"):
-                if statement.strip():
-                    connection.execute(text(statement))
+            for filename in ("041_async_task_dispatch.sql", "042_database_task_queue.sql"):
+                for statement in (ROOT / "database/migrations" / filename).read_text().split(";"):
+                    if statement.strip():
+                        connection.exec_driver_sql(statement)
     SchedulerJobRun.__table__.create(engine, checkfirst=True)
     AiDocument.__table__.create(engine, checkfirst=True)
     AiDocumentSection.__table__.create(engine, checkfirst=True)
@@ -67,7 +66,7 @@ def test_acceptance_rolls_back_all_intent(db):
     assert db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution_id)) is None
 
 
-def test_business_record_and_outbox_share_one_transaction(db):
+def test_business_record_and_execution_share_one_transaction(db):
     run_id = uuid4().hex
     run = start_scheduled_run(db, run_id, task_name="technical_documents_pipeline", commit=False)
     execution = service.enqueue(db, task_type="documents.fetch", business_id=run_id,
@@ -79,11 +78,11 @@ def test_business_record_and_outbox_share_one_transaction(db):
     assert db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution_id)) is None
 
 
-def test_committed_intent_survives_without_broker(db):
+def test_committed_task_survives_without_worker(db):
     execution = enqueue(db)
     db.commit()
     row = db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution.id))
-    assert row.status == "PENDING" and execution.status == "QUEUED"
+    assert row is None and execution.status == "QUEUED"
 
 
 def test_resource_uniqueness_blocks_a_second_active_task(db):
@@ -92,16 +91,6 @@ def test_resource_uniqueness_blocks_a_second_active_task(db):
     with pytest.raises(IntegrityError):
         enqueue(db, resource_key=resource)
     db.rollback()
-
-
-def test_delivery_retry_does_not_increment_execution_attempts(db):
-    execution = enqueue(db)
-    row = service.claim_delivery(db, "publisher")
-    assert row is not None
-    service.settle_delivery(db, row.id, "publisher", confirmed=False)
-    db.refresh(execution)
-    assert execution.attempt_count == 0
-    assert db.get(TaskOutbox, row.id, populate_existing=True).status == "PENDING"
 
 
 def test_claim_blocks_duplicate_and_completed_delivery(db):
@@ -123,7 +112,7 @@ def test_expired_execution_cannot_commit(db):
         service.finish(db, execution.id, claimed.fencing_token, status="SUCCEEDED")
 
 
-def test_retry_exhaustion_creates_failed_outbox(db):
+def test_retry_exhaustion_keeps_failure_in_execution(db):
     execution = enqueue(db)
     for attempt in range(1, 4):
         execution.next_attempt_at = None
@@ -138,7 +127,7 @@ def test_retry_exhaustion_creates_failed_outbox(db):
         if attempt < 3:
             assert (29 if attempt == 1 else 119) <= (execution.next_attempt_at - service.now()).total_seconds() <= (30 if attempt == 1 else 120)
     assert db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution.id,
-                                            TaskOutbox.routing_key == "agent.failed")) is not None
+                                            TaskOutbox.routing_key == "agent.failed")) is None
 
 
 def test_unknown_task_is_not_accepted(db):
@@ -151,8 +140,7 @@ def test_document_queue_drains_before_returning_to_legacy_path(db, monkeypatch):
     from fastapi import BackgroundTasks
     from app.modules.jobs import technical_documents
     from app.modules.task_queue import adapters
-    settings = Settings(_env_file=None, technical_document_execution_mode="rabbitmq",
-                        rabbitmq_username="test", rabbitmq_password="test")
+    settings = Settings(_env_file=None, technical_document_execution_mode="database")
     monkeypatch.setattr(technical_documents, "get_settings", lambda: settings)
     request = SimpleNamespace(cas_no="rollout-test", doc_types=["msds"])
     queued_background = BackgroundTasks()
@@ -161,8 +149,8 @@ def test_document_queue_drains_before_returning_to_legacy_path(db, monkeypatch):
     row = db.scalar(select(TaskExecution).where(TaskExecution.business_id == run.run_id))
     claimed = service.claim_execution(db, row.id, 0, "worker", 60)
     adapters.finish(db, row.id, claimed.fencing_token, status="SUCCEEDED")
-    settings.agent_execution_mode = "rabbitmq"  # Enable only after document queue drained.
-    assert settings.technical_document_execution_mode == "rabbitmq"
+    settings.agent_execution_mode = "database"  # Enable only after document queue drained.
+    assert settings.technical_document_execution_mode == "database"
     settings.technical_document_execution_mode = settings.agent_execution_mode = "in_process"
     legacy_background = BackgroundTasks()
     legacy = technical_documents.schedule_pipeline(db, SimpleNamespace(id=1), request, legacy_background, "fetch")
@@ -175,8 +163,7 @@ def test_document_acceptance_serializes_same_cas_requests(queue_engine, monkeypa
     from types import SimpleNamespace
     from fastapi import BackgroundTasks, HTTPException
     from app.modules.jobs import technical_documents
-    config = Settings(_env_file=None, technical_document_execution_mode="rabbitmq",
-                      rabbitmq_username="test", rabbitmq_password="test")
+    config = Settings(_env_file=None, technical_document_execution_mode="database")
     monkeypatch.setattr(technical_documents, "get_settings", lambda: config)
     factory = sessionmaker(queue_engine, expire_on_commit=False)
     cas = "acceptance-" + uuid4().hex[:16]
@@ -236,146 +223,26 @@ def test_recovery_requires_proof_old_process_stopped(db, monkeypatch, old_proces
     if not old_process_stopped:
         assert recovered.error_code == "RECOVERY_ISOLATION_REQUIRED"
         assert db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution.id,
-            TaskOutbox.routing_key == "documents.failed")) is not None
+            TaskOutbox.routing_key == "documents.failed")) is None
 
 
-def broker_settings():
-    values = dotenv_values(ROOT / ".env.rabbitmq")
-    import httpx
-    vhost = "chemicalops-acceptance-20261008"
-    with httpx.Client(base_url="http://127.0.0.1:15672", trust_env=False,
-                      auth=(values["RABBITMQ_USERNAME"], values["RABBITMQ_PASSWORD"])) as client:
-        client.put(f"/api/vhosts/{vhost}", json={}).raise_for_status()
-        client.put(f"/api/permissions/{vhost}/{values['RABBITMQ_USERNAME']}",
-                   json={"configure": ".*", "write": ".*", "read": ".*"}).raise_for_status()
-    return Settings(_env_file=None, rabbitmq_username=values["RABBITMQ_USERNAME"],
-                    rabbitmq_password=values["RABBITMQ_PASSWORD"], rabbitmq_vhost=vhost)
-
-
-def test_real_confirmed_dispatch_and_unroutable_publish(db):
-    execution = enqueue(db)
+def test_claim_next_filters_queue_due_time_and_terminal_status(db):
+    agent = enqueue(db)
+    delayed = service.enqueue(db, task_type="documents.fetch", business_id=uuid4().hex,
+        actor_id=1, generation=0, payload={})
+    delayed.next_attempt_at = service.now() + timedelta(seconds=60)
+    ready = service.enqueue(db, task_type="documents.ingest", business_id=uuid4().hex,
+        actor_id=1, generation=0, payload={})
     db.commit()
-    factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False, join_transaction_mode="create_savepoint")
-
-    async def verify():
-        async with broker.connection(broker_settings()) as client:
-            channel = await client.channel(publisher_confirms=True, on_return_raises=True)
-            exchange = await broker.topology(channel)
-            assert await dispatcher.dispatch_one(factory, exchange, "test-publisher")
-            queue = await channel.get_queue("chemicalops.agent")
-            message = await queue.get(timeout=10)
-            envelope = broker.TaskMessage.model_validate_json(message.body)
-            assert envelope.execution_id == execution.id
-            await message.ack()
-            with pytest.raises(Exception):
-                await broker.publish(exchange, message_id=uuid4().hex, body=envelope, route="unbound-route")
-    asyncio.run(verify())
-    db.expire_all()
-    assert db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution.id)).status == "SENT"
+    claimed = service.claim_next(db, "documents", "worker", 60)
+    assert claimed.id == ready.id
+    assert service.claim_next(db, "documents", "worker", 60) is None
+    assert service.claim_next(db, "agent", "worker", 60).id == agent.id
+    with pytest.raises(ValueError):
+        service.claim_next(db, "unknown", "worker", 60)
 
 
-def test_invalid_broker_message_is_confirmed_to_quarantine(db):
-    import aio_pika
-    factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False, join_transaction_mode="create_savepoint")
-    async def verify():
-        settings = broker_settings()
-        async with broker.connection(settings) as client:
-            channel = await client.channel(publisher_confirms=True, on_return_raises=True)
-            await broker.topology(channel)
-            source = await channel.get_queue("chemicalops.agent")
-            failed = await channel.get_queue("chemicalops.agent.failed")
-            await channel.default_exchange.publish(aio_pika.Message(b'{"command":"never execute"}'),
-                routing_key="chemicalops.agent", mandatory=True)
-            message = await source.get(timeout=10)
-            await worker.handle(message, factory, settings, "agent", "acceptance", channel)
-            result = await failed.get(timeout=10)
-            assert result.body == b'{"error_code":"INVALID_TASK_MESSAGE"}'
-            await result.ack()
-    asyncio.run(verify())
-
-
-def test_publish_confirmation_lost_is_republished_and_claimed_once(db):
-    execution = enqueue(db)
-    db.commit()
-    first = service.claim_delivery(db, "crashed-publisher")
-
-    async def verify():
-        async with broker.connection(broker_settings()) as client:
-            channel = await client.channel(publisher_confirms=True, on_return_raises=True)
-            exchange = await broker.topology(channel)
-            envelope = broker.TaskMessage(execution_id=execution.id, delivery_generation=0, task_type="agent.run")
-            await broker.publish(exchange, message_id=first.id, body=envelope, route="agent")
-            # Simulate crash before the database marks publication SENT.
-            first.lease_until = service.now() - timedelta(seconds=1)
-            db.commit()
-            second = service.claim_delivery(db, "recovered-publisher")
-            assert second.id == first.id
-            await broker.publish(exchange, message_id=second.id, body=envelope, route="agent")
-            service.settle_delivery(db, second.id, "recovered-publisher", confirmed=True)
-            queue = await channel.get_queue("chemicalops.agent")
-            claims = 0
-            for _ in range(2):
-                message = await queue.get(timeout=10)
-                delivery = broker.TaskMessage.model_validate_json(message.body)
-                assert delivery.execution_id == execution.id
-                claimed = service.claim_execution(db, execution.id, 0, uuid4().hex, 60)
-                if claimed:
-                    claims += 1
-                    service.finish(db, execution.id, claimed.fencing_token, status="SUCCEEDED")
-                    db.commit()
-                await message.ack()
-            assert claims == 1
-    asyncio.run(verify())
-
-
-def test_real_worker_duplicate_and_completed_redelivery_do_not_execute(db, monkeypatch):
-    execution = enqueue(db)
-    db.commit()
-    sessions = sessionmaker(bind=db.get_bind(), expire_on_commit=False, join_transaction_mode="create_savepoint")
-    from contextlib import contextmanager
-    from threading import Lock
-    connection_lock = Lock()  # This rollback fixture deliberately shares one connection.
-    @contextmanager
-    def factory():
-        with connection_lock:
-            with sessions() as session:
-                yield session
-    executed = []
-
-    async def fake_execution(factory, settings, claimed):
-        # A model substitute exercises worker concurrency, not external model quality.
-        executed.append(claimed.id)
-        await asyncio.sleep(0.05)
-        with factory() as session:
-            row = service.finish(session, claimed.id, claimed.fencing_token, status="SUCCEEDED")
-            row.checkpoint = {"completed_evidence": "preserved"}
-            session.commit()
-    monkeypatch.setattr(worker, "execute", fake_execution)
-
-    async def verify():
-        settings = broker_settings()
-        async with broker.connection(settings) as client:
-            channel = await client.channel(publisher_confirms=True, on_return_raises=True)
-            exchange = await broker.topology(channel)
-            envelope = broker.TaskMessage(execution_id=execution.id, delivery_generation=0, task_type="agent.run")
-            queue = await channel.get_queue("chemicalops.agent")
-            for _ in range(2):
-                await broker.publish(exchange, message_id=uuid4().hex, body=envelope, route="agent")
-            messages = [await queue.get(timeout=10) for _ in range(2)]
-            await asyncio.gather(*(worker.handle(message, factory, settings, "agent", uuid4().hex, channel)
-                                   for message in messages))
-            assert executed == [execution.id]
-            # Simulate ACK loss after the result transaction has already committed.
-            await broker.publish(exchange, message_id=uuid4().hex, body=envelope, route="agent")
-            replay = await queue.get(timeout=10)
-            await worker.handle(replay, factory, settings, "agent", "replay", channel)
-            assert executed == [execution.id]
-    asyncio.run(verify())
-    db.expire_all()
-    assert db.get(TaskExecution, execution.id).checkpoint == {"completed_evidence": "preserved"}
-
-
-def test_concurrent_publishers_claim_once(queue_engine):
+def test_concurrent_workers_claim_once(queue_engine):
     factory = sessionmaker(queue_engine, expire_on_commit=False)
     with factory() as db:
         execution = enqueue(db)
@@ -383,14 +250,34 @@ def test_concurrent_publishers_claim_once(queue_engine):
         db.commit()
     def claim(owner):
         with factory() as db:
-            row = service.claim_delivery(db, owner)
+            row = service.claim_next(db, "agent", owner, 60)
             return row.id if row else None
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(claim, ["publisher-a", "publisher-b"]))
-        assert sum(result is not None for result in results) == 1
+            results = list(pool.map(claim, ["worker-a", "worker-b"]))
+        assert results.count(execution_id) == 1
+        assert results.count(None) == 1
     finally:
         with factory() as db:
-            db.execute(delete(TaskOutbox).where(TaskOutbox.execution_id == execution_id))
             db.execute(delete(TaskExecution).where(TaskExecution.id == execution_id))
+            db.commit()
+
+
+def test_worker_skips_a_row_locked_by_another_worker(queue_engine):
+    factory = sessionmaker(queue_engine, expire_on_commit=False)
+    with factory() as db:
+        first, second = enqueue(db), enqueue(db)
+        ids = [first.id, second.id]
+        db.commit()
+    try:
+        with factory() as locked:
+            row = locked.scalar(select(TaskExecution).where(TaskExecution.id == ids[0])
+                .with_for_update())
+            with factory() as other:
+                claimed = service.claim_next(other, "agent", "other-worker", 60)
+                assert claimed.id in ids and claimed.id != row.id
+            locked.rollback()
+    finally:
+        with factory() as db:
+            db.execute(delete(TaskExecution).where(TaskExecution.id.in_(ids)))
             db.commit()

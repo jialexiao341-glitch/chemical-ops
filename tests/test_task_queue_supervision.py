@@ -7,9 +7,9 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import Settings
-from app.modules.task_queue import broker, processes, service, worker
+from app.modules.task_queue import processes, service, worker
 from app.modules.task_queue.model import TaskExecution
-from tests.test_task_queue_delivery import queue_engine, db, broker_settings
+from tests.test_task_queue_delivery import queue_engine, db
 
 
 @pytest.fixture
@@ -27,26 +27,21 @@ def sleeping_execution(db, monkeypatch, tmp_path):
     return claimed, factory
 
 
-def test_synchronous_child_preserves_amqp_and_lease_heartbeats(db, sleeping_execution):
+def test_synchronous_child_preserves_event_loop_and_lease_heartbeats(db, sleeping_execution):
     execution, factory = sleeping_execution
-    config = broker_settings().model_copy(update={"task_heartbeat_seconds": 1, "task_lease_seconds": 15})
+    config = Settings(_env_file=None, task_heartbeat_seconds=1, task_lease_seconds=15)
     ticks = []
     async def verify():
-        async with broker.connection(config) as client:
-            channel = await client.channel()
-            await broker.topology(channel)
-            async def ticker():
-                while True:
-                    ticks.append(1)
-                    await asyncio.sleep(0.05)
-            timer = asyncio.create_task(ticker())
-            try:
-                await worker.execute(factory, config, execution)
-                assert not client.is_closed and not channel.is_closed
-                await channel.get_queue("chemicalops.documents")
-            finally:
-                timer.cancel()
-                await asyncio.gather(timer, return_exceptions=True)
+        async def ticker():
+            while True:
+                ticks.append(1)
+                await asyncio.sleep(0.05)
+        timer = asyncio.create_task(ticker())
+        try:
+            await worker.execute(factory, config, execution)
+        finally:
+            timer.cancel()
+            await asyncio.gather(timer, return_exceptions=True)
     asyncio.run(verify())
     db.expire_all()
     row = db.get(TaskExecution, execution.id)

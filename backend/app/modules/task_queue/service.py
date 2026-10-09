@@ -1,4 +1,4 @@
-"""Short database transactions for durable acceptance and delivery claims."""
+"""Short database transactions for durable acceptance and worker claims."""
 
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -6,7 +6,7 @@ from uuid import uuid4
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.modules.task_queue.model import TaskExecution, TaskOutbox, TaskResourceLock
+from app.modules.task_queue.model import TaskExecution, TaskResourceLock
 
 TASK_ROUTES = {"documents.fetch": "documents", "documents.ingest": "documents", "agent.run": "agent"}
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "WAITING_INPUT"}
@@ -33,43 +33,26 @@ def enqueue(db: Session, *, task_type: str, business_id: str, actor_id: int,
     db.flush()
     if resource_key:
         db.add(TaskResourceLock(resource_key=resource_key, execution_id=execution.id))
-    add_delivery(db, execution)
     db.flush()
     return execution
 
 
-def add_delivery(db: Session, execution: TaskExecution, *, failed: bool = False,
-                 available_at: datetime | None = None) -> TaskOutbox:
-    row = TaskOutbox(id=uuid4().hex, execution_id=execution.id,
-        delivery_generation=execution.delivery_generation,
-        routing_key=TASK_ROUTES[execution.task_type] + (".failed" if failed else ""),
-        status="PENDING", available_at=available_at or now(), attempt_count=0, created_at=now())
-    db.add(row)
-    return row
-
-
-def claim_delivery(db: Session, owner: str, lease_seconds: int = 60) -> TaskOutbox | None:
+def claim_next(db: Session, queue: str, owner: str, lease_seconds: int) -> TaskExecution | None:
+    """Lock and claim one due task atomically; competing workers skip locked rows."""
+    task_types = [task_type for task_type, route in TASK_ROUTES.items() if route == queue]
+    if not task_types:
+        raise ValueError("Unknown task queue")
     timestamp = now()
-    row = db.scalar(select(TaskOutbox).where(TaskOutbox.available_at <= timestamp,
-        or_(TaskOutbox.status == "PENDING",
-            (TaskOutbox.status == "PUBLISHING") & (TaskOutbox.lease_until < timestamp)))
-        .order_by(TaskOutbox.available_at, TaskOutbox.id).with_for_update(skip_locked=True).limit(1))
-    if row is None:
+    execution = db.scalar(select(TaskExecution).where(
+        TaskExecution.task_type.in_(task_types),
+        TaskExecution.status.in_(("QUEUED", "RETRYING")),
+        or_(TaskExecution.next_attempt_at.is_(None), TaskExecution.next_attempt_at <= timestamp))
+        .order_by(TaskExecution.created_at, TaskExecution.id)
+        .with_for_update(skip_locked=True).limit(1))
+    if execution is None:
         db.commit()
         return None
-    row.status, row.lease_owner = "PUBLISHING", owner
-    row.lease_until = timestamp + timedelta(seconds=lease_seconds)
-    row.attempt_count += 1
-    db.commit()
-    return row
-
-
-def settle_delivery(db: Session, message_id: str, owner: str, *, confirmed: bool) -> None:
-    db.execute(update(TaskOutbox).where(TaskOutbox.id == message_id,
-        TaskOutbox.status == "PUBLISHING", TaskOutbox.lease_owner == owner).values(
-        status="SENT" if confirmed else "PENDING", lease_owner=None, lease_until=None,
-        available_at=now() + timedelta(seconds=0 if confirmed else 5)))
-    db.commit()
+    return claim_execution(db, execution.id, execution.delivery_generation, owner, lease_seconds)
 
 
 def claim_execution(db: Session, execution_id: str, delivery_generation: int,
@@ -121,14 +104,11 @@ def finish(db: Session, execution_id: str, token: int, *, status: str,
         execution.status = "RETRYING"
         execution.delivery_generation += 1
         execution.next_attempt_at = now() + timedelta(seconds=30 if execution.attempt_count == 1 else 120)
-        add_delivery(db, execution, available_at=execution.next_attempt_at)
     else:
         if status not in TERMINAL:
             raise ValueError("Invalid final status")
         execution.status = status
         db.execute(delete(TaskResourceLock).where(TaskResourceLock.execution_id == execution_id))
-        if status == "FAILED":
-            add_delivery(db, execution, failed=True)
     execution.lease_owner = None
     execution.lease_until = None
     execution.updated_at = now()

@@ -1,4 +1,4 @@
-"""Database task state is authoritative; broker messages only reference it."""
+"""Persistent database queue state and retained legacy delivery history."""
 
 from datetime import datetime
 
@@ -13,6 +13,7 @@ class TaskExecution(Base):
     __table_args__ = (
         UniqueConstraint("task_type", "business_id", "run_generation", name="uq_task_business_generation"),
         Index("ix_task_status_lease", "status", "lease_until"),
+        Index("ix_task_queue_poll", "task_type", "status", "created_at", "id"),
         Index("ix_task_actor", "actor_id"),
     )
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -37,6 +38,7 @@ class TaskExecution(Base):
 
 
 class TaskOutbox(Base):
+    """Legacy RabbitMQ delivery history; retained for inspection, never written by workers."""
     __tablename__ = "task_outbox"
     __table_args__ = (
         UniqueConstraint("execution_id", "delivery_generation", "routing_key", name="uq_task_outbox_delivery"),

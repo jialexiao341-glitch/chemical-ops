@@ -178,8 +178,8 @@ def create_pipeline_run(db: Session, run_id: str) -> SchedulerJobRun:
 
 
 def schedule_pipeline(db, user, data, background_tasks, action):
-    """Persist task parameters at acceptance, with one queue delivery intent."""
-    queued = get_settings().technical_document_execution_mode == "rabbitmq"
+    """Persist task parameters at acceptance, with one durable execution record."""
+    queued = get_settings().technical_document_execution_mode == "database"
     from uuid import uuid4
     run = start_scheduled_run(db, uuid4().hex, task_name=PIPELINE_NAME, commit=False)
     run.status = "QUEUED" if queued else "RUNNING"

@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import logging
 import sys
 from pathlib import Path
 
@@ -32,8 +31,6 @@ def main():
     errors = production_config_errors(settings)
     if errors:
         raise SystemExit("; ".join(errors))
-    if not settings.rabbitmq_username or not settings.rabbitmq_password:
-        raise SystemExit("RabbitMQ credentials required")
     factory = sessionmaker(create_engine(settings.resolved_database_url, pool_pre_ping=True,
         hide_parameters=True, connect_args={"connect_timeout": 5, "read_timeout": 5, "write_timeout": 5}), expire_on_commit=False)
     configure(settings)

@@ -899,7 +899,7 @@ def cancel_task(db: Session, user: User, task_id: str) -> TaskRead:
         if count == 1 and task.payload.get("chat"):
             db.execute(update(AIMessage).where(AIMessage.id == task.payload["chat"]["assistant_message_id"]).values(content="任务已取消。"))
             _save_conversation_memory(db, user, task.payload["chat"]["conversation_id"], memory)
-        if count == 1 and get_settings().agent_execution_mode == "rabbitmq":
+        if count == 1 and get_settings().agent_execution_mode == "database":
             from sqlalchemy import delete
             from app.modules.task_queue.model import TaskExecution, TaskResourceLock
             executions = list(db.scalars(select(TaskExecution).where(
@@ -916,7 +916,7 @@ def cancel_task(db: Session, user: User, task_id: str) -> TaskRead:
 
 
 def schedule_async(db, user, background, prepare, *args):
-    queued = get_settings().agent_execution_mode == "rabbitmq"
+    queued = get_settings().agent_execution_mode == "database"
     state = prepare(db, user, *args, commit=not queued)
     if queued:
         from app.modules.task_queue.service import enqueue

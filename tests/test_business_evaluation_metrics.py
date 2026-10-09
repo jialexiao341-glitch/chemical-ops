@@ -11,7 +11,7 @@ from app.modules.ai import agent_runtime as runtime, agent_tools as tools
 from scripts.agent_business_cases import CASES, RFQ_CONTROLS, business_db, evidence_correct, INVENTORY, COMPARE
 from scripts.evaluate_agent_business import evaluate_one, summarize, answer_facts_correct, score_row, write_atomic
 from scripts import evaluate_agent_tasks as original
-from scripts.evaluate_queue_reliability import metrics, percentile, connect_database
+from scripts.queue_reliability_metrics import metrics, percentile
 from tests.test_agent_task_evaluation import incomplete_inventory_task
 
 
@@ -84,10 +84,6 @@ def test_duplicate_messages_do_not_inflate_unique_task_denominator():
     assert result['unique_tasks']==2 and result['success_rate']==.5
     assert result['unrecovered']==1 and result['duplicate_side_effects']==1
     assert result['groups']['worker_crash']['recovery_p95_seconds']==20
-
-
-def test_reliability_refuses_business_database():
-    with pytest.raises(ValueError): connect_database('chemicalops')
 
 
 def test_report_retries_atomic_replace_without_truncating_previous_result(tmp_path,monkeypatch):

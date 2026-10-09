@@ -21,8 +21,7 @@ def queued_db(chat_task_db, monkeypatch):
     chat_task_db.autoflush = False
     for model in (TaskExecution, TaskOutbox, TaskResourceLock):
         model.__table__.create(chat_task_db.bind)
-    settings = Settings(_env_file=None, openai_api_key="test-key", agent_execution_mode="rabbitmq",
-                        rabbitmq_username="test", rabbitmq_password="test")
+    settings = Settings(_env_file=None, openai_api_key="test-key", agent_execution_mode="database")
     monkeypatch.setattr(runtime, "get_settings", lambda: settings)
     from sqlalchemy.orm import Session
     monkeypatch.setattr(runtime, "SessionLocal", lambda: Session(chat_task_db.bind, autoflush=False))
@@ -36,7 +35,7 @@ def accept(db):
     assert background.tasks == [] and task.status == "RUNNING"
     execution = db.scalar(select(TaskExecution).where(TaskExecution.business_id == task.id))
     assert execution.status == "QUEUED"
-    assert db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution.id)) is not None
+    assert db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution.id)) is None
     return task, execution
 
 
@@ -85,7 +84,7 @@ def test_cancel_queued_task_cannot_be_claimed(queued_db, monkeypatch):
     assert recover(sessionmaker(queued_db.bind, expire_on_commit=False), Settings(_env_file=None)) == 0
 
 
-def test_outbox_failure_rolls_back_chat_task_and_messages(queued_db, monkeypatch):
+def test_enqueue_failure_rolls_back_chat_task_and_messages(queued_db, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("simulated enqueue failure")
     monkeypatch.setattr(service, "enqueue", fail)

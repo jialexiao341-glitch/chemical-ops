@@ -76,14 +76,9 @@ class Settings(BaseSettings):
     business_alerts_scheduler_enabled: bool = False
     idempotency_required: bool = False
 
-    technical_document_execution_mode: Literal["in_process", "rabbitmq"] = "in_process"
-    agent_execution_mode: Literal["in_process", "rabbitmq"] = "in_process"
-    rabbitmq_host: str = "127.0.0.1"
-    rabbitmq_port: int = Field(default=5672, ge=1, le=65535)
-    rabbitmq_username: str = ""
-    rabbitmq_password: str = ""
-    rabbitmq_vhost: str = "chemicalops"
-    rabbitmq_tls: bool = False
+    technical_document_execution_mode: Literal["in_process", "database"] = "in_process"
+    agent_execution_mode: Literal["in_process", "database"] = "in_process"
+    task_poll_interval_seconds: float = Field(default=1.0, ge=0.1, le=60)
     task_max_attempts: int = Field(default=3, ge=1, le=10)
     task_lease_seconds: int = Field(default=60, ge=15)
     task_heartbeat_seconds: int = Field(default=10, ge=1)
@@ -92,19 +87,12 @@ class Settings(BaseSettings):
 
     @property
     def task_queue_enabled(self) -> bool:
-        return "rabbitmq" in (self.technical_document_execution_mode, self.agent_execution_mode)
+        return "database" in (self.technical_document_execution_mode, self.agent_execution_mode)
 
     @model_validator(mode="after")
     def validate_task_queue(self):
         if self.task_heartbeat_seconds * 3 > self.task_lease_seconds:
             raise ValueError("TASK_LEASE_SECONDS 必须至少为 TASK_HEARTBEAT_SECONDS 的三倍")
-        if self.task_queue_enabled:
-            if not all(value.strip() for value in (
-                self.rabbitmq_host, self.rabbitmq_username, self.rabbitmq_password, self.rabbitmq_vhost,
-            )):
-                raise ValueError("启用队列必须配置 RabbitMQ 主机、账号、密码和 vhost")
-            if self.rabbitmq_username.strip().lower() == "guest":
-                raise ValueError("启用队列必须使用独立 RabbitMQ 账号，不能使用 guest")
         return self
 
     jwt_secret_key: str = "CHANGE_ME_TO_A_LONG_RANDOM_SECRET"

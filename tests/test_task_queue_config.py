@@ -20,7 +20,7 @@ def test_default_does_not_require_a_broker():
 def test_transport_logs_redact_clear_and_encoded_credentials():
     import logging
     from app.modules.task_queue.logging import SecretFilter
-    config = settings(rabbitmq_password="test secret/@", mysql_password="sql-password")
+    config = settings(mysql_password="test secret/@", jwt_secret_key="sql-password")
     record = logging.LogRecord("transport", logging.WARNING, __file__, 1,
         "connection test secret/@ test%20secret%2F%40 test+secret%2F%40 sql-password", (), None)
     assert SecretFilter(config).filter(record)
@@ -29,7 +29,7 @@ def test_transport_logs_redact_clear_and_encoded_credentials():
 
 @pytest.mark.parametrize("mode", ["technical_document_execution_mode", "agent_execution_mode"])
 def test_each_queue_can_be_enabled_independently(mode):
-    config = settings(**{mode: "rabbitmq"}, rabbitmq_username="worker", rabbitmq_password="secure-value")
+    config = settings(**{mode: "database"})
     assert config.task_queue_enabled
     other = "agent_execution_mode" if mode.startswith("technical") else "technical_document_execution_mode"
     assert getattr(config, other) == "in_process"
@@ -38,19 +38,15 @@ def test_each_queue_can_be_enabled_independently(mode):
 @pytest.mark.parametrize("values", [
     {"agent_execution_mode": "unknown"},
     {"agent_execution_mode": "rabbitmq"},
-    {"agent_execution_mode": "rabbitmq", "rabbitmq_username": "guest", "rabbitmq_password": "value"},
     {"task_heartbeat_seconds": 30, "task_lease_seconds": 60},
     {"task_max_attempts": 0},
-    {"rabbitmq_port": 0},
+    {"task_poll_interval_seconds": 0},
 ])
 def test_invalid_config_fails_without_exposing_secret(values):
     with pytest.raises(ValidationError):
         settings(**values)
 
 
-def test_production_rejects_placeholder_broker_password_only_when_enabled():
-    config = settings(app_env="production", agent_execution_mode="rabbitmq",
-                      rabbitmq_username="worker", rabbitmq_password="change_me_password")
-    assert any("RABBITMQ_PASSWORD" in error for error in production_config_errors(config))
-    config.agent_execution_mode = "in_process"
-    assert not any("RABBITMQ_PASSWORD" in error for error in production_config_errors(config))
+def test_database_queue_needs_no_transport_credentials_in_production():
+    config = settings(app_env="production", agent_execution_mode="database")
+    assert not any("RABBITMQ" in error for error in production_config_errors(config))

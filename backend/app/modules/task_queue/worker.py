@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app.modules.task_queue import adapters, broker, processes, service
+from app.modules.task_queue import adapters, processes, service
 from app.modules.task_queue.model import TaskExecution
 
 LOGGER = logging.getLogger("chemicalops.task_worker")
@@ -89,11 +89,9 @@ def recover(factory, settings):
                 row.status = "RETRYING"
                 row.delivery_generation += 1
                 row.next_attempt_at = service.now()
-                service.add_delivery(db, row)
             else:
                 row.status = "FAILED"
                 row.error_code = "RECOVERY_ATTEMPTS_EXHAUSTED" if stopped else "RECOVERY_ISOLATION_REQUIRED"
-                service.add_delivery(db, row, failed=True)
                 if stopped:
                     from sqlalchemy import delete
                     from app.modules.task_queue.model import TaskResourceLock
@@ -103,39 +101,7 @@ def recover(factory, settings):
     return len(rows)
 
 
-async def quarantine(message, queue, channel):
-    import aio_pika
-    safe = aio_pika.Message(b'{"error_code":"INVALID_TASK_MESSAGE"}',
-        delivery_mode=aio_pika.DeliveryMode.PERSISTENT)
-    await channel.default_exchange.publish(safe, routing_key=f"chemicalops.{queue}.failed", mandatory=True)
-    await message.ack()
-
-
-async def handle(message, factory, settings, queue, owner, channel):
-    try:
-        envelope = broker.TaskMessage.model_validate_json(message.body)
-        if service.TASK_ROUTES[envelope.task_type] != queue:
-            raise ValueError("Wrong queue")
-    except Exception:
-        # Confirm quarantine before acknowledging the invalid original message.
-        await quarantine(message, queue, channel)
-        return
-    class InvalidEnvelope(Exception):
-        pass
-    def claim(db):
-        stored = db.get(TaskExecution, envelope.execution_id)
-        if stored is not None and stored.task_type != envelope.task_type:
-            raise InvalidEnvelope()
-        return service.claim_execution(db, envelope.execution_id, envelope.delivery_generation,
-                                           owner, settings.task_lease_seconds)
-    try:
-        execution = await database(factory, claim)
-    except InvalidEnvelope:
-        await quarantine(message, queue, channel)
-        return
-    if execution is None:
-        await message.ack()
-        return
+async def handle(factory, settings, execution):
     LOGGER.info("execution_started execution_id=%s token=%s attempt=%s",
                 execution.id, execution.fencing_token, execution.attempt_count)
     try:
@@ -143,7 +109,8 @@ async def handle(message, factory, settings, queue, owner, channel):
     except service.ExecutionLost:
         pass  # Cancellation/recovery has changed authoritative state.
     except Exception as exc:
-        LOGGER.warning("execution_interrupted execution_id=%s error_type=%s", execution.id, type(exc).__name__)
+        LOGGER.warning("execution_interrupted execution_id=%s error_type=%s",
+                       execution.id, type(exc).__name__)
         def fail(db):
             try:
                 adapters.finish(db, execution.id, execution.fencing_token, status="FAILED", retryable=True,
@@ -151,51 +118,46 @@ async def handle(message, factory, settings, queue, owner, channel):
             except service.ExecutionLost:
                 db.rollback()
         await database(factory, fail)
-    await message.ack()
 
 
 async def run(settings, factory, queue, *, once=False):
+    if queue not in service.TASK_ROUTES.values():
+        raise ValueError("Unknown task queue")
     owner = uuid4().hex
-    while True:
-        try:
-            await asyncio.to_thread(recover, factory, settings)
-            async with broker.connection(settings) as client:
-                channel = await client.channel(publisher_confirms=True, on_return_raises=True)
-                await broker.topology(channel)
-                concurrency = settings.task_document_concurrency if queue == "documents" else settings.task_agent_concurrency
-                await channel.set_qos(prefetch_count=concurrency)
-                source = await channel.get_queue(f"chemicalops.{queue}")
+    concurrency = settings.task_document_concurrency if queue == "documents" else settings.task_agent_concurrency
+    running = set()
+    recovery_at = 0
+    try:
+        while True:
+            try:
+                for task in list(running):
+                    if task.done():
+                        running.remove(task)
+                        task.result()
+                timestamp = asyncio.get_running_loop().time()
+                if timestamp >= recovery_at:
+                    await asyncio.to_thread(recover, factory, settings)
+                    recovery_at = timestamp + settings.task_heartbeat_seconds
+                if len(running) < concurrency:
+                    execution = await database(factory, lambda db:
+                        service.claim_next(db, queue, owner, settings.task_lease_seconds))
+                    if once:
+                        if execution is not None:
+                            await handle(factory, settings, execution)
+                        return
+                    if execution is not None:
+                        running.add(asyncio.create_task(handle(factory, settings, execution)))
+                        continue
+                # Polling remains asynchronous so running tasks can renew their leases.
+                await asyncio.sleep(settings.task_poll_interval_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                LOGGER.warning("worker_unavailable error_type=%s", type(exc).__name__)
                 if once:
-                    message = await source.get(timeout=10, fail=False)
-                    if message:
-                        await handle(message, factory, settings, queue, owner, channel)
-                    return
-                semaphore = asyncio.Semaphore(concurrency)
-                running = set()
-                async def consume(message):
-                    async with semaphore:
-                        await handle(message, factory, settings, queue, owner, channel)
-                try:
-                    async with source.iterator() as iterator:
-                        while True:
-                            try:
-                                message = await asyncio.wait_for(anext(iterator), timeout=10)
-                                task = asyncio.create_task(consume(message))
-                                running.add(task)
-                            except TimeoutError:
-                                await asyncio.to_thread(recover, factory, settings)
-                            for task in list(running):
-                                if task.done():
-                                    task.result()
-                                    running.discard(task)
-                finally:
-                    for task in running:
-                        task.cancel()
-                    await asyncio.gather(*running, return_exceptions=True)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            LOGGER.warning("worker_unavailable error_type=%s", type(exc).__name__)
-            if once:
-                raise RuntimeError("Worker unavailable; check task and connection configuration") from None
-            await asyncio.sleep(5)
+                    raise RuntimeError("Worker unavailable; check task and database configuration") from None
+                await asyncio.sleep(5)
+    finally:
+        for task in running:
+            task.cancel()
+        await asyncio.gather(*running, return_exceptions=True)
