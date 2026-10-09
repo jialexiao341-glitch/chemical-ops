@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import AuthenticationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.core.security import create_access_token, hash_password, verify_password
 from app.modules.system import crud
-from app.modules.system.model import Department, Permission, Role, RolePermission, User
+from app.modules.system.model import Department, Permission, Role, RolePermission, User, UserRole
 from app.modules.system.audit import add_audit_log
 from app.modules.system.schema import (
     DepartmentCreate,
@@ -62,6 +62,27 @@ def list_users(db: Session, keyword: str | None, status: str | None, page: int, 
     return crud.list_users(db, keyword, status, page, page_size)
 
 
+def ensure_active_system_admin_remains(db: Session, excluded_user_ids: set[int]) -> None:
+    """Prevent an account operation from removing the final active system admin."""
+
+    active_admin_ids = set(
+        db.scalars(
+            select(User.id)
+            .join(UserRole, UserRole.user_id == User.id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(
+                User.status == "ACTIVE",
+                Role.status == "ACTIVE",
+                Role.role_code == "SYS_ADMIN",
+            )
+            .order_by(User.id)
+            .with_for_update()
+        ).all()
+    )
+    if not active_admin_ids - excluded_user_ids:
+        raise BusinessValidationError("至少保留一个启用的系统管理员账号")
+
+
 def create_user(db: Session, data: UserCreate) -> User:
     """校验用户名、部门和角色后创建用户。"""
 
@@ -85,11 +106,29 @@ def create_user(db: Session, data: UserCreate) -> User:
     return user
 
 
-def update_user(db: Session, user_id: int, data: UserUpdate) -> User:
+def update_user(
+    db: Session, user_id: int, data: UserUpdate, *, actor_id: int | None = None
+) -> User:
     """更新用户资料、状态、密码和角色关联。"""
 
     user = _require_user(db, user_id)
     values = data.model_dump(exclude_unset=True, exclude={"password", "role_ids"})
+    current_role_codes = set(crud.get_user_role_codes(db, user_id))
+    if actor_id == user_id and values.get("status", user.status) != "ACTIVE":
+        raise BusinessValidationError("不能停用当前登录账号")
+    next_role_codes = current_role_codes
+    if data.role_ids is not None:
+        _require_roles(db, data.role_ids)
+        next_role_codes = set(
+            db.scalars(select(Role.role_code).where(Role.id.in_(set(data.role_ids)))).all()
+        )
+    if user.status == "ACTIVE" and "SYS_ADMIN" in current_role_codes and (
+        values.get("status", user.status) != "ACTIVE"
+        or "SYS_ADMIN" not in next_role_codes
+    ):
+        ensure_active_system_admin_remains(db, {user_id})
+    if actor_id == user_id and "SYS_ADMIN" in current_role_codes and "SYS_ADMIN" not in next_role_codes:
+        raise BusinessValidationError("不能移除当前登录账号的系统管理员角色")
     if data.password is not None:
         values["password_hash"] = hash_password(data.password)
         values["token_version"] = user.token_version + 1
@@ -97,15 +136,18 @@ def update_user(db: Session, user_id: int, data: UserUpdate) -> User:
         values["token_version"] = user.token_version + 1
     _require_department(db, data.department_id)
     if data.role_ids is not None:
-        _require_roles(db, data.role_ids)
         crud.replace_user_roles(db, user.id, data.role_ids)
     return crud.update_entity(db, user, values)
 
 
-def delete_user(db: Session, user_id: int) -> User:
+def delete_user(db: Session, user_id: int, *, actor_id: int | None = None) -> User:
     """软删除用户并保留历史操作记录。"""
 
     user = _require_user(db, user_id)
+    if actor_id == user_id:
+        raise BusinessValidationError("不能停用当前登录账号")
+    if user.status == "ACTIVE" and "SYS_ADMIN" in crud.get_user_role_codes(db, user_id):
+        ensure_active_system_admin_remains(db, {user_id})
     user.token_version += 1
     return crud.disable_entity(db, user)
 
@@ -180,6 +222,8 @@ def update_role(db: Session, role_id: int, data: RoleUpdate) -> Role:
     if role is None:
         raise ResourceNotFoundError(f"角色 {role_id} 不存在")
     values = data.model_dump(exclude_unset=True, exclude={"permission_ids"})
+    if role.role_code == "SYS_ADMIN" and values.get("status") == "INACTIVE":
+        raise BusinessValidationError("系统管理员角色不能停用")
     if data.permission_ids is not None:
         _require_permissions(db, data.permission_ids)
         db.query(RolePermission).filter_by(role_id=role_id).delete()
@@ -205,6 +249,8 @@ def delete_role(db: Session, role_id: int) -> Role:
     role = crud.get_role(db, role_id)
     if role is None:
         raise ResourceNotFoundError(f"角色 {role_id} 不存在")
+    if role.role_code == "SYS_ADMIN":
+        raise BusinessValidationError("系统管理员角色不能停用")
     return crud.disable_entity(db, role)
 
 

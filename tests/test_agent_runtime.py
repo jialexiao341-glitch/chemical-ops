@@ -20,7 +20,7 @@ from app.modules.ai.controller import router
 from app.modules.ai.model import AIAgentTask, AIConversationState, AIMessage, AIConversation
 from app.modules.products.model import Product
 from tests.conftest import login
-from tests.test_agent_read_tools import tool_db
+from tests.test_agent_read_tools import allow_ai_workspace_permission, tool_db
 
 
 USER = SimpleNamespace(id=7)
@@ -262,6 +262,7 @@ def test_http_task_create_read_continue_cancel_and_authentication(task_db, model
     """从任务 API 验证等待、追加输入、回看与取消的响应协议。"""
     app = FastAPI()
     app.include_router(router)
+    allow_ai_workspace_permission(app)
     app.dependency_overrides[get_db] = lambda: task_db
     with TestClient(app) as client:
         assert client.post('/ai/agent/tasks', json={'question': '查库存'}).status_code == 401
@@ -304,6 +305,7 @@ def test_background_api_returns_id_then_persists_wait_and_continues(task_db, mod
     monkeypatch.setattr(runtime, 'SessionLocal', lambda: Session(task_db.bind))
     app = FastAPI()
     app.include_router(router)
+    allow_ai_workspace_permission(app)
     app.dependency_overrides[get_db] = lambda: task_db
     actions, _ = model_script
     with TestClient(app) as client:
@@ -452,6 +454,7 @@ def test_ordinary_chat_context_is_loaded_before_pronoun_task(chat_task_db, model
 def test_chat_api_returns_conversation_and_reloadable_task(chat_task_db, model_script):
     app = FastAPI()
     app.include_router(router, prefix='/api/v1')
+    allow_ai_workspace_permission(app)
     app.dependency_overrides[get_db] = lambda: chat_task_db
     app.dependency_overrides[get_current_user] = lambda: USER
     actions, _ = model_script

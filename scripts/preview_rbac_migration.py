@@ -22,6 +22,11 @@ from seed_demo_accounts import ROLE_SCOPES
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, help="Optional path for a grant/revoke CSV report")
+    parser.add_argument(
+        "--snapshot-csv",
+        type=Path,
+        help="Optional path for a read-back matrix of expected and actual built-in role grants",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
@@ -53,6 +58,24 @@ def main() -> int:
                 changes.append((role_code, "GRANT", code))
             for code in sorted(actual.get(role_code, set()) - desired):
                 changes.append((role_code, "REVOKE", code))
+
+        if args.snapshot_csv:
+            args.snapshot_csv.parent.mkdir(parents=True, exist_ok=True)
+            with args.snapshot_csv.open("w", encoding="utf-8-sig", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(("role_code", "permission_code", "expected", "actual", "matches"))
+                for role_code, desired in ROLE_SCOPES.items():
+                    granted = actual.get(role_code, set())
+                    for code in sorted(catalog_codes | desired | granted):
+                        expected_grant = code in desired
+                        actual_grant = code in granted
+                        writer.writerow((
+                            role_code,
+                            code,
+                            "GRANT" if expected_grant else "DENY",
+                            "GRANT" if actual_grant else "DENY",
+                            "true" if expected_grant == actual_grant else "false",
+                        ))
 
         if args.csv:
             args.csv.parent.mkdir(parents=True, exist_ok=True)

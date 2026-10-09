@@ -177,8 +177,22 @@ def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db),
     _authorize_row_scope(db, user, name, rows, write=True)
     if spec.delete_mode == "draft" and any(row.status != "DRAFT" for row in rows):
         raise BusinessValidationError("只能批量删除草稿；请取消选择已提交或已生效记录")
+    if spec.delete_mode == "master" and name == "system.roles" and any(
+        row.role_code == "SYS_ADMIN" for row in rows
+    ):
+        raise BusinessValidationError("系统管理员角色不能停用")
     if spec.delete_mode == "master" and name == "system.users" and user.id in selection.ids:
         raise BusinessValidationError("不能停用当前登录账号")
+    if spec.delete_mode == "master" and name == "system.users":
+        admin_user_ids = {
+            row.id
+            for row in rows
+            if "SYS_ADMIN" in system_crud.get_user_role_codes(db, row.id)
+        }
+        if admin_user_ids:
+            from app.modules.system.service import ensure_active_system_admin_remains
+
+            ensure_active_system_admin_remains(db, admin_user_ids)
     if spec.delete_mode == "permission":
         used = db.scalar(select(RolePermission.permission_id).where(RolePermission.permission_id.in_(selection.ids)).limit(1))
         if used is not None:

@@ -355,7 +355,7 @@ defineExpose({ drawerApi });
 
         <div class="flex flex-wrap gap-2">
           <Button
-            v-if="detail.id && hasAccessByCodes(['procurement.orders.read'])"
+            v-if="detail.id && hasAccessByCodes(['procurement.orders.read']) && hasAccessByCodes(['ai.workspace.read'])"
             @click="insightDrawer?.open('supplier-change', detail.id)"
           >
             核对供应商变更

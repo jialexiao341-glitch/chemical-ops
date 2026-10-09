@@ -443,7 +443,7 @@ defineExpose({ open });
           <div class="space-y-3 border-t pt-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <h3 class="font-medium">召回演练报告</h3>
-              <Button :loading="busy" @click="createRecallReport">生成并保存报告</Button>
+              <Button v-if="hasAccessByCodes(['warehouse.inventory.write'])" :loading="busy" @click="createRecallReport">生成并保存报告</Button>
             </div>
             <div v-if="recallReports.length" class="flex flex-wrap gap-2">
               <Button v-for="report in recallReports" :key="report.id" size="small" :disabled="busy" :type="selectedRecallReport?.id === report.id ? 'primary' : 'default'" @click="selectRecallReport(report)">

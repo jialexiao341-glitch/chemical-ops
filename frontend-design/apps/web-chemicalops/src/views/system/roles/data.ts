@@ -53,7 +53,7 @@ export function useCreateFormSchema(): VbenFormSchema[] {
 }
 
 /** 编辑角色表单，角色编码不可修改，权限留空表示不调整 */
-export function useUpdateFormSchema(): VbenFormSchema[] {
+export function useUpdateFormSchema(isSystemAdmin = false): VbenFormSchema[] {
   return [
     {
       component: 'Input',
@@ -88,7 +88,10 @@ export function useUpdateFormSchema(): VbenFormSchema[] {
     },
     {
       component: 'Select',
-      componentProps: { options: ENABLE_STATUS_DICT.options() },
+      componentProps: {
+        disabled: isSystemAdmin,
+        options: ENABLE_STATUS_DICT.options(),
+      },
       fieldName: 'status',
       label: '状态',
     },
@@ -146,7 +149,11 @@ export function useColumns(
         name: 'CellOperation',
         options: [
           { code: 'edit', auth: 'system.roles.write' },
-          { code: 'delete', auth: 'system.roles.write' },
+          {
+            code: 'delete',
+            auth: 'system.roles.write',
+            show: (row: SystemRoleApi.SystemRole) => row.role_code !== 'SYS_ADMIN',
+          },
         ],
       },
       field: 'operation',

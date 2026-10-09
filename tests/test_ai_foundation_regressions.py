@@ -107,6 +107,19 @@ def test_financial_scope_matches_lists_details_queries_and_does_not_grant_order_
         page = client.get(f"/api/v1/finance/{name}", headers=restricted)
         if page.status_code == 200:
             assert value.id not in {x["id"] for x in page.json()["items"]}
+    for name, value in [("invoices", documents[0]), ("payments", documents[1])]:
+        params = {"reconciliation_id": rec.id, "page_size": 100}
+        allowed_page = client.get(f"/api/v1/finance/{name}", headers=headers, params=params)
+        assert allowed_page.status_code == 200
+        assert allowed_page.json()["total"] == 1
+        assert [row["id"] for row in allowed_page.json()["items"]] == [value.id]
+
+        restricted_page = client.get(f"/api/v1/finance/{name}", headers=restricted, params=params)
+        if restricted_page.status_code == 200:
+            assert restricted_page.json()["total"] == 0
+            assert restricted_page.json()["items"] == []
+        else:
+            assert restricted_page.status_code == 403
     with pytest.raises(ResourceNotFoundError):
         finance.confirm_reconciliation(db_session, viewer, rec.id, None)
     assert rec.status == "DRAFT"

@@ -13,7 +13,7 @@ from app.modules.ai.model import AIAgentTask, AIConversation, AIMessage
 from app.modules.task_queue import service
 from app.modules.task_queue.model import TaskExecution, TaskOutbox, TaskResourceLock
 from tests.test_agent_runtime import USER, task_db, chat_task_db, model_script, tool
-from tests.test_agent_read_tools import tool_db
+from tests.test_agent_read_tools import allow_ai_workspace_permission, tool_db
 
 
 @pytest.fixture
@@ -206,6 +206,7 @@ def test_async_start_and_continue_api_remain_202(queued_db, model_script, monkey
     from app.modules.ai.controller import router
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
+    allow_ai_workspace_permission(app)
     app.dependency_overrides[get_db] = lambda: queued_db
     app.dependency_overrides[get_current_user] = lambda: USER
     start_url = "/api/v1/ai/agent/chat/start" if chat else "/api/v1/ai/agent/tasks/start"

@@ -207,7 +207,7 @@ onMounted(load);
           </div>
           <div class="flex flex-wrap gap-2">
             <Button
-              v-if="order.id && hasAccessByCodes(['finance.reconciliations.read'])"
+              v-if="order.id && hasAccessByCodes(['finance.reconciliations.read']) && hasAccessByCodes(['ai.workspace.read'])"
               @click="insightDrawer?.open('finance-difference', order.id)"
             >
               核对财务差异

@@ -32,6 +32,13 @@ class TestSession(Session):
         self.flush()
 
 
+class _SecretString(str):
+    """Keep test credentials out of pytest's fixture representations."""
+
+    def __repr__(self) -> str:
+        return "<redacted>"
+
+
 @pytest.fixture(scope="session")
 def db_engine():
     """检查测试数据库连接。"""
@@ -77,11 +84,14 @@ def client(db_session: TestSession) -> Generator[TestClient, None, None]:
 
 @pytest.fixture
 def demo_password():
-    """读取当前开发环境演示账号密码。"""
+    """读取当前开发环境演示账号密码且避免失败报告回显。"""
 
     from app.core.config import get_settings
 
-    return get_settings().demo_default_password or "ChemicalOps@2026"
+    password = get_settings().demo_default_password
+    if not password:
+        pytest.skip("测试环境未配置演示账号密码")
+    return _SecretString(password)
 
 
 def login(client: TestClient, username: str, password: str) -> dict[str, str]:

@@ -77,11 +77,16 @@ function onActionClick({
   code,
   row,
 }: OnActionClickParams<QualityAcceptanceApi.Acceptance>) {
-  if (code === 'result') {
+  if (code === 'result' && canWriteAcceptances) {
     resultApi.setData(row).open();
   } else if (code === 'review') {
     reportReviewApi.setData(row).open();
   }
+}
+
+function continueToResult(record: QualityAcceptanceApi.Acceptance) {
+  if (!canWriteAcceptances || (record.result && !['PENDING', 'REINSPECTION'].includes(record.result))) return;
+  resultApi.setData(record).open();
 }
 
 onMounted(async () => {
@@ -95,11 +100,14 @@ onMounted(async () => {
 });
 
 async function openAiRecord(rawId: unknown) {
+  if (!canWriteAcceptances) return;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) return;
   try {
     const record = await getAcceptanceApi(id);
-    resultApi.setData(record).open();
+    if (!record.result || ['PENDING', 'REINSPECTION'].includes(record.result)) {
+      resultApi.setData(record).open();
+    }
   } catch {
     // API 层会展示权限或查询错误；不再打开一个不匹配的记录。
   }
@@ -126,7 +134,7 @@ watch(
   <Page auto-content-height>
     <Create @success="gridApi.query()" />
     <Result @success="gridApi.query()" @review="(record: QualityAcceptanceApi.Acceptance) => reportReviewApi.setData(record).open()" />
-    <ReportReview @continue="(record: QualityAcceptanceApi.Acceptance) => resultApi.setData(record).open()" />
+    <ReportReview @continue="continueToResult" />
     <Grid table-title="质量验收">
       <template #toolbar-tools>
         <Button v-if="canWriteAcceptances" type="primary" @click="createApi.open()">

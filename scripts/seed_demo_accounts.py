@@ -320,7 +320,6 @@ def main() -> None:
         db.commit()
         print("demo_accounts_ready=true")
         print("created_user_count=" + str(len(created_users)))
-        print("default_password=" + settings.demo_default_password)
         print("usernames=" + ",".join(username for username, *_ in USERS))
     finally:
         db.close()

@@ -44,6 +44,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
         'procurement.orders.read',
         'warehouse.deliveries.read',
         'quality.acceptances.read',
+        'ai.workspace.read',
       ].every((code) => hasAccessByCodes([code])),
     ),
     height: 'auto',

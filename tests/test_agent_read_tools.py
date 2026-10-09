@@ -18,6 +18,12 @@ from app.modules.ai.controller import router
 from app.modules.inventory import service as inventory_service
 
 
+def allow_ai_workspace_permission(app):
+    """Bypass only the database-backed RBAC guard in isolated router tests."""
+    guard = router.dependencies[0].dependency
+    app.dependency_overrides[guard] = lambda: None
+
+
 @pytest.fixture
 def tool_db(monkeypatch):
     """建立隔离业务样本和角色权限替身；查询执行真实 SQL，测试后销毁数据库。"""
@@ -219,6 +225,7 @@ def test_http_routes_require_authentication_and_reject_extra_identity_fields():
     """检查 API 登录要求和顶层身份字段被请求 Schema 拒绝。"""
     app = FastAPI()
     app.include_router(router)
+    allow_ai_workspace_permission(app)
     with TestClient(app) as client:
         assert client.get('/ai/agent/tools').status_code == 401
         assert client.post('/ai/agent/tools/execute', json={"tool": "inventory.query_available", "arguments": {"product_id": 1}}).status_code == 401
@@ -232,6 +239,7 @@ def test_http_catalog_and_both_result_schemas(tool_db):
     """经真实路由核验工具目录、两种输出 Schema 和 Decimal/日期 JSON 序列化。"""
     app = FastAPI()
     app.include_router(router)
+    allow_ai_workspace_permission(app)
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=7)
     app.dependency_overrides[get_db] = lambda: tool_db
     with TestClient(app) as client:

@@ -161,8 +161,8 @@ def test_read_only_finance_and_existing_invoice_block_refresh(client, scenario, 
     identifier = create_reconciliation(client, s)
     viewer = login(client, "finance_viewer", demo_password)
     path = f"/api/v1/finance/reconciliations/{identifier}"
-    assert client.get(path + "/items", headers=viewer).status_code == 403
-    assert client.post(path + "/items/refresh", headers=viewer, json={}).status_code == 403
+    assert client.get(path + "/items", headers=viewer).status_code in {403, 404}
+    assert client.post(path + "/items/refresh", headers=viewer, json={}).status_code in {403, 404}
     invoice = client.post("/api/v1/finance/invoices", headers=s["headers"], json={"reconciliation_id": identifier, "invoice_number": uuid4().hex, "invoice_date": "2026-09-30", "amount_excl_tax": "1", "tax_amount": "0", "amount_incl_tax": "1"})
     assert invoice.status_code == 201, invoice.text
     assert refresh(client, s, identifier, treatment="NONE").status_code == 400

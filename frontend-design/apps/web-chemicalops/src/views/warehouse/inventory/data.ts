@@ -129,9 +129,9 @@ export function useColumns(
         // 冻结与解冻共用一个入口，按当前状态在页面内分流
         options: [
           { code: 'return', text: '申请退货', auth: 'warehouse.inventory.return.write' },
-          { code: 'batch-impact', text: '批次影响' },
-          { code: 'replenishment', text: '消耗观察' },
-          { code: 'location-advice', text: '库位提示' },
+          { code: 'batch-impact', text: '批次影响', auth: 'ai.workspace.read' },
+          { code: 'replenishment', text: '消耗观察', auth: 'ai.workspace.read' },
+          { code: 'location-advice', text: '库位提示', auth: 'ai.workspace.read' },
           {
             code: 'toggle-freeze',
             auth: 'warehouse.inventory.freeze.write',

@@ -154,12 +154,20 @@ const filterDatasetOptions = computed(() =>
     .filter((item) => item.dataset !== 'inventory' && canReadDataset(item.dataset))
     .map(({ dataset, label }) => ({ label, value: dataset })),
 );
-const slashCommands = computed(() => [
+type SlashCommand = 'agent' | 'briefing' | 'briefing-push' | 'filter' | 'purchase-draft';
+type SlashCommandOption = {
+  description: string;
+  icon: 'briefing' | 'draft' | 'filter' | 'send';
+  label: string;
+  value: SlashCommand;
+};
+
+const slashCommands = computed((): SlashCommandOption[] => [
   { description: '在聊天中查库存、核对产品规格和供应商报价', icon: 'filter', label: '采购只读查询', value: 'agent' },
-  ...(filterDatasetOptions.value.length ? [{ description: '用自然语言设置条件，并带入业务列表', icon: 'filter', label: '自然语言筛选', value: 'filter' as const }] : []),
-  ...(canCreatePurchaseDraft ? [{ description: '整理采购信息，核对后创建草稿', icon: 'draft', label: '采购申请草稿', value: 'purchase-draft' as const }] : []),
+  ...(filterDatasetOptions.value.length ? [{ description: '用自然语言设置条件，并带入业务列表', icon: 'filter' as const, label: '自然语言筛选', value: 'filter' as const }] : []),
+  ...(canCreatePurchaseDraft ? [{ description: '整理采购信息，核对后创建草稿', icon: 'draft' as const, label: '采购申请草稿', value: 'purchase-draft' as const }] : []),
   { description: '查看本次生成的运营晨报', icon: 'briefing', label: '生成运营晨报', value: 'briefing' },
-  ...(canPushBriefing ? [{ description: '确认接收对象后生成并推送晨报', icon: 'send', label: '生成并推送', value: 'briefing-push' as const }] : []),
+  ...(canPushBriefing ? [{ description: '确认接收对象后生成并推送晨报', icon: 'send' as const, label: '生成并推送', value: 'briefing-push' as const }] : []),
 ]);
 
 function visibleSourceRecords(item: UiMessage) {
@@ -826,7 +834,7 @@ function onComposerInput(event: Event) {
   }
 }
 
-async function selectSlashCommand(command?: 'agent' | 'briefing' | 'briefing-push' | 'filter' | 'purchase-draft') {
+async function selectSlashCommand(command?: SlashCommand) {
   slashMenuOpen.value = false;
   inputText.value = '';
 

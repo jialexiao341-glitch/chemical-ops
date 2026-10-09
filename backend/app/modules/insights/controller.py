@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.errors import ResourceNotFoundError
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_permission
 from app.modules.chemicals.model import Chemical
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.deliveries import service as delivery_service
@@ -36,7 +36,11 @@ from app.modules.suppliers.model import Supplier
 from app.modules.system import crud as system_crud
 from app.modules.system.model import User
 
-router = APIRouter(prefix="/insights", tags=["业务分析"])
+router = APIRouter(
+    prefix="/insights",
+    tags=["业务分析"],
+    dependencies=[Depends(require_permission("ai.workspace.read"))],
+)
 
 
 class InsightEvidence(BaseModel):
@@ -64,9 +68,9 @@ PERMISSIONS: dict[str, str | tuple[str, ...]] = {
     "batch-impact": "warehouse.inventory.read",
     "finance-difference": ("finance.reconciliations.read", "procurement.orders.read"),
     "exception-action": "operations.exceptions.read",
-    "msds-change": ("master.chemicals.read", "warehouse.inventory.read"),
-    "supplier-score": ("master.suppliers.read", "procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read"),
-    "supplier-change": ("procurement.rfqs.read", "procurement.orders.read"),
+    "msds-change": "master.chemicals.read",
+    "supplier-score": "master.suppliers.read",
+    "supplier-change": "procurement.rfqs.read",
     "stocktake-explain": "warehouse.inventory.stocktake.read",
     "replenishment": "warehouse.inventory.read",
     "location-advice": "warehouse.inventory.read",
@@ -84,13 +88,18 @@ def _evidence(result: BusinessInsight, label: str, value: object, source: str, p
 
 
 def _check_permission(db: Session, user: User, code: str | tuple[str, ...]) -> None:
-    """使用现有用户角色和权限码限制分析数据。"""
+    """使用现有用户角色和权限码限制分析数据；多权限场景要求全部具备。"""
     if "SYS_ADMIN" in system_crud.get_user_role_codes(db, user.id):
         return
     required = (code,) if isinstance(code, str) else code
     granted = system_crud.get_user_permission_codes(db, user.id)
-    if any(item not in granted for item in required):
+    if not all(item in granted for item in required):
         raise HTTPException(status_code=403, detail="没有查看该业务分析的权限")
+
+
+def _has_permission(db: Session, user: User, code: str) -> bool:
+    """判断当前用户是否拥有指定来源对象的读取权限。"""
+    return "SYS_ADMIN" in system_crud.get_user_role_codes(db, user.id) or code in system_crud.get_user_permission_codes(db, user.id)
 
 
 def _balance(db: Session, user: User, balance_id: int) -> InventoryBalance:
@@ -106,11 +115,13 @@ def _batch_impact(db: Session, user: User, balance_id: int) -> BusinessInsight:
         raise ResourceNotFoundError("库存批次不存在")
     scope = inventory_service.accessible_warehouse_ids(db, user)
     result = _result("batch-impact", f"批次 {batch.batch_no} 影响范围", "仓管、质量负责人", "仅展示当前用户可见的 ChemicalOps 记录。")
-    if batch.source_delivery_id:
+    can_read_deliveries = _has_permission(db, user, "warehouse.deliveries.read")
+    can_read_acceptances = _has_permission(db, user, "quality.acceptances.read")
+    if batch.source_delivery_id and can_read_deliveries:
         source = db.get(Delivery, batch.source_delivery_id)
         if source:
             _evidence(result, "来源到货单", source.delivery_no, "到货记录", "/warehouse/deliveries")
-            acceptance = db.scalar(select(QualityAcceptance).where(QualityAcceptance.delivery_id == source.id).order_by(QualityAcceptance.id.desc()).limit(1))
+            acceptance = db.scalar(select(QualityAcceptance).where(QualityAcceptance.delivery_id == source.id).order_by(QualityAcceptance.id.desc()).limit(1)) if can_read_acceptances else None
             if acceptance:
                 _evidence(result, "关联质量验收", f"验收单 #{acceptance.id} · {acceptance.result or '待验收'}", "质量验收记录", "/quality/acceptances")
     balances = db.scalars(select(InventoryBalance).where(InventoryBalance.batch_id == batch.id)).all()
@@ -166,11 +177,17 @@ def _batch_impact(db: Session, user: User, balance_id: int) -> BusinessInsight:
 
 def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsight:
     """按订单行核对到货；发票和付款保持单据级口径。"""
+    _check_permission(db, user, "finance.reconciliations.read")
     order = order_service.read_order(db, user, order_id)
+    can_read_deliveries = _has_permission(db, user, "warehouse.deliveries.read")
+    can_read_returns = _has_permission(db, user, "warehouse.inventory.return.read")
+    can_read_invoices = _has_permission(db, user, "finance.invoices.read")
+    can_read_payments = _has_permission(db, user, "finance.payments.read")
+    can_read_settlements = _has_permission(db, user, "finance.settlements.read")
     result = _result("finance-difference", f"订单 {order.po_no} 财务差异", "财务对账人员、采购员", "按订单行核对到货数量和含税估算金额；发票、付款按对账单汇总。")
     _evidence(result, "订单金额", f"{order.order_amount:.2f} {order.currency_code}", order.po_no, f"/procurement/purchase-orders/{order.id}")
     lines = db.scalars(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == order.id).order_by(PurchaseOrderItem.line_no)).all()
-    deliveries = db.scalars(select(Delivery).where(Delivery.po_id == order.id)).all()
+    deliveries = db.scalars(select(Delivery).where(Delivery.po_id == order.id)).all() if can_read_deliveries else []
     delivery_by_id = {delivery.id: delivery for delivery in deliveries}
     delivered_lines = db.scalars(select(DeliveryItem).where(DeliveryItem.delivery_id.in_(delivery_by_id))).all() if delivery_by_id else []
     by_order_line: dict[int, list[DeliveryItem]] = {}
@@ -193,7 +210,7 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
             _evidence(result, f"到货行 {delivery.delivery_no} · 第 {row.line_no} 行", f"到货 {row.actual_quantity}，短交 {row.short_quantity}，状态 {delivery.status}", f"到货明细 #{row.id}", "/warehouse/deliveries")
     if lines:
         _evidence(result, "已验收到货含税估算", f"{accepted_total:.2f} {order.currency_code}；与订单金额相差 {order.order_amount-accepted_total:.2f}", "按订单行单价、税率和已验收到货量计算")
-    returns = db.scalars(select(InventoryReturnRequest).where(InventoryReturnRequest.status == "COMPLETED", or_(InventoryReturnRequest.po_id == order.id, InventoryReturnRequest.delivery_id.in_(list(delivery_by_id))))).all()
+    returns = db.scalars(select(InventoryReturnRequest).where(InventoryReturnRequest.status == "COMPLETED", or_(InventoryReturnRequest.po_id == order.id, InventoryReturnRequest.delivery_id.in_(list(delivery_by_id))))).all() if can_read_returns else []
     for returned in returns:
         return_items = db.scalars(select(InventoryReturnItem).where(InventoryReturnItem.return_request_id == returned.id)).all()
         _evidence(result, f"已完成退货 {returned.return_no}", "；".join(f"产品 #{item.product_id} 退回 {item.returned_quantity} · 单位 #{item.unit_id}" for item in return_items) or "无退货明细", f"退货单 #{returned.id}", "/warehouse/returns")
@@ -215,8 +232,8 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
         if rec.cancelled_at is not None:
             result.limitations.append(f"对账单 {rec.reconciliation_no} 已取消，不计入发票和付款差额。")
             continue
-        invoices = db.scalars(select(FinanceInvoice).where(FinanceInvoice.reconciliation_id == rec.id)).all()
-        payments = db.scalars(select(FinancePayment).where(FinancePayment.reconciliation_id == rec.id)).all()
+        invoices = db.scalars(select(FinanceInvoice).where(FinanceInvoice.reconciliation_id == rec.id)).all() if can_read_invoices else []
+        payments = db.scalars(select(FinancePayment).where(FinancePayment.reconciliation_id == rec.id)).all() if can_read_payments else []
         verified = sum((x.amount_incl_tax for x in invoices if x.status == "VERIFIED" and x.currency_code == rec.currency_code), Decimal(0))
         paid = sum((x.amount for x in payments if x.status == "PAID" and x.currency_code == rec.currency_code), Decimal(0))
         for invoice in invoices:
@@ -226,7 +243,7 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
             if match:
                 for allocation in match.allocations:
                     _evidence(result, f"发票匹配 · {invoice.invoice_no} · 第 {allocation['line_no']} 行", f"匹配版本 {match.version_no} / 对账版本 {match.reconciliation_version}；不含税 {allocation['amount_excl_tax']}，税额 {allocation['tax_amount']}；状态 {invoice.status}；差异处理 {allocation.get('difference_note') or '无'}", f"发票记录 #{invoice.id}", "/finance/invoices")
-        if rec.items_version:
+        if rec.items_version and can_read_invoices:
             from app.modules.finance.invoice_matches import line_summary
             summary, unallocated = line_summary(db, rec)
             for row in summary:
@@ -235,9 +252,11 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
                 result.limitations.append("有效发票尚未行级匹配，不推算行归属：" + "、".join(unallocated))
         for payment in payments:
             _evidence(result, f"付款 {payment.payment_no}", f"{payment.amount:.2f} {payment.currency_code} · {payment.status}", f"付款记录 #{payment.id}", "/finance/payments")
-        _evidence(result, "已核验发票 / 未开票差额", f"{verified:.2f} / {rec.total_amount-verified:.2f} {rec.currency_code}", rec.reconciliation_no, "/finance/invoices")
-        _evidence(result, "已付款 / 未付款差额", f"{paid:.2f} / {rec.total_amount-paid:.2f} {rec.currency_code}", rec.reconciliation_no, "/finance/payments")
-        settlements = db.scalars(select(FinanceSettlement).where(FinanceSettlement.reconciliation_id == rec.id)).all()
+        if can_read_invoices:
+            _evidence(result, "已核验发票 / 未开票差额", f"{verified:.2f} / {rec.total_amount-verified:.2f} {rec.currency_code}", rec.reconciliation_no, "/finance/invoices")
+        if can_read_payments:
+            _evidence(result, "已付款 / 未付款差额", f"{paid:.2f} / {rec.total_amount-paid:.2f} {rec.currency_code}", rec.reconciliation_no, "/finance/payments")
+        settlements = db.scalars(select(FinanceSettlement).where(FinanceSettlement.reconciliation_id == rec.id)).all() if can_read_settlements else []
         for settlement in settlements:
             _evidence(result, "结算状态", f"{settlement.settlement_amount:.2f} {settlement.currency_code} · {settlement.status}", settlement.settlement_no, "/finance/settlements")
         if any(x.currency_code != rec.currency_code for x in [*invoices, *payments]):
@@ -263,6 +282,7 @@ def _exception_action(db: Session, user: User, exception_id: int) -> BusinessIns
 
 def _msds_change(db: Session, user: User, chemical_id: int) -> BusinessInsight:
     """按同 CAS 最近两份已解析 MSDS 对比章节，并列出相关产品。"""
+    _check_permission(db, user, "master.chemicals.read")
     chemical = db.get(Chemical, chemical_id)
     if chemical is None:
         raise ResourceNotFoundError("化学品不存在")
@@ -279,42 +299,60 @@ def _msds_change(db: Session, user: User, chemical_id: int) -> BusinessInsight:
             _evidence(result, section.title or section.section_key, "新增章节" if prior is None else "章节内容变化，需核对原文", f"文档 #{older.id} → #{newer.id}，章节 {section.section_no}")
     for section in old_sections.values():
         _evidence(result, section.title or section.section_key, "新版中未找到", f"旧文档 #{older.id}，章节 {section.section_no}")
-    products = db.scalars(select(Product).where(Product.chemical_id == chemical.id)).all()
-    _evidence(result, "关联产品", "、".join(x.product_name for x in products) or "无", f"化学品 #{chemical.id}", "/master/products")
-    product_ids = [x.id for x in products]
-    scope = inventory_service.accessible_warehouse_ids(db, user)
-    balances = db.scalars(select(InventoryBalance, InventoryBatch).join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id).where(InventoryBalance.product_id.in_(product_ids))).all() if product_ids else []
-    for balance, batch in balances:
-        if scope is not None and balance.warehouse_id not in scope:
-            continue
-        _evidence(result, f"在库批次 {batch.batch_no}", f"余额 {balance.quantity}，有效期 {batch.expiry_date or '未记录'}，状态 {balance.status}", f"库存余额 #{balance.id}", "/warehouse/inventory")
+    can_read_products = _has_permission(db, user, "master.products.read")
+    can_read_inventory = _has_permission(db, user, "warehouse.inventory.read")
+    products = db.scalars(select(Product).where(Product.chemical_id == chemical.id)).all() if can_read_products else []
+    if can_read_products:
+        _evidence(result, "关联产品", "、".join(x.product_name for x in products) or "无", f"化学品 #{chemical.id}", "/master/products")
+    if can_read_inventory:
+        product_ids = [x.id for x in products]
+        scope = inventory_service.accessible_warehouse_ids(db, user)
+        balances = db.scalars(select(InventoryBalance, InventoryBatch).join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id).where(InventoryBalance.product_id.in_(product_ids))).all() if product_ids else []
+        for balance, batch in balances:
+            if scope is not None and balance.warehouse_id not in scope:
+                continue
+            _evidence(result, f"在库批次 {batch.batch_no}", f"余额 {balance.quantity}，有效期 {batch.expiry_date or '未记录'}，状态 {balance.status}", f"库存余额 #{balance.id}", "/warehouse/inventory")
     result.limitations.append("章节文字差异不代表危害结论变化；当前未记录批准版次与页码，必须由 EHS 对照原始 MSDS 判断。")
     return result
 
 
 def _supplier_score(db: Session, user: User, supplier_id: int) -> BusinessInsight:
     """统计供应商订单、到货及时性和短交记录，不在小样本下打总分。"""
+    _check_permission(db, user, "master.suppliers.read")
     supplier = db.get(Supplier, supplier_id)
     if supplier is None:
         raise ResourceNotFoundError("供应商不存在")
     result = _result("supplier-score", f"{supplier.supplier_name} 履约画像", "采购员、采购主管", "按已录入的订单和到货记录展示分项指标。")
     roles = set(system_crud.get_user_role_codes(db, user.id))
-    orders = db.scalars(select(PurchaseOrder).where(PurchaseOrder.supplier_id == supplier_id, PurchaseOrder.status.not_in({"DRAFT", "CANCELLED"}), order_read_condition(user, roles))).all()
+    can_read_orders = _has_permission(db, user, "procurement.orders.read")
+    can_read_deliveries = _has_permission(db, user, "warehouse.deliveries.read")
+    can_read_acceptances = _has_permission(db, user, "quality.acceptances.read")
+    orders = db.scalars(select(PurchaseOrder).where(PurchaseOrder.supplier_id == supplier_id, PurchaseOrder.status.not_in({"DRAFT", "CANCELLED"}), order_read_condition(user, roles))).all() if can_read_orders else []
     delivery_query = select(Delivery).join(PurchaseOrder, Delivery.po_id == PurchaseOrder.id).where(Delivery.supplier_id == supplier_id)
     if not delivery_service._can_manage_all(db, user):
         delivery_query = delivery_query.where(order_read_condition(user, roles))
-    deliveries = db.scalars(delivery_query).all()
+    deliveries = db.scalars(delivery_query).all() if can_read_deliveries else []
     _evidence(result, "统计范围", "当前权限内该供应商全部已录入记录；订单排除草稿和取消，未限定日期", "按供应商筛选后统计完整样本")
     dated = [x for x in deliveries if x.expected_arrival_date and x.actual_arrival_date]
     timely = sum(x.actual_arrival_date <= x.expected_arrival_date for x in dated)
-    _evidence(result, "采购订单", len(orders), "采购订单", "/procurement/purchase-orders")
-    _evidence(result, "有完整日期的到货单", len(dated), "到货记录", "/warehouse/deliveries")
-    _evidence(result, "准时到货", f"{timely}/{len(dated)}" if dated else "暂无完整日期样本", "到货记录", "/warehouse/deliveries")
+    if can_read_orders:
+        _evidence(result, "采购订单", len(orders), "采购订单", "/procurement/purchase-orders")
+    else:
+        result.limitations.append("当前账号无采购订单读取权限，未统计订单样本。")
+    if can_read_deliveries:
+        _evidence(result, "有完整日期的到货单", len(dated), "到货记录", "/warehouse/deliveries")
+        _evidence(result, "准时到货", f"{timely}/{len(dated)}" if dated else "暂无完整日期样本", "到货记录", "/warehouse/deliveries")
+    else:
+        result.limitations.append("当前账号无到货单读取权限，未统计到货样本。")
     delivery_ids = [x.id for x in deliveries]
     lines = db.scalars(select(DeliveryItem).where(DeliveryItem.delivery_id.in_(delivery_ids))).all() if delivery_ids else []
-    _evidence(result, "短交明细", f"{sum(x.short_quantity > 0 for x in lines)} / {len(lines)}", "到货明细", "/warehouse/deliveries")
-    acceptance_rows = db.scalars(select(QualityAcceptance).where(QualityAcceptance.delivery_id.in_(delivery_ids))).all() if delivery_ids else []
-    _evidence(result, "验收结果样本", f"合格 {sum(x.result == 'PASSED' for x in acceptance_rows)}，部分合格 {sum(x.result == 'PARTIAL' for x in acceptance_rows)}，不合格 {sum(x.result == 'FAILED' for x in acceptance_rows)}", "质量验收记录", "/quality/acceptances")
+    if can_read_deliveries:
+        _evidence(result, "短交明细", f"{sum(x.short_quantity > 0 for x in lines)} / {len(lines)}", "到货明细", "/warehouse/deliveries")
+    if can_read_acceptances and can_read_deliveries:
+        acceptance_rows = db.scalars(select(QualityAcceptance).where(QualityAcceptance.delivery_id.in_(delivery_ids))).all() if delivery_ids else []
+        _evidence(result, "验收结果样本", f"合格 {sum(x.result == 'PASSED' for x in acceptance_rows)}，部分合格 {sum(x.result == 'PARTIAL' for x in acceptance_rows)}，不合格 {sum(x.result == 'FAILED' for x in acceptance_rows)}", "质量验收记录", "/quality/acceptances")
+    else:
+        result.limitations.append("当前账号无法同时读取到货和质量验收记录，未统计验收结果。")
     result.limitations.append("未配置评分权重、同物料可比价格和最小样本量，因此不计算综合分或推荐排名。")
     return result
 
@@ -355,12 +393,13 @@ def _supplier_change(db: Session, user: User, rfq_id: int) -> BusinessInsight:
 def _stocktake_explain(db: Session, user: User, stocktake_id: int) -> BusinessInsight:
     """展示盘点账实数量及相同批次、库位的近期流水。"""
     stocktake = inventory_service.get_stocktake_request(db, user, stocktake_id)
+    can_read_inventory = _has_permission(db, user, "warehouse.inventory.read")
     result = _result("stocktake-explain", f"盘点 {stocktake.stocktake_no} 差异", "仓管、仓储主管", f"盘点状态：{stocktake.status}。数量保留各行原单位。")
     rows = db.scalars(select(InventoryStocktakeItem).where(InventoryStocktakeItem.stocktake_request_id == stocktake.id)).all()
     for row in rows:
         _evidence(result, f"盘点行 {row.line_no}", f"账面 {row.book_quantity}，实盘 {row.counted_quantity}，差异 {row.difference_quantity}，单位 #{row.unit_id}", f"盘点明细 #{row.id}", "/warehouse/stocktakes")
         scope = inventory_service.accessible_warehouse_ids(db, user)
-        if scope is None or stocktake.warehouse_id in scope:
+        if can_read_inventory and (scope is None or stocktake.warehouse_id in scope):
             txs = db.scalars(select(InventoryTransaction).where(InventoryTransaction.warehouse_id == stocktake.warehouse_id, InventoryTransaction.batch_id == row.batch_id, InventoryTransaction.location_id == row.location_id).order_by(InventoryTransaction.created_at.desc()).limit(5)).all()
             for tx in txs:
                 _evidence(result, f"关联流水 {tx.transaction_no}", f"{tx.transaction_type} {tx.quantity} · {tx.created_at}", f"库存流水 #{tx.id}", "/warehouse/transactions")
@@ -479,7 +518,7 @@ def list_batch_checks(balance_id: int, db: Session = Depends(get_db), user: User
 
 @router.post("/batch-impact/{balance_id}/recall-reports", response_model=recall_report.ReportRead, summary="生成召回演练报告")
 def create_batch_recall_report(balance_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> recall_report.ReportRead:
-    _check_permission(db, user, "warehouse.inventory.read")
+    _check_permission(db, user, "warehouse.inventory.write")
     return recall_report.read_report(db, recall_report.save_report(db, user, balance_id))
 
 
@@ -564,29 +603,29 @@ def decide_exception_action(exception_id: int, data: exception_actions.DecisionI
 
 @router.get("/finance-difference/{order_id}/checks", response_model=list[finance_checks.FinanceCheckRead], summary="查看订单财务核查清单")
 def list_finance_checks(order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[finance_checks.FinanceCheckRead]:
-    _check_permission(db, user, PERMISSIONS["finance-difference"])
+    _check_permission(db, user, "finance.reconciliations.read")
     return finance_checks.list_checks(db, user, order_id)
 
 
 @router.get("/finance-difference/{order_id}/assignees", summary="可指派的财务核查人员")
 def list_finance_assignees(order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict[str, int | str]]:
-    _check_permission(db, user, ("finance.reconciliations.write", "procurement.orders.read"))
+    _check_permission(db, user, "finance.reconciliations.write")
     return finance_checks.list_assignees(db, user, order_id)
 
 
 @router.post("/finance-difference/{order_id}/checks", response_model=list[finance_checks.FinanceCheckRead], summary="建立订单财务核查清单")
 def create_finance_checks(order_id: int, snapshot_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[finance_checks.FinanceCheckRead]:
-    _check_permission(db, user, ("finance.reconciliations.write", "procurement.orders.read"))
+    _check_permission(db, user, "finance.reconciliations.write")
     return finance_checks.create_checks(db, user, order_id, snapshot_id)
 
 
 @router.patch("/finance-difference/{order_id}/checks/{check_id}", response_model=finance_checks.FinanceCheckRead, summary="更新订单财务核查项")
 def update_finance_check(order_id: int, check_id: int, data: checks.CheckItemUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> finance_checks.FinanceCheckRead:
-    _check_permission(db, user, ("finance.reconciliations.write", "procurement.orders.read"))
+    _check_permission(db, user, "finance.reconciliations.write")
     return finance_checks.update_check(db, user, order_id, check_id, data)
 
 
 @router.get("/finance-difference/{order_id}/checks/{check_id}/events", response_model=list[finance_checks.FinanceEventRead], summary="查看财务核查处理记录")
 def list_finance_check_events(order_id: int, check_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[finance_checks.FinanceEventRead]:
-    _check_permission(db, user, PERMISSIONS["finance-difference"])
+    _check_permission(db, user, "finance.reconciliations.read")
     return finance_checks.list_events(db, user, order_id, check_id)

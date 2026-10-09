@@ -255,7 +255,8 @@ def test_supplier_portal_rfq_scope_quote_submission_and_revision(client: TestCli
     portal = login(client, user.username, demo_password)
     listed = client.get("/api/v1/supplier-portal/rfqs", headers=portal)
     assert listed.status_code == 200, listed.text
-    listed_ids = [row["id"] for row in listed.json()["items"]]
+    listed_payload = listed.json()
+    listed_ids = [row["id"] for row in listed_payload["items"]]
     assert rfq.id in listed_ids
     assert {"requester_id", "source_request_id", "suppliers", "quotes"}.isdisjoint(listed.json()["items"][0])
 
@@ -320,9 +321,16 @@ def test_supplier_portal_rfq_scope_quote_submission_and_revision(client: TestCli
         f"/api/v1/supplier-portal/rfqs/{expired.id}/quotes", headers=portal, json=payload
     )
     assert expired_response.status_code == 400
+    visible_before_hidden = client.get("/api/v1/supplier-portal/rfqs", headers=portal)
+    assert visible_before_hidden.status_code == 200, visible_before_hidden.text
 
     hidden = RFQ(rfq_no=f"TEST-RFQ-OTHER-{suffix}", requester_id=buyer_id, status="SENT")
     db_session.add(hidden)
     db_session.flush()
-    assert client.get(f"/api/v1/supplier-portal/rfqs/{hidden.id}", headers=portal).status_code == 404
+    hidden_detail = client.get(f"/api/v1/supplier-portal/rfqs/{hidden.id}", headers=portal)
+    assert hidden_detail.status_code == 404
     assert hidden.id not in listed_ids
+    refreshed = client.get("/api/v1/supplier-portal/rfqs", headers=portal)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["total"] == visible_before_hidden.json()["total"]
+    assert hidden.id not in {row["id"] for row in refreshed.json()["items"]}

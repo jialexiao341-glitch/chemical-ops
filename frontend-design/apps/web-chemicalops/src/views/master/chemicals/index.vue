@@ -35,7 +35,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     columns: useColumns(
       onActionClick,
-      hasAccessByCodes(['warehouse.inventory.read']),
+      hasAccessByCodes(['warehouse.inventory.read']) &&
+        hasAccessByCodes(['ai.workspace.read']),
     ),
     height: 'auto',
     keepSource: true,

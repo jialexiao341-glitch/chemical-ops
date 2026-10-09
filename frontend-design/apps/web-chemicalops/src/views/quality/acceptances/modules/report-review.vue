@@ -27,6 +27,7 @@ import {
 const emit = defineEmits(['continue']);
 const { hasAccessByCodes } = useAccess();
 const userStore = useUserStore();
+const canWriteAcceptances = hasAccessByCodes(['quality.acceptances.write']);
 const acceptance = ref<null | QualityAcceptanceApi.Acceptance>(null);
 const files = ref<QualityAcceptanceApi.ReportFile[]>([]);
 const targets = ref<QualityAcceptanceApi.ReviewTarget[]>([]);
@@ -57,7 +58,7 @@ const currentCorrections = computed(() => {
   for (const item of corrections.value) byName.set(item.item_name, item);
   return [...byName.values()];
 });
-const canRecordResult = computed(() => !acceptance.value?.result || ['PENDING', 'REINSPECTION'].includes(acceptance.value.result));
+const canRecordResult = computed(() => canWriteAcceptances && (!acceptance.value?.result || ['PENDING', 'REINSPECTION'].includes(acceptance.value.result)));
 const canPrefill = computed(() => canRecordResult.value && targets.value.length === 1 && review.value?.review_id === history.value[0]?.id && review.value?.batch_status === 'MATCH' && review.value?.product_status === 'MATCH');
 
 /** 将有报告原文依据的结果带入验收表单，由用户继续填写。 */

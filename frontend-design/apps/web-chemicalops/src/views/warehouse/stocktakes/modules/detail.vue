@@ -4,6 +4,7 @@ import type { StocktakeApi } from '#/api';
 import { computed, ref } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 
 import {
   Button,
@@ -29,6 +30,7 @@ import {
 import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 
 const detail = ref<StocktakeApi.StocktakeRequest>();
+const { hasAccessByCodes } = useAccess();
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const loading = ref(false);
 const productName = ref<(id?: null | number) => string>(() => '-');
@@ -96,7 +98,7 @@ defineExpose({ drawerApi });
     <Spin :spinning="loading">
       <Empty v-if="!detail && !loading" description="未找到该申请" />
       <div v-else-if="detail" class="space-y-5">
-        <Button @click="insightDrawer?.open('stocktake-explain', detail.id)">
+        <Button v-if="hasAccessByCodes(['ai.workspace.read'])" @click="insightDrawer?.open('stocktake-explain', detail.id)">
           分析盘点差异
         </Button>
         <Descriptions bordered :column="2" size="small">

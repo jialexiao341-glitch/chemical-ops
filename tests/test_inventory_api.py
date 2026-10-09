@@ -51,6 +51,7 @@ def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session
     quantity = min(Decimal("0.000001"), balance.quantity)
     technical = login(client, "technical_engineer", demo_password)
     manager = login(client, "procurement_manager", demo_password)
+    approver = login(client, "system_admin", demo_password)
     warehouse = login(client, "warehouse_receiver", demo_password)
     options = client.get("/api/v1/inventory/issue-request-options", headers=technical)
     assert options.status_code == 200
@@ -71,7 +72,8 @@ def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session
     assert created.status_code == 201, created.text
     issue_id = created.json()["id"]
     assert client.post(f"/api/v1/inventory/issue-requests/{issue_id}/submit", headers=technical).status_code == 200
-    assert client.post(f"/api/v1/inventory/issue-requests/{issue_id}/approve", headers=manager).status_code == 200
+    assert client.post(f"/api/v1/inventory/issue-requests/{issue_id}/approve", headers=manager).status_code == 403
+    assert client.post(f"/api/v1/inventory/issue-requests/{issue_id}/approve", headers=approver).status_code == 200
     assert client.post(f"/api/v1/inventory/issue-requests/{issue_id}/execute", headers=technical).status_code == 403
     executed = client.post(f"/api/v1/inventory/issue-requests/{issue_id}/execute", headers=warehouse)
     assert executed.status_code == 200
@@ -113,6 +115,7 @@ def test_stocktake_requires_unchanged_book_quantity(client: TestClient, db_sessi
     balance = get_available_balance(db_session)
     warehouse = login(client, "warehouse_receiver", demo_password)
     manager = login(client, "procurement_manager", demo_password)
+    approver = login(client, "system_admin", demo_password)
     body = {
         "warehouse_id": balance.warehouse_id,
         "location_id": balance.location_id,
@@ -130,7 +133,8 @@ def test_stocktake_requires_unchanged_book_quantity(client: TestClient, db_sessi
     assert created.json()["items"][0]["book_quantity"] == str(balance.quantity)
     stocktake_id = created.json()["id"]
     assert client.post(f"/api/v1/inventory/stocktakes/{stocktake_id}/submit", headers=warehouse).status_code == 200
-    assert client.post(f"/api/v1/inventory/stocktakes/{stocktake_id}/approve", headers=manager).status_code == 200
+    assert client.post(f"/api/v1/inventory/stocktakes/{stocktake_id}/approve", headers=manager).status_code == 403
+    assert client.post(f"/api/v1/inventory/stocktakes/{stocktake_id}/approve", headers=approver).status_code == 200
     completed = client.post(f"/api/v1/inventory/stocktakes/{stocktake_id}/execute", headers=warehouse)
     assert completed.status_code == 200
     assert completed.json()["status"] == "COMPLETED"

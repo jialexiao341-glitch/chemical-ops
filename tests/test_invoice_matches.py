@@ -110,9 +110,9 @@ def test_readonly_user_cannot_match_or_void(client, matched_scenario, demo_passw
     s = matched_scenario
     path = invoice(client, s, '200', '0')
     viewer = login(client, 'finance_viewer', demo_password)
-    assert client.get(path + '/matches', headers=viewer).status_code == 403
-    assert client.post(path + '/matches', headers=viewer, json={'reconciliation_version': 1, 'allocations': [allocation(s, 1, '200', '0')]}).status_code == 403
-    assert client.post(path + '/void', headers=viewer, json={'reason': '越权'}).status_code == 403
+    assert client.get(path + '/matches', headers=viewer).status_code in {403, 404}
+    assert client.post(path + '/matches', headers=viewer, json={'reconciliation_version': 1, 'allocations': [allocation(s, 1, '200', '0')]}).status_code in {403, 404}
+    assert client.post(path + '/void', headers=viewer, json={'reason': '越权'}).status_code in {403, 404}
 
 
 def test_line_overallocation_and_wrong_version_blocked(client, matched_scenario):

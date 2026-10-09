@@ -5,6 +5,7 @@ import type { TechnicalDocumentSource } from '#/api';
 import { computed, onMounted, ref } from 'vue';
 
 import { Page, useVbenDrawer } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getChemicalListApi, getTechnicalDocumentsApi, startTechnicalDocumentFetchApi, startTechnicalDocumentIngestApi } from '#/api';
 
@@ -37,6 +38,9 @@ const documentTypeOptions = [
   { label: 'TDS', value: 'tds' },
 ];
 const busy = ref(false);
+const { hasAccessByCodes } = useAccess();
+const canReadTechnicalDocuments = hasAccessByCodes(['master.chemicals.read']);
+const canWriteTechnicalDocuments = hasAccessByCodes(['master.chemicals.write']);
 const [TaskDrawer, taskDrawerApi] = useVbenDrawer({
   connectedComponent: TaskRunsDrawer,
   destroyOnClose: false,
@@ -60,7 +64,7 @@ const columns = [
     cellRender: {
       attrs: { onClick: onActionClick },
       name: 'CellOperation',
-      options: [{ code: 'preview', text: '预览' }],
+      options: [{ code: 'preview', text: '预览', auth: 'master.chemicals.read' }],
       props: { renderMode: 'menu' },
     },
     field: 'operation',
@@ -107,6 +111,7 @@ function searchDocuments() {
 }
 
 async function startFetch() {
+  if (!canWriteTechnicalDocuments) return;
   if (!/^\d{2,7}-\d{2}-\d$/.test(casNo.value.trim())) {
     message.warning('请先按名称搜索并选择已维护 CAS 号的化学品');
     return;
@@ -126,6 +131,7 @@ async function startFetch() {
 }
 
 async function startIngest() {
+  if (!canWriteTechnicalDocuments) return;
   if (!/^\d{2,7}-\d{2}-\d$/.test(casNo.value.trim())) {
     message.warning('请先按名称搜索并选择已维护 CAS 号的化学品');
     return;
@@ -210,8 +216,8 @@ onMounted(() => {
               />
             </div>
             <div class="flex shrink-0 items-center gap-2">
-              <Button :loading="busy" @click="startFetch">拉取数据</Button>
-              <Button type="primary" :loading="busy" @click="startIngest">写入知识库</Button>
+              <Button v-if="canWriteTechnicalDocuments" :loading="busy" @click="startFetch">拉取数据</Button>
+              <Button v-if="canWriteTechnicalDocuments" type="primary" :loading="busy" @click="startIngest">写入知识库</Button>
             </div>
           </div>
           <div class="flex shrink-0 items-center gap-2">
@@ -223,7 +229,7 @@ onMounted(() => {
 
       <Grid table-title="技术资料库">
         <template #toolbar-tools>
-          <Button class="ml-2" @click="taskDrawerApi.open()">处理任务</Button>
+          <Button v-if="canReadTechnicalDocuments" class="ml-2" @click="taskDrawerApi.open()">处理任务</Button>
         </template>
       </Grid>
     </div>
