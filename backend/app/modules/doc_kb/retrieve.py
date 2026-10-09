@@ -120,14 +120,48 @@ async def resolve_doc_targets(db: Session, question: str) -> list[str]:
     return targets
 
 
+DOC_TYPE_PATTERNS = {
+    "msds": r"(?<![a-z])(?:msds|sds)(?![a-z])|安全数据表|安全技术说明书|安全资料",
+    "tds": r"(?<![a-z])tds(?![a-z])|技术数据表|产品(?:技术)?资料",
+    "property": r"物性页|物性资料",
+}
+FIELD_PATTERNS = (
+    r"闪点|flash\s*point",
+    r"沸点|沸程|boiling\s*point|boiling\s*range",
+    r"熔点|melting\s*point",
+    r"密度|density",
+    r"蒸气压|vapou?r\s*pressure",
+    r"溶解度|solubility",
+    r"自燃温度|auto.?ignition",
+    r"分子式|molecular\s*formula",
+    r"分子量|molecular\s*(?:weight|mass)",
+)
+
+
+def requested_doc_types(question: str) -> set[str]:
+    return {kind for kind, pattern in DOC_TYPE_PATTERNS.items() if re.search(pattern, question, re.I)}
+
+
+def _field_relevance(question: str, doc_type: str, section_no: int | None, content: str) -> float:
+    """Prefer requested field labels and structured safety properties over page boilerplate."""
+    fields = [pattern for pattern in FIELD_PATTERNS if re.search(pattern, question, re.I)]
+    if not fields:
+        return 0.0
+    # Only rank text that can actually reach the model context.
+    excerpt = content[:SECTION_CONTENT_MAX_CHARS]
+    coverage = sum(bool(re.search(pattern, excerpt, re.I)) for pattern in fields) / len(fields)
+    mentioned = requested_doc_types(question)
+    source_bonus = 0.4 if doc_type in mentioned else 0.0
+    structured_bonus = 0.3 if doc_type == "msds" and section_no == 9 and coverage else 0.0
+    return coverage * 0.8 + source_bonus + structured_bonus
+
+
 def requested_msds_section(question: str) -> int | None:
     """识别明确要求的 MSDS 章节；物性字段归入第 9 节。"""
 
     lowered = question.lower()
-    if not re.search(r"(?<![a-z])(?:msds|sds)(?![a-z])|安全数据表|安全技术说明书", lowered):
+    if requested_doc_types(question) != {"msds"}:
         return None
-    if re.search(r"(?<![a-z])tds(?![a-z])|技术数据表|物性页|物性资料", lowered):
-        return None  # 比较多个来源时不强行限定为 MSDS
     matches = re.findall(r"第\s*(\d{1,2})\s*节|\bsection\s*(\d{1,2})\b", lowered)
     if matches:
         section_numbers = {int(chinese or english) for chinese, english in matches}
@@ -143,14 +177,7 @@ def requested_msds_section(question: str) -> int | None:
 def requested_single_doc_type(question: str) -> str | None:
     """Only constrain retrieval when exactly one document type is requested."""
 
-    lowered = question.lower()
-    mentioned = {
-        doc_type for doc_type, pattern in (
-            ("msds", r"(?<![a-z])(?:msds|sds)(?![a-z])|安全数据表|安全技术说明书"),
-            ("tds", r"(?<![a-z])tds(?![a-z])|技术数据表"),
-            ("property", r"物性页|物性资料"),
-        ) if re.search(pattern, lowered)
-    }
+    mentioned = requested_doc_types(question)
     return next(iter(mentioned)) if len(mentioned) == 1 else None
 
 
@@ -205,6 +232,7 @@ async def retrieve_sections(
             rows.sort(key=lambda row: (targets.index(row[0].cas_no), row[0].id))
         else:
             rows.sort(key=lambda row: targets.index(row[0].cas_no))
+        rows.sort(key=lambda row: -_field_relevance(question, row[0].doc_type, row[0].section_no, row[0].content))
         return [
             DocSectionHit(
                 id=section.id,
@@ -277,7 +305,9 @@ async def retrieve_sections(
             .order_by(AiDocumentSection.cas_no, AiDocumentSection.doc_type, AiDocumentSection.section_no)
         )
         per_cas_seen: dict[str, int] = {}
-        for section, name_zh, document_id, document_title, source_url, parse_status, updated_at in db.execute(statement).all():
+        rows = db.execute(statement).all()
+        rows.sort(key=lambda row: -_field_relevance(question, row[0].doc_type, row[0].section_no, row[0].content))
+        for section, name_zh, document_id, document_title, source_url, parse_status, updated_at in rows:
             seen = per_cas_seen.get(section.cas_no, 0)
             if seen >= BRIDGE_SECTIONS_PER_CAS:
                 continue
@@ -329,8 +359,17 @@ async def retrieve_sections(
                 hit.parse_status = parse_status
                 hit.updated_at = updated_at.isoformat() if updated_at else None
 
-    ordered = sorted(merged.values(), key=lambda item: -item.score)
-    return ordered[:top_k]
+    ordered = sorted(merged.values(), key=lambda item: -(item.score + _field_relevance(question, item.doc_type, item.section_no, item.content)))
+    selected = ordered[:top_k]
+    # A comparison must retain evidence for each explicitly requested source.
+    mentioned = requested_doc_types(question)
+    if len(mentioned) > 1 and top_k >= len(mentioned):
+        reserved = [next((hit for hit in ordered if hit.doc_type == kind), None) for kind in sorted(mentioned)]
+        required = {hit.id for hit in reserved if hit is not None}
+        selected = [hit for hit in ordered if hit.id in required]
+        selected += [hit for hit in ordered if hit.id not in required][:top_k - len(selected)]
+        selected.sort(key=lambda hit: ordered.index(hit))
+    return selected
 
 
 def build_doc_context(hits: list[DocSectionHit], *, max_chars: int = CONTEXT_MAX_CHARS) -> tuple[str, list[dict]]:

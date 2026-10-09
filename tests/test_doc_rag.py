@@ -31,6 +31,9 @@ from app.modules.doc_kb.retrieve import (
         ("乙醇的物性页熔点是多少？", "property"),
         ("乙醇的 MSDS 第9节闪点是多少？", "msds"),
         ("比较乙醇的 MSDS 和 TDS", None),
+        ("乙醇的安全资料中闪点是多少？", "msds"),
+        ("乙醇产品资料中的分子式", "tds"),
+        ("结合乙醇安全资料与产品技术资料", None),
     ],
 )
 def test_requested_single_doc_type(question, expected):
@@ -352,6 +355,55 @@ def test_retrieve_vector_only_when_no_target(db_session, monkeypatch: pytest.Mon
     assert len(hits) == 1
     assert hits[0].source == "vector"
     assert hits[0].cas_no == "75-05-8"
+
+
+def test_property_boilerplate_does_not_displace_structured_fields(db_session, monkeypatch):
+    async def fake_embed(_texts, _settings=None):
+        return [[0.5]]
+
+    monkeypatch.setattr(retrieve_module, "embed_texts", fake_embed)
+    monkeypatch.setattr(vector_store, "get_client", lambda: object())
+    crowded = [
+        {"id": -index, "score": 0.99, "payload": {
+            "cas_no": "64-17-5", "doc_type": "property",
+            "content": "Ethanol supplier catalog and navigation links",
+        }} for index in range(1, 19)
+    ]
+    monkeypatch.setattr(vector_store, "search_sections", lambda *_args, **_kwargs: crowded)
+    hits = asyncio.run(retrieve_sections(db_session, "乙醇的闪点和初沸点分别是多少？"))
+    assert hits[0].doc_type == "msds"
+    assert hits[0].section_no == 9
+    assert hits[0].source == "bridge"
+    assert "Flash point" in hits[0].content
+    assert len(hits) <= 6
+    assert all(hit.cas_no == "64-17-5" for hit in hits)
+
+
+def test_cross_source_fields_survive_embedding_outage(db_session, monkeypatch):
+    async def broken_embed(_texts, _settings=None):
+        raise BusinessValidationError("Embedding unavailable")
+
+    monkeypatch.setattr(retrieve_module, "embed_texts", broken_embed)
+    hits = asyncio.run(retrieve_sections(
+        db_session, "结合乙醇安全资料和产品技术资料，闪点与分子量分别是多少？", top_k=2,
+    ))
+    assert {hit.doc_type for hit in hits} == {"msds", "tds"}
+    assert next(hit for hit in hits if hit.doc_type == "msds").section_no == 9
+    assert all(hit.source == "bridge" and hit.cas_no == "64-17-5" for hit in hits)
+
+
+def test_natural_single_source_stays_scoped(db_session, monkeypatch):
+    async def should_not_embed(_texts, _settings=None):
+        pytest.fail("Single explicit source should be read directly")
+
+    monkeypatch.setattr(retrieve_module, "embed_texts", should_not_embed)
+    hits = asyncio.run(retrieve_sections(db_session, "乙醇产品资料里的分子式是什么？"))
+    assert hits and all(hit.doc_type == "tds" and hit.source == "exact" for hit in hits)
+
+
+def test_field_ranking_ignores_labels_outside_context():
+    prefix = "Supplier links " * 120
+    assert retrieve_module._field_relevance("闪点", "property", None, prefix + "Flash point 13") == 0
 
 
 # ---------- 上下文构建 ----------
