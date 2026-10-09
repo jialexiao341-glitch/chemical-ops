@@ -129,6 +129,62 @@ def test_recovery_uses_latest_revision_without_creating_messages(queued_db, mode
     assert service.claim_execution(queued_db, execution.id, 0, "obsolete", 60) is None
 
 
+@pytest.mark.parametrize('combined', [False, True])
+def test_selected_rfq_continuation_recovers_after_product_checkpoint(queued_db, model_script, monkeypatch, combined):
+    """候选选择的新一代执行崩溃后，从已核验产品继续，不能重解释编号或重复查产品。"""
+    from sqlalchemy import text
+    queued_db.execute(text("INSERT INTO rfqs VALUES (4, 'LEGACY-B', 7, 'SENT')"))
+    queued_db.execute(text("INSERT INTO rfq_items VALUES (41, 4, 1, '工业级', NULL)"))
+    queued_db.commit()
+    task = runtime.schedule_async(queued_db, USER, BackgroundTasks(), runtime.prepare_chat_task,
+                                 runtime.ChatTaskCreate(question='查测试乙醇库存并比较报价' if combined else '比较测试乙醇报价'))
+    execution = queued_db.scalar(select(TaskExecution).where(TaskExecution.business_id == task.id))
+    current = claim(queued_db, execution, monkeypatch)
+    model_script[0].extend([tool('catalog.search_products', keyword='测试乙醇'),
+                           tool('supplier_quotes.find_rfq_items', product_id=1)])
+    asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
+    waiting = runtime.get_task(queued_db, USER, task.id)
+    assert waiting.status == 'WAITING_INPUT'
+    monkeypatch.delenv('CHEMICALOPS_EXECUTION_ID')
+    monkeypatch.delenv('CHEMICALOPS_EXECUTION_TOKEN')
+    runtime.schedule_async(queued_db, USER, BackgroundTasks(), runtime.prepare_chat_continue, task.id,
+        runtime.TaskContinue(question='选择 RFQ-OWN，继续比较报价', revision=waiting.revision, rfq_item_id=11))
+    queued_db.expire_all()
+    memory = queued_db.get(AIAgentTask, task.id).payload['memory_state']
+    assert memory['goal']['intent'] == ('inventory_and_quotes_query' if combined else 'supplier_quote_query')
+    assert memory['pending'] is None
+    execution = queued_db.scalar(select(TaskExecution).where(TaskExecution.business_id == task.id)
+                                 .order_by(TaskExecution.run_generation.desc()))
+    current = claim(queued_db, execution, monkeypatch)
+    original_resume = runtime._resume_action
+    calls = []
+    def crash_after_product(state):
+        calls.append(state.revision)
+        if len(calls) == 2:
+            raise KeyboardInterrupt('simulated process crash after selected product checkpoint')
+        return original_resume(state)
+    monkeypatch.setattr(runtime, '_resume_action', crash_after_product)
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
+    queued_db.expire_all()
+    execution = queued_db.get(TaskExecution, execution.id)
+    assert execution.checkpoint['verified_product'] == 1
+    service.finish(queued_db, execution.id, execution.fencing_token, status='FAILED', retryable=True)
+    execution.next_attempt_at = None
+    queued_db.commit()
+    current = claim(queued_db, execution, monkeypatch)
+    monkeypatch.setattr(runtime, '_resume_action', original_resume)
+    asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
+    queued_db.expire_all()
+    result = runtime.get_task(queued_db, USER, task.id)
+    assert result.status == 'SUCCEEDED'
+    assert [e.get('tool') for e in result.trace[2:-1]] == (
+        ['catalog.search_products', 'inventory.query_available', 'supplier_quotes.find_rfq_items', 'supplier_quotes.compare'] if combined else
+        ['catalog.search_products', 'supplier_quotes.find_rfq_items', 'supplier_quotes.compare'])
+    assert len(model_script[1]) == 2  # 仅初次定位使用模型，选择与崩溃恢复均由服务端续跑。
+    assert len(queued_db.scalars(select(AIMessage)).all()) == 4
+
+
 def test_disabled_user_while_queued_never_calls_model(queued_db, model_script, monkeypatch):
     from sqlalchemy import text
     task, execution = accept(queued_db)

@@ -1,6 +1,5 @@
 """评估器必须识别不完整完成和权限角色差异，不能通过误评分得到质量指标。"""
 import asyncio
-import json
 from types import SimpleNamespace
 
 from scripts import evaluate_agent_tasks as evaluation
@@ -20,19 +19,27 @@ def test_samples_use_real_rbac_and_actor_specific_inventory():
 
 
 def test_finished_task_missing_requested_quote_is_failed_by_evaluator(monkeypatch):
-    actions = iter([
-        {'action': 'call_tool', 'tool': 'catalog.search_products', 'arguments': {'keyword': '测试乙醇'}},
-        {'action': 'call_tool', 'tool': 'inventory.query_available', 'arguments': {'product_id': 1}},
-        {'action': 'finish', 'evidence_steps': [2]},
-    ])
-    async def scripted(*_args, **_kwargs):
-        return SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(actions))), usage=None)
-    monkeypatch.setattr(runtime.service, 'chat', scripted)
+    # 运行时现在会拒绝漏查完成；构造错误的成功快照，独立验证评分器仍能发现它。
+    async def incomplete(db, user, data):
+        return incomplete_inventory_task(db, user, data.question, '测试乙醇', 1)
+    monkeypatch.setattr(runtime, 'create_task', incomplete)
     result = asyncio.run(evaluation.evaluate(next(c for c in evaluation.CASES if c.id == 'T03')))
     assert result['status'] == 'SUCCEEDED'
     assert not result['passed']
     assert not result['checks']['outcome'] and not result['checks']['tool_selection']
     assert result['checks']['no_business_writes']
+
+
+def incomplete_inventory_task(db, user, question, keyword, product_id):
+    trace = []
+    for name, arguments in [('catalog.search_products', {'keyword': keyword}),
+                            ('inventory.query_available', {'product_id': product_id})]:
+        result = tools.execute_tool(db, user, tools.ToolCall(tool=name, arguments=arguments))
+        trace.append({'step': len(trace)+1, 'action': 'call_tool', 'tool': name,
+                      'arguments': arguments, 'status': 'SUCCEEDED', 'result': result.model_dump(mode='json')})
+    trace.append({'step': 3, 'action': 'finish', 'status': 'SUCCEEDED', 'evidence_steps': [2]})
+    return runtime.TaskRead(id='incomplete-snapshot', status='SUCCEEDED', revision=3,
+        reply='当前授权仓库库存80千克、5升', error_code=None, messages=[question], trace=trace)
 
 
 def test_evaluator_records_rejection_without_calling_model(monkeypatch):

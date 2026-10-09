@@ -55,7 +55,7 @@ def tool(name, **arguments):
     return {"action": "call_tool", "tool": name, "arguments": arguments}
 
 
-def start(db, question="查询测试乙醇库存并比较报价"):
+def start(db, question="查询测试乙醇库存"):
     """通过公开服务入口启动任务，便于核验最终数据库记录。"""
     return asyncio.run(runtime.create_task(db, USER, runtime.TaskCreate(question=question)))
 
@@ -73,7 +73,7 @@ def test_full_goal_drives_four_tools_with_evidence_and_persisted_trace(task_db, 
     """C19：模型动作串联业务工具，后续上下文含前一步真实结果，最终数值来自证据。"""
     actions, contexts = model_script
     full_script(actions)
-    result = start(task_db)
+    result = start(task_db, '查询测试乙醇库存并比较报价')
     assert result.status == 'SUCCEEDED' and result.revision == 5
     assert len(contexts) == 5 and not actions
     assert contexts[1]['current_turn_steps'][0]['result']['rows'][0]['product_id'] == 1
@@ -89,7 +89,7 @@ def test_multiple_products_pause_and_selected_candidate_continues(task_db, model
     task_db.commit()
     actions, _ = model_script
     actions.append(tool('catalog.search_products', keyword='测试乙醇'))
-    result = start(task_db)
+    result = start(task_db, '查询测试乙醇库存')
     assert result.status == 'WAITING_INPUT'
     assert len(result.trace[0]['result']['rows']) == 2
     actions.extend([tool('catalog.search_products', keyword='测试乙醇'),
@@ -150,7 +150,7 @@ def test_client_cannot_select_fabricated_id_or_continue_stale_revision(task_db, 
 ])
 def test_invalid_model_output_and_unbacked_answer_stop(task_db, model_script, action, code):
     """格式无效、伪造证据或身份字段不能进入工具或最终回答。"""
-    model_script[0].append(action)
+    model_script[0].extend([action] * (2 if code == 'MODEL_FORMAT_ERROR' else 1))
     result = start(task_db)
     assert result.status == 'FAILED' and result.error_code == code
 

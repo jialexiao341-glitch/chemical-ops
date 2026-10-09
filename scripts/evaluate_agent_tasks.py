@@ -94,7 +94,7 @@ def check_evidence(result: runtime.TaskRead, actor: int = 7) -> bool:
     return True
 
 
-async def evaluate(case: Case) -> dict:
+async def evaluate(case: Case, *, db_factory=evaluation_db, evidence_checker=check_evidence) -> dict:
     calls, writes, rounds = [], [], []
     original_chat = runtime.service.chat
     async def measured_chat(*args, **kwargs):
@@ -116,10 +116,10 @@ async def evaluate(case: Case) -> dict:
     began = perf_counter()
     runtime.service.chat = measured_chat
     try:
-        with evaluation_db() as db:
-            if case.variant == 'products':
+        with db_factory() as db:
+            if db_factory is evaluation_db and case.variant == 'products':
                 db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
-            if case.variant == 'rfqs':
+            if db_factory is evaluation_db and case.variant == 'rfqs':
                 db.execute(text("INSERT INTO rfqs VALUES (4, 'RFQ-OWN-2', 7, 'SENT')"))
                 db.execute(text("INSERT INTO rfq_items VALUES (41, 4, 1, '工业级', NULL)"))
             db.commit()
@@ -143,12 +143,14 @@ async def evaluate(case: Case) -> dict:
             executed = [e for e in (result.trace if result else []) if e.get('action') == 'call_tool' and e.get('status') == 'SUCCEEDED']
             names = {e['tool'] for e in executed}
             tool_match = set(case.required_tools).issubset(names)
-            parameters = all((e['arguments'].get('product_id', 1) == 1 and e['arguments'].get('rfq_item_id', 11) == 11) for e in executed)
+            expected_product = getattr(case, 'expected_product', 1)
+            expected_item = getattr(case, 'expected_item', 11)
+            parameters = all((e['arguments'].get('product_id', expected_product) == expected_product and e['arguments'].get('rfq_item_id', expected_item) == expected_item) for e in executed)
             if case.id == 'T01': parameters = parameters and any(e['tool'] == 'inventory.query_available' and e['arguments'].get('limit') == 1 for e in executed)
             if case.id == 'T16': parameters = parameters and any(e['tool'] == 'supplier_quotes.compare' and e['arguments'].get('limit') == 1 for e in executed)
             no_side_effect = all('ai_agent_tasks' in statement.lower() for statement in writes)
             authorized = names.issubset({item['name'] for item in tools.list_tools(db, actor)})
-            evidence = check_evidence(result, case.actor) if result else True
+            evidence = evidence_checker(result, case.actor) if result else True
             status = 'REJECTED' if rejected else result.status
             finish = next((e for e in reversed(result.trace) if e.get('action') == 'finish'), None) if result else None
             used = {e['tool'] for e in executed if finish and e['step'] in finish['evidence_steps']}
@@ -165,6 +167,15 @@ async def evaluate(case: Case) -> dict:
                     'source_and_numbers': evidence if executed else None, 'authorized_tools': authorized, 'no_business_writes': no_side_effect},
                 'latency_seconds': round(perf_counter() - began, 3), 'model_calls': calls, 'rounds': rounds,
                 'business_write_count': sum('ai_agent_tasks' not in s.lower() for s in writes)}
+    except Exception as exc:
+        # 评测异常保存已有模型调用与轮次，不能让一个样本丢失后续批次结果。
+        return {**asdict(case), 'passed': False, 'status': 'EVALUATOR_ERROR',
+            'checks': {'outcome': False, 'tool_selection': None, 'parameters': None, 'clarification': None,
+                'source_and_numbers': None, 'authorized_tools': None,
+                'no_business_writes': all('ai_agent_tasks' in statement.lower() for statement in writes)},
+            'latency_seconds': round(perf_counter()-began, 3), 'model_calls': calls, 'rounds': rounds,
+            'business_write_count': sum('ai_agent_tasks' not in s.lower() for s in writes),
+            'evaluation_error_type': type(exc).__name__}
     finally:
         runtime.service.chat = original_chat
 

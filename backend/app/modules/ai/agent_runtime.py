@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from time import perf_counter
@@ -52,6 +53,8 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 用户要求同时查库存与报价时，应查询两个工具并同时引用两类证据；不可只完成其中一项。
 用户明确给出产品名称或编码时直接检索，不因名称含“停用”等文字而跳过目录查询。
 finish 不含自由编写的事实，服务端将从工具证据生成结果，不能编造库存/价格。
+workflow.rfq_no 是从用户询价语境提取的原始条件，与产品名称/编码分开；它不要求 RFQ 前缀，禁止把它交给 catalog.search_products。
+产品已核验后保持其身份，直接查询库存或定位询价；只有用户明确更换产品才重新搜索其他产品。
 """
 
 
@@ -86,6 +89,40 @@ class FinishAction(tools.ToolSchema):
 ACTION = TypeAdapter(Annotated[CallAction | AskAction | FinishAction, Field(discriminator="action")])
 
 
+class PendingChoice(tools.ToolSchema):
+    entity: Literal["product", "rfq_item"]
+    lookup_arguments: dict
+    candidates: list[dict]
+    revision: int
+
+
+class Workflow(tools.ToolSchema):
+    """条件只用于限定查询；候选和业务事实仍必须由授权工具核验。"""
+    rfq_no: str | None = Field(default=None, min_length=1, max_length=32)
+    pending: PendingChoice | None = None
+    resume_selection: bool = False
+    product_keyword: str | None = None
+
+
+def _rfq_condition(question: str) -> str | None:
+    # 识别语义位置，不绑定 RFQ/EVAL 前缀；不把孤立编号猜成询价。
+    token = r"([A-Za-z0-9][A-Za-z0-9_.:/-]{1,31})(?![A-Za-z0-9_.:/-])"
+    patterns = (
+        r"询价(?:单|编号|号)\s*[:：]?\s*" + token,
+        r"在\s*" + token + r"\s*(?:的)?(?:有效最新|最新|有效)?报价",
+        r"询价(?:编号|单号)\s*[:：]?\s*[‘“\"]?([^\s，。；‘’“”\"]{1,32}?)(?:的报价|[’”\"])",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, question)
+        if match:
+            return match.group(1)
+    # “比较产品编码报价”仍可能指产品；仅组合库存查询后的独立编号归入询价条件。
+    match = re.search(r"(?:比较|比对|和|及|与)\s*" + token + r"\s*(?:的)?(?:有效最新|最新|有效)?报价", question)
+    if match and any(word in question[:match.start()] for word in ("库存", "现货", "可用量")):
+        return match.group(1)
+    return None
+
+
 class TaskRead(tools.ToolSchema):
     id: str
     status: Literal["RUNNING", "WAITING_INPUT", "SUCCEEDED", "FAILED", "CANCELLED"]
@@ -118,6 +155,7 @@ class RunState:
     seen_calls: set[str] = field(default_factory=set)
     chat: dict | None = None
     memory_state: dict = field(default_factory=dict)
+    workflow: Workflow = field(default_factory=Workflow)
 
 
 class GraphState(TypedDict):
@@ -219,14 +257,21 @@ def _sync_memory_state(state: RunState) -> dict:
     last_question = next(
         (entry.get("question") for entry in reversed(state.trace) if entry.get("action") == "ask_user"), None
     )
-    if state.status == "WAITING_INPUT" and last_question:
+    if state.status == "WAITING_INPUT" and state.workflow.pending:
+        pending = state.workflow.pending
+        memory["pending"] = {
+            "slot": "product_identity" if pending.entity == "product" else "rfq_identity",
+            "question": state.reply, "reason": "multiple_candidates",
+            **pending.model_dump(mode="json"),
+        }
+    elif state.status == "WAITING_INPUT" and last_question:
         latest_result = latest_search.get("result") if latest_search else None
         memory["pending"] = {
             "slot": "product_identity" if memory.get("focus", {}).get("resolution") != "resolved" else "query_detail",
             "question": last_question[:1000],
             "reason": "catalog_no_match" if latest_search and latest_search.get("status") == "SUCCEEDED" and latest_result and latest_result.get("total_rows", 0) == 0 else "needs_clarification",
         }
-    elif state.status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+    elif state.status != "WAITING_INPUT":
         memory["pending"] = None
     memory["evidence_ref"] = {
         "task_id": state.task_id,
@@ -313,6 +358,7 @@ def _persist(db: Session, user: User, state: RunState) -> None:
         payload={"messages": state.messages, "trace": state.trace,
                  "chat": state.chat,
                  "memory_state": memory,
+                 "workflow": state.workflow.model_dump(mode="json"),
                  "turn_start": state.turn_start,
                  "selected_product": state.selected_product or state.verified_product,
                  "selected_rfq_item": state.selected_rfq_item or state.verified_rfq_item}, status=state.status,
@@ -364,6 +410,7 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
         "tools": [{k: item[k] for k in ("name", "description", "input_schema")} for item in catalog],
         "current_turn_steps": state.trace[state.turn_start:],
         "recent_task_memory": state.memory_state,
+        "workflow": state.workflow.model_dump(mode="json"),
         "selected_product_id": state.selected_product, "selected_rfq_item_id": state.selected_rfq_item,
         "verified_product_id": state.verified_product, "verified_rfq_item_id": state.verified_rfq_item,
     }, ensure_ascii=False)
@@ -371,9 +418,20 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
         raise BusinessValidationError("CONTEXT_LIMIT")
     model_settings = settings.model_copy(update={"llm_max_tokens": min(settings.llm_max_tokens, 2048),
         "llm_max_retries": 0})
-    reply = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
-        model_settings, response_format={"type": "json_object"}, system_prompt=PLANNER_PROMPT)
-    return ACTION.validate_json(reply.message.content)
+    for attempt in range(2):
+        reply = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
+            model_settings, response_format={"type": "json_object"}, system_prompt=PLANNER_PROMPT)
+        try:
+            return ACTION.validate_json(reply.message.content)
+        except ValidationError:
+            if attempt:
+                raise
+            # 格式修复发生在执行工具之前，不重试任何业务调用。
+            correction = json.loads(context)
+            correction["format_correction"] = "上一动作未通过严格 JSON schema 校验；请仅输出符合 action schema 的 JSON，不添加身份字段。"
+            context = json.dumps(correction, ensure_ascii=False)
+            if len(context) > settings.agent_context_max_chars:
+                raise BusinessValidationError("CONTEXT_LIMIT") from None
 
 
 def _summary(entries: list[dict]) -> str:
@@ -411,11 +469,73 @@ def _resolve_candidates(state: RunState, result: dict) -> None:
     if product:
         state.verified_product = verified
         state.verified_rfq_item = None
+        state.workflow.product_keyword = result.get("keyword") or next(
+            e["arguments"]["keyword"] for e in reversed(state.trace) if e.get("tool") == result["tool"]
+        )
     else:
         state.verified_rfq_item = verified
-    if result["total_rows"] > 0 and verified is None:
+    if verified is None and (result["total_rows"] > 0 or chosen is not None):
         state.status = "WAITING_INPUT"
-        state.reply = "找到多个产品规格或询价明细，请从本次候选中选择，或补充更精确的名称/询价编号。"
+        entity = "产品规格" if product else "询价明细"
+        state.reply = (f"所选{entity}已不在当前可用候选中，请重新补充条件。" if chosen is not None else
+                       f"找到多个{entity}，请从本次候选中选择，或补充更精确的条件。")
+        state.workflow.pending = PendingChoice(entity="product" if product else "rfq_item",
+            lookup_arguments=state.trace[-1]["arguments"], candidates=result["rows"], revision=state.revision + 1)
+    else:
+        state.workflow.pending = None
+
+
+def _resume_action(state: RunState) -> CallAction | FinishAction | None:
+    """选择续答只恢复原查询目标；所有数据按当前权限重新读取，不调用模型重猜身份。"""
+    if not state.workflow.resume_selection:
+        return None
+    entries = [e for e in state.trace[state.turn_start:] if e.get("status") == "SUCCEEDED"]
+    def call(name, **arguments):
+        return CallAction(action="call_tool", tool=name, arguments=arguments)
+    if state.verified_product is None:
+        return call("catalog.search_products", keyword=state.workflow.product_keyword)
+    intent = state.memory_state.get("goal", {}).get("intent") or _intent_from_question(state.messages[0])
+    needs_inventory = intent in {"inventory_query", "inventory_and_quotes_query"}
+    needs_quotes = intent in {"supplier_quote_query", "inventory_and_quotes_query"}
+    completed = {e.get("tool") for e in entries}
+    def business_args(name):
+        previous = next((e["arguments"] for e in reversed(state.trace[:state.turn_start])
+                         if e.get("tool") == name and e.get("status") == "SUCCEEDED"), {})
+        args = {**previous, "product_id": state.verified_product}
+        label = "库存" if name == "inventory.query_available" else "报价"
+        question = state.memory_state.get("goal", {}).get("description") or state.messages[0]
+        limit = re.search(label + r"[^，。；]{0,20}?(?:返回|显示)\s*(\d+)\s*条", question)
+        if limit:
+            args["limit"] = min(int(limit.group(1)), 100)
+        warehouse = re.search(r"仓库\s*(\d+)", question) if label == "库存" else None
+        if warehouse:
+            args["warehouse_id"] = int(warehouse.group(1))
+        return args
+    if needs_inventory and "inventory.query_available" not in completed:
+        return call("inventory.query_available", **business_args("inventory.query_available"))
+    if needs_quotes and "supplier_quotes.find_rfq_items" not in completed:
+        args = {"product_id": state.verified_product}
+        if state.workflow.rfq_no:
+            args["rfq_no"] = state.workflow.rfq_no
+        return call("supplier_quotes.find_rfq_items", **args)
+    lookup_empty = any(e.get("tool") == "supplier_quotes.find_rfq_items" and not e["result"]["total_rows"] for e in entries)
+    if needs_quotes and not lookup_empty and "supplier_quotes.compare" not in completed:
+        return call("supplier_quotes.compare", **{**business_args("supplier_quotes.compare"), "rfq_item_id": state.verified_rfq_item})
+    evidence = [e["step"] for e in entries if e.get("tool") in {"inventory.query_available", "supplier_quotes.compare"}
+                or e.get("tool") == "supplier_quotes.find_rfq_items" and not e["result"]["total_rows"]]
+    return FinishAction(action="finish", evidence_steps=evidence) if evidence else None
+
+
+def _constrain_action(state: RunState, action):
+    """已核验产品下的询价条件不能误入产品检索；查询范围由原始条件约束。"""
+    if not isinstance(action, CallAction) or state.verified_product is None or not state.workflow.rfq_no:
+        return action
+    if action.tool == "catalog.search_products" and action.arguments.get("keyword") == state.workflow.rfq_no:
+        return CallAction(action="call_tool", tool="supplier_quotes.find_rfq_items",
+                          arguments={"product_id": state.verified_product, "rfq_no": state.workflow.rfq_no})
+    if action.tool == "supplier_quotes.find_rfq_items":
+        return action.model_copy(update={"arguments": {**action.arguments, "rfq_no": state.workflow.rfq_no}})
+    return action
 
 
 async def _drive(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
@@ -432,10 +552,11 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
         if execution_context.identity() and not catalog:
             raise AuthorizationError("当前没有可用的任务工具权限")
         current.decisions += 1
-        current.action = await _decide(current, catalog, settings)
+        current.action = _resume_action(current) or _constrain_action(current, await _decide(current, catalog, settings))
         _assert_running(db, user, current)
         if isinstance(current.action, AskAction):
             current.status, current.reply = "WAITING_INPUT", current.action.question
+            current.workflow.pending = None
             current.trace.append({"step": len(current.trace) + 1, "action": "ask_user", "status": "WAITING_INPUT",
                                   "question": current.reply})
             _append_memory_context(current.memory_state, "assistant", current.reply)
@@ -448,6 +569,15 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
                 raise BusinessValidationError("INVALID_EVIDENCE")
             if any(e["tool"] not in {"inventory.query_available", "supplier_quotes.compare"}
                    and e["result"]["total_rows"] != 0 for e in entries):
+                raise BusinessValidationError("INCOMPLETE_TASK")
+            intent = current.memory_state.get("goal", {}).get("intent")
+            required = ({"inventory.query_available", "supplier_quotes.compare"} if intent == "inventory_and_quotes_query" else
+                        {"inventory.query_available"} if intent == "inventory_query" else
+                        {"supplier_quotes.compare"} if intent == "supplier_quote_query" else set())
+            covered = {e["tool"] for e in entries}
+            if any(e["tool"] == "supplier_quotes.find_rfq_items" and e["result"]["total_rows"] == 0 for e in entries):
+                covered.add("supplier_quotes.compare")
+            if not any(e["tool"] == "catalog.search_products" and e["result"]["total_rows"] == 0 for e in entries) and required - covered:
                 raise BusinessValidationError("INCOMPLETE_TASK")
             current.reply, current.status = _summary(entries), "SUCCEEDED"
             current.trace.append({"step": len(current.trace) + 1, "action": "finish", "status": "SUCCEEDED",
@@ -469,6 +599,10 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
                  "arguments": action.arguments, "status": "FAILED"}
         current.trace.append(entry)
         try:
+            if action.tool == "catalog.search_products" and current.verified_product is not None:
+                keyword = action.arguments.get("keyword")
+                if keyword != current.workflow.product_keyword:
+                    raise BusinessValidationError("产品已定位，请沿用当前产品查询库存或询价")
             if action.tool in {"inventory.query_available", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"}:
                 if current.verified_product is None or action.arguments.get("product_id") != current.verified_product:
                     raise BusinessValidationError("产品 ID 必须来自本轮定位或用户选择")
@@ -520,6 +654,8 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
             "PERMISSION_DENIED" if isinstance(exc, AuthorizationError) else
             "MODEL_FORMAT_ERROR" if isinstance(exc, ValidationError) else
             "DATABASE_ERROR" if isinstance(exc, SQLAlchemyError) else str(exc) if str(exc) in codes else "RUNTIME_ERROR")
+        if state.error_code == "RUNTIME_ERROR" and transient(exc):
+            state.error_code = "MODEL_SERVICE_ERROR"
         state.reply = "本次只读任务已停止，请核对权限、输入或服务状态后重新发起。"
         state.trace.append({"step": len(state.trace) + 1, "action": "stop", "status": "FAILED", "error_code": state.error_code})
         _append_memory_context(state.memory_state, "assistant", state.reply)
@@ -539,10 +675,12 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
     if "catalog.search_products" not in catalog or not catalog & {"inventory.query_available", "supplier_quotes.compare"}:
         raise AuthorizationError("采购 Agent 需要产品读取权限及库存或询价读取权限")
     task_id = uuid4().hex
-    state = RunState(task_id, 0, [data.question], [], 0, memory_state=_new_memory_state(data.question))
+    state = RunState(task_id, 0, [data.question], [], 0, memory_state=_new_memory_state(data.question),
+                     workflow=Workflow(rfq_no=_rfq_condition(data.question)))
     db.add(AIAgentTask(id=task_id, user_id=user.id, status="RUNNING", revision=0,
         payload={"messages": state.messages, "trace": [], "turn_start": 0,
-                 "memory_state": state.memory_state}, reply="", created_at=_now(), updated_at=_now()))
+                 "memory_state": state.memory_state, "workflow": state.workflow.model_dump(mode="json")},
+        reply="", created_at=_now(), updated_at=_now()))
     db.flush()
     if commit:
         db.commit()
@@ -564,6 +702,19 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
         raise DuplicateResourceError("任务状态或版本已变化，请刷新后操作")
     if len(task.payload["messages"]) >= 10 or len(task.payload["trace"]) >= 100:
         raise BusinessValidationError("任务补充次数已达上限，请重新发起")
+    workflow = Workflow.model_validate(task.payload.get("workflow") or {})
+    pending = workflow.pending
+    product_choice, rfq_choice = data.product_id, data.rfq_item_id
+    # 纯文字续答也可选择唯一的完整编号；前缀、多个命中不会自动选第一项。
+    if pending and product_choice is None and rfq_choice is None:
+        field = "product_code" if pending.entity == "product" else "rfq_no"
+        matches = [row for row in pending.candidates if row.get(field) and
+                   re.search(r"(?<![A-Za-z0-9_./:-])" + re.escape(row[field]) + r"(?![A-Za-z0-9_./:-])", data.question)]
+        if len(matches) == 1:
+            if pending.entity == "product":
+                product_choice = matches[0]["product_id"]
+            else:
+                rfq_choice = matches[0]["rfq_item_id"]
     for tool, key, chosen in (("catalog.search_products", "product_id", data.product_id),
                              ("supplier_quotes.find_rfq_items", "rfq_item_id", data.rfq_item_id)):
         if chosen is None:
@@ -572,23 +723,49 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
                        and e.get("status") == "SUCCEEDED"), None)
         if latest is None or chosen not in {row[key] for row in latest["result"]["rows"]}:
             raise BusinessValidationError("选择必须来自本任务已返回的候选")
-    product = data.product_id or task.payload.get("selected_product")
-    rfq_item = data.rfq_item_id or task.payload.get("selected_rfq_item")
-    if data.product_id is not None and data.product_id != task.payload.get("selected_product"):
-        rfq_item = data.rfq_item_id
+        if "workflow" in task.payload and pending is None:
+            raise BusinessValidationError("当前没有待选择的候选")
+        if pending and (pending.entity != ("product" if key == "product_id" else "rfq_item") or
+                        chosen not in {row[key] for row in pending.candidates} or pending.revision != task.revision):
+            raise BusinessValidationError("选择必须来自本轮待确认的候选")
+    product = product_choice or task.payload.get("selected_product")
+    rfq_item = rfq_choice or task.payload.get("selected_rfq_item")
+    if product_choice is not None and product_choice != task.payload.get("selected_product"):
+        rfq_item = rfq_choice
+    switching_product = any(word in data.question for word in ("改查", "换成", "改为查询", "更换产品"))
+    if switching_product:
+        if product_choice or rfq_choice:
+            raise BusinessValidationError("更换产品时请先补充新产品条件，不要同时选择旧候选")
+        product, rfq_item = None, None
+        workflow = Workflow(rfq_no=_rfq_condition(data.question))
+    elif pending and (product_choice or rfq_choice):
+        workflow.resume_selection = True
+        if rfq_choice:
+            chosen_row = next(row for row in pending.candidates if row["rfq_item_id"] == rfq_choice)
+            workflow.rfq_no = chosen_row["rfq_no"]
+    else:
+        workflow.resume_selection = False
+        workflow.rfq_no = _rfq_condition(data.question) or workflow.rfq_no
+    workflow.pending = None
+    memory = json.loads(json.dumps(task.payload.get("memory_state") or _new_memory_state(task.payload["messages"][0]), ensure_ascii=False))
+    memory["pending"] = None
+    if switching_product:
+        memory["goal"]["intent"] = _intent_from_question(data.question) or "unknown"
+        memory["goal"]["description"] = data.question
     messages = [*task.payload["messages"], data.question]
     count = db.execute(update(AIAgentTask).where(AIAgentTask.id == task.id,
         AIAgentTask.user_id == user.id, AIAgentTask.revision == data.revision,
         AIAgentTask.status == "WAITING_INPUT").values(status="RUNNING", revision=data.revision + 1,
         payload={**task.payload, "messages": messages, "selected_product": product,
-                 "selected_rfq_item": rfq_item, "turn_start": len(task.payload["trace"])},
+                 "selected_rfq_item": rfq_item, "turn_start": len(task.payload["trace"]),
+                 "workflow": workflow.model_dump(mode="json"), "memory_state": memory},
         updated_at=_now()).execution_options(synchronize_session=False)).rowcount
     if count != 1:
         db.rollback()
         raise DuplicateResourceError("任务已被其他请求继续或取消")
     state = RunState(task.id, data.revision + 1, messages,
         list(task.payload["trace"]), len(task.payload["trace"]), product, rfq_item,
-        chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {})
+        chat=task.payload.get("chat"), memory_state=memory, workflow=workflow)
     if commit:
         db.commit()
     return state
@@ -605,7 +782,7 @@ def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, c
         .with_for_update()
     )
     stored_memory = stored_state.memory_state if stored_state else None
-    if stored_memory:
+    if stored_memory and not continuing:
         state.memory_state = json.loads(json.dumps(stored_memory, ensure_ascii=False))
     if not state.memory_state:
         state.memory_state = _new_memory_state(question)
@@ -628,7 +805,8 @@ def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, c
     goal = memory.setdefault("goal", {})
     if not continuing:
         goal["description"] = question[:1000]
-    goal["intent"] = _intent_from_question(question) or goal.get("intent", "unknown")
+    if not continuing:
+        goal["intent"] = _intent_from_question(question) or goal.get("intent", "unknown")
     goal["last_user_input"] = question[:1000]
     goal["status"] = "running"
     memory["pending"] = None
@@ -686,7 +864,8 @@ async def run_prepared_task(task_id: str, user_id: int, revision: int) -> None:
             return
         state = RunState(task_id, revision, task.payload["messages"], list(task.payload["trace"]),
             task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"),
-            chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {})
+            chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {},
+            workflow=Workflow.model_validate(task.payload.get("workflow") or {}))
         execution = execution_context.guard(db)
         if execution:
             state.decisions = execution.checkpoint.get("decisions", 0)
