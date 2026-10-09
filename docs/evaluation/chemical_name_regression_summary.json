@@ -1,9 +1,0 @@
-{
-  "scope": "target identification only; no retrieval or answer generation",
-  "total": 149,
-  "passed": 149,
-  "failed": [],
-  "input_sha256": "420bbe63a10847d30fcebbdaa76ff28d50a08ca60351307b8b7489c45a06fe5e",
-  "previous_unresolved_total": 17,
-  "previous_unresolved_now_passed": 17
-}
