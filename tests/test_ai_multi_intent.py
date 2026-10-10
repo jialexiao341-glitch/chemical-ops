@@ -172,3 +172,12 @@ def test_dependent_plan_receives_only_successful_predecessor_evidence(db_session
     assert batch.status == BatchStatus.SUCCEEDED
     assert received[0] == ("t1", None)
     assert received[1][1][0]["evidence"] == batch.tasks[0].evidence
+
+
+def test_single_followup_uses_resolved_subtask_question():
+    """理解器还原的第二项查询必须传给规划器，不能丢失为无上下文的原句。"""
+    from app.modules.ai.intent import Intent, IntentResult
+    resolved = routing.Understanding(purpose="query", dialogue_action="modify", tasks=["analytics"],
+        sub_tasks=[{"id": "t2", "kind": "analytics", "question": "统计已批准的采购申请数量"}])
+    intent = IntentResult(Intent.QUERY, "semantic_route", resolved.model_dump(mode="json"))
+    assert service._resolved_query_question("只修改第二项", intent) == "统计已批准的采购申请数量"

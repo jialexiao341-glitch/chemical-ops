@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { AgentApi } from '#/api';
+import type { AgentApi, AiApi } from '#/api';
+import { AI_TASK_STATUS_LABELS } from '#/api';
 import { computed, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { Button } from 'antdv-next';
@@ -7,7 +8,7 @@ import { formatDateTime } from '#/utils/format';
 import { agentDisplayNumber, primaryTaskResults } from './task-view';
 import AgentSourcePopover from './agent-source-popover.vue';
 import { inventorySource, TASK_ERROR_HELP, TASK_LABELS, TOOL_LABELS, waitingCandidates } from './task-view';
-const props = defineProps<{ task: AgentApi.Task; busy: boolean }>();
+const props = withDefaults(defineProps<{ task: AgentApi.Task; busy: boolean; showActions?: boolean; progress?: AiApi.BatchProgress }>(), { showActions: true });
 const emit = defineEmits<{ continue: [data: AgentApi.Continue]; cancel: []; refresh: [] }>();
 const { hasAccessByCodes } = useAccess();
 const selection = ref<number>();
@@ -44,17 +45,24 @@ function visibleWarnings(result: AgentApi.Result) {
         <span>{{ TASK_LABELS[task.status] }}</span>
         <span class="agent-readonly">只读查询</span>
       </div>
-      <div class="agent-actions">
-        <Button type="text" size="small" :disabled="busy" @click="emit('refresh')">刷新任务</Button>
+      <div v-if="showActions !== false" class="agent-actions">
+        <Button v-if="!progress" type="text" size="small" :disabled="busy" @click="emit('refresh')">刷新任务</Button>
         <Button v-if="['RUNNING', 'WAITING_INPUT'].includes(task.status)" type="text" size="small" :disabled="busy" @click="emit('cancel')">取消</Button>
       </div>
     </header>
 
-    <p v-if="task.status !== 'SUCCEEDED' || !results.length" class="agent-reply">{{ task.status === 'RUNNING' ? '正在核对产品和业务数据…' : task.reply }}</p>
-    <p v-if="task.status === 'RUNNING'" class="agent-muted">查询会自动更新；若服务中断，可取消后重新查询。</p>
+    <template v-if="progress">
+      <p class="agent-reply" aria-live="polite">已完成 {{ progress.completed }}/{{ progress.total }} 项查询</p>
+      <ol class="agent-prose"><li v-for="entry in progress.tasks" :key="entry.id">{{ entry.question }} · {{ AI_TASK_STATUS_LABELS[entry.status] }}</li></ol>
+      <p class="agent-muted">取消会停止未完成项，已完成结果保留。</p>
+    </template>
+    <template v-else>
+      <p v-if="task.status !== 'SUCCEEDED' || !results.length" class="agent-reply">{{ task.status === 'RUNNING' ? '正在核对产品和业务数据…' : task.reply }}</p>
+      <p v-if="task.status === 'RUNNING'" class="agent-muted">查询会自动更新；若服务中断，可取消后重新查询。</p>
+    </template>
     <p v-if="task.error_code" class="agent-error">{{ TASK_ERROR_HELP[task.error_code] || '请核对条件、权限及模型服务后重新查询。' }}（{{ task.error_code }}）</p>
 
-    <form v-if="candidates" class="agent-selection" @submit.prevent="choose">
+    <form v-if="candidates && showActions !== false" class="agent-selection" @submit.prevent="choose">
       <fieldset :disabled="busy">
         <legend>{{ candidates.tool === 'catalog.search_products' ? '选择需要查询的规格' : '选择需要比较的询价' }}</legend>
         <div class="agent-choices">

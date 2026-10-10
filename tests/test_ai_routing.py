@@ -39,7 +39,8 @@ def test_structured_model_result_controls_route_and_keeps_context(monkeypatch, q
         assert json.loads(request.messages[0].content)["context"] == context
         assert settings.llm_temperature == 0
         assert kwargs["interpret_only"] is True
-        assert "# JSON Schema" in kwargs["system_prompt"]
+        assert kwargs["response_format"]["type"] == "json_schema"
+        assert kwargs["response_format"]["json_schema"]["strict"] is True
         return SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))
     monkeypatch.setattr(service, "chat", model)
     decision = asyncio.run(routing.understand(question, context))

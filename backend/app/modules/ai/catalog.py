@@ -42,6 +42,12 @@ CATALOG: dict[str, DatasetSpec] = {
 }
 
 
+def slot_description(attribute: str) -> str:
+    """Schema 槽位复用执行白名单，不暴露数据库表名或权限元数据。"""
+    return json.dumps({key: (spec.label if attribute == "label" else sorted(getattr(spec, attribute)))
+                       for key, spec in CATALOG.items()}, ensure_ascii=False)
+
+
 def catalog_prompt() -> str:
     """生成给模型看的最小白名单，不包含数据库中未开放的字段。"""
 

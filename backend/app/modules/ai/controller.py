@@ -214,20 +214,8 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
     LOGGER.info("AI HTTP 历史消息 user_id=%s conversation_id=%s count=%s", user.id, conversation_id, total)
     result = []
     for item in items:
-        citations = item.citations
-        agent_ref = next((c for c in (citations or []) if isinstance(c, dict) and c.get("type") == "agent_task"), None)
-        content = item.content
-        batch_ref = next((c for c in (citations or []) if isinstance(c, dict) and c.get("type") == "multi_intent"), None)
-        if batch_ref and item.message_role == "ASSISTANT":
-            from app.modules.ai.multi_intent import history_accessible
-            if not history_accessible(db, user, batch_ref.get("batch")):
-                content, citations = "这组查询的权限、范围或数据已变化，请重新查询。", []
-        if agent_ref and item.message_role == "ASSISTANT":
-            # 先重查任务权限；不从历史消息绕过证据鉴权返回旧库存/价格摘要。
-            try:
-                agent_runtime.get_task(db, user, agent_ref["task_id"])
-            except (AuthorizationError, ResourceNotFoundError, BusinessValidationError):
-                content = "任务结果当前不可访问，请核对权限或服务状态。"
+        from app.modules.ai.history_access import visible_message
+        content, citations = visible_message(db, user, item)
         if isinstance(citations, list):
             normalized = []
             for citation in citations:

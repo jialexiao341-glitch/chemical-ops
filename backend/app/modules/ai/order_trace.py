@@ -119,6 +119,9 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
     allowed = _can_read("采购申请", permissions, roles)
     if allowed and order.source_request_id:
         request = db.get(PurchaseRequest, order.source_request_id)
+        if request and not roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+            if (request.department_id != user.department_id if user.department_id is not None else request.applicant_id != user.id):
+                request = None
         records = [_record(request.request_no, request.status, request.updated_at)] if request else []
         if request:
             source_records.append({"dataset": "purchase_requests", "label": f"采购申请 {request.request_no}", "record_id": request.id, "filters": {"keywords": request.request_no}})
@@ -135,6 +138,8 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
             quote_id = comparison.selected_quote_id if comparison else None
         quote = db.get(SupplierQuote, quote_id) if quote_id else None
         rfq = db.get(RFQ, quote.rfq_id) if quote else None
+        if rfq and not roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"} and rfq.requester_id != user.id:
+            quote, rfq = None, None
         quote_records = [_record(quote.quote_no, quote.status, quote.updated_at, rfq_no=rfq.rfq_no if rfq else None)] if quote else []
         stages.append(_stage("询价与报价", True, quote_records, summary=(f"关联询价单 {rfq.rfq_no}，报价 {quote.quote_no}（{quote.status}）" if quote and rfq else None)))
         if quote and rfq:
@@ -160,7 +165,10 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
 
     # 质量验收
     quality_allowed = _can_read("质量验收", permissions, roles)
-    acceptance_rows = list(db.scalars(select(QualityAcceptance).join(Delivery, Delivery.id == QualityAcceptance.delivery_id).where(Delivery.po_id == order.id).order_by(QualityAcceptance.id).limit(51)).all()) if quality_allowed else []
+    from app.modules.quality_acceptances.scope import acceptance_read_condition
+
+    acceptance_rows = list(db.scalars(select(QualityAcceptance).join(Delivery, Delivery.id == QualityAcceptance.delivery_id).where(
+        Delivery.po_id == order.id, acceptance_read_condition(user, roles)).order_by(QualityAcceptance.id).limit(51)).all()) if quality_allowed else []
     acceptances_truncated = len(acceptance_rows) > 50
     acceptances = acceptance_rows[:50]
     stages.append(_stage("质量验收", quality_allowed, [_record(item.acceptance_no, item.result, item.updated_at, conclusion=item.conclusion) for item in acceptances], truncated=acceptances_truncated))
@@ -177,7 +185,12 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
         from app.modules.inventory.service import accessible_warehouse_ids
 
         warehouse_ids = accessible_warehouse_ids(db, user)
-        all_batches = list(db.scalars(select(InventoryBatch).where(InventoryBatch.source_delivery_id.in_(delivery_ids)).order_by(InventoryBatch.id).limit(51)).all())
+        batch_query = select(InventoryBatch).where(InventoryBatch.source_delivery_id.in_(delivery_ids))
+        if warehouse_ids is not None:
+            batch_query = batch_query.where(exists(select(1).where(
+                InventoryBalance.batch_id == InventoryBatch.id,
+                InventoryBalance.warehouse_id.in_(warehouse_ids))))
+        all_batches = list(db.scalars(batch_query.order_by(InventoryBatch.id).limit(51)).all())
         batches_truncated = len(all_batches) > 50
         batch_rows = all_batches[:50]
         if batch_rows:

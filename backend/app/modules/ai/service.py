@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import logging
+from urllib.parse import urlsplit
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
@@ -53,7 +54,7 @@ READ_ONLY_WRITE_MARKERS = (
 )
 
 
-def _build_llm_payload(runtime: Settings, messages: list[dict[str, object]], *, stream: bool = False, response_format: dict[str, str] | None = None) -> dict[str, object]:
+def _build_llm_payload(runtime: Settings, messages: list[dict[str, object]], *, stream: bool = False, response_format: dict[str, object] | None = None) -> dict[str, object]:
     """组装 OpenAI 兼容请求；DeepSeek Flash 默认支持思考模式，显式开启以获得完整回答。"""
 
     payload: dict[str, object] = {
@@ -169,6 +170,12 @@ CHEMICAL_SPECIFIC_DOC_MARKERS = (
 async def _classify_chat_intent(db: Session, question: str, *, user: User, data: AIChatRequest) -> IntentResult:
     """聊天与 Agent 使用同一语义结果；客户端只能复用后端签发的短期结果。"""
     from app.modules.ai import routing
+    if data.retry_failed:
+        if data.attachments or data.attachment_file_ids:
+            raise BusinessValidationError("重试使用原查询条件；修改附件或条件请重新发起查询。")
+        from app.modules.ai.multi_intent import retry_decision
+        decision = retry_decision(db, user, data.conversation_id)
+        return IntentResult(Intent.MULTI, "retry_failed", decision.model_dump(mode="json"))
     decision = (routing.read_ticket(data.route_token, user.id, question, data.conversation_id) if data.route_token else
                 await routing.understand(question, routing.conversation_context(db, user, data.conversation_id)))
     route = decision.route
@@ -182,7 +189,18 @@ async def _classify_chat_intent(db: Session, question: str, *, user: User, data:
                             decision.question or "这次请求包含不同处理流程，请先选择要查询的业务数据或化学品资料。")
     return IntentResult({"capability": Intent.PROJECT, "greeting": Intent.GREETING,
                          "guidance": Intent.GUIDANCE, "document": Intent.DOC,
-                         "query": Intent.QUERY}.get(route, Intent.UNSUPPORTED), "semantic_route")
+                         "query": Intent.QUERY}.get(route, Intent.UNSUPPORTED), "semantic_route", decision.model_dump(mode="json"))
+
+
+def _resolved_query_question(question: str, intent: IntentResult) -> str:
+    """单项续问使用理解器已还原的对象和条件，不能把“第二项”再交给无历史的规划器。"""
+    from app.modules.ai.routing import Understanding
+
+    if intent.understanding:
+        decision = Understanding.model_validate(intent.understanding)
+        if len(decision.sub_tasks) == 1:
+            return decision.sub_tasks[0].question
+    return question
 
 
 def _retryable_status(status_code: int) -> bool:
@@ -596,7 +614,7 @@ async def _run_text2sql_for_chat(
     return answer, citation, trace
 
 
-async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, str] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None, interpret_only: bool = False) -> AIChatResponse:
+async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, object] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None, interpret_only: bool = False) -> AIChatResponse:
     """调用配置的 OpenAI 兼容模型。"""
 
     if not interpret_only:
@@ -611,6 +629,15 @@ async def chat(data: AIChatRequest, settings: Settings | None = None, attachment
 
     url = f"{runtime.openai_base_url.rstrip('/')}/chat/completions"
     payload = _build_llm_payload(runtime, _build_messages(data, attachment_context, image_parts, system_prompt), response_format=response_format)
+    # DeepSeek Chat Completions 只接受 json_object；严格字段约束使用其 Responses 接口。
+    responses_api = (urlsplit(runtime.openai_base_url).hostname == "api.deepseek.com"
+                     and response_format is not None and response_format.get("type") == "json_schema")
+    if responses_api:
+        url = f"{runtime.openai_base_url.rstrip('/')}/responses"
+        payload = {"model": runtime.llm_model, "input": payload["messages"],
+                   "temperature": runtime.llm_temperature,
+                   "max_output_tokens": runtime.llm_max_tokens, "store": False,
+                   "text": {"format": {"type": "json_schema", **response_format["json_schema"]}}}
     headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json"}
     attempts = max(0, runtime.llm_max_retries) + 1
     response: httpx.Response | None = None
@@ -654,8 +681,17 @@ async def chat(data: AIChatRequest, settings: Settings | None = None, attachment
         raise BusinessValidationError("AI 服务没有返回结果")
     try:
         result = response.json()
-        raw_message = result["choices"][0]["message"]
-        content = str(raw_message.get("content") or "").strip()
+        if responses_api:
+            content = "".join(part["text"] for item in result["output"] if item.get("type") == "message"
+                              for part in item.get("content", []) if part.get("type") == "output_text").strip()
+            if result.get("status") != "completed":
+                raise ValueError("incomplete structured output")
+        else:
+            choice = result["choices"][0]
+            if response_format and response_format.get("type") == "json_schema" and choice.get("finish_reason") != "stop":
+                raise ValueError("incomplete structured output")
+            raw_message = choice["message"]
+            content = str(raw_message.get("content") or "").strip()
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "invalid_response"})
         raise BusinessValidationError("AI 服务返回了无法识别的结果") from exc
@@ -913,7 +949,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
                 LOGGER.warning("AI 会话 QueryPlan 状态无效 conversation_id=%s", conversation.id)
         thread_id = f"ai:{user.id}:{conversation.id}"
         content, citation, query_trace = await _run_text2sql_for_chat(
-            db, user, user_message.content, runtime, previous_plan=previous_plan, thread_id=thread_id
+            db, user, _resolved_query_question(user_message.content, intent_result), runtime, previous_plan=previous_plan, thread_id=thread_id
         )
         citations = [citation]
         from app.modules.ai.text2sql import QueryPlan
@@ -978,12 +1014,48 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         yield f"event: error\ndata: {json.dumps({'message': '至少需要一条用户消息'}, ensure_ascii=False)}\n\n"
         return
     LOGGER.info("AI 请求进入 mode=stream %s", _query_log_fields(user, user_message.content))
-    stream_intent_result = await _classify_chat_intent(db, user_message.content, user=user, data=data)
+    try:
+        stream_intent_result = await _classify_chat_intent(db, user_message.content, user=user, data=data)
+    except BusinessValidationError as exc:
+        yield "event: error\ndata: " + json.dumps({"message": str(exc)}, ensure_ascii=False) + "\n\n"
+        return
     LOGGER.info("AI 意图识别 mode=stream user_id=%s intent=%s reason=%s", user.id, stream_intent_result.intent, stream_intent_result.reason)
     if stream_intent_result.intent is Intent.MULTI and not data.attachment_file_ids:
         from app.modules.ai import routing, multi_intent
-        result = await multi_intent.reply_for_user(db, user, data, conversation,
-                                                  routing.Understanding.model_validate(stream_intent_result.understanding))
+        # 首次进度即暴露会话 ID；先保存会话，取消后的历史读取才能立即访问。
+        db.commit()
+        queue = asyncio.Queue()
+        async def progress(snapshot):
+            await queue.put({"conversation_id": conversation.id, **snapshot})
+        execution = asyncio.create_task(multi_intent.reply_for_user(db, user, data, conversation,
+                            routing.Understanding.model_validate(stream_intent_result.understanding), on_progress=progress))
+        receive = None
+        try:
+            while True:
+                if not queue.empty():
+                    yield "event: progress\ndata: " + json.dumps(queue.get_nowait(), ensure_ascii=False) + "\n\n"
+                    continue
+                if execution.done():
+                    break
+                receive = asyncio.create_task(queue.get())
+                done, _ = await asyncio.wait({execution, receive}, return_when=asyncio.FIRST_COMPLETED)
+                if receive in done:
+                    yield "event: progress\ndata: " + json.dumps(receive.result(), ensure_ascii=False) + "\n\n"
+                else:
+                    receive.cancel()
+                    await asyncio.gather(receive, return_exceptions=True)
+                receive = None
+            result = execution.result()
+        except BusinessValidationError as exc:
+            yield "event: error\ndata: " + json.dumps({"message": str(exc)}, ensure_ascii=False) + "\n\n"
+            return
+        finally:
+            if receive is not None:
+                receive.cancel()
+            if not execution.done():
+                execution.cancel()
+            # 断开连接会取消执行；等待它保存部分结果和取消终态后再释放请求会话。
+            await asyncio.shield(asyncio.gather(execution, return_exceptions=True))
         async for chunk in _stream_text_chunks(result.answer):
             yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
         yield "event: done\ndata: " + json.dumps(result.model_dump(mode="json", exclude={"message"}), ensure_ascii=False) + "\n\n"
@@ -1047,7 +1119,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         thread_id = f"ai:{user.id}:{conversation.id}"
         try:
             content, citation, query_trace = await _run_text2sql_for_chat(
-                db, user, user_message.content, runtime, previous_plan=previous_plan, thread_id=thread_id
+                db, user, _resolved_query_question(user_message.content, stream_intent_result), runtime, previous_plan=previous_plan, thread_id=thread_id
             )
         except BusinessValidationError as exc:
             LOGGER.warning("AI 流式查询业务失败 user_id=%s query_hash=%s error_type=%s", user.id, _text_fingerprint(user_message.content), exc.__class__.__name__)

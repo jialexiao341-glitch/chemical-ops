@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.errors import BusinessValidationError
 from app.modules.ai import text2sql
@@ -38,7 +39,7 @@ def test_text2sql_builds_parameterized_grouped_statement_from_whitelist():
 
 
 def test_text2sql_plan_rejects_unknown_fields():
-    with pytest.raises(BusinessValidationError):
+    with pytest.raises(ValidationError):
         build_statement(QueryPlan(dataset="purchase_orders", metric="count", filters=[QueryFilter(field="password_hash", value="x")]))
 
 
@@ -76,7 +77,7 @@ def test_follow_up_plan_inherits_safe_fields_and_updates_explicit_conditions():
     assert merged.filters[-1].field == "region"
 
 
-def test_text2sql_normalizes_markdown_json_and_common_aliases(monkeypatch):
+def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):
     async def fake_chat(*_args, **_kwargs):
         content = "规划结果：\n" + "`" * 3 + "json\n" + '{"dataset":"purchase_order","metric":"sum_amount","group_by":"supplier_name","filters":null,"order":"降序","top_n":"10"}' + "\n" + "`" * 3
         return SimpleNamespace(message=SimpleNamespace(content=content))
@@ -84,18 +85,10 @@ def test_text2sql_normalizes_markdown_json_and_common_aliases(monkeypatch):
     monkeypatch.setattr(text2sql, "chat", fake_chat)
     monkeypatch.setattr(text2sql, "_inventory_movement_trace_plan", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(text2sql, "_supplier_profile_plan", lambda *_args, **_kwargs: None)
-    plan = asyncio.run(
-        text2sql._understand_question(
-            "查询供应商采购金额排名", SimpleNamespace(), SimpleNamespace(), SimpleNamespace(id=1)
-        )
-    )
-
-    assert plan.dataset == "purchase_orders"
-    assert plan.metric == "amount"
-    assert plan.group_by == "supplier"
-    assert plan.filters == []
-    assert plan.order == "desc"
-    assert plan.limit == 10
+    monkeypatch.setattr(text2sql, "_fallback_query_plan", lambda *_args: None)
+    with pytest.raises(BusinessValidationError, match="查询计划格式不正确"):
+        asyncio.run(text2sql._understand_question(
+            "查询供应商采购金额排名", SimpleNamespace(), SimpleNamespace(), SimpleNamespace(id=1)))
 
 
 def test_text2sql_uses_safe_supplier_amount_fallback_when_model_plan_is_invalid(monkeypatch):

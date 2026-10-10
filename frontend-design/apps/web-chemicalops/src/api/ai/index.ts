@@ -13,11 +13,18 @@
 import { useAccessStore } from '@vben/stores';
 
 import { requestClient } from '#/api/request';
+import type { AiTaskStatus } from './task-status';
 
 export * from './agent';
 export * from './task-status';
 
 export namespace AiApi {
+  export interface BatchProgress {
+    conversation_id: number;
+    completed: number;
+    total: number;
+    tasks: Array<{ id: string; kind: string; question: string; status: AiTaskStatus; [key: string]: any }>;
+  }
   /** 会话摘要 */
   export interface Conversation {
     business_scene: string;
@@ -42,6 +49,8 @@ export namespace AiApi {
 
   /** 流式增量事件 */
   export interface StreamHandlers {
+    onProgress?: (payload: BatchProgress) => void;
+    onCancelled?: () => void;
     /** 收到增量文本 */
     onDelta?: (content: string) => void;
     /** 正常结束，携带会话 ID 与完整答案 */
@@ -170,6 +179,7 @@ export async function streamChatApi(
   conversationId: null | number,
   handlers: AiApi.StreamHandlers,
   routeToken?: string,
+  options: { retryFailed?: boolean; signal?: AbortSignal } = {},
 ): Promise<void> {
   if (streaming) {
     throw new Error('上一条消息尚未回复完成');
@@ -183,6 +193,7 @@ export async function streamChatApi(
         conversation_id: conversationId ?? undefined,
         messages,
         route_token: routeToken,
+        retry_failed: options.retryFailed ?? false,
       }),
       headers: {
         Accept: 'text/event-stream',
@@ -190,6 +201,7 @@ export async function streamChatApi(
         'Content-Type': 'application/json',
       },
       method: 'POST',
+      signal: options.signal,
     });
     if (!response.ok || !response.body) {
       let message = `AI 请求失败（HTTP ${response.status}）`;
@@ -208,6 +220,7 @@ export async function streamChatApi(
     let buffer = '';
     // 完整事件按 "\n\n" 切分，字段行以 "event:" / "data:" 开头
     let eventName = '';
+    let terminal = false;
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
@@ -235,9 +248,13 @@ export async function streamChatApi(
           if (eventName === 'delta') {
             handlers.onDelta?.(String(payload.content ?? ''));
           } else if (eventName === 'done') {
+            terminal = true;
             handlers.onDone?.(payload);
           } else if (eventName === 'error') {
+            terminal = true;
             handlers.onError?.(String(payload.message ?? 'AI 服务错误'));
+          } else if (eventName === 'progress') {
+            handlers.onProgress?.(payload);
           }
         } catch {
           // 单帧解析失败不中断整个流
@@ -246,7 +263,12 @@ export async function streamChatApi(
         sepIndex = buffer.indexOf('\n\n');
       }
     }
+    if (!terminal && !options.signal?.aborted) handlers.onError?.('响应连接已中断，请刷新会话核对已完成项。');
   } catch (error: any) {
+    if (options.signal?.aborted) {
+      handlers.onCancelled?.();
+      return;
+    }
     handlers.onError?.(
       error?.message === 'Failed to fetch'
         ? '网络异常，请检查后端服务是否已启动'

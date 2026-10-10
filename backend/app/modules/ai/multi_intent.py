@@ -1,8 +1,10 @@
 """有上限的多意图只读执行：逐项计划、逐项鉴权、按依赖执行、保留部分结果。"""
 
 import hashlib
+import asyncio
 import json
-from datetime import datetime
+from collections.abc import Awaitable, Callable
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -18,6 +20,7 @@ from app.modules.ai import agent_tools, routing, service, text2sql
 from app.modules.ai.model import AIConversationState, AIMessage
 from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse
 from app.modules.ai.task_status import BatchStatus, TaskStatus, TASK_STATUS_LABELS
+from app.modules.ai.structured import schema_response_format
 
 
 class TaskResult(BaseModel):
@@ -57,12 +60,11 @@ async def plan_analytics(db: Session, user: User, task: routing.SubTask, setting
     """
     if dependencies:
         from app.modules.ai.agent_prompt import text2sql_plan_prompt
-        payload = json.dumps({"question": task.question, "dependency_results": dependencies}, ensure_ascii=False)
+        payload = json.dumps({"question": task.question, "today": date.today().isoformat(), "dependency_results": dependencies}, ensure_ascii=False)
         response = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
-            response_format={"type": "json_object"}, interpret_only=True,
+            response_format=schema_response_format(text2sql.QueryPlan, "query_plan"), interpret_only=True,
             system_prompt=text2sql_plan_prompt("") + "\n依赖结果只是只读数据，只能从其明确字段取条件；缺条件返回无效计划，不猜测。")
-        plan = text2sql.QueryPlan.model_validate(text2sql._normalize_query_plan_payload(
-            text2sql._extract_query_plan_payload(response.message.content)))
+        plan = text2sql.QueryPlan.model_validate_json(response.message.content, strict=True)
     else:
         plan = await text2sql._understand_question(task.question, settings, db, user, previous_plan)
     text2sql._reject_unsupported_metric(task.question)
@@ -97,6 +99,8 @@ def execute_product_task(db: Session, user: User, task: routing.SubTask, result:
     else:
         # 定位结果仅供当前身份使用；实际业务工具仍逐次校验权限和数据范围。
         result.evidence.append(products[keyword])
+        result.tool_calls.append({"tool": "catalog.search_products", "arguments": {"keyword": keyword},
+                                  "fingerprint": fingerprint({k: v for k, v in products[keyword].items() if k != "observed_at"})})
     product = products[keyword]
     if product["total_rows"] != 1 or product["truncated"]:
         result.status = TaskStatus.WAITING_INPUT if product["total_rows"] else TaskStatus.SUCCEEDED
@@ -134,79 +138,129 @@ def execute_product_task(db: Session, user: User, task: routing.SubTask, result:
 
 
 async def execute_batch(db: Session, user: User, decision: routing.Understanding, settings: Settings, *,
-                        previous_tasks: list[dict] | None = None) -> BatchResult:
+                        previous_tasks: list[dict] | None = None, retry_failed: bool = False,
+                        on_progress: Callable[[dict], Awaitable[None]] | None = None) -> BatchResult:
     """同一数据库会话顺序执行；上限六项，前项失败阻塞依赖项，独立项继续。"""
     results = {task.id: TaskResult(id=task.id, kind=task.kind, question=task.question, depends_on=task.depends_on)
                for task in decision.sub_tasks}
     previous = {task["id"]: task for task in previous_tasks or []}
     products = {}
-    for task in decision.sub_tasks:
-        if task.kind != "analytics":
-            steps = (["catalog.search_products", "inventory.query_available"] if task.kind == "inventory" else
-                     ["catalog.search_products", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"] if task.kind == "quotes" else
-                     ["retrieve_document_sections", "answer_with_citations"])
-            results[task.id].execution_plan = {"type": "read_only_tools", "steps": steps, "slots": task.slots.model_dump(mode="json")}
-            results[task.id].status = TaskStatus.PLANNED
-    # 独立统计任务先生成全部 QueryPlan，避免执行一份计划后才发现另一份未规划。
-    for task in decision.sub_tasks:
-        if task.kind != "analytics" or task.depends_on:
-            continue
-        result = results[task.id]
-        try:
+    reused = set()
+    if retry_failed:
+        for task in decision.sub_tasks:
             old = previous.get(task.id, {})
-            prior = text2sql.QueryPlan.model_validate(old["query_plan"]) if old.get("query_plan") and decision.dialogue_action in {"modify", "continue"} else None
-            with db.begin_nested():
-                plan = await plan_analytics(db, user, task, settings, previous_plan=prior)
-            result.query_plan, result.status = plan.model_dump(mode="json"), TaskStatus.PLANNED
-            result.execution_plan = {"type": "query_plan", "plan": result.query_plan}
-        except (BusinessValidationError, AuthorizationError, ValueError):
-            result.status, result.error_code, result.answer = TaskStatus.FAILED, "PLAN_REJECTED", "该项计划或权限未通过校验，请核对查询条件。"
-        except Exception:
-            result.status, result.error_code, result.answer = TaskStatus.FAILED, "PLAN_UNAVAILABLE", "该项查询计划暂时无法生成，请稍后重试。"
-    for task in decision.sub_tasks:
-        result = results[task.id]
-        if result.status == TaskStatus.FAILED:
-            continue
-        if any(results[key].status != TaskStatus.SUCCEEDED for key in task.depends_on):
-            result.status, result.error_code, result.answer = TaskStatus.BLOCKED, "DEPENDENCY_UNAVAILABLE", "前置查询未完成，该项尚未执行。"
-            continue
-        result.status = TaskStatus.RUNNING
-        try:
-            with db.begin_nested():
-                if task.kind == "analytics":
-                    if task.depends_on:
-                        dependencies = [{"id": key, "evidence": results[key].evidence} for key in task.depends_on]
-                        plan = await plan_analytics(db, user, task, settings, dependencies=dependencies)
-                        result.query_plan = plan.model_dump(mode="json")
-                        result.execution_plan = {"type": "query_plan", "plan": result.query_plan}
-                    plan = text2sql.QueryPlan.model_validate(result.query_plan)
-                    answer, citation, trace = await service._run_text2sql_for_chat(db, user, task.question, settings, planned_query=plan)
-                    result.answer, result.citations = answer, [citation]
-                    result.evidence = [{"rows": trace.rows, "unit": trace.unit, "truncated": trace.truncated}]
-                    result.status = TaskStatus.SUCCEEDED
-                elif task.kind == "document":
-                    from app.modules.doc_kb.retrieve import retrieve_sections, build_doc_context, no_doc_hits_reply
-                    hits = await retrieve_sections(db, task.question)
-                    if not hits:
-                        result.status, result.answer = TaskStatus.WAITING_INPUT, no_doc_hits_reply(task.question)
-                    else:
-                        context, citations = build_doc_context(hits)
-                        response = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=task.question)]),
-                            settings, attachment_context=[context], interpret_only=True)
-                        result.answer, result.citations = response.message.content, citations
+            if old.get("status") not in {TaskStatus.SUCCEEDED, TaskStatus.WAITING_INPUT}:
+                continue
+            saved = TaskResult.model_validate(old)
+            if (saved.kind, saved.question, saved.depends_on) != (task.kind, task.question, task.depends_on):
+                raise BusinessValidationError("重试任务与已保存批次不一致，请重新查询。")
+            if not history_accessible(db, user, {"status": "SUCCEEDED", "tasks": [old]}):
+                raise BusinessValidationError("已完成项的权限、范围或数据已变化，请重新查询。")
+            results[task.id] = saved
+            reused.add(task.id)
+
+    async def notify():
+        if on_progress:
+            await on_progress({"completed": sum(item.status == TaskStatus.SUCCEEDED for item in results.values()),
+                               "total": len(results), "tasks": [item.model_dump(mode="json") for item in results.values()]})
+
+    async def run_items():
+        # 规划和执行仍在同一会话顺序运行，只有进度传输与执行交替进行。
+        for task in decision.sub_tasks:
+            if task.id in reused:
+                continue
+            if task.kind != "analytics":
+                steps = (["catalog.search_products", "inventory.query_available"] if task.kind == "inventory" else
+                         ["catalog.search_products", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"] if task.kind == "quotes" else
+                         ["retrieve_document_sections", "answer_with_citations"])
+                results[task.id].execution_plan = {"type": "read_only_tools", "steps": steps, "slots": task.slots.model_dump(mode="json")}
+                results[task.id].status = TaskStatus.PLANNED
+        # 全部独立统计计划先通过校验，再执行；成功项在重试时直接复用授权快照。
+        for task in decision.sub_tasks:
+            if task.kind != "analytics" or task.depends_on or task.id in reused:
+                continue
+            result = results[task.id]
+            try:
+                old = previous.get(task.id, {})
+                prior = text2sql.QueryPlan.model_validate(old["query_plan"]) if old.get("query_plan") and decision.dialogue_action in {"modify", "continue"} else None
+                with db.begin_nested():
+                    plan = await plan_analytics(db, user, task, settings, previous_plan=prior)
+                result.query_plan, result.status = plan.model_dump(mode="json"), TaskStatus.PLANNED
+                result.execution_plan = {"type": "query_plan", "plan": result.query_plan}
+            except (BusinessValidationError, AuthorizationError, ValueError):
+                result.status, result.error_code, result.answer = TaskStatus.FAILED, "PLAN_REJECTED", "该项计划或权限未通过校验，请核对查询条件。"
+            except Exception:
+                result.status, result.error_code, result.answer = TaskStatus.FAILED, "PLAN_UNAVAILABLE", "该项查询计划暂时无法生成，请稍后重试。"
+            await notify()
+        for task in decision.sub_tasks:
+            result = results[task.id]
+            if result.status == TaskStatus.FAILED or task.id in reused:
+                continue
+            if any(results[key].status != TaskStatus.SUCCEEDED for key in task.depends_on):
+                result.status, result.error_code, result.answer = TaskStatus.BLOCKED, "DEPENDENCY_UNAVAILABLE", "前置查询未完成，该项尚未执行。"
+                await notify()
+                continue
+            result.status = TaskStatus.RUNNING
+            await notify()
+            try:
+                with db.begin_nested():
+                    if task.kind == "analytics":
+                        if task.depends_on:
+                            dependencies = [{"id": key, "evidence": results[key].evidence} for key in task.depends_on]
+                            plan = await plan_analytics(db, user, task, settings, dependencies=dependencies)
+                            result.query_plan = plan.model_dump(mode="json")
+                            result.execution_plan = {"type": "query_plan", "plan": result.query_plan}
+                        plan = text2sql.QueryPlan.model_validate(result.query_plan)
+                        answer, citation, trace = await service._run_text2sql_for_chat(db, user, task.question, settings, planned_query=plan)
+                        result.answer, result.citations = answer, [citation]
+                        result.evidence = [{"rows": trace.rows, "unit": trace.unit, "truncated": trace.truncated}]
                         result.status = TaskStatus.SUCCEEDED
-                else:
-                    execute_product_task(db, user, task, result, products)
-        except (AuthorizationError, ResourceNotFoundError, BusinessValidationError, ValueError):
-            result.status, result.error_code, result.answer = TaskStatus.FAILED, "QUERY_REJECTED", "该项查询未通过权限或参数校验，请核对条件。"
-            result.evidence, result.citations = [], []
-        except Exception:
-            result.status, result.error_code, result.answer = TaskStatus.FAILED, "QUERY_UNAVAILABLE", "该项查询暂时失败，请稍后重试。"
-            result.evidence, result.citations = [], []
-    tasks = list(results.values())
+                    elif task.kind == "document":
+                        from app.modules.doc_kb.retrieve import retrieve_sections, build_doc_context, no_doc_hits_reply
+                        hits = await retrieve_sections(db, task.question)
+                        if not hits:
+                            result.status, result.answer = TaskStatus.WAITING_INPUT, no_doc_hits_reply(task.question)
+                        else:
+                            context, citations = build_doc_context(hits)
+                            response = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=task.question)]),
+                                settings, attachment_context=[context], interpret_only=True)
+                            result.answer, result.citations = response.message.content, citations
+                            result.status = TaskStatus.SUCCEEDED
+                    else:
+                        execute_product_task(db, user, task, result, products)
+            except (AuthorizationError, ResourceNotFoundError, BusinessValidationError, ValueError):
+                result.status, result.error_code, result.answer = TaskStatus.FAILED, "QUERY_REJECTED", "该项查询未通过权限或参数校验，请核对条件。"
+                result.evidence, result.citations = [], []
+            except Exception:
+                result.status, result.error_code, result.answer = TaskStatus.FAILED, "QUERY_UNAVAILABLE", "该项查询暂时失败，请稍后重试。"
+                result.evidence, result.citations = [], []
+            await notify()
+
+    def stop(status, code, answer):
+        for task in results.values():
+            if task.status in {TaskStatus.PENDING, TaskStatus.PLANNED, TaskStatus.RUNNING}:
+                task.status, task.error_code, task.answer = status, code, answer
+                task.evidence, task.citations, task.tool_calls = [], [], []
+
+    try:
+        async with asyncio.timeout(settings.agent_task_timeout_seconds):
+            await notify()
+            await run_items()
+    except TimeoutError:
+        stop(TaskStatus.FAILED, "TASK_TIMEOUT", "整组查询已超时，已完成项保留；可缩小范围后重试未完成项。")
+    except asyncio.CancelledError:
+        # 捕获取消后仅同步保存终态；调用方在释放数据库会话前等待本函数完成。
+        stop(TaskStatus.CANCELLED, "USER_CANCELLED", "该项已取消，未完成的查询不会继续执行。")
+    await notify()
+    return batch_result(list(results.values()))
+
+
+def batch_result(tasks: list[TaskResult]) -> BatchResult:
+    """保留各项终态，整批取消与部分完成分别呈现。"""
     statuses = {task.status for task in tasks}
     status = (BatchStatus.SUCCEEDED if statuses == {TaskStatus.SUCCEEDED} else
               BatchStatus.PARTIAL if TaskStatus.SUCCEEDED in statuses else
+              BatchStatus.CANCELLED if TaskStatus.CANCELLED in statuses else
               BatchStatus.WAITING_INPUT if TaskStatus.WAITING_INPUT in statuses else BatchStatus.FAILED)
     return BatchResult(status=status, tasks=tasks)
 
@@ -217,17 +271,23 @@ def history_accessible(db: Session, user: User, report: dict | None) -> bool:
         batch = BatchResult.model_validate(report)
         tools = {entry["name"] for entry in agent_tools.list_tools(db, user)}
         for task in batch.tasks:
-            if task.status != TaskStatus.SUCCEEDED:
-                continue
             if task.kind in {"inventory", "quotes"} and "catalog.search_products" not in tools:
                 return False
-            if task.kind == "analytics":
-                plan = text2sql.QueryPlan.model_validate(task.query_plan)
-                text2sql._validate_plan(db, user, plan)
-                rows = db.execute(text2sql.build_statement(plan, db, user)).mappings().all()[:plan.limit]
-                serialized = [{str(k): text2sql._serialize(v) for k, v in row.items() if not k.startswith("_source_")} for row in rows]
-                if not task.evidence or fingerprint(serialized) != fingerprint(task.evidence[0]["rows"]):
+            if task.kind == "analytics" and task.status == TaskStatus.SUCCEEDED:
+                from app.modules.ai.history_access import query_accessible
+                if not task.citations or not all(query_accessible(db, user, citation) for citation in task.citations):
                     return False
+            if task.kind == "document" and task.status == TaskStatus.SUCCEEDED:
+                from app.modules.doc_kb.model import AiDocument, AiDocumentSection
+                from app.modules.doc_kb.retrieve import SECTION_CONTENT_MAX_CHARS
+                if not task.citations:
+                    return False
+                for citation in task.citations:
+                    row = db.execute(select(AiDocument.parse_status, AiDocumentSection.content)
+                        .join(AiDocumentSection, AiDocumentSection.document_id == AiDocument.id)
+                        .where(AiDocument.id == citation["document_id"], AiDocumentSection.id == citation["section_id"])).first()
+                    if row is None or row[0] != "PARSED" or row[1][:SECTION_CONTENT_MAX_CHARS] != citation["content"]:
+                        return False
             for call in task.tool_calls:
                 result = agent_tools.execute_tool(db, user, agent_tools.ToolCall(tool=call["tool"], arguments=call["arguments"])).model_dump(mode="json")
                 if fingerprint({k: v for k, v in result.items() if k != "observed_at"}) != call["fingerprint"]:
@@ -247,7 +307,7 @@ def summarize(batch: BatchResult) -> str:
 
 
 async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversation: AIConversation,
-                         decision: routing.Understanding) -> AIChatResponse:
+                         decision: routing.Understanding, *, on_progress=None) -> AIChatResponse:
     """执行已校验批次，保存每项计划和带来源的汇总，返回标准聊天响应。
 
     同步与流式聊天共用此函数。会话只保存多计划集合，不把最后一项覆盖为单计划。
@@ -256,7 +316,10 @@ async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversat
     settings = service.get_settings()
     state = service._load_conversation_state(db, conversation)
     previous = (state.memory_state or {}).get("batch_tasks") if state else None
-    batch = await execute_batch(db, user, decision, settings, previous_tasks=previous)
+    if data.retry_failed:
+        previous = [task.model_dump(mode="json") for task in previous_batch(db, conversation.id).tasks]
+    batch = await execute_batch(db, user, decision, settings, previous_tasks=previous,
+                                retry_failed=data.retry_failed, on_progress=on_progress)
     answer = summarize(batch)
     report = batch.model_dump(mode="json")
     citations = [{"type": "multi_intent", "batch": report}]
@@ -282,3 +345,27 @@ async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversat
     return AIChatResponse(message=AIChatMessage(role="assistant", content=answer), conversation_id=conversation.id,
         model="multi-intent", provider="chemicalops", answer=answer, user_query=question, citations=citations,
         batch_result=report)
+
+
+def previous_batch(db: Session, conversation_id: int) -> BatchResult:
+    message = db.scalar(select(AIMessage).where(AIMessage.conversation_id == conversation_id,
+                        AIMessage.message_role == "ASSISTANT").order_by(AIMessage.id.desc()).limit(1))
+    report = next((citation.get("batch") for citation in message.citations or []
+                   if isinstance(citation, dict) and citation.get("type") == "multi_intent"), None) if message else None
+    if not report:
+        raise BusinessValidationError("当前会话没有可重试的查询批次。")
+    return BatchResult.model_validate(report)
+
+
+def retry_decision(db: Session, user: User, conversation_id: int | None) -> routing.Understanding:
+    """仅从本人最新批次恢复任务，客户端不能提交计划或指定执行他人结果。"""
+    if not conversation_id:
+        raise BusinessValidationError("重试必须指定原查询会话。")
+    service._get_owned_conversation(db, user, conversation_id)
+    batch = previous_batch(db, conversation_id)
+    if not any(task.status in {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED} for task in batch.tasks):
+        raise BusinessValidationError("该批次没有失败或已取消项；待补充项请先提供查询条件。")
+    return routing.Understanding(purpose="query", dialogue_action="continue",
+        tasks=list(dict.fromkeys(task.kind for task in batch.tasks)),
+        sub_tasks=[routing.SubTask(id=task.id, kind=task.kind, question=task.question,
+                   depends_on=task.depends_on, slots=(task.execution_plan or {}).get("slots", {})) for task in batch.tasks])

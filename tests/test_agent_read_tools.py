@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -269,6 +269,15 @@ def test_product_lookup_respects_product_read_permission(tool_db):
     """库存读取权限不自动包含主数据目录读取权限。"""
     with pytest.raises(AuthorizationError):
         call(tool_db, name='catalog.search_products', actor_id=8, keyword='乙醇')
+
+
+def test_exact_product_code_resolves_prefix_ambiguity_without_guessing(tool_db):
+    tool_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-ALT', '其他规格', '5kg', 1)"))
+    assert call(tool_db, name='catalog.search_products', keyword='测试乙醇').total_rows == 2
+    exact = call(tool_db, name='catalog.search_products', keyword='P-ETH')
+    assert exact.total_rows == 1 and exact.rows[0].product_id == 1
+    assert exact.sources[0].record_id == 1
+    assert call(tool_db, name='catalog.search_products', keyword='P-OFF').total_rows == 0
 
 
 def test_rfq_lookup_filters_requester_status_and_exact_number(tool_db):

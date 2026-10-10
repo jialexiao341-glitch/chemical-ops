@@ -228,7 +228,7 @@ def test_ai_conversation_list_requires_login_and_reads_database(client: TestClie
 
 
 def test_ai_chat_persists_conversation_and_messages(client: TestClient, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.modules.ai import service
+    from app.modules.ai import routing, service
     from app.modules.ai.schema import AIQueryTrace
 
     async def fake_text2sql(*args: object, **_kwargs: object) -> tuple[str, dict[str, object], AIQueryTrace]:
@@ -236,6 +236,10 @@ def test_ai_chat_persists_conversation_and_messages(client: TestClient, demo_pas
         trace = AIQueryTrace(query=str(args[2]), slots=[], template="采购订单 · COUNT", sql="SELECT ...", columns=[{"key": "metric_value", "label": "指标值", "format": "text"}], rows=[], row_count=0, truncated=False, stages=["execution"], render={"type": "table", "title": "采购订单查询结果", "empty_text": "没有符合条件的数据", "columns": [{"key": "metric_value", "label": "指标值", "format": "text"}]})
         return "查询已通过 Text2SQL 执行，但没有找到符合条件的数据。", {"type": "text2sql", "source": "实时数据库只读查询", "row_count": 0, "stages": ["execution"], "query_trace": trace.model_dump(mode="json")}, trace
 
+    async def understand(*args, **kwargs):
+        return routing.Understanding(purpose="query", tasks=["analytics"], sub_tasks=[
+            routing.SubTask(id="t1", kind="analytics", question="查询采购订单")])
+    monkeypatch.setattr(routing, "understand", understand)
     monkeypatch.setattr(service, "_run_text2sql_for_chat", fake_text2sql)
     headers = _login(client, demo_password)
     response = client.post("/api/v1/ai/chat", headers=headers, json={"messages": [{"role": "user", "content": "查询采购订单"}]})

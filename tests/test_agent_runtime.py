@@ -40,8 +40,8 @@ def model_script(monkeypatch):
     actions, contexts = [], []
     async def chat(request, settings, *, response_format, system_prompt, interpret_only=False):
         """按预期动作响应并保留模型收到的上下文，验证工具结果确实反馈给下一步。"""
-        assert response_format == {"type": "json_object"}
         if system_prompt.startswith(runtime.routing.ROUTING_PROMPT):
+            assert response_format["type"] == "json_schema"
             # 脚本模型仅隔离执行链；真实语义效果由独立评测验证。
             payload = json.loads(request.messages[0].content)
             question = payload['question']
@@ -51,6 +51,7 @@ def model_script(monkeypatch):
             quotes = '报价' in question or '询价' in question or 'quotes' in previous or 'quote' in previous
             tasks = (['inventory'] if inventory else []) + (['quotes'] if quotes else [])
             return SimpleNamespace(message=SimpleNamespace(content=json.dumps({'purpose': 'query', 'tasks': tasks or ['inventory'], 'dialogue_action': 'switch' if switching else 'continue'})))
+        assert response_format == {"type": "json_object"}
         assert system_prompt == runtime.PLANNER_PROMPT and settings.llm_max_tokens <= 2048
         contexts.append(json.loads(request.messages[0].content))
         action = actions.pop(0)
@@ -309,8 +310,10 @@ def test_actual_model_adapter_uses_planner_prompt_and_json_protocol(task_db, mon
         """模拟兼容模型的 chat/completions 响应，保留客户端发出的 JSON。"""
         payload = json.loads(request.content)
         requests.append(payload)
-        if payload['messages'][0]['content'].startswith(runtime.routing.ROUTING_PROMPT):
-            return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps({'purpose': 'query', 'tasks': ['inventory']})}}]})
+        messages = payload.get('messages', payload.get('input'))
+        if messages[0]['content'].startswith(runtime.routing.ROUTING_PROMPT):
+            assert payload['text']['format']['type'] == 'json_schema'
+            return httpx.Response(200, json={'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps({'purpose': 'query', 'tasks': ['inventory']})}]}]})
         assert payload['messages'][0]['content'] == runtime.PLANNER_PROMPT
         assert payload['response_format'] == {'type': 'json_object'}
         return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps(actions.pop(0))}}]})

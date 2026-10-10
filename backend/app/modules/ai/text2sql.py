@@ -17,7 +17,7 @@ from uuid import uuid4
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import Select, and_, case, desc, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.orm import Session
 
@@ -41,6 +41,8 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIQueryTrace
 from app.modules.ai.service import chat
+from app.modules.ai.catalog import CATALOG, slot_description
+from app.modules.ai.structured import schema_response_format
 
 
 LOGGER = logging.getLogger("chemicalops.ai.text2sql")
@@ -55,23 +57,45 @@ def _query_hash(question: str) -> str:
 class QueryFilter(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    field: str = Field(min_length=1, max_length=64)
-    operator: Literal["eq", "contains", "gte", "lte", "in"] = "eq"
-    value: str | int | float | list[str | int | float]
+    field: Literal[tuple(sorted({field for spec in CATALOG.values() for field in spec.filters}))] = Field(
+        title="筛选槽位", description="必须属于当前 dataset 的 filters，不能把分组别名用于筛选。各数据集允许值：" + slot_description("filters"))
+    operator: Literal["eq", "contains", "gte", "lte", "in"] = Field(default="eq", title="筛选操作符",
+        description="eq=等于，contains=包含文本，gte=大于等于，lte=小于等于，in=属于集合。in 的 value 必须是数组；其余操作使用单个值。")
+    value: str | int | float | list[str | int | float] = Field(title="筛选值",
+        description="用户明确给出或前置查询明确返回的值，不得猜测ID。状态使用业务编码：finance_invoices 已核验=VERIFIED；finance_payments 已付款=PAID。")
 
 
 class QueryPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    dataset: str
-    metric: str
-    time_field: str | None = "created_at"
-    date_from: date | None = None
-    date_to: date | None = None
-    group_by: str | None = None
-    filters: list[QueryFilter] = Field(default_factory=list)
-    order: Literal["asc", "desc"] = "desc"
-    limit: int = Field(default=20, ge=1, le=100)
+    dataset: Literal[tuple(CATALOG)] = Field(title="查询数据集",
+        description="根据问题选择唯一数据集，不能选择无关数据集来凑合法输出。数据集含义：" + slot_description("label"))
+    metric: Literal["count", "amount", "sum_quantity", "records"] = Field(title="统计指标",
+        description="count=记录数量，amount=金额合计，sum_quantity=库存数量合计，records=固定业务明细。发票金额为含税金额；报价单价不得跨产品或单位求和；金额按币种分别统计。各数据集允许值：" + slot_description("metrics"))
+    time_field: Literal[tuple(sorted({field for spec in CATALOG.values() for field in spec.times}))] | None = Field(
+        default="created_at", title="时间口径",
+        description="日期筛选依据的业务时间字段。采购订单本月统计使用 order_date；未限定日期可为 null；无时间字段的数据集必须为 null。各数据集允许值：" + slot_description("times"))
+    date_from: date | None = Field(default=None, title="起始日期",
+        description="包含当天的 ISO 日期 YYYY-MM-DD；不限起始时间为 null。相对时间以输入 today 换算；本月从当月第一天开始。不得晚于 date_to。")
+    date_to: date | None = Field(default=None, title="结束日期",
+        description="包含当天的 ISO 日期 YYYY-MM-DD；不限结束时间为 null。相对时间以输入 today 换算；本月截至 today，不能擅自扩展到未来月底。")
+    group_by: Literal[tuple(sorted({field for spec in CATALOG.values() for field in spec.dimensions}))] | None = Field(
+        default=None, title="分组维度",
+        description="只能是一个维度字符串或 null，不能是数组。按供应商分组使用 supplier，不能使用筛选字段 supplier_name；金额会再按币种分组。各数据集允许值：" + slot_description("dimensions"))
+    filters: list[QueryFilter] = Field(default_factory=list, title="筛选条件",
+        description="按用户明确条件逐项填写；没有条件使用 []，不得猜测。已付款金额须筛选 status=PAID，已核验发票金额须筛选 status=VERIFIED。")
+    order: Literal["asc", "desc"] = Field(default="desc", title="排序方向",
+        description="asc=升序，desc=降序；金额最高、数量最多等排名使用 desc。")
+    limit: int = Field(default=20, ge=1, le=100, title="最多展示条数",
+        description="用户明确最多显示 N 家或 N 条时取 N；未指定取20。仅限制明细展示，不能将展示条数当作全范围统计数量。允许1至100。")
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("时间范围起止顺序错误")
+        if (self.date_from or self.date_to) and not self.time_field:
+            raise ValueError("日期筛选必须指定时间字段")
+        return self
 
 
 class Text2SQLRequest(BaseModel):
@@ -100,7 +124,6 @@ class Text2SQLResponse(BaseModel):
 
 
 from app.modules.ai.agent_prompt import text2sql_plan_prompt
-from app.modules.ai.catalog import CATALOG
 
 
 TABLE_REFERENCE = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", re.I)
@@ -180,7 +203,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             .join(RFQ, RFQ.id == RFQItem.rfq_id)
             .where(PurchaseRequestItem.request_id == PurchaseRequest.id)
         )
-        return (
+        statement = (
             select(
                 PurchaseRequest.id.label("_source_record_id"),
                 PurchaseRequest.request_no.label("request_no"),
@@ -193,6 +216,11 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             .order_by(PurchaseRequest.approved_at.desc(), PurchaseRequest.id.desc())
             .limit(plan.limit + 1)
         )
+        if user is not None and db is not None and not {"SYS_ADMIN", "PROCUREMENT_MANAGER"}.intersection(get_user_role_codes(db, user.id)):
+            condition = (PurchaseRequest.department_id == user.department_id if user.department_id is not None
+                         else PurchaseRequest.applicant_id == user.id)
+            statement = statement.where(condition)
+        return statement
     if plan.dataset == "weekly_order_risks":
         today = date.today()
         week_start = today - timedelta(days=today.weekday())
@@ -543,9 +571,12 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             or_(exception_by_po, exception_by_delivery, exception_by_item)
         )
         open_supplier_exceptions = supplier_exceptions.where(OperationException.status.in_(("OPEN", "PROCESSING")))
-        if user is not None and db is not None and not bool(role_codes.intersection({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY"})):
-            supplier_exceptions = supplier_exceptions.where(OperationException.owner_id == user.id)
-            open_supplier_exceptions = open_supplier_exceptions.where(OperationException.owner_id == user.id)
+        if user is not None and db is not None:
+            from app.modules.operation_exceptions.service import _exception_record_scope_condition
+
+            exception_scope = _exception_record_scope_condition(db, user)
+            supplier_exceptions = supplier_exceptions.where(exception_scope)
+            open_supplier_exceptions = open_supplier_exceptions.where(exception_scope)
 
         product_id_expr = func.coalesce(SupplierProduct.product_id, RFQItem.product_id)
         statement = (
@@ -1152,14 +1183,13 @@ async def _understand_question(question: str, settings: Settings, db: Session, u
         LOGGER.info("AI 查询计划使用安全兜底 question_hash=%s dataset=%s metric=%s", _query_hash(question), fallback.dataset, fallback.metric)
         return fallback
     prompt = text2sql_plan_prompt("")
-    payload = json.dumps({"question": question, "previous_plan": previous_plan.model_dump(mode="json") if previous_plan else None}, ensure_ascii=False)
+    payload = json.dumps({"question": question, "today": date.today().isoformat(), "previous_plan": previous_plan.model_dump(mode="json") if previous_plan else None}, ensure_ascii=False)
     result = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
-                        response_format={"type": "json_object"}, system_prompt=prompt, interpret_only=True)
+                        response_format=schema_response_format(QueryPlan, "query_plan"), system_prompt=prompt, interpret_only=True)
     raw = result.message.content
     LOGGER.info("AI 查询计划原始输出 question_hash=%s raw_length=%s raw_hash=%s", _query_hash(question), len(raw), _query_hash(raw))
     try:
-        payload = _extract_query_plan_payload(raw)
-        return QueryPlan.model_validate(_normalize_query_plan_payload(payload))
+        return QueryPlan.model_validate_json(raw, strict=True)
     except (BusinessValidationError, ValueError, TypeError) as exc:
         LOGGER.warning("AI 查询计划解析失败 question_hash=%s error_type=%s raw_length=%s", _query_hash(question), exc.__class__.__name__, len(raw))
         fallback = _fallback_query_plan(question)

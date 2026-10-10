@@ -125,6 +125,10 @@ def search_products(db: Session, user: User, arguments: ProductSearchInput) -> P
             Product.status == "ACTIVE", Unit.status == "ACTIVE", Chemical.status == "ACTIVE",
             Chemical.cas_no == arguments.keyword,
         )
+    # 完整编码是明确规格；不能因它同时是其他编码的前缀而再次要求消歧。
+    exact = base.where(Product.product_code == arguments.keyword)
+    if db.scalar(select(func.count()).select_from(exact.subquery())):
+        base = exact
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = db.execute(base.order_by(Product.id).limit(arguments.limit)).mappings().all()
     return ProductSearchResult(keyword=arguments.keyword, total_rows=total,

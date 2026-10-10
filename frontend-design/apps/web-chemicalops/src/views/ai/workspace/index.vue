@@ -25,7 +25,7 @@ import { AI_FILTER_TARGETS } from '#/utils/ai-list-filters';
 import { formatDateTime } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
 
-import QueryCharts from './query-charts.vue';
+import QueryEvidence from './query-evidence.vue';
 import AgentChatTask from './agent-chat-task.vue';
 import { acceptTask } from './task-view';
 import assistantLogo from './chemicalops-ai.svg';
@@ -75,11 +75,11 @@ interface UiMessage {
   id: string;
   /** 后端 Text2SQL 查询链路，仅助手消息可能携带 */
   queryTrace?: any;
+  batchProgress?: AiApi.BatchProgress;
+  cancelPending?: boolean;
   draftProposal?: AiApi.PurchaseDraftPreview;
   draftCreatedRequestNo?: string;
   draftInteraction?: boolean;
-  /** 查询链路详情是否展开（默认收起，点击查看） */
-  traceOpen?: boolean;
   sourceRecords?: Array<{
     dataset: string;
     filters?: Record<string, string | number>;
@@ -174,13 +174,32 @@ function visibleSourceRecords(item: UiMessage) {
   return (item.sourceRecords ?? []).filter((record) => canReadDataset(record.dataset));
 }
 
+/** 每个子任务只关联自己的来源，历史回放与即时回复复用同一引用。 */
+function queryViews(item: UiMessage): Array<UiMessage & { question?: string }> {
+  const batch = item.citations?.find((citation) => citation.type === 'multi_intent')?.batch;
+  if (!batch) return item.queryTrace && canReadDataset(item.queryTrace.dataset) ? [item] : [];
+  return batch.tasks.flatMap((task: any) => (task.citations ?? [])
+    .filter((citation: any) => citation.query_trace && canReadDataset(citation.query_trace.dataset))
+    .map((citation: any) => ({ id: `${item.id}:${task.id}`, role: 'assistant', content: '',
+      question: task.question, queryTrace: citation.query_trace, sourceRecords: citation.source_records ?? [] })));
+}
+function batchToolViews(item: UiMessage): Array<{ question: string; task: AgentApi.Task }> {
+  const batch = item.citations?.find((citation) => citation.type === 'multi_intent')?.batch;
+  return (batch?.tasks ?? []).filter((task: any) => ['inventory', 'quotes'].includes(task.kind) && task.evidence?.length)
+    .map((task: any) => ({ question: task.question, task: { id: `${item.id}:${task.id}`, revision: 0,
+      status: task.status, reply: task.answer ?? '', error_code: task.error_code, messages: [],
+      trace: task.evidence.map((result: AgentApi.Result, index: number) => ({ step: index + 1,
+        action: 'call_tool', status: 'SUCCEEDED', tool: result.tool, result })) } }));
+}
+
 const agentMode = ref(false);
 let chatEpoch = 0;
 const agentReads = new Map<string, number>();
 let agentTimer: ReturnType<typeof setTimeout> | undefined;
+let streamAbort: AbortController | undefined;
 const currentAgent = computed(() => messages.value.at(-1)?.agentTask);
 function stopAgentPolling() { if (agentTimer) clearTimeout(agentTimer); }
-function resetChatWork() { chatEpoch += 1; stopAgentPolling(); agentMode.value = false; }
+function resetChatWork() { chatEpoch += 1; streamAbort?.abort(); stopAgentPolling(); agentMode.value = false; }
 function applyAgent(task: AgentApi.Task, id: string, epoch: number) {
   if (epoch !== chatEpoch) return;
   messages.value = messages.value.map((item) => item.id === id && acceptTask(item.agentTask, task)
@@ -290,6 +309,18 @@ function scrollToBottom() {
 }
 
 /** 打开会话历史 */
+function historyMessages(items: AiApi.Message[]): UiMessage[] {
+  return items.map((item) => ({
+    agentTaskId: item.citations?.find((citation: any) => citation.type === 'agent_task')?.task_id,
+    content: item.content,
+    citations: Array.isArray(item.citations) ? item.citations : [],
+    id: String(item.id),
+    queryTrace: (item.citations as any)?.[0]?.query_trace,
+    sourceRecords: (Array.isArray(item.citations) ? item.citations : []).flatMap((citation: any) => citation.source_records ?? []),
+    role: item.role === 'user' ? 'user' : 'assistant',
+  }));
+}
+
 async function openConversation(conversation: AiApi.Conversation) {
   if (sending.value) {
     message.warning('正在回复中，请稍候');
@@ -305,15 +336,7 @@ async function openConversation(conversation: AiApi.Conversation) {
   try {
     const res = await getAIMessagesApi(conversation.id);
     if (epoch !== chatEpoch) return;
-    messages.value = res.items.map((item) => ({
-      agentTaskId: item.citations?.find((citation: any) => citation.type === 'agent_task')?.task_id,
-      content: item.content,
-      citations: Array.isArray(item.citations) ? item.citations : [],
-      id: String(item.id),
-      queryTrace: (item.citations as any)?.[0]?.query_trace,
-      sourceRecords: (Array.isArray(item.citations) ? item.citations : []).flatMap((citation: any) => citation.source_records ?? []),
-      role: item.role === 'user' ? 'user' : 'assistant',
-    }));
+    messages.value = historyMessages(res.items);
     // 一项任务只在最新助手回复中展示可交互结果，旧轮保留原追问文字。
     const latest = new Map<string, UiMessage>();
     for (const item of messages.value) if (item.role === 'assistant' && item.agentTaskId) latest.set(item.agentTaskId, item);
@@ -406,7 +429,7 @@ async function removeConversation(conversation: AiApi.Conversation) {
 }
 
 /** 发送消息并消费 SSE 流 */
-async function onSend() {
+async function onSend(retryFailed = false) {
   const text = inputText.value.trim();
   if (!text || sending.value || historyLoading.value) {
     return;
@@ -417,11 +440,12 @@ async function onSend() {
     await previewPurchaseRequestDraft(text);
     return;
   }
-  let routeToken: string;
+  let routeToken: string | undefined;
   const epoch = chatEpoch;
   sending.value = true;
   try {
-    const decision = await routeAiRequestApi(text, activeConversationId.value);
+    const decision = retryFailed ? { route: 'batch', route_token: undefined }
+      : await routeAiRequestApi(text, activeConversationId.value);
     if (epoch !== chatEpoch) return;
     routeToken = decision.route_token;
     if (decision.route === 'agent') {
@@ -445,6 +469,9 @@ async function onSend() {
     { content: '', id: nextId(), role: 'assistant', streaming: true },
   ];
   sending.value = true;
+  const abort = new AbortController();
+  streamAbort = abort;
+  const assistantId = messages.value.at(-1)!.id;
   scrollToBottom();
 
   // 后端要求 OpenAI 兼容格式：只传 user/assistant 文本历史
@@ -457,6 +484,7 @@ async function onSend() {
     .concat({ content: text, role: 'user' as const });
 
   const updateLast = (patch: Partial<UiMessage>) => {
+    if (epoch !== chatEpoch || messages.value.at(-1)?.id !== assistantId) return;
     const list = messages.value;
     const last = list.at(-1);
     if (!last) {
@@ -472,14 +500,28 @@ async function onSend() {
 
   try {
     await streamChatApi(payload, activeConversationId.value ?? null, {
+      onProgress(progress) {
+        if (epoch !== chatEpoch || abort.signal.aborted) return;
+        updateLast({ batchProgress: progress, citations: [{ type: 'multi_intent', batch: { status: 'PARTIAL', tasks: progress.tasks } }] });
+        if (activeConversationId.value !== progress.conversation_id) {
+          activeConversationId.value = progress.conversation_id;
+          void router.replace({ query: { conversation: String(progress.conversation_id) } });
+        }
+      },
+      onCancelled() {
+        updateLast({ streaming: false, cancelPending: true, content: '已取消后续查询，正在核对已完成项…' });
+      },
       onDelta(content) {
+        if (abort.signal.aborted) return;
         const list = messages.value;
         updateLast({
           content: (list[list.length - 1]?.content ?? '') + content,
         });
       },
       onDone(payloadDone) {
+        if (abort.signal.aborted || epoch !== chatEpoch) return;
         updateLast({
+          batchProgress: undefined, cancelPending: false,
           content: payloadDone.answer ?? '',
           citations: Array.isArray(payloadDone.citations) ? payloadDone.citations : [],
           queryTrace: payloadDone.query_trace,
@@ -493,14 +535,56 @@ async function onSend() {
       onError(errMessage) {
         updateLast({
           content: `⚠ ${errMessage}`,
+          cancelPending: Boolean(messages.value.at(-1)?.batchProgress),
+          batchProgress: undefined,
           streaming: false,
         });
       },
-    }, routeToken);
+    }, routeToken, { signal: abort.signal, retryFailed });
   } finally {
+    if (streamAbort === abort) streamAbort = undefined;
+    if (epoch !== chatEpoch) return;
+    if (abort.signal.aborted && activeConversationId.value && messages.value.at(-1)?.cancelPending) {
+      // 断开后服务端先保存取消终态；短暂轮询只读取本人会话，不重新执行查询。
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const res = await getAIMessagesApi(activeConversationId.value);
+          if (epoch !== chatEpoch) return;
+          const latest = res.items.at(-1);
+          const lastUser = res.items.filter((item) => item.role === 'user').at(-1);
+          const batch = latest?.citations?.find((citation: any) => citation.type === 'multi_intent')?.batch;
+          if (lastUser?.content === text && batch && batch.tasks.every((task: any) => !['PENDING', 'PLANNED', 'RUNNING'].includes(task.status))) {
+            messages.value = historyMessages(res.items);
+            break;
+          }
+        } catch { /* 保留本地已完成结果，允许稍后刷新会话核对。 */ }
+        await new Promise((resolve) => setTimeout(resolve, 150 * 2 ** attempt));
+      }
+      if (messages.value.at(-1)?.cancelPending) updateLast({ batchProgress: undefined, content: '已取消后续查询；已完成项保留，请刷新会话核对最终状态。' });
+    }
     sending.value = false;
     scrollToBottom();
   }
+}
+
+function progressTask(item: UiMessage): AgentApi.Task {
+  return { id: item.id, revision: 0, status: 'RUNNING', reply: '', error_code: null, messages: [], trace: [] };
+}
+function canRetryBatch(item: UiMessage) {
+  const batch = item.citations?.find((citation) => citation.type === 'multi_intent')?.batch;
+  return !sending.value && !item.cancelPending && !item.batchProgress && item.id === messages.value.at(-1)?.id
+    && batch?.tasks.every((task: any) => !['PENDING', 'PLANNED', 'RUNNING'].includes(task.status))
+    && batch?.tasks.some((task: any) => ['FAILED', 'BLOCKED', 'CANCELLED'].includes(task.status));
+}
+async function retryBatch() {
+  inputText.value = '重试上一组失败或已取消的查询项，保留已完成项。';
+  await onSend(true);
+}
+async function reloadActiveConversation() {
+  if (!activeConversationId.value || sending.value) return;
+  const epoch = chatEpoch;
+  const res = await getAIMessagesApi(activeConversationId.value);
+  if (epoch === chatEpoch) { messages.value = historyMessages(res.items); scrollToBottom(); }
 }
 
 async function previewPurchaseRequestDraft(text: string) {
@@ -581,12 +665,7 @@ function confirmCreatePurchaseDraft(item: UiMessage) {
   });
 }
 
-/** 展开/收起某条消息的查询链路详情 */
-function toggleTrace(id: string) {
-  messages.value = messages.value.map((item) =>
-    item.id === id ? { ...item, traceOpen: !item.traceOpen } : item,
-  );
-}
+
 
 function toggleCitation(messageId: string, sectionId: number) {
   messages.value = messages.value.map((item) => {
@@ -1067,12 +1146,14 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                   class="chat-md [&_a]:text-blue-500 [&_a]:underline [&_code]:bg-black/20 [&_code]:rounded [&_code]:px-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:my-1"
                   v-html="renderMarkdown(item.content)"
                 ></div>
-                <span v-else-if="item.streaming" class="animate-pulse">
+                <span v-else-if="item.streaming && !item.batchProgress" class="animate-pulse">
                   正在思考…
                 </span>
                 <AgentChatTask v-if="item.agentTask" :task="item.agentTask" :busy="sending" @continue="continueAgent(item, $event)" @cancel="cancelAgent(item)" @refresh="refreshAgent(item)" />
+                <AgentChatTask v-if="item.batchProgress" :task="progressTask(item)" :progress="item.batchProgress" :busy="false" :show-actions="!item.cancelPending" @cancel="streamAbort?.abort()" />
+                <Button v-if="canRetryBatch(item)" type="text" size="small" @click="retryBatch">重试未完成项</Button>
+                <Button v-if="item.cancelPending && !sending" type="text" size="small" @click="reloadActiveConversation">刷新会话</Button>
                 <div v-if="item.agentError" role="alert"><p>{{ item.agentError }}</p><Button size="small" @click="refreshAgent(item)">重试读取</Button></div>
-                <QueryCharts v-if="item.queryTrace?.rows?.length && canReadDataset(item.queryTrace.dataset)" :trace="item.queryTrace" />
                 <div v-if="item.draftProposal && canCreatePurchaseDraft" class="mt-3 space-y-2 rounded-md border border-border/70 bg-background/70 p-3 text-xs">
                   <div class="font-medium">采购申请草稿预览 · 尚未保存</div>
                   <div>用途：{{ item.draftProposal.draft.purpose }}</div>
@@ -1100,85 +1181,14 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                     </Button>
                   </div>
                 </div>
-                <div
-                v-if="item.queryTrace && canReadDataset(item.queryTrace.dataset)"
-                  class="border-border/50 mt-2 border-t pt-2 text-xs opacity-80"
-                >
-                  <div class="mb-2 rounded-md border border-border/70 bg-background/70 p-2">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span class="font-medium">数据来源：</span>
-                        {{ item.queryTrace.dataset_label || item.queryTrace.dataset || '业务数据' }}
-                        <span v-if="item.queryTrace.executed_at" class="text-muted-foreground ml-2">
-                          查询于 {{ formatDateTime(item.queryTrace.executed_at) }}
-                        </span>
-                      </div>
-                      <Button
-                        v-if="canReadDataset(item.queryTrace.dataset)"
-                        size="small"
-                        type="link"
-                        @click="openDataset(item.queryTrace.dataset)"
-                      >打开对应业务列表</Button>
-                    </div>
-                    <div v-if="item.queryTrace.unit_note" class="text-muted-foreground mt-1">
-                      口径：{{ item.queryTrace.unit_note }}
-                    </div>
-                  </div>
-                  <!-- 默认收起：标题行常驻摘要，点击展开槽位与 SQL -->
-                  <button
-                    class="flex w-full cursor-pointer items-center gap-1 text-left select-none"
-                    type="button"
-                    @click="toggleTrace(item.id)"
-                  >
-                    <span
-                      class="transition-transform"
-                      :class="item.traceOpen ? 'rotate-90' : ''"
-                    >▸</span>
-                    <span>
-                      查询链路 ·
-                      {{ item.queryTrace.dataset_label || item.queryTrace.dataset || '-' }} ·
-                      命中 {{ item.queryTrace.row_count }} 行
-                    </span>
-                    <span class="text-muted-foreground">
-                      {{ item.traceOpen ? '收起' : '查看' }}
-                    </span>
-                  </button>
-                  <template v-if="item.traceOpen">
-                    <!-- 已抽取槽位：label: display_value，empty 状态降透明度区分 -->
-                    <div
-                      v-if="item.queryTrace.slots?.length"
-                      class="mt-2 flex flex-wrap gap-1"
-                    >
-                      <Tag
-                        v-for="slot in item.queryTrace.slots"
-                        :key="slot.name"
-                        class="!mr-0"
-                        :class="slot.status === 'filled' ? '' : 'opacity-50'"
-                        :color="slot.status === 'filled' ? 'blue' : undefined"
-                      >
-                        {{ slot.label }}：{{ slot.display_value }}
-                      </Tag>
-                    </div>
-                    <pre
-                      class="mt-2 max-h-32 overflow-auto whitespace-pre-wrap"
-                    >{{ item.queryTrace.sql }}</pre>
-                  </template>
-                </div>
-                <details v-if="visibleSourceRecords(item).length" class="mt-2 border-t border-border/50 pt-2">
-                  <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">
-                    来源记录（{{ visibleSourceRecords(item).length }}）
-                  </summary>
-                  <div class="mt-2 space-y-1">
-                    <div
-                      v-for="(record, index) in visibleSourceRecords(item)"
-                      :key="`${record.dataset}-${record.record_id ?? index}`"
-                      class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-xs"
-                    >
-                      <span>{{ record.label }}</span>
-                      <Button size="small" type="link" @click="openSourceRecord(record)">定位业务记录</Button>
-                    </div>
-                  </div>
-                </details>
+                <template v-for="view in queryViews(item)" :key="view.id">
+                  <p v-if="view.question" class="mt-3 font-medium">{{ view.question }}</p>
+                  <QueryEvidence :trace="view.queryTrace" :source-records="visibleSourceRecords(view)" @open-dataset="openDataset" @open-source-record="openSourceRecord" />
+                </template>
+                <template v-for="entry in batchToolViews(item)" :key="entry.task.id">
+                  <p class="mt-3 font-medium">{{ entry.question }}</p>
+                  <AgentChatTask :task="entry.task" :busy="false" :show-actions="false" />
+                </template>
                 <details v-if="item.citations?.some((citation) => citation.type === 'doc_kb')" class="mt-3 border-t border-border/50 pt-2">
                   <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">
                     资料来源（{{ item.citations.filter((citation) => citation.type === 'doc_kb').length }}）
@@ -1269,7 +1279,7 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                 <button v-if="agentMode" class="ai-mode-exit" type="button" @click="agentMode = false">退出只读查询</button>
                 <button v-if="draftMode" class="ai-mode-exit" type="button" @click="draftMode = false">退出草稿模式</button>
               </div>
-              <button class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend">
+              <button class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend()">
                 <svg v-if="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
                 <span v-else class="ai-send-loading">···</span>
               </button>
