@@ -27,7 +27,7 @@ import { renderMarkdown } from '#/utils/markdown';
 
 import QueryEvidence from './query-evidence.vue';
 import AgentChatTask from './agent-chat-task.vue';
-import { acceptTask } from './task-view';
+import { acceptTask, primaryTaskResults } from './task-view';
 import assistantLogo from './chemicalops-ai.svg';
 
 defineOptions({ name: 'AiWorkspace' });
@@ -502,7 +502,8 @@ async function onSend(retryFailed = false) {
     await streamChatApi(payload, activeConversationId.value ?? null, {
       onProgress(progress) {
         if (epoch !== chatEpoch || abort.signal.aborted) return;
-        updateLast({ batchProgress: progress, citations: [{ type: 'multi_intent', batch: { status: 'PARTIAL', tasks: progress.tasks } }] });
+        // 进度只更新状态；正文走 delta，明细与来源等 done 后展示。
+        updateLast({ batchProgress: progress });
         if (activeConversationId.value !== progress.conversation_id) {
           activeConversationId.value = progress.conversation_id;
           void router.replace({ query: { conversation: String(progress.conversation_id) } });
@@ -1139,7 +1140,7 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
               <div
                 v-else
                 class="ai-assistant-message min-w-0 px-4 py-3 text-sm"
-                :class="[item.queryTrace?.rows?.length || item.agentTask ? 'w-full max-w-[1100px]' : 'max-w-[85%]', { 'is-agent': item.agentTask }]"
+                :class="[item.queryTrace?.rows?.length || item.agentTask || queryViews(item).length || batchToolViews(item).length || item.batchProgress ? 'w-full max-w-[1100px]' : 'max-w-[85%]', { 'is-agent': item.agentTask }]"
               >
                 <div
                   v-if="item.content && !item.agentTask"
@@ -1186,8 +1187,16 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                   <QueryEvidence :trace="view.queryTrace" :source-records="visibleSourceRecords(view)" @open-dataset="openDataset" @open-source-record="openSourceRecord" />
                 </template>
                 <template v-for="entry in batchToolViews(item)" :key="entry.task.id">
-                  <p class="mt-3 font-medium">{{ entry.question }}</p>
-                  <AgentChatTask :task="entry.task" :busy="false" :show-actions="false" />
+                  <details v-if="entry.task.status === 'SUCCEEDED' && entry.task.trace.some((step) => step.result?.tool === 'inventory.query_available')" class="mt-3 border-t border-border/50 pt-2">
+                    <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">
+                      规格明细与数据来源（{{ primaryTaskResults(entry.task).filter((step) => step.result?.tool === 'inventory.query_available').length }} 个规格） · {{ entry.question }}
+                    </summary>
+                    <AgentChatTask :task="entry.task" :busy="false" :show-actions="false" compact-details />
+                  </details>
+                  <template v-else>
+                    <p class="mt-3 font-medium">{{ entry.question }}</p>
+                    <AgentChatTask :task="entry.task" :busy="false" :show-actions="false" />
+                  </template>
                 </template>
                 <details v-if="item.citations?.some((citation) => citation.type === 'doc_kb')" class="mt-3 border-t border-border/50 pt-2">
                   <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">

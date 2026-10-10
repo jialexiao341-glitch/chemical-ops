@@ -17,9 +17,24 @@ export function primaryTaskResults(task: AgentApi.Task) {
   }
   const latest = new Map<string, AgentApi.Step>();
   for (const entry of task.trace) {
-    if (entry.status === 'SUCCEEDED' && entry.result && ['inventory.query_available', 'supplier_quotes.compare'].includes(entry.result.tool)) latest.set(entry.result.tool, entry);
+    if (entry.status === 'SUCCEEDED' && entry.result && ['inventory.query_available', 'supplier_quotes.compare'].includes(entry.result.tool)) {
+      const key = entry.result.tool === 'inventory.query_available'
+        ? `${entry.result.tool}:${entry.result.product_id}:${entry.result.warehouse_id ?? 'all'}`
+        : entry.result.tool;
+      latest.set(key, entry);
+    }
   }
   return [...latest.values()];
+}
+
+/** 用本次目录定位结果标识规格，不能把单个规格可用量误当成全部规格合计。 */
+export function inventoryProductLabel(task: AgentApi.Task, productId: number, fallback: string) {
+  for (const entry of [...task.trace].reverse()) {
+    if (entry.result?.tool !== 'catalog.search_products') continue;
+    const product = entry.result.rows.find((row) => row.product_id === productId);
+    if (product) return `${product.product_name} · ${product.product_code}（${product.model || '未登记型号'} / ${product.packaging_spec || '未登记包装'}）`;
+  }
+  return `${fallback} · 产品规格 #${productId}`;
 }
 
 export const TASK_LABELS: Record<AgentApi.Task['status'], string> = {

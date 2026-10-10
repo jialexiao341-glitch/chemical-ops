@@ -5,7 +5,7 @@
  * 星号原文外露。项目未引入 marked/dompurify（本机 pnpm 装大包有已知网络坑），
  * 因此自实现受支持的子集：
  *   段落换行 / 无序列表(- ) / 有序列表(1. ) / **粗体** / *斜体* /
- *   `行内代码` / [链接](http(s)://…) / 分隔线(---)
+ *   `行内代码` / [链接](http(s)://…) / 标题(# 至 ######)
  *
  * 安全：先对全文做 HTML 转义，再只拼接白名单标签，
  * 模型输出即使含 <script> 也只会以文本呈现，可安全 v-html。
@@ -51,6 +51,13 @@ export function renderMarkdown(source: null | string | undefined): string {
   };
 
   for (const line of lines) {
+    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (heading) {
+      closeList();
+      const level = heading[1]!.length;
+      out.push(`<h${level} class="my-2 text-sm font-semibold">${renderInline(heading[2]!)}</h${level}>`);
+      continue;
+    }
     const unordered = line.match(/^\s*[-*]\s+(.*)$/);
     const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
     if (unordered) {

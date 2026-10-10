@@ -60,6 +60,7 @@ export namespace AgentApi {
         tool: 'inventory.query_available';
         product_id: number;
         product_name: string;
+        warehouse_id?: null | number;
         observed_at: string;
         scope: string;
         warnings: string[];

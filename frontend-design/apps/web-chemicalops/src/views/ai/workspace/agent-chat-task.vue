@@ -5,15 +5,23 @@ import { computed, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { Button } from 'antdv-next';
 import { formatDateTime } from '#/utils/format';
-import { agentDisplayNumber, primaryTaskResults } from './task-view';
+import { agentDisplayNumber, inventoryProductLabel, primaryTaskResults } from './task-view';
 import AgentSourcePopover from './agent-source-popover.vue';
 import { inventorySource, TASK_ERROR_HELP, TASK_LABELS, TOOL_LABELS, waitingCandidates } from './task-view';
-const props = withDefaults(defineProps<{ task: AgentApi.Task; busy: boolean; showActions?: boolean; progress?: AiApi.BatchProgress }>(), { showActions: true });
+const props = withDefaults(defineProps<{ task: AgentApi.Task; busy: boolean; showActions?: boolean; progress?: AiApi.BatchProgress; compactDetails?: boolean }>(), { showActions: true, compactDetails: false });
 const emit = defineEmits<{ continue: [data: AgentApi.Continue]; cancel: []; refresh: [] }>();
 const { hasAccessByCodes } = useAccess();
 const selection = ref<number>();
 const candidates = computed(() => waitingCandidates(props.task));
 const results = computed(() => primaryTaskResults(props.task));
+const inventoryContext = computed(() => {
+  const inventory = results.value.flatMap((entry) => entry.result?.tool === 'inventory.query_available' ? [entry.result] : []);
+  return {
+    scopes: [...new Set(inventory.map((result) => result.scope))],
+    warnings: [...new Set(inventory.flatMap(visibleWarnings))],
+    times: [...new Set(inventory.map((result) => formatDateTime(result.observed_at)))],
+  };
+});
 watch(() => props.task.revision, () => { selection.value = undefined; });
 function choose() {
   const data: AgentApi.Continue = { question: '使用本次选中的候选继续原查询目标', revision: props.task.revision };
@@ -37,7 +45,7 @@ function visibleWarnings(result: AgentApi.Result) {
 </script>
 <template>
   <article class="agent-chat">
-    <header class="agent-header">
+    <header v-if="!compactDetails" class="agent-header">
       <div class="agent-state" :class="`is-${task.status.toLowerCase()}`" aria-live="polite">
         <span class="agent-state-icon" aria-hidden="true">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path v-if="task.status === 'SUCCEEDED'" d="m5 10 3 3 7-7"/><template v-else><circle cx="10" cy="10" r="6.5"/><path d="M10 6v4l2.5 1.5"/></template></svg>
@@ -83,14 +91,20 @@ function visibleWarnings(result: AgentApi.Result) {
       <div class="agent-selection-footer"><p>也可以在输入框补充更精确的条件{{ candidates.truncated ? '；当前候选未完整返回' : '' }}。</p><Button html-type="submit" type="primary" :disabled="busy || selection === undefined">继续查询</Button></div>
     </form>
     <p v-else-if="task.status === 'WAITING_INPUT'" class="agent-muted">在下方输入框补充信息，即可继续。</p>
-    <p v-if="task.status === 'SUCCEEDED' && results.length" class="agent-intro">根据本次查询结果，可以确认以下信息：</p>
+    <p v-if="!compactDetails && task.status === 'SUCCEEDED' && results.length" class="agent-intro">根据本次查询结果，可以确认以下信息：</p>
+    <p v-if="results.filter((entry) => entry.result?.tool === 'inventory.query_available').length > 1" class="agent-muted">以下为各规格的独立可用量与来源，不是全部规格合计。</p>
+    <template v-if="compactDetails && inventoryContext.scopes.length">
+      <p class="agent-muted">查询范围：{{ inventoryContext.scopes.join('；') }}。</p>
+      <p v-if="inventoryContext.warnings.length" class="agent-muted">{{ inventoryContext.warnings.join(' ') }}</p>
+      <p class="agent-snapshot">{{ inventoryContext.times.join('；') }}（本地时间）查询快照</p>
+    </template>
 
     <section v-for="entry in results" :key="entry.step" class="agent-result">
       <template v-if="entry.result?.tool === 'inventory.query_available'">
         <ol class="agent-prose">
-          <li><strong>{{ entry.result.product_name }}的账面可用库存<span v-if="entry.result.totals.length">为 <template v-for="(total, i) in entry.result.totals" :key="i">{{ i ? '、' : '' }}{{ agentDisplayNumber(total.available_quantity) }} {{ total.unit_name }}</template></span><span v-else>暂无合计数据</span>。</strong><span v-if="entry.result.total_rows === 0">当前授权范围内没有库存记录。</span><AgentSourcePopover :result="entry.result" /></li>
-          <li><strong>查询范围与明细。</strong>{{ entry.result.scope }}。<span v-if="entry.result.truncated">合计覆盖全部授权范围，本次展示 <strong>{{ entry.result.rows.length }} / {{ entry.result.total_rows }} 条</strong>明细。</span><span v-else>本次返回 <strong>{{ entry.result.total_rows }} 条</strong>明细。</span></li>
-          <li v-if="visibleWarnings(entry.result).length"><strong>使用这些数据时需要注意：</strong><span v-for="warning in visibleWarnings(entry.result)" :key="warning">{{ warning }} </span></li>
+          <li><strong>{{ inventoryProductLabel(task, entry.result.product_id, entry.result.product_name) }}，本规格账面可用库存<span v-if="entry.result.totals.length">为 <template v-for="(total, i) in entry.result.totals" :key="i">{{ i ? '、' : '' }}{{ agentDisplayNumber(total.available_quantity) }} {{ total.unit_name }}</template></span><span v-else>暂无合计数据</span>。</strong><span v-if="entry.result.total_rows === 0">当前授权范围内没有库存记录。</span><AgentSourcePopover :result="entry.result" /></li>
+          <li v-if="!compactDetails"><strong>查询范围与明细。</strong>{{ entry.result.scope }}。<span v-if="entry.result.truncated">合计覆盖全部授权范围，本次展示 <strong>{{ entry.result.rows.length }} / {{ entry.result.total_rows }} 条</strong>明细。</span><span v-else>本次返回 <strong>{{ entry.result.total_rows }} 条</strong>明细。</span></li>
+          <li v-if="!compactDetails && visibleWarnings(entry.result).length"><strong>使用这些数据时需要注意：</strong><span v-for="warning in visibleWarnings(entry.result)" :key="warning">{{ warning }} </span></li>
         </ol>
         <details v-if="entry.result.total_rows > 0" class="agent-disclosure">
           <summary><span>库存明细</span><span class="agent-count">{{ entry.result.rows.length }}{{ entry.result.truncated ? ` / ${entry.result.total_rows}` : '' }} 条</span></summary>
@@ -116,7 +130,7 @@ function visibleWarnings(result: AgentApi.Result) {
       <p v-else-if="entry.result?.total_rows === 0" class="agent-empty">{{ entry.result.tool === 'catalog.search_products' ? '当前授权范围未找到匹配产品。' : '当前授权范围未找到可用询价明细。' }}</p>
       <template v-if="entry.result">
         <div v-if="entry.result.tool !== 'inventory.query_available' && visibleWarnings(entry.result).length" class="agent-notice"><span aria-hidden="true">ⓘ</span><div><p v-for="warning in visibleWarnings(entry.result)" :key="warning">{{ warning }}</p></div></div>
-        <p v-if="'observed_at' in entry.result" class="agent-snapshot">{{ formatDateTime(entry.result.observed_at) }}（本地时间）查询快照 · 刷新任务不会重新查询业务数据</p>
+        <p v-if="'observed_at' in entry.result && !(compactDetails && entry.result.tool === 'inventory.query_available')" class="agent-snapshot">{{ formatDateTime(entry.result.observed_at) }}（本地时间）查询快照 · 刷新任务不会重新查询业务数据</p>
       </template>
       <AgentSourcePopover v-if="entry.result && !['inventory.query_available', 'supplier_quotes.compare'].includes(entry.result.tool)" :result="entry.result" />
     </section>

@@ -1,6 +1,6 @@
 import type { AgentApi } from '../../../api/ai/agent';
 import { describe, expect, it } from 'vitest';
-import { acceptTask, inventorySource, waitingCandidates, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS } from './task-view';
+import { acceptTask, inventoryProductLabel, inventorySource, waitingCandidates, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS } from './task-view';
 
 const waiting: AgentApi.Task = { id: 'a', revision: 2, status: 'WAITING_INPUT', reply: '', error_code: null, messages: [], trace: [
   { step: 1, action: 'call_tool', status: 'SUCCEEDED', result: { tool: 'catalog.search_products', total_rows: 2, truncated: false, rows: [], sources: [] } },
@@ -47,6 +47,20 @@ describe('聊天结果展示', () => {
     expect(preview.title).toBe('乙醇 · 乙仓');
     expect(preview.description).toContain('批次 B · 账面可用 20.5 升');
     expect(JSON.parse(preview.to!.query!.ai_filters!)).toEqual({ dataset: 'inventory', filters: { product_id: '11', warehouse_id: '23' } });
+  });
+  it('多规格保留每个规格的最新结果，不被最后一次同名工具调用覆盖', () => {
+    const task: AgentApi.Task = { ...waiting, status: 'SUCCEEDED', trace: [
+      { step: 1, action: 'call_tool', status: 'SUCCEEDED', result: inventory },
+      { step: 2, action: 'call_tool', status: 'SUCCEEDED', result: { ...inventory, product_id: 12 } },
+      { step: 3, action: 'call_tool', status: 'SUCCEEDED', result: inventory },
+    ] };
+    expect(primaryTaskResults(task).map((entry) => entry.step)).toEqual([3, 2]);
+    expect(inventoryProductLabel(task, 11, '乙醇')).toBe('乙醇 · 产品规格 #11');
+    const lookup: AgentApi.Step = { step: 0, action: 'call_tool', status: 'SUCCEEDED', result: {
+      tool: 'catalog.search_products', total_rows: 1, truncated: false, sources: [],
+      rows: [{ product_id: 11, product_code: 'ETH-001', product_name: '无水乙醇', model: '分析纯', packaging_spec: '20L', unit_name: '升' }],
+    } };
+    expect(inventoryProductLabel({ ...task, trace: [lookup, ...task.trace] }, 11, '乙醇')).toBe('无水乙醇 · ETH-001（分析纯 / 20L）');
   });
   it('来源没有对应明细时不会借用其他记录的数量或链接', () => {
     const preview = agentSourcePreview(inventory, { resource: 'inventory_balances', record_id: 99 });
