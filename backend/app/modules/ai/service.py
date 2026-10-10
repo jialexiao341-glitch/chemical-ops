@@ -9,9 +9,9 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, inspect, select
 from sqlalchemy.orm import Session
 
+from app.modules.ai import conversation_store
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
 from app.core.observability import get_request_id
@@ -32,12 +32,11 @@ from app.modules.ai.agent_prompt import (
     result_rewrite_prompt,
 )
 from app.modules.ai.llm import chat, stream_chat
-from app.modules.ai.model import AIConversation, AIConversationState, AIMessage, AIQueryLog
 from app.modules.files import service as file_service
 from app.modules.files import mineru
 from app.modules.files.parser import parse_file_content
 from app.modules.files.scanner import scan_content
-from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
+from app.modules.system.crud import get_user_role_codes
 from app.modules.system.model import User
 
 
@@ -272,9 +271,9 @@ async def _rewrite_text2sql_answer(result: object, dataset_label: str, settings:
         raw = (rewritten.answer or rewritten.message.content or "").strip()
         if not raw:
             return None
-        from app.modules.ai.text2sql import _extract_query_plan_payload
+        from app.modules.ai.llm import extract_json_object
 
-        parsed = _extract_query_plan_payload(raw)
+        parsed = extract_json_object(raw)
         answer = parsed.get("answer")
         if isinstance(answer, str) and answer.strip():
             return answer.strip()
@@ -380,11 +379,7 @@ async def _run_text2sql_for_chat(
             stages=["order_anchor", "module_permission_checks", "read_only_relation_queries"],
             render={"type": "table", "title": f"订单 {order_no} 追溯", "columns": ["stage", "status", "summary"]},
         )
-        state = db.scalar(select(AIConversationState).where(AIConversationState.thread_id == thread_id)) if thread_id else None
-        if state is not None:
-            state.query_plan = None
-            state.query_trace = trace.model_dump(mode="json", exclude={"sql", "parameterized_sql", "rows"})
-            state.permission_snapshot = _permission_snapshot(db, user)
+        conversation_store.save_order_trace_state(db, user, thread_id, trace)
         citation: dict[str, object] = {
             "type": "order_trace",
             "source": "关联业务模块的只读追溯",
@@ -484,201 +479,11 @@ async def _run_text2sql_for_chat(
     return answer, citation, trace
 
 
-def _get_owned_conversation(db: Session, user: User, conversation_id: int) -> AIConversation:
-    """读取当前用户自己的会话，其他用户的会话按不存在处理。"""
-
-    conversation = db.scalar(select(AIConversation).where(AIConversation.id == conversation_id, AIConversation.user_id == user.id))
-    if conversation is None:
-        raise BusinessValidationError("AI 会话不存在或无权访问")
-    return conversation
-
-
-def _conversation_state_enabled(db: Session) -> bool:
-    """迁移尚未执行时保持旧版本可用；完成 017 后自动启用持久化上下文。"""
-
-    try:
-        bind = db.get_bind()
-        return bool(bind is not None and inspect(bind).has_table(AIConversationState.__tablename__))
-    except Exception as exc:
-        LOGGER.warning("AI 会话状态表检查失败 error_type=%s", exc.__class__.__name__)
-        return False
-
-
-def _permission_snapshot(db: Session, user: User) -> dict[str, list[str]]:
-    return {"roles": get_user_role_codes(db, user.id), "permissions": get_user_permission_codes(db, user.id)}
-
-
-def _load_conversation_state(db: Session, conversation: AIConversation) -> AIConversationState | None:
-    if not _conversation_state_enabled(db):
-        return None
-    return db.scalar(select(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
-
-
-def _query_log_enabled(db: Session) -> bool:
-    """迁移 020 尚未执行时跳过留档，保持旧环境可用。"""
-
-    try:
-        bind = db.get_bind()
-        return bool(bind is not None and inspect(bind).has_table(AIQueryLog.__tablename__))
-    except Exception as exc:
-        LOGGER.warning("AI 查询留档表检查失败 error_type=%s", exc.__class__.__name__)
-        return False
-
-
-def _append_query_log(db: Session, conversation: AIConversation, trace: AIQueryTrace) -> None:
-    """每轮 Text2SQL 追加一条留档，与会话级“最近一次”状态互补保留历史轨迹。"""
-
-    if not _query_log_enabled(db):
-        return
-    db.add(
-        AIQueryLog(
-            conversation_id=conversation.id,
-            thread_id=trace.thread_id,
-            question=trace.query,
-            question_hash=_text_fingerprint(trace.query),
-            dataset=trace.dataset or "unknown",
-            dataset_label=trace.dataset_label,
-            slots=trace.model_dump(mode="json", include={"slots"})["slots"],
-            template=trace.template,
-            sql_text=trace.sql,
-            row_count=trace.row_count,
-            truncated=trace.truncated,
-            unit=trace.unit,
-            executed_at=trace.executed_at,
-        )
-    )
-
-
-def _save_query_state(
-    db: Session,
-    user: User,
-    conversation: AIConversation,
-    *,
-    plan: object,
-    trace: AIQueryTrace,
-    citations: list[dict[str, object]],
-) -> None:
-    if not _conversation_state_enabled(db):
-        return
-    existing = _load_conversation_state(db, conversation)
-    state = existing or AIConversationState(
-        conversation_id=conversation.id,
-        thread_id=f"ai:{user.id}:{conversation.id}",
-        state_version=1,
-    )
-    state.query_plan = plan.model_dump(mode="json") if hasattr(plan, "model_dump") else None
-    state.query_trace = trace.model_dump(mode="json", exclude={"sql", "parameterized_sql", "rows"})
-    state.permission_snapshot = _permission_snapshot(db, user)
-    state.attachment_refs = [
-        {key: item.get(key) for key in ("file_id", "file_name", "parse_status", "parser", "object_key") if key in item}
-        for item in citations
-        if isinstance(item, dict) and item.get("file_id")
-    ] or None
-    if existing is None:
-        db.add(state)
-
-
-def delete_conversation(db: Session, user: User, conversation_id: int) -> None:
-    """删除当前用户自己的会话及其消息。"""
-    conversation = _get_owned_conversation(db, user, conversation_id)
-    if _conversation_state_enabled(db):
-        db.execute(delete(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
-    if _query_log_enabled(db):
-        db.execute(delete(AIQueryLog).where(AIQueryLog.conversation_id == conversation.id))
-    db.execute(delete(AIMessage).where(AIMessage.conversation_id == conversation.id))
-    db.delete(conversation)
-    db.commit()
-
-
-def clear_query_context(db: Session, user: User, conversation_id: int) -> None:
-    """清除结构化 QueryPlan，不删除用户可见聊天记录。"""
-
-    conversation = _get_owned_conversation(db, user, conversation_id)
-    if _conversation_state_enabled(db):
-        db.execute(delete(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
-        db.commit()
-
-def list_conversations(db: Session, user: User, *, limit: int = 50) -> tuple[list[AIConversation], int]:
-    """按最近消息时间返回当前用户会话。"""
-
-    condition = AIConversation.user_id == user.id
-    total = db.scalar(select(func.count(AIConversation.id)).where(condition)) or 0
-    items = list(db.scalars(select(AIConversation).where(condition).order_by(AIConversation.last_message_at.desc(), AIConversation.id.desc()).limit(limit)).all())
-    return items, total
-
-
-def update_conversation(db: Session, user: User, conversation_id: int, *, title: str | None = None, pinned: bool | None = None) -> AIConversation:
-    """只更新当前用户自己的会话管理字段。"""
-    conversation = _get_owned_conversation(db, user, conversation_id)
-    if title is not None:
-        normalized = title.strip()
-        if not normalized or len(normalized) > 255:
-            raise BusinessValidationError("会话标题长度需为 1 至 255 个字符")
-        conversation.title = normalized
-    if pinned is not None:
-        conversation.pinned = pinned
-    db.commit()
-    db.refresh(conversation)
-    return conversation
-
-
-def list_messages(db: Session, user: User, conversation_id: int, *, limit: int = 100) -> tuple[list[AIMessage], int]:
-    """读取当前用户会话消息。"""
-
-    _get_owned_conversation(db, user, conversation_id)
-    condition = AIMessage.conversation_id == conversation_id
-    total = db.scalar(select(func.count(AIMessage.id)).where(condition)) or 0
-    items = list(db.scalars(select(AIMessage).where(condition).order_by(AIMessage.created_at.asc(), AIMessage.id.asc()).limit(limit)).all())
-    return items, total
-
-
-def _ensure_conversation(db: Session, user: User, data: AIChatRequest) -> AIConversation:
-    """获取或创建会话，并保存权限快照。"""
-
-    if data.conversation_id:
-        conversation = _get_owned_conversation(db, user, data.conversation_id)
-        conversation.permission_snapshot = _permission_snapshot(db, user)
-        return conversation
-    first_user = next((message.content.strip() for message in data.messages if message.role == "user" and message.content.strip()), "新建对话")
-    conversation = AIConversation(
-        user_id=user.id,
-        title=first_user[:80],
-        business_scene="GENERAL",
-        permission_snapshot=_permission_snapshot(db, user),
-        status="ACTIVE",
-        last_message_at=datetime.now(),
-    )
-    db.add(conversation)
-    db.flush()
-    return conversation
-
-
-def _save_chat_turn(db: Session, conversation: AIConversation, question: str, answer: str, *, citations: list | None = None) -> None:
-    """同步和流式回复共用同一落库路径；调用方决定在回复的哪个阶段提交。"""
-    db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=question, citations=citations))
-    db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=answer, citations=citations))
-    conversation.last_message_at = datetime.now()
-    db.commit()
-
-
-def _previous_query_plan(db: Session, conversation: AIConversation):
-    """读取上一轮计划，无效历史状态按无计划处理。"""
-    from app.modules.ai.schema import QueryPlan
-
-    state = _load_conversation_state(db, conversation)
-    if state and state.query_plan:
-        try:
-            return QueryPlan.model_validate(state.query_plan)
-        except (TypeError, ValueError):
-            LOGGER.warning("AI 会话 QueryPlan 状态无效 conversation_id=%s", conversation.id)
-    return None
-
-
 async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatResponse:
     """持久化用户消息并调用模型，再持久化助手回复。"""
 
 
-    conversation = _ensure_conversation(db, user, data)
+    conversation = conversation_store.ensure_conversation(db, user, data)
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
     if user_message is None:
         raise BusinessValidationError("至少需要一条用户消息")
@@ -696,7 +501,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         if not hits:
             fixed_content = no_doc_hits_reply(user_message.content)
             LOGGER.info("AI 文档检索为空 user_id=%s question_hash=%s", user.id, _text_fingerprint(user_message.content))
-            _save_chat_turn(db, conversation, user_message.content, fixed_content)
+            conversation_store.save_chat_turn(db, conversation, user_message.content, fixed_content)
             return AIChatResponse(
                 message=AIChatMessage(role="assistant", content=fixed_content),
                 conversation_id=conversation.id,
@@ -709,7 +514,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         context, citations = build_doc_context(hits)
         runtime = get_settings()
         result = await chat(data, runtime, attachment_context=[context])
-        _save_chat_turn(db, conversation, user_message.content, result.message.content, citations=citations)
+        conversation_store.save_chat_turn(db, conversation, user_message.content, result.message.content, citations=citations)
         result.conversation_id = conversation.id
         result.citations = citations
         result.user_query = user_message.content
@@ -723,7 +528,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         return result
     if intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
         runtime = get_settings()
-        previous_plan = _previous_query_plan(db, conversation)
+        previous_plan = conversation_store.previous_query_plan(db, conversation)
         thread_id = f"ai:{user.id}:{conversation.id}"
         content, citation, query_trace = await _run_text2sql_for_chat(
             db, user, _resolved_query_question(user_message.content, intent_result), runtime, previous_plan=previous_plan, thread_id=thread_id
@@ -733,9 +538,9 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
 
         plan_payload = citation.get("query_plan") if isinstance(citation, dict) else None
         if isinstance(plan_payload, dict):
-            _save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
-        _append_query_log(db, conversation, query_trace)
-        _save_chat_turn(db, conversation, user_message.content, content, citations=citations)
+            conversation_store.save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
+        conversation_store.append_query_log(db, conversation, query_trace)
+        conversation_store.save_chat_turn(db, conversation, user_message.content, content, citations=citations)
         return AIChatResponse(
             message=AIChatMessage(role="assistant", content=content),
             conversation_id=conversation.id,
@@ -752,18 +557,15 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
             intent_result.intent, intent_result.reason, user_message.content
         )
         LOGGER.info("AI 非查询回复 user_id=%s intent=%s reason=%s model=%s answer_length=%s", user.id, intent_result.intent, intent_result.reason, model_tag, len(fixed_content))
-        _save_chat_turn(db, conversation, user_message.content, fixed_content)
+        conversation_store.save_chat_turn(db, conversation, user_message.content, fixed_content)
         return AIChatResponse(message=AIChatMessage(role="assistant", content=fixed_content), conversation_id=conversation.id, model=model_tag, provider="chemicalops", citations=None, user_query=user_message.content, answer=fixed_content)
 
     runtime = get_settings()
     combined_context, native_image_parts, combined_citations = await _prepare_attachments(db, user, data, runtime)
-    db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=combined_citations or None))
-    conversation.last_message_at = datetime.now()
+    conversation_store.append_message(db, conversation, "USER", user_message.content, citations=combined_citations or None)
     db.commit()
     result = await chat(data, runtime, attachment_context=combined_context or None, image_parts=native_image_parts or None)
-    assistant_message = AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=result.message.content, citations=combined_citations or None)
-    db.add(assistant_message)
-    conversation.last_message_at = datetime.now()
+    conversation_store.append_message(db, conversation, "ASSISTANT", result.message.content, citations=combined_citations or None)
     db.commit()
     result.conversation_id = conversation.id
     result.citations = combined_citations or None
@@ -776,7 +578,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     """通过 SSE 转发 OpenAI 兼容接口的增量内容，并在结束时持久化。"""
 
 
-    conversation = _ensure_conversation(db, user, data)
+    conversation = conversation_store.ensure_conversation(db, user, data)
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
     if user_message is None:
         yield f"event: error\ndata: {json.dumps({'message': '至少需要一条用户消息'}, ensure_ascii=False)}\n\n"
@@ -857,7 +659,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         async for chunk in _stream_text_chunks(doc_content):
             chunk_count += 1
             yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
-        _save_chat_turn(db, conversation, user_message.content, doc_content, citations=doc_citations)
+        conversation_store.save_chat_turn(db, conversation, user_message.content, doc_content, citations=doc_citations)
         yield "event: done\ndata: " + json.dumps(
             {
                 "conversation_id": conversation.id,
@@ -872,7 +674,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         return
     if stream_intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
         runtime = get_settings()
-        previous_plan = _previous_query_plan(db, conversation)
+        previous_plan = conversation_store.previous_query_plan(db, conversation)
         thread_id = f"ai:{user.id}:{conversation.id}"
         try:
             content, citation, query_trace = await _run_text2sql_for_chat(
@@ -895,9 +697,9 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
 
         plan_payload = citation.get("query_plan") if isinstance(citation, dict) else None
         if isinstance(plan_payload, dict):
-            _save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
-        _append_query_log(db, conversation, query_trace)
-        _save_chat_turn(db, conversation, user_message.content, content, citations=citations)
+            conversation_store.save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
+        conversation_store.append_query_log(db, conversation, query_trace)
+        conversation_store.save_chat_turn(db, conversation, user_message.content, content, citations=citations)
         LOGGER.info("AI 流式回复完成 user_id=%s mode=query chunks=%s", user.id, chunk_count)
         trace_payload = query_trace.model_dump(mode="json")
         yield f"event: done\ndata: {json.dumps({'conversation_id': conversation.id, 'model': 'text2sql', 'provider': 'chemicalops', 'citations': citations, 'query_trace': trace_payload, 'query_slots': trace_payload['slots'], 'user_query': user_message.content, 'answer': content}, ensure_ascii=False)}\n\n"
@@ -911,7 +713,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         async for chunk in _stream_text_chunks(fixed_content):
             chunk_count += 1
             yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
-        _save_chat_turn(db, conversation, user_message.content, fixed_content)
+        conversation_store.save_chat_turn(db, conversation, user_message.content, fixed_content)
         LOGGER.info("AI 流式回复完成 user_id=%s mode=%s chunks=%s answer_length=%s answer_hash=%s", user.id, model_tag, chunk_count, len(fixed_content), _text_fingerprint(fixed_content))
         yield "event: done\ndata: " + json.dumps({"conversation_id": conversation.id, "model": model_tag, "provider": "chemicalops", "citations": None, "user_query": user_message.content, "answer": fixed_content}, ensure_ascii=False) + "\n\n"
         return
@@ -926,8 +728,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         LOGGER.exception("AI 流式附件准备失败 user_id=%s", user.id)
         yield f"event: error\ndata: {json.dumps({'message': '附件暂时无法读取，请检查文件权限或重新上传'}, ensure_ascii=False)}\n\n"
         return
-    db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations or None))
-    conversation.last_message_at = datetime.now()
+    conversation_store.append_message(db, conversation, "USER", user_message.content, citations=citations or None)
     db.commit()
 
     full_content = ""
@@ -938,8 +739,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     except BusinessValidationError as exc:
         yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
         return
-    db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=full_content.strip(), citations=citations or None))
-    conversation.last_message_at = datetime.now()
+    conversation_store.append_message(db, conversation, "ASSISTANT", full_content.strip(), citations=citations or None)
     db.commit()
     LOGGER.info("AI 流式回复完成 user_id=%s mode=llm answer_length=%s answer_hash=%s", user.id, len(full_content.strip()), _text_fingerprint(full_content.strip()))
     done = {"conversation_id": conversation.id, "model": runtime.llm_model, "provider": runtime.llm_provider, "citations": citations or None, "user_query": user_message.content, "answer": full_content.strip()}

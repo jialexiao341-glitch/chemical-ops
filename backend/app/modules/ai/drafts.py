@@ -16,7 +16,7 @@ from app.modules.ai.schema import (
     _DraftProposal,
 )
 from app.modules.ai.llm import chat
-from app.modules.ai.text2sql import _extract_query_plan_payload
+from app.modules.ai.llm import extract_json_object
 from app.modules.products.model import Product
 from app.modules.purchase_requests.model import Unit
 from app.modules.purchase_requests.schema import PurchaseRequestCreate
@@ -71,7 +71,7 @@ async def propose_purchase_request_draft(
     )
     raw_answer = result.answer or result.message.content
     try:
-        payload = _extract_query_plan_payload(raw_answer)
+        payload = extract_json_object(raw_answer)
         proposal = _DraftProposal.model_validate(payload)
     except (BusinessValidationError, ValidationError, TypeError, ValueError) as exc:
         raise BusinessValidationError("AI 没有给出完整、可检查的采购申请字段；请补充用途、物料、数量和计量单位") from exc

@@ -799,21 +799,6 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
 _QUERY_PLAN_FIELDS = frozenset({"dataset", "metric", "time_field", "date_from", "date_to", "group_by", "filters", "order", "limit"})
 
 
-def _extract_query_plan_payload(raw: str) -> dict[str, Any]:
-    """从模型输出中提取第一个合法 JSON 对象，兼容代码块和前置说明。"""
-
-    cleaned = re.sub(r"```(?:json)?", "", raw, flags=re.IGNORECASE).replace("```", "")
-    decoder = json.JSONDecoder()
-    for match in re.finditer(r"\{", cleaned):
-        try:
-            payload, _ = decoder.raw_decode(cleaned, match.start())
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            return payload
-    raise BusinessValidationError("AI 未返回有效的查询计划")
-
-
 def _normalize_query_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """规范化常见模型别名；最终仍由 QueryPlan 和 RBAC 白名单校验。"""
 

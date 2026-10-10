@@ -387,7 +387,7 @@ def chat_task_db(task_db, monkeypatch):
     ):
         task_db.execute(text(ddl))
     task_db.commit()
-    monkeypatch.setattr(runtime.service, '_permission_snapshot', lambda db, user: {})
+    monkeypatch.setattr(runtime.conversation_store, 'permission_snapshot', lambda db, user: {})
     monkeypatch.setattr(runtime, 'SessionLocal', lambda: Session(task_db.bind))
     return task_db
 

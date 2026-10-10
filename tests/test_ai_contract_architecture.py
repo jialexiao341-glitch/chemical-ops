@@ -38,3 +38,20 @@ def test_schema_and_llm_do_not_depend_on_business_execution():
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.modules.ai"):
                 assert node.module in allowed, (name, node.module)
+
+
+def test_conversation_store_does_not_depend_on_execution():
+    tree = ast.parse((AI_ROOT / "conversation_store.py").read_text(encoding="utf-8"))
+    allowed = {"app.modules.ai.model", "app.modules.ai.schema"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.modules.ai"):
+            assert node.module in allowed, node.module
+
+
+def test_history_access_does_not_depend_on_batch_executor():
+    tree = ast.parse((AI_ROOT / "history_access.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert node.module != "app.modules.ai.multi_intent"
+            if node.module == "app.modules.ai":
+                assert "multi_intent" not in {alias.name for alias in node.names}

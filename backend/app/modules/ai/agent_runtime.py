@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.modules.ai import llm
+from app.modules.ai import conversation_store
 from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
@@ -36,7 +37,7 @@ from app.modules.ai.schema import (
     Workflow,
 )
 from app.modules.ai import agent_tools as tools, service, routing
-from app.modules.ai.model import AIAgentTask, AIConversationState, AIMessage
+from app.modules.ai.model import AIAgentTask, AIMessage
 from app.modules.inventory.model import Warehouse
 from app.modules.rfqs.model import RFQ
 from app.modules.system.model import User
@@ -241,23 +242,6 @@ def _sync_memory_state(state: RunState) -> dict:
     return memory
 
 
-def _save_conversation_memory(db: Session, user: User, conversation_id: int, memory: dict) -> None:
-    row = db.scalar(
-        select(AIConversationState)
-        .where(AIConversationState.conversation_id == conversation_id)
-        .with_for_update()
-    )
-    if row is None:
-        row = AIConversationState(
-            conversation_id=conversation_id,
-            thread_id=f"ai:{user.id}:{conversation_id}",
-            state_version=1,
-        )
-        db.add(row)
-    row.memory_state = json.loads(json.dumps(memory, ensure_ascii=False))
-    row.updated_at = _now()
-
-
 def _load(db: Session, user: User, task_id: str) -> AIAgentTask:
     """仅获取本人任务，管理员也不能通过此接口读取其他人的私人任务。"""
     task = db.scalar(select(AIAgentTask).where(AIAgentTask.id == task_id,
@@ -330,7 +314,7 @@ def _persist(db: Session, user: User, state: RunState) -> None:
         db.execute(update(AIMessage).where(AIMessage.id == state.chat["assistant_message_id"],
             AIMessage.conversation_id == state.chat["conversation_id"]).values(
             content=state.reply or "正在查询业务数据…"))
-        _save_conversation_memory(db, user, state.chat["conversation_id"], memory)
+        conversation_store.save_conversation_memory(db, user, state.chat["conversation_id"], memory)
     if execution:
         execution.business_revision = state.revision + 1
         execution.checkpoint = {**execution.checkpoint, "decisions": state.decisions,
@@ -791,13 +775,9 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
 def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, conversation_id: int | None, *, commit: bool = True) -> None:
     """同一事务保存会话、输入及任务引用；聊天历史不复制业务证据。"""
     continuing = state.chat is not None
-    conversation = service._ensure_conversation(db, user, AIChatRequest(
+    conversation = conversation_store.ensure_conversation(db, user, AIChatRequest(
         conversation_id=conversation_id, messages=[AIChatMessage(role="user", content=question)]))
-    stored_state = db.scalar(
-        select(AIConversationState)
-        .where(AIConversationState.conversation_id == conversation.id)
-        .with_for_update()
-    )
+    stored_state = conversation_store.lock_conversation_state(db, conversation)
     incoming_route = state.memory_state.get("understanding")
     stored_memory = stored_state.memory_state if stored_state else None
     if stored_memory and not continuing:
@@ -847,7 +827,7 @@ def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, c
     state.chat = {"conversation_id": conversation.id, "assistant_message_id": assistant.id}
     task = _load(db, user, state.task_id)
     task.payload = {**task.payload, "chat": state.chat, "memory_state": memory}
-    _save_conversation_memory(db, user, conversation.id, memory)
+    conversation_store.save_conversation_memory(db, user, conversation.id, memory)
     conversation.last_message_at = _now()
     conversation.updated_at = _now()
     if commit:
@@ -858,7 +838,7 @@ def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, c
 
 def prepare_chat_task(db: Session, user: User, data: ChatTaskCreate, *, commit: bool = True) -> RunState:
     if data.conversation_id:
-        service._get_owned_conversation(db, user, data.conversation_id)
+        conversation_store.get_owned_conversation(db, user, data.conversation_id)
     state = prepare_task(db, user, data, commit=False)
     _attach_chat_turn(db, user, state, data.question, data.conversation_id, commit=commit)
     return state
@@ -869,7 +849,7 @@ def prepare_chat_continue(db: Session, user: User, task_id: str, data: TaskConti
     chat = task.payload.get("chat")
     if not chat:
         raise BusinessValidationError("该任务未关联聊天会话")
-    service._get_owned_conversation(db, user, chat["conversation_id"])
+    conversation_store.get_owned_conversation(db, user, chat["conversation_id"])
     state = prepare_continue(db, user, task_id, data, commit=False)
     _attach_chat_turn(db, user, state, data.question, chat["conversation_id"], commit=commit)
     return state
@@ -924,7 +904,7 @@ def cancel_task(db: Session, user: User, task_id: str) -> TaskRead:
             payload={**task.payload, "memory_state": memory}, updated_at=_now())).rowcount
         if count == 1 and task.payload.get("chat"):
             db.execute(update(AIMessage).where(AIMessage.id == task.payload["chat"]["assistant_message_id"]).values(content="任务已取消。"))
-            _save_conversation_memory(db, user, task.payload["chat"]["conversation_id"], memory)
+            conversation_store.save_conversation_memory(db, user, task.payload["chat"]["conversation_id"], memory)
         if count == 1 and get_settings().agent_execution_mode == "database":
             from sqlalchemy import delete
             from app.modules.task_queue.model import TaskExecution, TaskResourceLock

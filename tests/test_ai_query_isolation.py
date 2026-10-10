@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai import agent_tools, controller, history_access, multi_intent, routing, service, text2sql
+from app.modules.ai import agent_tools, controller, conversation_store, history_access, multi_intent, routing, service, text2sql
 from app.modules.ai.catalog import CATALOG
 from app.modules.ai.model import AIConversation, AIConversationState, AIMessage
 from app.modules.ai.schema import TaskStatus
@@ -128,7 +128,7 @@ def test_cross_user_cannot_load_conversation_or_routing_context(db_session):
     conversation = AIConversation(user_id=users[0].id, title="私有查询", business_scene="GENERAL", status="ACTIVE")
     db_session.add(conversation)
     db_session.flush()
-    for load in (service.list_messages, routing.conversation_context):
+    for load in (conversation_store.list_messages, routing.conversation_context):
         with pytest.raises(BusinessValidationError, match="无权访问"):
             load(db_session, users[1], conversation.id)
 

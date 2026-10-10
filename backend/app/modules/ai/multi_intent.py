@@ -1,21 +1,16 @@
 """有上限的多意图只读执行：逐项计划、逐项鉴权、按依赖执行、保留部分结果。"""
 
-import hashlib
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.modules.ai import llm
-from app.core.config import Settings
-from app.modules.system.model import User
-from app.modules.ai.model import AIConversation
-
+from app.core.config import Settings, get_settings
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
+from app.modules.ai.history_access import fingerprint, history_accessible
 from app.modules.ai.schema import (
     AIChatMessage,
     AIChatRequest,
@@ -31,13 +26,9 @@ from app.modules.ai.schema import (
     Understanding,
     schema_response_format,
 )
-from app.modules.ai import agent_tools, service, text2sql
-from app.modules.ai.model import AIConversationState, AIMessage
-
-
-def fingerprint(value: object) -> str:
-    """对规范化证据生成摘要，用于历史重验；不输出原始数据或认证信息。"""
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+from app.modules.ai import agent_tools, conversation_store, llm, service, text2sql
+from app.modules.ai.model import AIConversation, AIMessage
+from app.modules.system.model import User
 
 
 async def plan_analytics(db: Session, user: User, task: SubTask, settings: Settings, *,
@@ -254,38 +245,6 @@ def batch_result(tasks: list[TaskResult]) -> BatchResult:
     return BatchResult(status=status, tasks=tasks)
 
 
-def history_accessible(db: Session, user: User, report: dict | None) -> bool:
-    """旧结果展示前重查当前权限及范围；变化时隐藏整批旧答案和来源。"""
-    try:
-        batch = BatchResult.model_validate(report)
-        tools = {entry["name"] for entry in agent_tools.list_tools(db, user)}
-        for task in batch.tasks:
-            if task.kind in {"inventory", "quotes"} and "catalog.search_products" not in tools:
-                return False
-            if task.kind == "analytics" and task.status == TaskStatus.SUCCEEDED:
-                from app.modules.ai.history_access import query_accessible
-                if not task.citations or not all(query_accessible(db, user, citation) for citation in task.citations):
-                    return False
-            if task.kind == "document" and task.status == TaskStatus.SUCCEEDED:
-                from app.modules.doc_kb.model import AiDocument, AiDocumentSection
-                from app.modules.doc_kb.retrieve import SECTION_CONTENT_MAX_CHARS
-                if not task.citations:
-                    return False
-                for citation in task.citations:
-                    row = db.execute(select(AiDocument.parse_status, AiDocumentSection.content)
-                        .join(AiDocumentSection, AiDocumentSection.document_id == AiDocument.id)
-                        .where(AiDocument.id == citation["document_id"], AiDocumentSection.id == citation["section_id"])).first()
-                    if row is None or row[0] != "PARSED" or row[1][:SECTION_CONTENT_MAX_CHARS] != citation["content"]:
-                        return False
-            for call in task.tool_calls:
-                result = agent_tools.execute_tool(db, user, ToolCall(tool=call["tool"], arguments=call["arguments"])).model_dump(mode="json")
-                if fingerprint({k: v for k, v in result.items() if k != "observed_at"}) != call["fingerprint"]:
-                    return False
-        return True
-    except (AuthorizationError, ResourceNotFoundError, BusinessValidationError, ValueError, SQLAlchemyError, KeyError):
-        return False
-
-
 def summarize(batch: BatchResult) -> str:
     """确定性汇总，保留每项原始数字/单位，不跨数据集求和，也不伪造成功。"""
     completed = sum(task.status == TaskStatus.SUCCEEDED for task in batch.tasks)
@@ -302,8 +261,8 @@ async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversat
     同步与流式聊天共用此函数。会话只保存多计划集合，不把最后一项覆盖为单计划。
     函数提交本轮聊天记录；业务读取位于 savepoint 中，不写业务实体。
     """
-    settings = service.get_settings()
-    state = service._load_conversation_state(db, conversation)
+    settings = get_settings()
+    state = conversation_store.load_conversation_state(db, conversation)
     previous = (state.memory_state or {}).get("batch_tasks") if state else None
     if data.retry_failed:
         previous = [task.model_dump(mode="json") for task in previous_batch(db, conversation.id).tasks]
@@ -317,18 +276,11 @@ async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversat
     for task in batch.tasks:
         for citation in task.citations:
             if citation.get("type") == "text2sql":
-                service._append_query_log(db, conversation, AIQueryTrace.model_validate(citation["query_trace"]))
+                conversation_store.append_query_log(db, conversation, AIQueryTrace.model_validate(citation["query_trace"]))
     question = next(message.content for message in reversed(data.messages) if message.role == "user")
     db.add_all([AIMessage(conversation_id=conversation.id, message_role="USER", content=question),
                 AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=answer, citations=citations)])
-    if service._conversation_state_enabled(db):
-        if state is None:
-            state = AIConversationState(conversation_id=conversation.id, thread_id=f"ai:{user.id}:{conversation.id}")
-            db.add(state)
-        state.memory_state = {**(state.memory_state or {}), "batch_tasks": report["tasks"]}
-        state.query_plan = None  # 多计划不能伪装成最后一项单计划。
-        state.permission_snapshot = service._permission_snapshot(db, user)
-        state.state_version = (state.state_version or 0) + 1
+    conversation_store.save_batch_state(db, user, conversation, state, report["tasks"])
     conversation.last_message_at = datetime.now()
     db.commit()
     return AIChatResponse(message=AIChatMessage(role="assistant", content=answer), conversation_id=conversation.id,
@@ -350,7 +302,7 @@ def retry_decision(db: Session, user: User, conversation_id: int | None) -> Unde
     """仅从本人最新批次恢复任务，客户端不能提交计划或指定执行他人结果。"""
     if not conversation_id:
         raise BusinessValidationError("重试必须指定原查询会话。")
-    service._get_owned_conversation(db, user, conversation_id)
+    conversation_store.get_owned_conversation(db, user, conversation_id)
     batch = previous_batch(db, conversation_id)
     if not any(task.status in {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED} for task in batch.tasks):
         raise BusinessValidationError("该批次没有失败或已取消项；待补充项请先提供查询条件。")

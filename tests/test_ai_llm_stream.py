@@ -14,6 +14,21 @@ from app.modules.ai.schema import AIChatMessage, AIChatRequest
 REQUEST = AIChatRequest(messages=[AIChatMessage(role="user", content="分析附件")])
 
 
+@pytest.mark.parametrize("raw", [
+    '{"items": [{"name": "乙醇"}]}',
+    '结果如下：\n```json\n{"items": [{"name": "乙醇"}]}\n```',
+    '前文含无效 {内容}，实际结果：{"items": [{"name": "乙醇"}]} 后文',
+])
+def test_extract_json_object_handles_model_output(raw):
+    assert llm.extract_json_object(raw) == {"items": [{"name": "乙醇"}]}
+
+
+@pytest.mark.parametrize("raw", ["", "没有结构化结果", "```json\n{invalid}\n```"])
+def test_extract_json_object_rejects_invalid_output(raw):
+    with pytest.raises(BusinessValidationError):
+        llm.extract_json_object(raw)
+
+
 @pytest.mark.parametrize("failure", ["before_token", "after_token", "empty"])
 def test_stream_retries_only_before_output(monkeypatch, failure):
     attempts = 0

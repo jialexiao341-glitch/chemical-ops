@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.modules.ai import conversation_store
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
 from app.core.observability import get_request_id, metrics, observe_duration
@@ -204,7 +205,7 @@ async def chat_stream(data: AIChatRequest, db: Session = Depends(get_db), user: 
 def conversations(limit: int = Query(default=50, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> AIConversationPage:
     """只返回当前用户自己的 AI 会话。"""
 
-    items, total = service.list_conversations(db, user, limit=limit)
+    items, total = conversation_store.list_conversations(db, user, limit=limit)
     LOGGER.info("AI HTTP 历史会话 user_id=%s count=%s", user.id, total)
     return AIConversationPage(items=[AIConversationRead.model_validate(item) for item in items], total=total)
 
@@ -212,7 +213,7 @@ def conversations(limit: int = Query(default=50, ge=1, le=100), db: Session = De
 @router.patch("/conversations/{conversation_id}", response_model=AIConversationRead, summary="管理 AI 会话")
 def update_conversation(conversation_id: int, data: AIConversationUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> AIConversationRead:
     """重命名或置顶当前用户自己的会话。"""
-    updated = service.update_conversation(db, user, conversation_id, title=data.title, pinned=data.pinned)
+    updated = conversation_store.update_conversation(db, user, conversation_id, title=data.title, pinned=data.pinned)
     return AIConversationRead.model_validate(updated)
 
 
@@ -220,7 +221,7 @@ def update_conversation(conversation_id: int, data: AIConversationUpdate, db: Se
 def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200), db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> AIMessagePage:
     """只读取当前用户自己的 AI 会话消息。"""
 
-    items, total = service.list_messages(db, user, conversation_id, limit=limit)
+    items, total = conversation_store.list_messages(db, user, conversation_id, limit=limit)
     LOGGER.info("AI HTTP 历史消息 user_id=%s conversation_id=%s count=%s", user.id, conversation_id, total)
     result = []
     for item in items:
@@ -265,7 +266,7 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
 def delete_conversation(conversation_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, object]:
     """只允许删除当前用户自己的会话及消息。"""
 
-    service.delete_conversation(db, user, conversation_id)
+    conversation_store.delete_conversation(db, user, conversation_id)
     return {"deleted": True, "conversation_id": conversation_id}
 
 
@@ -273,5 +274,5 @@ def delete_conversation(conversation_id: int, db: Session = Depends(get_db), use
 def clear_query_context(conversation_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, object]:
     """清空当前会话的结构化 QueryPlan，保留历史消息和审计引用。"""
 
-    service.clear_query_context(db, user, conversation_id)
+    conversation_store.clear_query_context(db, user, conversation_id)
     return {"cleared": True, "conversation_id": conversation_id}

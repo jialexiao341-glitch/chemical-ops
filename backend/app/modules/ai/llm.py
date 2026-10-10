@@ -6,7 +6,9 @@
 import asyncio
 import logging
 import json
+import re
 from collections.abc import AsyncIterator
+from typing import Any
 from time import perf_counter
 from urllib.parse import urlsplit
 
@@ -249,3 +251,18 @@ async def stream_chat(data: AIChatRequest, runtime: Settings, *, attachment_cont
         raise BusinessValidationError("AI 服务暂时不可用，请稍后重试") from stream_error
     if not full_content.strip():
         raise BusinessValidationError("AI 服务返回了空答案")
+
+
+def extract_json_object(raw: str) -> dict[str, Any]:
+    """从模型输出中提取第一个合法 JSON 对象，兼容代码块和前置说明。"""
+
+    cleaned = re.sub(r"```(?:json)?", "", raw, flags=re.IGNORECASE).replace("```", "")
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", cleaned):
+        try:
+            payload, _ = decoder.raw_decode(cleaned, match.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise BusinessValidationError("AI 未返回有效的查询计划")

@@ -25,7 +25,7 @@ from app.modules.ai.schema import (
 )
 from app.modules.ai.catalog import CATALOG, DatasetSpec
 from app.modules.ai.llm import chat
-from app.modules.ai.text2sql import _extract_query_plan_payload
+from app.modules.ai.llm import extract_json_object
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
 
@@ -289,7 +289,7 @@ async def parse_filters(db: Session, user: User, request: NLFilterRequest) -> NL
     )
     raw = result.message.content
     try:
-        payload = _extract_query_plan_payload(raw)
+        payload = extract_json_object(raw)
     except BusinessValidationError as exc:
         raise BusinessValidationError("AI 未能返回合法的筛选条件，请换个说法重试") from exc
 

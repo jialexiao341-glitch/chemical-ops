@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.ai.schema import AIChatMessage, AIChatRequest
 from app.modules.ai.llm import chat
-from app.modules.ai.text2sql import _extract_query_plan_payload
+from app.modules.ai.llm import extract_json_object
 from app.modules.deliveries.model import DeliveryItem
 from app.modules.files import mineru, service as file_service
 from app.modules.files.parser import parse_file_content
@@ -426,7 +426,7 @@ async def review_report(db: Session, user: User, acceptance_id: int, file_id: in
         response_format={"type": "json_object"},
     )
     try:
-        extracted = _ExtractedReport.model_validate(_extract_query_plan_payload(response.answer or response.message.content))
+        extracted = _ExtractedReport.model_validate(extract_json_object(response.answer or response.message.content))
     except (BusinessValidationError, ValidationError, TypeError, ValueError) as exc:
         raise BusinessValidationError("报告字段提取结果不可核对，请重新尝试或人工查看报告") from exc
 

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.modules.system.model import User
 
 from app.modules.ai import llm
+from app.modules.ai import conversation_store
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
 from app.modules.ai.schema import (
@@ -83,15 +84,14 @@ def conversation_context(db: Session, user: User, conversation_id: int | None) -
     """
     if conversation_id is None:
         return {}
-    from app.modules.ai import service
-    conversation = service._get_owned_conversation(db, user, conversation_id)
+    conversation = conversation_store.get_owned_conversation(db, user, conversation_id)
     messages = list(db.scalars(select(AIMessage).where(AIMessage.conversation_id == conversation_id)
                               .order_by(AIMessage.id.desc()).limit(8)).all())
-    state = service._load_conversation_state(db, conversation)
+    state = conversation_store.load_conversation_state(db, conversation)
     memory = dict(state.memory_state or {}) if state else {}
     memory_accessible = True
     if memory.get("batch_tasks"):
-        from app.modules.ai.multi_intent import history_accessible
+        from app.modules.ai.history_access import history_accessible
         memory_accessible = history_accessible(db, user, {"status": "PARTIAL", "tasks": memory["batch_tasks"]})
     task_id = (memory.get("evidence_ref") or {}).get("task_id")
     if task_id:
