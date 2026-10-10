@@ -1,0 +1,3522 @@
+{
+  "model": "deepseek-flash",
+  "repeats": 3,
+  "sample_count": 10,
+  "case_count": 30,
+  "passed_count": 30,
+  "query_plan_schema_sha256": "0dddb72fd5085f786452a86e8baa0f29c40578d23d3fb1fcd9218497a2da72a7",
+  "scope": "开发库管理员只读查询；识别独立评分，计划与执行使用评测集已标注的业务查询意图；独立 SQL 核验聚合与前 N 项，不代表跨角色、回答质量或生产效果",
+  "rounds": [
+    {
+      "model": "deepseek-flash",
+      "case_count": 10,
+      "query_plan_schema_sha256": "0dddb72fd5085f786452a86e8baa0f29c40578d23d3fb1fcd9218497a2da72a7",
+      "passed_count": 10,
+      "recognition": {
+        "total": 8,
+        "passed": 8
+      },
+      "plan": {
+        "total": 8,
+        "passed": 8
+      },
+      "execution": {
+        "total": 8,
+        "passed": 8
+      },
+      "scope": "开发库管理员只读查询；识别独立评分，计划与执行使用评测集已标注的业务查询意图；独立 SQL 核验聚合与前 N 项，不代表跨角色、回答质量或生产效果",
+      "cases": [
+        {
+          "question": "统计本月已付款金额，按供应商分组",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [],
+          "actual_rows": [],
+          "dataset": "finance_payments",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [
+            {
+              "field": "status",
+              "operator": "eq",
+              "value": "PAID"
+            }
+          ],
+          "row_count": 0,
+          "truncated": false,
+          "unit": null
+        },
+        {
+          "question": "统计已核验发票含税金额，按供应商分组",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "388827.000000"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "146817.000000"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "137656.000000"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "139939.000000"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "164981.000000"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "174120.000000"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632.000000"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943.000000"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315.000000"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255.000000"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811.000000"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274.000000"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174.000000"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441.000000"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "3667.000000"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "11246.000000"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "19144.000000"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "4959.000000"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "1311.000000"
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "388827"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "174120"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "164981"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "146817"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "139939"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "137656"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "19144"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "11246"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "4959"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "3667"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "1311"
+            }
+          ],
+          "dataset": "finance_invoices",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [
+            {
+              "field": "status",
+              "operator": "eq",
+              "value": "VERIFIED"
+            }
+          ],
+          "row_count": 19,
+          "truncated": false,
+          "unit": "CNY"
+        },
+        {
+          "question": "按供应商统计报价单笔数",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 269
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 152
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 117
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 63
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 88
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 28
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 7
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "metric_value": 6
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 8
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华中工业试剂供应中心10",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 7
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南分析试剂供应中心14",
+              "metric_value": 6
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "metric_value": 7
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 269
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 152
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 117
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 88
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 63
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 28
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "metric_value": 9
+            }
+          ],
+          "dataset": "supplier_quotes",
+          "metric": "count",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "条"
+        },
+        {
+          "question": "按类型统计库存流水笔数",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "type": "INBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "OUTBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "TRANSFER_OUT",
+              "metric_value": 69
+            },
+            {
+              "type": "TRANSFER_IN",
+              "metric_value": 69
+            }
+          ],
+          "actual_rows": [
+            {
+              "type": "INBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "OUTBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "TRANSFER_OUT",
+              "metric_value": 69
+            },
+            {
+              "type": "TRANSFER_IN",
+              "metric_value": 69
+            }
+          ],
+          "dataset": "inventory_transactions",
+          "metric": "count",
+          "group_by": "type",
+          "filters": [],
+          "row_count": 4,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按供应商统计采购订单金额",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "235889.000000"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "266434.000000"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174.000000"
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "currency": "CNY",
+              "metric_value": "5786.000000"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632.000000"
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "currency": "CNY",
+              "metric_value": "11933.000000"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "17299.000000"
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "currency": "CNY",
+              "metric_value": "15568.000000"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255.000000"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "16820.000000"
+            },
+            {
+              "supplier": "华中工业试剂供应中心10",
+              "currency": "CNY",
+              "metric_value": "5915.000000"
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "currency": "CNY",
+              "metric_value": "7050.000000"
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "currency": "CNY",
+              "metric_value": "25267.000000"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "46706.000000"
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "currency": "CNY",
+              "metric_value": "22534.000000"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811.000000"
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "currency": "CNY",
+              "metric_value": "990.000000"
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "currency": "CNY",
+              "metric_value": "19471.000000"
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "currency": "CNY",
+              "metric_value": "41045.000000"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "15399.000000"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274.000000"
+            },
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "582404.360000"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "208976.000000"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "211727.000000"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943.000000"
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "currency": "CNY",
+              "metric_value": "34228.000000"
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "currency": "CNY",
+              "metric_value": "4636.000000"
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "currency": "CNY",
+              "metric_value": "24331.000000"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441.000000"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "7627.000000"
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "currency": "CNY",
+              "metric_value": "19054.000000"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315.000000"
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "currency": "CNY",
+              "metric_value": "17442.000000"
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "currency": "CNY",
+              "metric_value": "26745.000000"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "204023.000000"
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "582404.36"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "266434"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "235889"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "211727"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "208976"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "204023"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "46706"
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "currency": "CNY",
+              "metric_value": "41045"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441"
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "currency": "CNY",
+              "metric_value": "34228"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255"
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "currency": "CNY",
+              "metric_value": "26745"
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "currency": "CNY",
+              "metric_value": "25267"
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "currency": "CNY",
+              "metric_value": "24331"
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "currency": "CNY",
+              "metric_value": "22534"
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "currency": "CNY",
+              "metric_value": "19471"
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "currency": "CNY",
+              "metric_value": "19054"
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "currency": "CNY",
+              "metric_value": "17442"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "17299"
+            }
+          ],
+          "dataset": "purchase_orders",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "CNY"
+        },
+        {
+          "question": "按验收结果统计质量验收单数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "result": "PASSED",
+              "metric_value": 283
+            },
+            {
+              "result": "PARTIAL",
+              "metric_value": 46
+            },
+            {
+              "result": "PENDING",
+              "metric_value": 25
+            }
+          ],
+          "actual_rows": [
+            {
+              "result": "PASSED",
+              "metric_value": 283
+            },
+            {
+              "result": "PARTIAL",
+              "metric_value": 46
+            },
+            {
+              "result": "PENDING",
+              "metric_value": 25
+            }
+          ],
+          "dataset": "quality_acceptances",
+          "metric": "count",
+          "group_by": "result",
+          "filters": [],
+          "row_count": 3,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按状态统计运营异常数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "status": "CLOSED",
+              "metric_value": 1
+            },
+            {
+              "status": "OPEN",
+              "metric_value": 97
+            },
+            {
+              "status": "PROCESSING",
+              "metric_value": 2
+            }
+          ],
+          "actual_rows": [
+            {
+              "status": "OPEN",
+              "metric_value": 97
+            },
+            {
+              "status": "PROCESSING",
+              "metric_value": 2
+            },
+            {
+              "status": "CLOSED",
+              "metric_value": 1
+            }
+          ],
+          "dataset": "exceptions",
+          "metric": "count",
+          "group_by": "status",
+          "filters": [],
+          "row_count": 3,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按供应商统计到货单数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 106
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 64
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 41
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 37
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 24
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 25
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 2
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "metric_value": 1
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 106
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 64
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 41
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 37
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 25
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 24
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 4
+            }
+          ],
+          "dataset": "deliveries",
+          "metric": "count",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "条"
+        },
+        {
+          "question": "统计供应商报价金额合计",
+          "passed": true,
+          "result": "明确拒绝不支持的汇总"
+        },
+        {
+          "question": "统计库存流水数量合计",
+          "passed": true,
+          "result": "明确拒绝不支持的汇总"
+        }
+      ]
+    },
+    {
+      "model": "deepseek-flash",
+      "case_count": 10,
+      "query_plan_schema_sha256": "0dddb72fd5085f786452a86e8baa0f29c40578d23d3fb1fcd9218497a2da72a7",
+      "passed_count": 10,
+      "recognition": {
+        "total": 8,
+        "passed": 8
+      },
+      "plan": {
+        "total": 8,
+        "passed": 8
+      },
+      "execution": {
+        "total": 8,
+        "passed": 8
+      },
+      "scope": "开发库管理员只读查询；识别独立评分，计划与执行使用评测集已标注的业务查询意图；独立 SQL 核验聚合与前 N 项，不代表跨角色、回答质量或生产效果",
+      "cases": [
+        {
+          "question": "统计本月已付款金额，按供应商分组",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [],
+          "actual_rows": [],
+          "dataset": "finance_payments",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [
+            {
+              "field": "status",
+              "operator": "eq",
+              "value": "PAID"
+            }
+          ],
+          "row_count": 0,
+          "truncated": false,
+          "unit": null
+        },
+        {
+          "question": "统计已核验发票含税金额，按供应商分组",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "388827.000000"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "146817.000000"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "137656.000000"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "139939.000000"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "164981.000000"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "174120.000000"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632.000000"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943.000000"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315.000000"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255.000000"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811.000000"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274.000000"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174.000000"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441.000000"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "3667.000000"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "11246.000000"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "19144.000000"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "4959.000000"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "1311.000000"
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "388827"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "174120"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "164981"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "146817"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "139939"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "137656"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "19144"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "11246"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "4959"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "3667"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "1311"
+            }
+          ],
+          "dataset": "finance_invoices",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [
+            {
+              "field": "status",
+              "operator": "eq",
+              "value": "VERIFIED"
+            }
+          ],
+          "row_count": 19,
+          "truncated": false,
+          "unit": "CNY"
+        },
+        {
+          "question": "按供应商统计报价单笔数",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 269
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 152
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 117
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 63
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 88
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 28
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 7
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "metric_value": 6
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 8
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华中工业试剂供应中心10",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 7
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南分析试剂供应中心14",
+              "metric_value": 6
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "metric_value": 7
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 269
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 152
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 117
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 88
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 63
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 28
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "metric_value": 9
+            }
+          ],
+          "dataset": "supplier_quotes",
+          "metric": "count",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "条"
+        },
+        {
+          "question": "按类型统计库存流水笔数",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "type": "INBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "OUTBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "TRANSFER_OUT",
+              "metric_value": 69
+            },
+            {
+              "type": "TRANSFER_IN",
+              "metric_value": 69
+            }
+          ],
+          "actual_rows": [
+            {
+              "type": "INBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "OUTBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "TRANSFER_OUT",
+              "metric_value": 69
+            },
+            {
+              "type": "TRANSFER_IN",
+              "metric_value": 69
+            }
+          ],
+          "dataset": "inventory_transactions",
+          "metric": "count",
+          "group_by": "type",
+          "filters": [],
+          "row_count": 4,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按供应商统计采购订单金额",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "235889.000000"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "266434.000000"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174.000000"
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "currency": "CNY",
+              "metric_value": "5786.000000"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632.000000"
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "currency": "CNY",
+              "metric_value": "11933.000000"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "17299.000000"
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "currency": "CNY",
+              "metric_value": "15568.000000"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255.000000"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "16820.000000"
+            },
+            {
+              "supplier": "华中工业试剂供应中心10",
+              "currency": "CNY",
+              "metric_value": "5915.000000"
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "currency": "CNY",
+              "metric_value": "7050.000000"
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "currency": "CNY",
+              "metric_value": "25267.000000"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "46706.000000"
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "currency": "CNY",
+              "metric_value": "22534.000000"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811.000000"
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "currency": "CNY",
+              "metric_value": "990.000000"
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "currency": "CNY",
+              "metric_value": "19471.000000"
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "currency": "CNY",
+              "metric_value": "41045.000000"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "15399.000000"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274.000000"
+            },
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "582404.360000"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "208976.000000"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "211727.000000"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943.000000"
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "currency": "CNY",
+              "metric_value": "34228.000000"
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "currency": "CNY",
+              "metric_value": "4636.000000"
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "currency": "CNY",
+              "metric_value": "24331.000000"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441.000000"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "7627.000000"
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "currency": "CNY",
+              "metric_value": "19054.000000"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315.000000"
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "currency": "CNY",
+              "metric_value": "17442.000000"
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "currency": "CNY",
+              "metric_value": "26745.000000"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "204023.000000"
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "582404.36"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "266434"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "235889"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "211727"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "208976"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "204023"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "46706"
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "currency": "CNY",
+              "metric_value": "41045"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441"
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "currency": "CNY",
+              "metric_value": "34228"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255"
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "currency": "CNY",
+              "metric_value": "26745"
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "currency": "CNY",
+              "metric_value": "25267"
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "currency": "CNY",
+              "metric_value": "24331"
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "currency": "CNY",
+              "metric_value": "22534"
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "currency": "CNY",
+              "metric_value": "19471"
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "currency": "CNY",
+              "metric_value": "19054"
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "currency": "CNY",
+              "metric_value": "17442"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "17299"
+            }
+          ],
+          "dataset": "purchase_orders",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "CNY"
+        },
+        {
+          "question": "按验收结果统计质量验收单数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "result": "PASSED",
+              "metric_value": 283
+            },
+            {
+              "result": "PARTIAL",
+              "metric_value": 46
+            },
+            {
+              "result": "PENDING",
+              "metric_value": 25
+            }
+          ],
+          "actual_rows": [
+            {
+              "result": "PASSED",
+              "metric_value": 283
+            },
+            {
+              "result": "PARTIAL",
+              "metric_value": 46
+            },
+            {
+              "result": "PENDING",
+              "metric_value": 25
+            }
+          ],
+          "dataset": "quality_acceptances",
+          "metric": "count",
+          "group_by": "result",
+          "filters": [],
+          "row_count": 3,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按状态统计运营异常数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "status": "CLOSED",
+              "metric_value": 1
+            },
+            {
+              "status": "OPEN",
+              "metric_value": 97
+            },
+            {
+              "status": "PROCESSING",
+              "metric_value": 2
+            }
+          ],
+          "actual_rows": [
+            {
+              "status": "OPEN",
+              "metric_value": 97
+            },
+            {
+              "status": "PROCESSING",
+              "metric_value": 2
+            },
+            {
+              "status": "CLOSED",
+              "metric_value": 1
+            }
+          ],
+          "dataset": "exceptions",
+          "metric": "count",
+          "group_by": "status",
+          "filters": [],
+          "row_count": 3,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按供应商统计到货单数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 106
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 64
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 41
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 37
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 24
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 25
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 2
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "metric_value": 1
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 106
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 64
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 41
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 37
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 25
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 24
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 4
+            }
+          ],
+          "dataset": "deliveries",
+          "metric": "count",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "条"
+        },
+        {
+          "question": "统计供应商报价金额合计",
+          "passed": true,
+          "result": "明确拒绝不支持的汇总"
+        },
+        {
+          "question": "统计库存流水数量合计",
+          "passed": true,
+          "result": "明确拒绝不支持的汇总"
+        }
+      ]
+    },
+    {
+      "model": "deepseek-flash",
+      "case_count": 10,
+      "query_plan_schema_sha256": "0dddb72fd5085f786452a86e8baa0f29c40578d23d3fb1fcd9218497a2da72a7",
+      "passed_count": 10,
+      "recognition": {
+        "total": 8,
+        "passed": 8
+      },
+      "plan": {
+        "total": 8,
+        "passed": 8
+      },
+      "execution": {
+        "total": 8,
+        "passed": 8
+      },
+      "scope": "开发库管理员只读查询；识别独立评分，计划与执行使用评测集已标注的业务查询意图；独立 SQL 核验聚合与前 N 项，不代表跨角色、回答质量或生产效果",
+      "cases": [
+        {
+          "question": "统计本月已付款金额，按供应商分组",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [],
+          "actual_rows": [],
+          "dataset": "finance_payments",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [
+            {
+              "field": "status",
+              "operator": "eq",
+              "value": "PAID"
+            }
+          ],
+          "row_count": 0,
+          "truncated": false,
+          "unit": null
+        },
+        {
+          "question": "统计已核验发票含税金额，按供应商分组",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "388827.000000"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "146817.000000"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "137656.000000"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "139939.000000"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "164981.000000"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "174120.000000"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632.000000"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943.000000"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315.000000"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255.000000"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811.000000"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274.000000"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174.000000"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441.000000"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "3667.000000"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "11246.000000"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "19144.000000"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "4959.000000"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "1311.000000"
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "388827"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "174120"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "164981"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "146817"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "139939"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "137656"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "19144"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "11246"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "4959"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "3667"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "1311"
+            }
+          ],
+          "dataset": "finance_invoices",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [
+            {
+              "field": "status",
+              "operator": "eq",
+              "value": "VERIFIED"
+            }
+          ],
+          "row_count": 19,
+          "truncated": false,
+          "unit": "CNY"
+        },
+        {
+          "question": "按供应商统计报价单笔数",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 269
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 152
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 117
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 63
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 88
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 28
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 7
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "metric_value": 6
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 8
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 8
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华中工业试剂供应中心10",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 7
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 7
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华南分析试剂供应中心14",
+              "metric_value": 6
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "metric_value": 7
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 269
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 152
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 117
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 88
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 63
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 28
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 10
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 10
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 9
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 9
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "metric_value": 9
+            }
+          ],
+          "dataset": "supplier_quotes",
+          "metric": "count",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "条"
+        },
+        {
+          "question": "按类型统计库存流水笔数",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "type": "INBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "OUTBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "TRANSFER_OUT",
+              "metric_value": 69
+            },
+            {
+              "type": "TRANSFER_IN",
+              "metric_value": 69
+            }
+          ],
+          "actual_rows": [
+            {
+              "type": "INBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "OUTBOUND",
+              "metric_value": 328
+            },
+            {
+              "type": "TRANSFER_OUT",
+              "metric_value": 69
+            },
+            {
+              "type": "TRANSFER_IN",
+              "metric_value": 69
+            }
+          ],
+          "dataset": "inventory_transactions",
+          "metric": "count",
+          "group_by": "type",
+          "filters": [],
+          "row_count": 4,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按供应商统计采购订单金额",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "235889.000000"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "266434.000000"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174.000000"
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "currency": "CNY",
+              "metric_value": "5786.000000"
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "currency": "CNY",
+              "metric_value": "1632.000000"
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "currency": "CNY",
+              "metric_value": "11933.000000"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "17299.000000"
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "currency": "CNY",
+              "metric_value": "15568.000000"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255.000000"
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "currency": "CNY",
+              "metric_value": "16820.000000"
+            },
+            {
+              "supplier": "华中工业试剂供应中心10",
+              "currency": "CNY",
+              "metric_value": "5915.000000"
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "currency": "CNY",
+              "metric_value": "7050.000000"
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "currency": "CNY",
+              "metric_value": "25267.000000"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "46706.000000"
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "currency": "CNY",
+              "metric_value": "22534.000000"
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "currency": "CNY",
+              "metric_value": "14811.000000"
+            },
+            {
+              "supplier": "华北工艺材料供应中心27",
+              "currency": "CNY",
+              "metric_value": "990.000000"
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "currency": "CNY",
+              "metric_value": "19471.000000"
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "currency": "CNY",
+              "metric_value": "41045.000000"
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "currency": "CNY",
+              "metric_value": "15399.000000"
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "currency": "CNY",
+              "metric_value": "5274.000000"
+            },
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "582404.360000"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "208976.000000"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "211727.000000"
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "currency": "CNY",
+              "metric_value": "1943.000000"
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "currency": "CNY",
+              "metric_value": "34228.000000"
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "currency": "CNY",
+              "metric_value": "4636.000000"
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "currency": "CNY",
+              "metric_value": "24331.000000"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441.000000"
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "currency": "CNY",
+              "metric_value": "7627.000000"
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "currency": "CNY",
+              "metric_value": "19054.000000"
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "currency": "CNY",
+              "metric_value": "4315.000000"
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "currency": "CNY",
+              "metric_value": "17442.000000"
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "currency": "CNY",
+              "metric_value": "26745.000000"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "204023.000000"
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "currency": "CNY",
+              "metric_value": "582404.36"
+            },
+            {
+              "supplier": "北方实验材料",
+              "currency": "CNY",
+              "metric_value": "266434"
+            },
+            {
+              "supplier": "东部试剂配送",
+              "currency": "CNY",
+              "metric_value": "235889"
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "currency": "CNY",
+              "metric_value": "211727"
+            },
+            {
+              "supplier": "安研化学材料",
+              "currency": "CNY",
+              "metric_value": "208976"
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "currency": "CNY",
+              "metric_value": "204023"
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "currency": "CNY",
+              "metric_value": "46706"
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "currency": "CNY",
+              "metric_value": "41045"
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "currency": "CNY",
+              "metric_value": "40441"
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "currency": "CNY",
+              "metric_value": "34228"
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "currency": "CNY",
+              "metric_value": "28174"
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "currency": "CNY",
+              "metric_value": "27255"
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "currency": "CNY",
+              "metric_value": "26745"
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "currency": "CNY",
+              "metric_value": "25267"
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "currency": "CNY",
+              "metric_value": "24331"
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "currency": "CNY",
+              "metric_value": "22534"
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "currency": "CNY",
+              "metric_value": "19471"
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "currency": "CNY",
+              "metric_value": "19054"
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "currency": "CNY",
+              "metric_value": "17442"
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "currency": "CNY",
+              "metric_value": "17299"
+            }
+          ],
+          "dataset": "purchase_orders",
+          "metric": "amount",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "CNY"
+        },
+        {
+          "question": "按验收结果统计质量验收单数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "result": "PASSED",
+              "metric_value": 283
+            },
+            {
+              "result": "PARTIAL",
+              "metric_value": 46
+            },
+            {
+              "result": "PENDING",
+              "metric_value": 25
+            }
+          ],
+          "actual_rows": [
+            {
+              "result": "PASSED",
+              "metric_value": 283
+            },
+            {
+              "result": "PARTIAL",
+              "metric_value": 46
+            },
+            {
+              "result": "PENDING",
+              "metric_value": 25
+            }
+          ],
+          "dataset": "quality_acceptances",
+          "metric": "count",
+          "group_by": "result",
+          "filters": [],
+          "row_count": 3,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按状态统计运营异常数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "status": "CLOSED",
+              "metric_value": 1
+            },
+            {
+              "status": "OPEN",
+              "metric_value": 97
+            },
+            {
+              "status": "PROCESSING",
+              "metric_value": 2
+            }
+          ],
+          "actual_rows": [
+            {
+              "status": "OPEN",
+              "metric_value": 97
+            },
+            {
+              "status": "PROCESSING",
+              "metric_value": 2
+            },
+            {
+              "status": "CLOSED",
+              "metric_value": 1
+            }
+          ],
+          "dataset": "exceptions",
+          "metric": "count",
+          "group_by": "status",
+          "filters": [],
+          "row_count": 3,
+          "truncated": false,
+          "unit": "条"
+        },
+        {
+          "question": "按供应商统计到货单数量",
+          "passed": true,
+          "recognition_passed": true,
+          "plan_passed": true,
+          "execution_passed": true,
+          "expected_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 106
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 64
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 41
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 37
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 24
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 25
+            },
+            {
+              "supplier": "华东实验材料供应中心01",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西北分析试剂供应中心18",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西南实验材料供应中心05",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华中化学品配送供应中心22",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华北工业试剂供应中心09",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华南工艺材料供应中心26",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华中分析试剂供应中心16",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华中工艺材料供应中心28",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华北分析试剂供应中心15",
+              "metric_value": 3
+            },
+            {
+              "supplier": "华南实验材料供应中心02",
+              "metric_value": 2
+            },
+            {
+              "supplier": "华东化学品配送供应中心19",
+              "metric_value": 2
+            },
+            {
+              "supplier": "西北实验材料供应中心06",
+              "metric_value": 1
+            },
+            {
+              "supplier": "西南化学品配送供应中心23",
+              "metric_value": 1
+            }
+          ],
+          "actual_rows": [
+            {
+              "supplier": "华辰精细化工",
+              "metric_value": 106
+            },
+            {
+              "supplier": "安研化学材料",
+              "metric_value": 64
+            },
+            {
+              "supplier": "瑞科试剂供应链",
+              "metric_value": 41
+            },
+            {
+              "supplier": "远洋实验室用品",
+              "metric_value": 37
+            },
+            {
+              "supplier": "北方实验材料",
+              "metric_value": 25
+            },
+            {
+              "supplier": "东部试剂配送",
+              "metric_value": 24
+            },
+            {
+              "supplier": "华北实验材料供应中心03",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华东工业试剂供应中心07",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西南分析试剂供应中心17",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华北化学品配送供应中心21",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华东工艺材料供应中心25",
+              "metric_value": 5
+            },
+            {
+              "supplier": "西南工艺材料供应中心29",
+              "metric_value": 5
+            },
+            {
+              "supplier": "华南化学品配送供应中心20",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北化学品配送供应中心24",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西南工业试剂供应中心11",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华东分析试剂供应中心13",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工艺材料供应中心30",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华中实验材料供应中心04",
+              "metric_value": 4
+            },
+            {
+              "supplier": "华南工业试剂供应中心08",
+              "metric_value": 4
+            },
+            {
+              "supplier": "西北工业试剂供应中心12",
+              "metric_value": 4
+            }
+          ],
+          "dataset": "deliveries",
+          "metric": "count",
+          "group_by": "supplier",
+          "filters": [],
+          "row_count": 20,
+          "truncated": true,
+          "unit": "条"
+        },
+        {
+          "question": "统计供应商报价金额合计",
+          "passed": true,
+          "result": "明确拒绝不支持的汇总"
+        },
+        {
+          "question": "统计库存流水数量合计",
+          "passed": true,
+          "result": "明确拒绝不支持的汇总"
+        }
+      ]
+    }
+  ],
+  "recognition": {
+    "total": 24,
+    "passed": 24
+  },
+  "plan": {
+    "total": 24,
+    "passed": 24
+  },
+  "execution": {
+    "total": 24,
+    "passed": 24
+  },
+  "stable_cases": 10
+}

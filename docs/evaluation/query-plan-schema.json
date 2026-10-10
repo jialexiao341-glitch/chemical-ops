@@ -1,0 +1,238 @@
+{
+  "$defs": {
+    "QueryFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "description": "必须属于当前 dataset 的 filters，不能把分组别名用于筛选。各数据集允许值：{\"approved_requests_without_rfq\": [], \"weekly_order_risks\": [], \"inventory_by_batch\": [\"product_id\"], \"accepted_orders_finance_gaps\": [], \"supplier_quote_delivery_profile\": [\"product_id\", \"supplier_id\"], \"inventory_movement_trace\": [\"batch_id\", \"product_id\"], \"purchase_requests\": [\"currency_code\", \"priority\", \"status\"], \"purchase_orders\": [\"currency_code\", \"region\", \"status\", \"supplier_name\"], \"deliveries\": [\"status\", \"supplier_name\"], \"inventory\": [\"product_name\", \"status\", \"warehouse_name\"], \"quality_acceptances\": [\"certificate_complete\", \"result\"], \"exceptions\": [\"severity\", \"status\", \"type\"], \"finance_reconciliations\": [\"currency_code\", \"status\", \"supplier_name\"], \"supplier_quotes\": [\"currency_code\", \"status\", \"supplier_name\"], \"inventory_transactions\": [\"product_name\", \"type\", \"warehouse_name\"], \"finance_invoices\": [\"currency_code\", \"status\", \"supplier_name\"], \"finance_payments\": [\"currency_code\", \"status\", \"supplier_name\"], \"suppliers\": [\"cooperation_level\", \"region\", \"status\"]}",
+          "enum": [
+            "batch_id",
+            "certificate_complete",
+            "cooperation_level",
+            "currency_code",
+            "priority",
+            "product_id",
+            "product_name",
+            "region",
+            "result",
+            "severity",
+            "status",
+            "supplier_id",
+            "supplier_name",
+            "type",
+            "warehouse_name"
+          ],
+          "title": "筛选槽位",
+          "type": "string"
+        },
+        "operator": {
+          "description": "eq=等于，contains=包含文本，gte=大于等于，lte=小于等于，in=属于集合。in 的 value 必须是数组；其余操作使用单个值。",
+          "enum": [
+            "eq",
+            "contains",
+            "gte",
+            "lte",
+            "in"
+          ],
+          "title": "筛选操作符",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "type": "array"
+            }
+          ],
+          "description": "用户明确给出或前置查询明确返回的值，不得猜测ID。状态使用业务编码：finance_invoices 已核验=VERIFIED；finance_payments 已付款=PAID。",
+          "title": "筛选值"
+        }
+      },
+      "required": [
+        "field",
+        "operator",
+        "value"
+      ],
+      "title": "QueryFilter",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "dataset": {
+      "description": "根据问题选择唯一数据集，不能选择无关数据集来凑合法输出。数据集含义：{\"approved_requests_without_rfq\": \"已审批未建立询价单的采购申请\", \"weekly_order_risks\": \"本周订单履约风险\", \"inventory_by_batch\": \"产品批次可用库存\", \"accepted_orders_finance_gaps\": \"已验收订单财务进度\", \"supplier_quote_delivery_profile\": \"供应商报价、交期与异常表现\", \"inventory_movement_trace\": \"库存变动与冻结原因追溯\", \"purchase_requests\": \"采购申请\", \"purchase_orders\": \"采购订单\", \"deliveries\": \"入库单\", \"inventory\": \"库存\", \"quality_acceptances\": \"质量验收\", \"exceptions\": \"运营异常\", \"finance_reconciliations\": \"财务对账\", \"supplier_quotes\": \"供应商报价\", \"inventory_transactions\": \"库存流水\", \"finance_invoices\": \"财务发票\", \"finance_payments\": \"财务付款\", \"suppliers\": \"供应商\"}",
+      "enum": [
+        "approved_requests_without_rfq",
+        "weekly_order_risks",
+        "inventory_by_batch",
+        "accepted_orders_finance_gaps",
+        "supplier_quote_delivery_profile",
+        "inventory_movement_trace",
+        "purchase_requests",
+        "purchase_orders",
+        "deliveries",
+        "inventory",
+        "quality_acceptances",
+        "exceptions",
+        "finance_reconciliations",
+        "supplier_quotes",
+        "inventory_transactions",
+        "finance_invoices",
+        "finance_payments",
+        "suppliers"
+      ],
+      "title": "查询数据集",
+      "type": "string"
+    },
+    "metric": {
+      "description": "count=记录数量，amount=金额合计，sum_quantity=库存数量合计，records=固定业务明细。发票金额为含税金额；报价单价不得跨产品或单位求和；金额按币种分别统计。各数据集允许值：{\"approved_requests_without_rfq\": [\"records\"], \"weekly_order_risks\": [\"records\"], \"inventory_by_batch\": [\"records\"], \"accepted_orders_finance_gaps\": [\"records\"], \"supplier_quote_delivery_profile\": [\"records\"], \"inventory_movement_trace\": [\"records\"], \"purchase_requests\": [\"amount\", \"count\"], \"purchase_orders\": [\"amount\", \"count\"], \"deliveries\": [\"count\"], \"inventory\": [\"count\", \"sum_quantity\"], \"quality_acceptances\": [\"count\"], \"exceptions\": [\"count\"], \"finance_reconciliations\": [\"amount\", \"count\"], \"supplier_quotes\": [\"count\"], \"inventory_transactions\": [\"count\"], \"finance_invoices\": [\"amount\", \"count\"], \"finance_payments\": [\"amount\", \"count\"], \"suppliers\": [\"count\"]}",
+      "enum": [
+        "count",
+        "amount",
+        "sum_quantity",
+        "records"
+      ],
+      "title": "统计指标",
+      "type": "string"
+    },
+    "time_field": {
+      "anyOf": [
+        {
+          "enum": [
+            "actual_arrival_date",
+            "approved_at",
+            "created_at",
+            "due_at",
+            "expected_arrival_date",
+            "expected_date",
+            "expiry_date",
+            "inspection_time",
+            "invoice_date",
+            "order_date",
+            "paid_at",
+            "quote_date",
+            "submitted_at",
+            "verified_at"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "日期筛选依据的业务时间字段。采购订单本月统计使用 order_date；未限定日期可为 null；无时间字段的数据集必须为 null。各数据集允许值：{\"approved_requests_without_rfq\": [], \"weekly_order_risks\": [], \"inventory_by_batch\": [], \"accepted_orders_finance_gaps\": [], \"supplier_quote_delivery_profile\": [], \"inventory_movement_trace\": [], \"purchase_requests\": [\"approved_at\", \"created_at\", \"expected_date\", \"submitted_at\"], \"purchase_orders\": [\"created_at\", \"expected_arrival_date\", \"order_date\"], \"deliveries\": [\"actual_arrival_date\", \"created_at\", \"expected_arrival_date\"], \"inventory\": [\"created_at\", \"expiry_date\"], \"quality_acceptances\": [\"created_at\", \"inspection_time\"], \"exceptions\": [\"created_at\", \"due_at\"], \"finance_reconciliations\": [\"created_at\"], \"supplier_quotes\": [\"created_at\", \"quote_date\"], \"inventory_transactions\": [\"created_at\"], \"finance_invoices\": [\"created_at\", \"invoice_date\", \"verified_at\"], \"finance_payments\": [\"approved_at\", \"created_at\", \"paid_at\"], \"suppliers\": [\"created_at\"]}",
+      "title": "时间口径"
+    },
+    "date_from": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "包含当天的 ISO 日期 YYYY-MM-DD；不限起始时间为 null。相对时间以输入 today 换算；本月从当月第一天开始。不得晚于 date_to。",
+      "title": "起始日期"
+    },
+    "date_to": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "包含当天的 ISO 日期 YYYY-MM-DD；不限结束时间为 null。相对时间以输入 today 换算；本月截至 today，不能擅自扩展到未来月底。",
+      "title": "结束日期"
+    },
+    "group_by": {
+      "anyOf": [
+        {
+          "enum": [
+            "certificate_complete",
+            "cooperation_level",
+            "currency",
+            "expiry_date",
+            "priority",
+            "product",
+            "region",
+            "result",
+            "severity",
+            "status",
+            "supplier",
+            "type",
+            "warehouse"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "只能是一个维度字符串或 null，不能是数组。按供应商分组使用 supplier，不能使用筛选字段 supplier_name；金额会再按币种分组。各数据集允许值：{\"approved_requests_without_rfq\": [], \"weekly_order_risks\": [], \"inventory_by_batch\": [], \"accepted_orders_finance_gaps\": [], \"supplier_quote_delivery_profile\": [], \"inventory_movement_trace\": [], \"purchase_requests\": [\"currency\", \"priority\", \"status\"], \"purchase_orders\": [\"currency\", \"region\", \"status\", \"supplier\"], \"deliveries\": [\"status\", \"supplier\"], \"inventory\": [\"expiry_date\", \"product\", \"status\", \"warehouse\"], \"quality_acceptances\": [\"certificate_complete\", \"result\"], \"exceptions\": [\"severity\", \"status\", \"type\"], \"finance_reconciliations\": [\"currency\", \"status\", \"supplier\"], \"supplier_quotes\": [\"currency\", \"status\", \"supplier\"], \"inventory_transactions\": [\"product\", \"type\", \"warehouse\"], \"finance_invoices\": [\"currency\", \"status\", \"supplier\"], \"finance_payments\": [\"currency\", \"status\", \"supplier\"], \"suppliers\": [\"cooperation_level\", \"region\", \"status\"]}",
+      "title": "分组维度"
+    },
+    "filters": {
+      "description": "按用户明确条件逐项填写；没有条件使用 []，不得猜测。已付款金额须筛选 status=PAID，已核验发票金额须筛选 status=VERIFIED。",
+      "items": {
+        "$ref": "#/$defs/QueryFilter"
+      },
+      "title": "筛选条件",
+      "type": "array"
+    },
+    "order": {
+      "description": "asc=升序，desc=降序；金额最高、数量最多等排名使用 desc。",
+      "enum": [
+        "asc",
+        "desc"
+      ],
+      "title": "排序方向",
+      "type": "string"
+    },
+    "limit": {
+      "description": "用户明确最多显示 N 家或 N 条时取 N；未指定取20。仅限制明细展示，不能将展示条数当作全范围统计数量。允许1至100。",
+      "maximum": 100,
+      "minimum": 1,
+      "title": "最多展示条数",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "dataset",
+    "metric",
+    "time_field",
+    "date_from",
+    "date_to",
+    "group_by",
+    "filters",
+    "order",
+    "limit"
+  ],
+  "title": "QueryPlan",
+  "type": "object"
+}
