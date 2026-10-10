@@ -1,0 +1,11 @@
+# 单独管理 Qdrant 时，也复用统一服务定义。
+name: chemicalops
+
+services:
+  qdrant:
+    extends:
+      file: compose.yaml
+      service: qdrant
+
+volumes:
+  chemicalops_qdrant_data:

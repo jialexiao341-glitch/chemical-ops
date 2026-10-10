@@ -1,0 +1,68 @@
+name: chemicalops
+
+services:
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CHEMICALOPS_REDIS_PORT:-6380}:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  qdrant:
+    image: qdrant/qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CHEMICALOPS_QDRANT_PORT:-6333}:6333"
+    volumes:
+      - chemicalops_qdrant_data:/qdrant/storage
+
+  minio:
+    image: pgsty/minio:RELEASE.2026-03-25T00-00-00Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:${CHEMICALOPS_MINIO_API_PORT:-19000}:9000"
+      - "127.0.0.1:${CHEMICALOPS_MINIO_CONSOLE_PORT:-19001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?请通过 --env-file 指定项目 .env 中的 MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?请通过 --env-file 指定项目 .env 中的 MINIO_SECRET_KEY}
+    volumes:
+      - chemicalops_minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-31Z
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}";
+        mc mb --ignore-existing "local/$${MINIO_DOCUMENT_BUCKET}";
+        mc mb --ignore-existing "local/$${MINIO_RESULT_BUCKET}";
+        mc anonymous set none "local/$${MINIO_BUCKET}";
+        mc anonymous set none "local/$${MINIO_DOCUMENT_BUCKET}";
+        mc anonymous set none "local/$${MINIO_RESULT_BUCKET}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?请配置 MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?请配置 MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-chemicalops-files}
+      MINIO_DOCUMENT_BUCKET: ${MINIO_DOCUMENT_BUCKET:-chemicalops-documents}
+      MINIO_RESULT_BUCKET: ${MINIO_RESULT_BUCKET:-chemicalops-results}
+
+volumes:
+  chemicalops_minio_data:
+  chemicalops_qdrant_data:

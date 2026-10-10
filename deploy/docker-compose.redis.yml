@@ -1,0 +1,8 @@
+# 保留原单服务入口，服务定义统一维护在 compose.yaml。
+name: chemicalops
+
+services:
+  redis:
+    extends:
+      file: compose.yaml
+      service: redis
