@@ -57,7 +57,7 @@ def model_script(monkeypatch):
         action = actions.pop(0)
         content = action if isinstance(action, str) else json.dumps(action, ensure_ascii=False)
         return SimpleNamespace(message=SimpleNamespace(content=content))
-    monkeypatch.setattr(runtime.service, "chat", chat)
+    monkeypatch.setattr(runtime.llm, "chat", chat)
     return actions, contexts
 
 
@@ -204,7 +204,7 @@ def test_context_and_time_budget_stop(task_db, model_script, monkeypatch):
     async def slow(*_args, **_kwargs):
         """模拟外部模型长时间未响应。"""
         await asyncio.sleep(2)
-    monkeypatch.setattr(runtime.service, 'chat', slow)
+    monkeypatch.setattr(runtime.llm, 'chat', slow)
     monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(_env_file=None, agent_execution_mode="in_process", agent_task_timeout_seconds=1))
     assert start(task_db).error_code == 'TASK_TIMEOUT'
 
@@ -244,14 +244,14 @@ def test_permission_rechecked_immediately_before_tool(task_db, model_script, mon
     actions, _ = model_script
     actions.append(tool('catalog.search_products', keyword='测试乙醇'))
     actions.append(tool('inventory.query_available', product_id=1))
-    original = runtime.service.chat
+    original = runtime.llm.chat
     async def revoke(request, *args, **kwargs):
         """库存动作生成后撤销库存读取权限。"""
         reply = await original(request, *args, **kwargs)
         if not actions:
             monkeypatch.setattr(tools, 'get_user_permission_codes', lambda *_: ['master.products.read'])
         return reply
-    monkeypatch.setattr(runtime.service, 'chat', revoke)
+    monkeypatch.setattr(runtime.llm, 'chat', revoke)
     assert start(task_db).error_code == 'PERMISSION_DENIED'
 
 
@@ -262,7 +262,7 @@ def test_cancel_during_model_wait_cannot_be_overwritten(task_db, monkeypatch):
         task_id = task_db.scalar(select(AIAgentTask.id))
         runtime.cancel_task(task_db, USER, task_id)
         return SimpleNamespace(message=SimpleNamespace(content=json.dumps(tool('catalog.search_products', keyword='测试乙醇'))))
-    monkeypatch.setattr(runtime.service, 'chat', cancel_then_reply)
+    monkeypatch.setattr(runtime.llm, 'chat', cancel_then_reply)
     result = start(task_db)
     assert result.status == 'CANCELLED' and result.trace == []
 
@@ -318,7 +318,7 @@ def test_actual_model_adapter_uses_planner_prompt_and_json_protocol(task_db, mon
         assert payload['response_format'] == {'type': 'json_object'}
         return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps(actions.pop(0))}}]})
     original_client = httpx.AsyncClient
-    monkeypatch.setattr(runtime.service.httpx, 'AsyncClient', lambda **kwargs: original_client(
+    monkeypatch.setattr(runtime.llm.httpx, 'AsyncClient', lambda **kwargs: original_client(
         transport=httpx.MockTransport(respond), **kwargs))
     assert start(task_db).status == 'SUCCEEDED'
     assert len(requests) == 4 and requests[-1]['max_tokens'] == 2048

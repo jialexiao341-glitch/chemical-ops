@@ -4,7 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 from app.core.config import Settings
-from app.modules.ai.intent import Intent, classify_intent
+from app.modules.ai.schema import Intent
+from app.modules.ai.evaluation import classify_intent
 from app.modules.ai.order_trace import _can_read, _stage, extract_order_trace_no
 
 

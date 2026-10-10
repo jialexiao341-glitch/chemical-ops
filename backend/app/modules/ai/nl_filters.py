@@ -16,7 +16,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai.catalog import CATALOG, DatasetSpec
 from app.modules.ai.schema import (
     AIChatMessage,
     AIChatRequest,
@@ -24,7 +23,8 @@ from app.modules.ai.schema import (
     NLFilterResult,
     NLFilterTimeRange,
 )
-from app.modules.ai.service import chat
+from app.modules.ai.catalog import CATALOG, DatasetSpec
+from app.modules.ai.llm import chat
 from app.modules.ai.text2sql import _extract_query_plan_payload
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User

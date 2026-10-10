@@ -9,7 +9,7 @@ from app.core.config import Settings
 from app.core.errors import BusinessValidationError
 from app.modules.ai import multi_intent as multi, routing, service, text2sql
 from app.modules.ai.model import AIConversationState
-from app.modules.ai.task_status import BatchStatus, TaskStatus
+from app.modules.ai.schema import BatchStatus, TaskStatus
 from app.modules.system.model import User
 from tests.test_agent_read_tools import tool_db
 from tests.test_agent_runtime import USER
@@ -176,7 +176,7 @@ def test_dependent_plan_receives_only_successful_predecessor_evidence(db_session
 
 def test_single_followup_uses_resolved_subtask_question():
     """理解器还原的第二项查询必须传给规划器，不能丢失为无上下文的原句。"""
-    from app.modules.ai.intent import Intent, IntentResult
+    from app.modules.ai.schema import Intent, IntentResult
     resolved = routing.Understanding(purpose="query", dialogue_action="modify", tasks=["analytics"],
         sub_tasks=[{"id": "t2", "kind": "analytics", "question": "统计已批准的采购申请数量"}])
     intent = IntentResult(Intent.QUERY, "semantic_route", resolved.model_dump(mode="json"))

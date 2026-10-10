@@ -5,30 +5,34 @@ import base64
 import hashlib
 import json
 import logging
-from urllib.parse import urlsplit
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
-from time import perf_counter
 
-import httpx
 from sqlalchemy import delete, func, inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
-from app.core.observability import get_request_id, metrics
+from app.core.observability import get_request_id
+from app.modules.ai.schema import (
+    AIChatMessage,
+    AIChatRequest,
+    AIChatResponse,
+    AIQueryTrace,
+    Intent,
+    IntentResult,
+    Understanding,
+)
 from app.modules.ai.agent_prompt import (
-    SYSTEM_PROMPT as AGENT_SYSTEM_PROMPT,
     UNSUPPORTED_REPLY,
     build_project_reply,
     fallback_guidance_prompt,
     greeting_reply,
     result_rewrite_prompt,
 )
-from app.modules.ai.intent import Intent, IntentResult
+from app.modules.ai.llm import chat, stream_chat
 from app.modules.ai.model import AIConversation, AIConversationState, AIMessage, AIQueryLog
-from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse, AIQueryTrace
 from app.modules.files import service as file_service
 from app.modules.files import mineru
 from app.modules.files.parser import parse_file_content
@@ -38,38 +42,10 @@ from app.modules.system.model import User
 
 
 LOGGER = logging.getLogger("chemicalops.ai")
-SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT
 STREAM_CHUNK_SIZE = 4
 STREAM_CHUNK_DELAY_SECONDS = 0.03
 MAX_ATTACHMENT_CONTEXT_CHARS = 48_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
-UNRESOLVED_CHEMICAL_REPLY = "我没有匹配到已登记化学品的名称或有效 CAS 号，因此无法核对对应资料。请补充准确名称或 CAS 号后再问。"
-READ_ONLY_WRITE_MARKERS = (
-    "帮我创建", "帮我修改", "帮我删除", "帮我提交", "帮我审批", "帮我驳回",
-    "帮我下单", "帮我入库", "帮我出库", "帮我付款", "帮我执行",
-    "请创建", "请修改", "请删除", "请提交", "请审批", "请驳回",
-    "请下单", "请入库", "请出库", "请付款", "请执行",
-    "直接创建", "直接修改", "直接提交", "直接审批", "直接下单",
-    "直接入库", "直接出库", "直接付款", "直接执行",
-)
-
-
-def _build_llm_payload(runtime: Settings, messages: list[dict[str, object]], *, stream: bool = False, response_format: dict[str, object] | None = None) -> dict[str, object]:
-    """组装 OpenAI 兼容请求；DeepSeek Flash 默认支持思考模式，显式开启以获得完整回答。"""
-
-    payload: dict[str, object] = {
-        "model": runtime.llm_model,
-        "messages": messages,
-        "temperature": runtime.llm_temperature,
-        "max_tokens": runtime.llm_max_tokens,
-    }
-    if runtime.llm_model.lower() == "deepseek-flash":
-        payload["thinking"] = {"type": "enabled"}
-    if stream:
-        payload["stream"] = True
-    if response_format is not None:
-        payload["response_format"] = response_format
-    return payload
 
 
 async def _stream_text_chunks(content: str) -> AsyncIterator[str]:
@@ -78,14 +54,6 @@ async def _stream_text_chunks(content: str) -> AsyncIterator[str]:
     for index in range(0, len(content), STREAM_CHUNK_SIZE):
         yield content[index : index + STREAM_CHUNK_SIZE]
         await asyncio.sleep(STREAM_CHUNK_DELAY_SECONDS)
-
-
-def _validate_read_only_request(data: AIChatRequest) -> None:
-    """拒绝明确要求 AI 执行业务写操作的请求。"""
-
-    user_text = " ".join(message.content for message in data.messages if message.role == "user")
-    if any(marker in user_text for marker in READ_ONLY_WRITE_MARKERS):
-        raise BusinessValidationError("AI 仅支持查询和分析，不支持创建、修改、审批、提交、下单、入库、出库或付款等业务操作。")
 
 
 def _text_fingerprint(value: str) -> str:
@@ -101,70 +69,6 @@ def _query_log_fields(user: User, query: str) -> dict[str, object]:
         "query_length": len(query),
         "query_hash": _text_fingerprint(query),
     }
-
-
-CHEMICAL_REFERENCE_MARKERS = (
-    "产品",
-    "化学品",
-    "化合物",
-    "了解",
-    "介绍",
-    "什么是",
-    "是什么",
-    "基本信息",
-    "用途",
-    "特性",
-    "性质",
-    "物性",
-    "特点",
-    "溶解度",
-    "蒸气压",
-    "自燃温度",
-    "密度",
-    "外观",
-    "粘度",
-    "黏度",
-)
-CHEMICAL_SPECIFIC_DOC_MARKERS = (
-    "特性",
-    "性质",
-    "物性",
-    "特点",
-    "溶解度",
-    "蒸气压",
-    "自燃温度",
-    "密度",
-    "外观",
-    "粘度",
-    "黏度",
-    "闪点",
-    "沸点",
-    "熔点",
-    "分子式",
-    "分子量",
-    "危险性",
-    "危险类别",
-    "危险声明",
-    "信号词",
-    "ghs",
-    "msds",
-    "tds",
-    "安全数据表",
-    "安全技术说明书",
-    "急救",
-    "消防",
-    "灭火",
-    "泄漏处置",
-    "职业接触",
-    "毒性",
-    "储存条件",
-    "存储条件",
-    "相容性",
-    "不相容",
-    "tlv",
-    "ld50",
-    "lc50",
-)
 
 
 async def _classify_chat_intent(db: Session, question: str, *, user: User, data: AIChatRequest) -> IntentResult:
@@ -201,14 +105,6 @@ def _resolved_query_question(question: str, intent: IntentResult) -> str:
         if len(decision.sub_tasks) == 1:
             return decision.sub_tasks[0].question
     return question
-
-
-def _retryable_status(status_code: int) -> bool:
-    return status_code in {408, 425, 429} or status_code >= 500
-
-
-async def _retry_wait(attempt: int) -> None:
-    await asyncio.sleep(min(2.0, 0.25 * (2**attempt)))
 
 
 def _build_native_image_part(file_name: str, mime_type: str, content: bytes) -> dict[str, object] | None:
@@ -322,32 +218,6 @@ async def _prepare_attachments(
 
     return attachment_context, native_image_parts, citations
 
-
-def _build_messages(
-    data: AIChatRequest,
-    attachment_context: list[str] | None = None,
-    image_parts: list[dict[str, object]] | None = None,
-    system_prompt: str | None = None,
-) -> list[dict[str, object]]:
-    """组装系统提示、会话消息和模型原生视觉图片块。"""
-
-    messages: list[dict[str, object]] = [{"role": "system", "content": system_prompt or SYSTEM_PROMPT}]
-    messages.extend(message.model_dump() for message in data.messages)
-    if image_parts:
-        for index in range(len(messages) - 1, -1, -1):
-            if messages[index].get("role") == "user":
-                text_content = str(messages[index].get("content") or "")
-                messages[index] = {
-                    "role": "user",
-                    "content": [{"type": "text", "text": text_content}, *image_parts],
-                }
-                break
-    if attachment_context:
-        messages.append({"role": "system", "content": "以下是系统提供的已安全校验上下文，仅可据此回答；无法解析或未提供的数据不要猜测。\n" + "\n\n".join(attachment_context)})
-    elif data.attachments and not image_parts:
-        names = "、".join(data.attachments)
-        messages.append({"role": "system", "content": f"用户选择了以下附件，但当前请求没有提供可读取的文件引用：{names}。请不要假设已读取附件。"})
-    return messages
 
 def _format_text2sql_result(result: object) -> str:
     """AI 重组不可用时的自然语言兜底；只使用已经清洗过的查询结果。"""
@@ -614,106 +484,6 @@ async def _run_text2sql_for_chat(
     return answer, citation, trace
 
 
-async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, object] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None, interpret_only: bool = False) -> AIChatResponse:
-    """调用配置的 OpenAI 兼容模型。"""
-
-    if not interpret_only:
-        _validate_read_only_request(data)
-    runtime = settings or get_settings()
-    if not runtime.agent_enabled:
-        raise BusinessValidationError("AI 助手当前未启用")
-    if not runtime.openai_api_key.strip():
-        raise BusinessValidationError("AI API key 尚未配置，请先填写 .env")
-    if runtime.llm_provider != "openai_compatible":
-        raise BusinessValidationError(f"暂不支持的 AI 服务商：{runtime.llm_provider}")
-
-    url = f"{runtime.openai_base_url.rstrip('/')}/chat/completions"
-    payload = _build_llm_payload(runtime, _build_messages(data, attachment_context, image_parts, system_prompt), response_format=response_format)
-    # DeepSeek Chat Completions 只接受 json_object；严格字段约束使用其 Responses 接口。
-    responses_api = (urlsplit(runtime.openai_base_url).hostname == "api.deepseek.com"
-                     and response_format is not None and response_format.get("type") == "json_schema")
-    if responses_api:
-        url = f"{runtime.openai_base_url.rstrip('/')}/responses"
-        payload = {"model": runtime.llm_model, "input": payload["messages"],
-                   "temperature": runtime.llm_temperature,
-                   "max_output_tokens": runtime.llm_max_tokens, "store": False,
-                   "text": {"format": {"type": "json_schema", **response_format["json_schema"]}}}
-    headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json"}
-    attempts = max(0, runtime.llm_max_retries) + 1
-    response: httpx.Response | None = None
-    started = perf_counter()
-    metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "started"})
-    for attempt in range(attempts):
-        try:
-            async with httpx.AsyncClient(timeout=runtime.llm_timeout_seconds) as client:
-                response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "success"})
-            break
-        except httpx.TimeoutException as exc:
-            if attempt == attempts - 1:
-                metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "timeout"})
-                LOGGER.warning("AI 服务请求超时 retries=%s", attempt)
-                raise BusinessValidationError("AI 服务响应超时，请稍后重试") from exc
-            metrics.increment("ai_external_retries", labels={"mode": "sync", "reason": "timeout"})
-            await _retry_wait(attempt)
-        except httpx.RequestError as exc:
-            if attempt == attempts - 1:
-                metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "network_error"})
-                LOGGER.warning("AI 服务网络请求失败 error_type=%s retries=%s", exc.__class__.__name__, attempt)
-                raise BusinessValidationError("AI 服务暂时不可用，请检查网络或稍后重试") from exc
-            metrics.increment("ai_external_retries", labels={"mode": "sync", "reason": "network_error"})
-            await _retry_wait(attempt)
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code if exc.response is not None else 0
-            if _retryable_status(status_code) and attempt < attempts - 1:
-                metrics.increment("ai_external_retries", labels={"mode": "sync", "reason": f"http_{status_code}"})
-                await _retry_wait(attempt)
-                continue
-            metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": f"http_{status_code}"})
-            LOGGER.warning("AI 服务返回 HTTP status=%s retries=%s", status_code, attempt)
-            if _retryable_status(status_code):
-                raise BusinessValidationError("AI 服务暂时不可用，请稍后重试") from exc
-            raise BusinessValidationError("AI 服务拒绝了请求，请检查 API key、模型和额度配置") from exc
-
-    if response is None:
-        metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "empty"})
-        raise BusinessValidationError("AI 服务没有返回结果")
-    try:
-        result = response.json()
-        if responses_api:
-            content = "".join(part["text"] for item in result["output"] if item.get("type") == "message"
-                              for part in item.get("content", []) if part.get("type") == "output_text").strip()
-            if result.get("status") != "completed":
-                raise ValueError("incomplete structured output")
-        else:
-            choice = result["choices"][0]
-            if response_format and response_format.get("type") == "json_schema" and choice.get("finish_reason") != "stop":
-                raise ValueError("incomplete structured output")
-            raw_message = choice["message"]
-            content = str(raw_message.get("content") or "").strip()
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
-        metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "invalid_response"})
-        raise BusinessValidationError("AI 服务返回了无法识别的结果") from exc
-    if not content:
-        metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "empty_answer"})
-        raise BusinessValidationError("AI 服务返回了空答案")
-
-    metrics.observe("ai_external_duration_seconds", perf_counter() - started, labels={"mode": "sync", "provider": runtime.llm_provider})
-
-    usage = result.get("usage")
-    normalized_usage = usage if isinstance(usage, dict) and all(isinstance(value, int) for value in usage.values()) else None
-    return AIChatResponse(
-        message=AIChatMessage(role="assistant", content=content),
-        conversation_id=data.conversation_id or 0,
-        model=runtime.llm_model,
-        provider=runtime.llm_provider,
-        usage=normalized_usage,
-        user_query=next((message.content for message in reversed(data.messages) if message.role == "user"), None),
-        answer=content,
-    )
-
-
 def _get_owned_conversation(db: Session, user: User, conversation_id: int) -> AIConversation:
     """读取当前用户自己的会话，其他用户的会话按不存在处理。"""
 
@@ -883,6 +653,27 @@ def _ensure_conversation(db: Session, user: User, data: AIChatRequest) -> AIConv
     return conversation
 
 
+def _save_chat_turn(db: Session, conversation: AIConversation, question: str, answer: str, *, citations: list | None = None) -> None:
+    """同步和流式回复共用同一落库路径；调用方决定在回复的哪个阶段提交。"""
+    db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=question, citations=citations))
+    db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=answer, citations=citations))
+    conversation.last_message_at = datetime.now()
+    db.commit()
+
+
+def _previous_query_plan(db: Session, conversation: AIConversation):
+    """读取上一轮计划，无效历史状态按无计划处理。"""
+    from app.modules.ai.schema import QueryPlan
+
+    state = _load_conversation_state(db, conversation)
+    if state and state.query_plan:
+        try:
+            return QueryPlan.model_validate(state.query_plan)
+        except (TypeError, ValueError):
+            LOGGER.warning("AI 会话 QueryPlan 状态无效 conversation_id=%s", conversation.id)
+    return None
+
+
 async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatResponse:
     """持久化用户消息并调用模型，再持久化助手回复。"""
 
@@ -897,18 +688,15 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
     if intent_result.intent is Intent.MULTI and not data.attachment_file_ids:
         from app.modules.ai import routing, multi_intent
         return await multi_intent.reply_for_user(db, user, data, conversation,
-                                                 routing.Understanding.model_validate(intent_result.understanding))
+                                                 Understanding.model_validate(intent_result.understanding))
     if intent_result.intent is Intent.DOC and not data.attachment_file_ids:
         from app.modules.doc_kb.retrieve import build_doc_context, no_doc_hits_reply, retrieve_sections
 
-        hits = [] if intent_result.reason == "chemical_target_unresolved" else await retrieve_sections(db, user_message.content)
+        hits = await retrieve_sections(db, user_message.content)
         if not hits:
-            fixed_content = UNRESOLVED_CHEMICAL_REPLY if intent_result.reason == "chemical_target_unresolved" else no_doc_hits_reply(user_message.content)
+            fixed_content = no_doc_hits_reply(user_message.content)
             LOGGER.info("AI 文档检索为空 user_id=%s question_hash=%s", user.id, _text_fingerprint(user_message.content))
-            db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
-            db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
-            conversation.last_message_at = datetime.now()
-            db.commit()
+            _save_chat_turn(db, conversation, user_message.content, fixed_content)
             return AIChatResponse(
                 message=AIChatMessage(role="assistant", content=fixed_content),
                 conversation_id=conversation.id,
@@ -921,10 +709,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         context, citations = build_doc_context(hits)
         runtime = get_settings()
         result = await chat(data, runtime, attachment_context=[context])
-        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=result.message.content, citations=citations))
-        conversation.last_message_at = datetime.now()
-        db.commit()
+        _save_chat_turn(db, conversation, user_message.content, result.message.content, citations=citations)
         result.conversation_id = conversation.id
         result.citations = citations
         result.user_query = user_message.content
@@ -938,15 +723,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         return result
     if intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
         runtime = get_settings()
-        conversation_state = _load_conversation_state(db, conversation)
-        previous_plan = None
-        if conversation_state and conversation_state.query_plan:
-            from app.modules.ai.text2sql import QueryPlan
-
-            try:
-                previous_plan = QueryPlan.model_validate(conversation_state.query_plan)
-            except (TypeError, ValueError):
-                LOGGER.warning("AI 会话 QueryPlan 状态无效 conversation_id=%s", conversation.id)
+        previous_plan = _previous_query_plan(db, conversation)
         thread_id = f"ai:{user.id}:{conversation.id}"
         content, citation, query_trace = await _run_text2sql_for_chat(
             db, user, _resolved_query_question(user_message.content, intent_result), runtime, previous_plan=previous_plan, thread_id=thread_id
@@ -958,10 +735,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
         if isinstance(plan_payload, dict):
             _save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
         _append_query_log(db, conversation, query_trace)
-        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
-        conversation.last_message_at = datetime.now()
-        db.commit()
+        _save_chat_turn(db, conversation, user_message.content, content, citations=citations)
         return AIChatResponse(
             message=AIChatMessage(role="assistant", content=content),
             conversation_id=conversation.id,
@@ -978,10 +752,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
             intent_result.intent, intent_result.reason, user_message.content
         )
         LOGGER.info("AI 非查询回复 user_id=%s intent=%s reason=%s model=%s answer_length=%s", user.id, intent_result.intent, intent_result.reason, model_tag, len(fixed_content))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
-        conversation.last_message_at = datetime.now()
-        db.commit()
+        _save_chat_turn(db, conversation, user_message.content, fixed_content)
         return AIChatResponse(message=AIChatMessage(role="assistant", content=fixed_content), conversation_id=conversation.id, model=model_tag, provider="chemicalops", citations=None, user_query=user_message.content, answer=fixed_content)
 
     runtime = get_settings()
@@ -989,10 +760,7 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
     db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=combined_citations or None))
     conversation.last_message_at = datetime.now()
     db.commit()
-    try:
-        result = await chat(data, runtime, attachment_context=combined_context or None, image_parts=native_image_parts or None)
-    except Exception:
-        raise
+    result = await chat(data, runtime, attachment_context=combined_context or None, image_parts=native_image_parts or None)
     assistant_message = AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=result.message.content, citations=combined_citations or None)
     db.add(assistant_message)
     conversation.last_message_at = datetime.now()
@@ -1028,7 +796,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         async def progress(snapshot):
             await queue.put({"conversation_id": conversation.id, **snapshot})
         execution = asyncio.create_task(multi_intent.reply_for_user(db, user, data, conversation,
-                            routing.Understanding.model_validate(stream_intent_result.understanding), on_progress=progress))
+                            Understanding.model_validate(stream_intent_result.understanding), on_progress=progress))
         receive = None
         try:
             while True:
@@ -1063,7 +831,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     if stream_intent_result.intent is Intent.DOC and not data.attachment_file_ids:
         from app.modules.doc_kb.retrieve import build_doc_context, no_doc_hits_reply, retrieve_sections
 
-        hits = [] if stream_intent_result.reason == "chemical_target_unresolved" else await retrieve_sections(db, user_message.content)
+        hits = await retrieve_sections(db, user_message.content)
         doc_citations: list | None = None
         doc_model = "rule-based"
         if hits:
@@ -1083,16 +851,13 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
             doc_model = result.model
             LOGGER.info("AI 流式文档问答完成 user_id=%s hits=%s answer_length=%s", user.id, len(hits), len(doc_content))
         else:
-            doc_content = UNRESOLVED_CHEMICAL_REPLY if stream_intent_result.reason == "chemical_target_unresolved" else no_doc_hits_reply(user_message.content)
+            doc_content = no_doc_hits_reply(user_message.content)
             LOGGER.info("AI 流式文档检索为空 user_id=%s", user.id)
         chunk_count = 0
         async for chunk in _stream_text_chunks(doc_content):
             chunk_count += 1
             yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
-        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=doc_citations))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=doc_content, citations=doc_citations))
-        conversation.last_message_at = datetime.now()
-        db.commit()
+        _save_chat_turn(db, conversation, user_message.content, doc_content, citations=doc_citations)
         yield "event: done\ndata: " + json.dumps(
             {
                 "conversation_id": conversation.id,
@@ -1107,15 +872,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         return
     if stream_intent_result.intent is Intent.QUERY and not data.attachment_file_ids:
         runtime = get_settings()
-        conversation_state = _load_conversation_state(db, conversation)
-        previous_plan = None
-        if conversation_state and conversation_state.query_plan:
-            from app.modules.ai.text2sql import QueryPlan
-
-            try:
-                previous_plan = QueryPlan.model_validate(conversation_state.query_plan)
-            except (TypeError, ValueError):
-                LOGGER.warning("AI 流式会话 QueryPlan 状态无效 conversation_id=%s", conversation.id)
+        previous_plan = _previous_query_plan(db, conversation)
         thread_id = f"ai:{user.id}:{conversation.id}"
         try:
             content, citation, query_trace = await _run_text2sql_for_chat(
@@ -1140,10 +897,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         if isinstance(plan_payload, dict):
             _save_query_state(db, user, conversation, plan=QueryPlan.model_validate(plan_payload), trace=query_trace, citations=citations)
         _append_query_log(db, conversation, query_trace)
-        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content, citations=citations))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=content, citations=citations))
-        conversation.last_message_at = datetime.now()
-        db.commit()
+        _save_chat_turn(db, conversation, user_message.content, content, citations=citations)
         LOGGER.info("AI 流式回复完成 user_id=%s mode=query chunks=%s", user.id, chunk_count)
         trace_payload = query_trace.model_dump(mode="json")
         yield f"event: done\ndata: {json.dumps({'conversation_id': conversation.id, 'model': 'text2sql', 'provider': 'chemicalops', 'citations': citations, 'query_trace': trace_payload, 'query_slots': trace_payload['slots'], 'user_query': user_message.content, 'answer': content}, ensure_ascii=False)}\n\n"
@@ -1157,10 +911,7 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         async for chunk in _stream_text_chunks(fixed_content):
             chunk_count += 1
             yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
-        db.add(AIMessage(conversation_id=conversation.id, message_role="USER", content=user_message.content))
-        db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=fixed_content))
-        conversation.last_message_at = datetime.now()
-        db.commit()
+        _save_chat_turn(db, conversation, user_message.content, fixed_content)
         LOGGER.info("AI 流式回复完成 user_id=%s mode=%s chunks=%s answer_length=%s answer_hash=%s", user.id, model_tag, chunk_count, len(fixed_content), _text_fingerprint(fixed_content))
         yield "event: done\ndata: " + json.dumps({"conversation_id": conversation.id, "model": model_tag, "provider": "chemicalops", "citations": None, "user_query": user_message.content, "answer": fixed_content}, ensure_ascii=False) + "\n\n"
         return
@@ -1179,59 +930,13 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
     conversation.last_message_at = datetime.now()
     db.commit()
 
-    if not runtime.agent_enabled or not runtime.openai_api_key.strip() or runtime.llm_provider != "openai_compatible":
-        yield f"event: error\ndata: {json.dumps({'message': 'AI 服务配置不可用，请检查服务开关、API key 和服务商配置'}, ensure_ascii=False)}\n\n"
-        return
-    url = f"{runtime.openai_base_url.rstrip('/')}/chat/completions"
-    payload = _build_llm_payload(runtime, _build_messages(data, combined_context or None, native_image_parts or None), stream=True)
-    headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"}
     full_content = ""
-    first_token_at: float | None = None
-    stream_error: Exception | None = None
-    started = perf_counter()
-    attempts = max(0, runtime.llm_max_retries) + 1
-    metrics.increment("ai_external_requests", labels={"mode": "stream", "provider": runtime.llm_provider, "status": "started"})
-    for attempt in range(attempts):
-        try:
-            async with httpx.AsyncClient(timeout=runtime.llm_timeout_seconds) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        raw = line[5:].strip()
-                        if raw == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(raw)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content") or ""
-                        except (ValueError, TypeError, IndexError, KeyError):
-                            continue
-                        if delta:
-                            if first_token_at is None:
-                                first_token_at = perf_counter()
-                                metrics.observe("ai_first_token_seconds", first_token_at - started, labels={"mode": "stream", "provider": runtime.llm_provider})
-                            full_content += delta
-                            yield f"event: delta\ndata: {json.dumps({'content': delta}, ensure_ascii=False)}\n\n"
-            stream_error = None
-            metrics.increment("ai_external_requests", labels={"mode": "stream", "provider": runtime.llm_provider, "status": "success"})
-            break
-        except (httpx.HTTPError, httpx.TimeoutException) as exc:
-            stream_error = exc
-            # 已经向客户端发送过内容时不能重试，否则会重复输出；同时绝不保存半截答案。
-            retryable = not isinstance(exc, httpx.HTTPStatusError) or _retryable_status(exc.response.status_code if exc.response is not None else 0)
-            if full_content or attempt == attempts - 1 or not retryable:
-                break
-            metrics.increment("ai_external_retries", labels={"mode": "stream", "reason": exc.__class__.__name__})
-            await _retry_wait(attempt)
-    metrics.observe("ai_external_duration_seconds", perf_counter() - started, labels={"mode": "stream", "provider": runtime.llm_provider})
-    if stream_error is not None:
-        metrics.increment("ai_external_requests", labels={"mode": "stream", "provider": runtime.llm_provider, "status": "failure"})
-        LOGGER.warning("AI SSE 请求失败 error_type=%s retries=%s partial=%s", stream_error.__class__.__name__, attempt, bool(full_content))
-        yield f"event: error\ndata: {json.dumps({'message': 'AI 服务暂时不可用，请稍后重试'}, ensure_ascii=False)}\n\n"
-        return
-    if not full_content.strip():
-        yield f"event: error\ndata: {json.dumps({'message': 'AI 服务返回了空答案'}, ensure_ascii=False)}\n\n"
+    try:
+        async for delta in stream_chat(data, runtime, attachment_context=combined_context or None, image_parts=native_image_parts or None):
+            full_content += delta
+            yield f"event: delta\ndata: {json.dumps({'content': delta}, ensure_ascii=False)}\n\n"
+    except BusinessValidationError as exc:
+        yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
         return
     db.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content=full_content.strip(), citations=citations or None))
     conversation.last_message_at = datetime.now()

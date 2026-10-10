@@ -19,7 +19,7 @@ from app.modules.ai.schema import (
     BriefingRequest,
     BriefingResponse,
 )
-from app.modules.ai.service import chat
+from app.modules.ai.llm import chat
 from app.modules.dashboard.service import get_overview, get_report
 from app.modules.notifications.service import notify_users
 from app.modules.system.audit import add_audit_log

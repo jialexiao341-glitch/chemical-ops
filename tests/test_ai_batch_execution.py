@@ -12,7 +12,7 @@ from app.core.errors import BusinessValidationError
 from app.modules.ai import multi_intent as multi, routing, service, text2sql
 from app.modules.ai.model import AIMessage
 from app.modules.ai.schema import AIChatMessage, AIChatRequest
-from app.modules.ai.task_status import BatchStatus, TaskStatus
+from app.modules.ai.schema import BatchStatus, TaskStatus
 from app.modules.system.model import User
 from tests.test_ai_multi_intent import decision, product_task
 from tests.test_agent_read_tools import tool_db

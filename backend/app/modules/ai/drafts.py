@@ -1,46 +1,27 @@
 """需要用户复核后才能创建的 AI 采购申请草稿建议。"""
 
 import json
-from decimal import Decimal
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
 from app.modules.ai.schema import (
-    AIPurchaseDraftPreview,
-    AIPurchaseDraftPreviewItem,
     AIChatMessage,
     AIChatRequest,
+    AIPurchaseDraftPreview,
+    AIPurchaseDraftPreviewItem,
+    _DraftItem,
+    _DraftProposal,
 )
-from app.modules.ai.service import chat
+from app.modules.ai.llm import chat
 from app.modules.ai.text2sql import _extract_query_plan_payload
 from app.modules.products.model import Product
 from app.modules.purchase_requests.model import Unit
 from app.modules.purchase_requests.schema import PurchaseRequestCreate
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
-
-
-class _DraftItem(BaseModel):
-    requested_name: str = Field(default="", max_length=255)
-    product_id: int | None = Field(default=None, gt=0)
-    quantity: Decimal | None = Field(default=None, gt=0)
-    unit_id: int | None = Field(default=None, gt=0)
-    technical_requirements: str | None = None
-    budget_price: Decimal | None = Field(default=None, ge=0)
-    expected_date: str | None = None
-
-
-class _DraftProposal(BaseModel):
-    purpose: str = Field(default="", max_length=1000)
-    priority: str = "NORMAL"
-    budget_amount: Decimal | None = Field(default=None, ge=0)
-    currency_code: str = "CNY"
-    expected_date: str | None = None
-    items: list[_DraftItem] = Field(min_length=1, max_length=100)
-    missing_fields: list[str] = Field(default_factory=list)
 
 
 def _build_prompt(question: str, products: list[Product], units: list[Unit]) -> str:

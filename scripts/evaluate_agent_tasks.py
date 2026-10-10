@@ -96,7 +96,7 @@ def check_evidence(result: runtime.TaskRead, actor: int = 7) -> bool:
 
 async def evaluate(case: Case, *, db_factory=evaluation_db, evidence_checker=check_evidence) -> dict:
     calls, writes, rounds = [], [], []
-    original_chat = runtime.service.chat
+    original_chat = runtime.llm.chat
     async def measured_chat(*args, **kwargs):
         began = perf_counter()
         record = {'input': json.loads(args[0].messages[0].content)}
@@ -114,7 +114,7 @@ async def evaluate(case: Case, *, db_factory=evaluation_db, evidence_checker=che
         if statement.lstrip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'REPLACE', 'CREATE', 'DROP', 'ALTER')):
             writes.append(statement)
     began = perf_counter()
-    runtime.service.chat = measured_chat
+    runtime.llm.chat = measured_chat
     try:
         with db_factory() as db:
             if db_factory is evaluation_db and case.variant == 'products':
@@ -177,7 +177,7 @@ async def evaluate(case: Case, *, db_factory=evaluation_db, evidence_checker=che
             'business_write_count': sum('ai_agent_tasks' not in s.lower() for s in writes),
             'evaluation_error_type': type(exc).__name__}
     finally:
-        runtime.service.chat = original_chat
+        runtime.llm.chat = original_chat
 
 
 def save_report(path: Path, report: dict):

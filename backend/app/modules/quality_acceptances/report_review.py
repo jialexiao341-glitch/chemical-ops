@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.ai.schema import AIChatMessage, AIChatRequest
-from app.modules.ai.service import chat
+from app.modules.ai.llm import chat
 from app.modules.ai.text2sql import _extract_query_plan_payload
 from app.modules.deliveries.model import DeliveryItem
 from app.modules.files import mineru, service as file_service

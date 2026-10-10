@@ -7,9 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import intent as intent_module
 from app.modules.ai import service as ai_service
-from app.modules.ai.intent import Intent, classify_intent, extract_valid_cas, valid_cas_checksum
+from app.modules.ai.schema import Intent
+from app.modules.ai.evaluation import classify_intent
+from app.modules.chemicals.cas import extract_valid_cas, valid_cas_checksum
 from app.modules.ai.schema import AIChatMessage, AIChatResponse
 from app.modules.doc_kb import retrieve as retrieve_module
 from app.modules.doc_kb import vector_store

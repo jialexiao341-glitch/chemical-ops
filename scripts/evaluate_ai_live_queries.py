@@ -20,7 +20,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.errors import BusinessValidationError
 from app.modules.ai.text2sql import QueryPlan, Text2SQLRequest, run_text2sql
-from app.modules.ai.structured import schema_response_format
+from app.modules.ai.schema import schema_response_format
 from app.modules.ai.routing import understand
 from app.modules.system.model import User
 

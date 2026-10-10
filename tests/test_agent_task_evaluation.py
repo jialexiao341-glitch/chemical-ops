@@ -45,7 +45,7 @@ def incomplete_inventory_task(db, user, question, keyword, product_id):
 def test_evaluator_records_rejection_without_calling_model(monkeypatch):
     async def forbidden(*_args, **_kwargs):
         raise AssertionError('无权入口不应调用模型')
-    monkeypatch.setattr(runtime.service, 'chat', forbidden)
+    monkeypatch.setattr(runtime.llm, 'chat', forbidden)
     result = asyncio.run(evaluation.evaluate(next(c for c in evaluation.CASES if c.id == 'T07')))
     assert result['passed'] and result['status'] == 'REJECTED'
     assert result['model_calls'] == []

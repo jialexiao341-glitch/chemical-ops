@@ -10,14 +10,14 @@ from pydantic import ValidationError
 
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai import routing, service
+from app.modules.ai import llm, routing, service
 
 
 @pytest.mark.parametrize("question,route", [("/help", "capability"), ("你好", "greeting"), ("取消查询", "cancel")])
 def test_explicit_commands_skip_model(monkeypatch, question, route):
     async def forbidden(*args, **kwargs):
         raise AssertionError("明确控制命令不应调用模型")
-    monkeypatch.setattr(service, "chat", forbidden)
+    monkeypatch.setattr(llm, "chat", forbidden)
     assert asyncio.run(routing.understand(question)).route == route
 
 
@@ -42,7 +42,7 @@ def test_structured_model_result_controls_route_and_keeps_context(monkeypatch, q
         assert kwargs["response_format"]["type"] == "json_schema"
         assert kwargs["response_format"]["json_schema"]["strict"] is True
         return SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))
-    monkeypatch.setattr(service, "chat", model)
+    monkeypatch.setattr(llm, "chat", model)
     decision = asyncio.run(routing.understand(question, context))
     assert decision.route == route
     assert not set(decision.tasks) & set(decision.excluded_tasks)
@@ -55,7 +55,7 @@ def test_structured_model_result_controls_route_and_keeps_context(monkeypatch, q
 def test_invalid_model_output_clarifies_without_keyword_fallback(monkeypatch, value):
     async def model(*args, **kwargs):
         return SimpleNamespace(message=SimpleNamespace(content=value))
-    monkeypatch.setattr(service, "chat", model)
+    monkeypatch.setattr(llm, "chat", model)
     decision = asyncio.run(routing.understand("查乙醇库存"))
     assert decision.route == "clarify" and decision.tasks == [] and decision.question
 
@@ -63,7 +63,7 @@ def test_invalid_model_output_clarifies_without_keyword_fallback(monkeypatch, va
 def test_model_failure_clarifies(monkeypatch):
     async def unavailable(*args, **kwargs):
         raise TimeoutError()
-    monkeypatch.setattr(service, "chat", unavailable)
+    monkeypatch.setattr(llm, "chat", unavailable)
     assert asyncio.run(routing.understand("查乙醇库存")).route == "clarify"
 
 

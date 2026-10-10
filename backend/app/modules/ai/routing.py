@@ -3,19 +3,26 @@
 import hashlib
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
-from typing import Literal
+from datetime import datetime, timedelta, timezone
 
 import jwt
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.modules.system.model import User
 
+from app.modules.ai import llm
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai.model import AIMessage, AIConversationState
-from app.modules.ai.structured import schema_response_format
+from app.modules.ai.schema import (
+    RouteRequest,
+    Slots,
+    SubTask,
+    Task,
+    Understanding,
+    schema_response_format,
+)
+from app.modules.ai.model import AIMessage
 
 
 LOGGER = logging.getLogger("chemicalops.ai.routing")
@@ -67,102 +74,6 @@ slots 字段限于 product_keyword, rfq_no, warehouse_keyword, date_from, date_t
 “取消查询” → dialogue_action=cancel，tasks=[]。
 """
 
-Task = Literal["inventory", "quotes", "analytics", "document"]
-
-
-class Slots(BaseModel):
-    """仅承载用户明确给出的业务条件；不接受数据库 ID 或身份字段。"""
-    model_config = ConfigDict(extra="forbid")
-    product_keyword: str | None = Field(default=None, max_length=200)
-    rfq_no: str | None = Field(default=None, max_length=32)
-    warehouse_keyword: str | None = Field(default=None, max_length=128)
-    date_from: date | None = None
-    date_to: date | None = None
-    limit: int | None = Field(default=None, strict=True, ge=1, le=100)
-    unit: str | None = Field(default=None, max_length=32)
-
-    @model_validator(mode="after")
-    def validate_dates(self):
-        """拒绝倒置的 ISO 日期范围，防止错误条件进入计划生成阶段。"""
-        if self.date_from and self.date_to and self.date_from > self.date_to:
-            raise ValueError("时间范围起止顺序错误")
-        return self
-
-
-class SubTask(BaseModel):
-    """一项原子只读请求；依赖由前置任务 ID 表示，不包含任意执行代码。"""
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(pattern=r"^t[1-6]$")
-    kind: Task
-    question: str = Field(min_length=2, max_length=1000)
-    slots: Slots = Field(default_factory=Slots)
-    depends_on: list[str] = Field(default_factory=list, max_length=5)
-
-
-class Understanding(BaseModel):
-    """语义模型的严格输出契约，由程序校验后才能用于路由或拆分。"""
-    model_config = ConfigDict(extra="forbid")
-    purpose: Literal["capability", "guidance", "query", "greeting", "unsupported", "clarify"]
-    dialogue_action: Literal["new", "continue", "modify", "switch", "cancel"] = "new"
-    tasks: list[Task] = Field(default_factory=list, max_length=4)
-    excluded_tasks: list[Task] = Field(default_factory=list, max_length=4)
-    slots: Slots = Field(default_factory=Slots)
-    question: str | None = Field(default=None, max_length=1000)
-    sub_tasks: list[SubTask] = Field(default_factory=list, max_length=6)
-
-    @model_validator(mode="after")
-    def normalize(self):
-        """校验任务一致性和无环依赖，并去除被明确否定的任务类别。"""
-        seen = set()
-        for task in self.sub_tasks:
-            if task.id in seen or not set(task.depends_on) <= seen:
-                raise ValueError("子任务 ID 必须唯一，依赖必须来自前置子任务")
-            if task.kind in self.excluded_tasks:
-                raise ValueError("子任务不得执行被排除的意图")
-            seen.add(task.id)
-        if self.sub_tasks and set(self.tasks) != {task.kind for task in self.sub_tasks}:
-            raise ValueError("子任务类别必须与总任务一致")
-        self.tasks = list(dict.fromkeys(task for task in self.tasks if task not in self.excluded_tasks))
-        if self.dialogue_action == "cancel":
-            self.tasks = []
-        elif self.purpose == "query" and not self.tasks:
-            raise ValueError("查询必须明确业务任务")
-        if self.purpose != "query":
-            self.tasks = []
-            self.sub_tasks = []
-        return self
-
-    @property
-    def route(self) -> str:
-        """根据已校验任务决定入口；多项原子任务进入批次，混合未拆分则澄清。"""
-        if self.dialogue_action == "cancel":
-            return "cancel"
-        if self.purpose != "query":
-            return self.purpose
-        tasks = set(self.tasks)
-        if len(self.sub_tasks) > 1:
-            return "batch"
-        if tasks <= {"inventory", "quotes"}:
-            return "agent"
-        if tasks == {"document"}:
-            return "document"
-        if tasks == {"analytics"}:
-            return "query"
-        return "clarify"  # 未拆分的混合请求不能直接执行
-
-    @property
-    def agent_goal(self) -> str:
-        """将库存/报价类别映射到现有 Agent 的完成条件；其他类别返回 unknown。"""
-        return ({"inventory": "inventory_query", "quotes": "supplier_quote_query"}.get(self.tasks[0], "unknown")
-                if len(self.tasks) == 1 else "inventory_and_quotes_query" if set(self.tasks) == {"inventory", "quotes"} else "unknown")
-
-
-class RouteRequest(BaseModel):
-    """统一路由接口的输入；会话 ID 仍需服务端检查归属。"""
-    model_config = ConfigDict(extra="forbid")
-    question: str = Field(min_length=1, max_length=2000)
-    conversation_id: int | None = Field(default=None, gt=0)
-
 
 def conversation_context(db: Session, user: User, conversation_id: int | None) -> dict:
     """读取本人会话的最近八条消息和精简状态；不存在状态表时兼容空状态。
@@ -206,7 +117,6 @@ def conversation_context(db: Session, user: User, conversation_id: int | None) -
             "memory": memory, "query_plan": query_plan}
 
 
-
 async def understand(question: str, context: dict | None = None, settings=None) -> Understanding:
     """只对完整明确的控制命令快速匹配；自然语言交给同一个语义理解器。"""
     normalized = question.strip().lower().rstrip("。！？!?")
@@ -216,12 +126,11 @@ async def understand(question: str, context: dict | None = None, settings=None) 
         return Understanding(purpose="capability")
     if normalized in {"你好", "您好", "hello", "hi"}:
         return Understanding(purpose="greeting")
-    from app.modules.ai import service
     from app.modules.ai.schema import AIChatRequest, AIChatMessage
     runtime = (settings or get_settings()).model_copy(update={"llm_temperature": 0, "llm_max_tokens": 3000})
     payload = {"question": question, "context": context or {}, "today": datetime.now().astimezone().date().isoformat()}
     try:
-        response = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
+        response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
                                       runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=ROUTING_PROMPT, interpret_only=True)
         return Understanding.model_validate_json(response.message.content, strict=True)
     except Exception as exc:

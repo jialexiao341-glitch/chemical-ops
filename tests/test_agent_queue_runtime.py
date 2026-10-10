@@ -237,7 +237,7 @@ def test_transport_error_preserves_checkpoint_for_queue_retry(queued_db, monkeyp
     async def understand(*args, **kwargs):
         return runtime.routing.Understanding(purpose="query", tasks=["inventory"])
     monkeypatch.setattr(runtime.routing, "understand", understand)
-    monkeypatch.setattr(runtime.service, "chat", unavailable)
+    monkeypatch.setattr(runtime.llm, "chat", unavailable)
     with pytest.raises(httpx.ConnectError):
         asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
     queued_db.expire_all()
@@ -252,7 +252,7 @@ def test_model_wait_cancel_rejects_late_reply(queued_db, monkeypatch):
     async def cancelled(*args, **kwargs):
         runtime.cancel_task(queued_db, USER, task.id)
         return SimpleNamespace(message=SimpleNamespace(content=json.dumps({"action": "ask_user", "question": "late reply"})))
-    monkeypatch.setattr(runtime.service, "chat", cancelled)
+    monkeypatch.setattr(runtime.llm, "chat", cancelled)
     asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
     queued_db.expire_all()
     assert queued_db.get(AIAgentTask, task.id).status == "CANCELLED"

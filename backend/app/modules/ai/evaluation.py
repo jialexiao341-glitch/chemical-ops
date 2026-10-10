@@ -3,12 +3,243 @@
 from types import SimpleNamespace
 
 from app.core.errors import BusinessValidationError
+from app.modules.ai.schema import (
+    AIChatMessage,
+    AIChatRequest,
+    AIPurchaseDraftPreview,
+    Intent,
+    IntentResult,
+)
 from app.modules.ai.catalog import CATALOG
-from app.modules.ai.intent import Intent, classify_intent
+from app.modules.chemicals.cas import extract_valid_cas
 from app.modules.ai.order_trace import _stage, extract_order_trace_no
-from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIPurchaseDraftPreview
-from app.modules.ai.service import _format_text2sql_result, _validate_read_only_request
+from app.modules.ai.service import _format_text2sql_result
+from app.modules.ai.llm import _validate_read_only_request
 from app.modules.ai.text2sql import QueryPlan, _unit_metadata, build_statement
+
+
+# 旧关键词分类器仅用于离线护栏回归；生产入口使用 routing.understand。
+
+GREETING_MARKERS = (
+    "你好",
+    "您好",
+    "嗨",
+    "哈喽",
+    "hello",
+    "hi",
+    "hey",
+    "在吗",
+    "有人吗",
+    "早上好",
+    "上午好",
+    "中午好",
+    "下午好",
+    "晚上好",
+    "辛苦了",
+)
+
+
+PROJECT_MARKERS = (
+    "你能干什么",
+    "你能做什么",
+    "你可以做什么",
+    "你是干什么的",
+    "你是做什么的",
+    "你是干嘛的",
+    "你是谁",
+    "你是什么",
+    "你会什么",
+    "你的作用",
+    "你的职责",
+    "可以帮我什么",
+    "我可以问你什么",
+    "我能问你什么",
+    "我可以问哪些",
+    "我能问哪些",
+    "可以问你什么",
+    "能问你什么",
+    "可以问你哪些",
+    "能问你哪些",
+    "可以问哪些问题",
+    "能问哪些问题",
+    "可以咨询什么",
+    "能咨询什么",
+    "能帮我什么",
+    "能帮忙做什么",
+    "能提供什么",
+    "能解决什么问题",
+    "请介绍一下你自己",
+    "介绍一下你自己",
+    "介绍下你自己",
+    "ai能做什么",
+    "ai可以做什么",
+    "能做哪些事情",
+    "能做哪些",
+    "有什么功能",
+    "有哪些功能",
+    "支持哪些功能",
+    "支持哪些能力",
+    "支持什么",
+    "项目有什么功能",
+    "项目有哪些功能",
+    "项目当前状态",
+    "项目做到什么程度",
+    "目前做到什么程度",
+    "现在做到什么程度",
+    "当前能做什么",
+    "怎么使用",
+    "如何使用",
+    "使用方法",
+    "使用说明",
+    "操作说明",
+    "功能介绍",
+    "系统介绍",
+    "帮助",
+)
+
+
+UNSUPPORTED_MARKERS = (
+    "天气",
+    "天气预报",
+    "新闻",
+    "热点",
+    "热搜",
+    "微博热搜",
+    "股票",
+    "股价",
+    "基金",
+    "彩票",
+    "写诗",
+    "作诗",
+    "讲故事",
+    "写小说",
+    "旅游攻略",
+    "旅行攻略",
+    "外卖",
+    "电影推荐",
+    "电视剧推荐",
+    "歌曲推荐",
+    "唱歌",
+)
+
+
+QUERY_MARKERS = (
+    "采购",
+    "采购申请",
+    "采购订单",
+    "订单",
+    "库存",
+    "库存余额",
+    "库存批次",
+    "到货",
+    "收货",
+    "入库",
+    "入库单",
+    "质量",
+    "质量验收",
+    "验收",
+    "合格",
+    "不合格",
+    "异常",
+    "逾期",
+    "财务",
+    "对账",
+    "发票",
+    "付款",
+    "结算",
+    "供应商",
+    "供应商数量",
+    "询价",
+    "查询",
+    "查一下",
+    "查查",
+    "看一下",
+    "帮我看",
+    "告诉我",
+    "多少",
+    "数量",
+    "金额",
+    "总额",
+    "合计",
+    "统计",
+    "列表",
+    "明细",
+    "记录",
+    "排名",
+    "占比",
+    "平均",
+    "趋势",
+    "最近",
+    "今年",
+    "本月",
+    "上月",
+    "按",
+    "分组",
+)
+
+
+DOC_MARKERS = (
+    "特性",
+    "性质",
+    "物性",
+    "特点",
+    "溶解度",
+    "蒸气压",
+    "自燃温度",
+    "密度",
+    "外观",
+    "粘度",
+    "黏度",
+    "闪点",
+    "沸点",
+    "熔点",
+    "分子式",
+    "分子量",
+    "危险性",
+    "危险类别",
+    "危险声明",
+    "信号词",
+    "ghs",
+    "msds",
+    "sds",
+    "安全数据表",
+    "安全技术说明书",
+    "急救",
+    "消防",
+    "灭火",
+    "泄漏处置",
+    "职业接触",
+    "tlv",
+    "ld50",
+    "lc50",
+    "毒性",
+    "储存条件",
+    "存储条件",
+    "相容性",
+    "不相容",
+    "nfpa",
+)
+
+
+def classify_intent(text: str) -> IntentResult:
+    """旧关键词分类器，仅保留离线兼容回归；生产入口统一使用 routing.understand。"""
+
+    normalized = text.strip().lower()
+    if not normalized:
+        return IntentResult(Intent.UNSUPPORTED, "empty")
+    if any(marker in normalized for marker in PROJECT_MARKERS):
+        return IntentResult(Intent.PROJECT, "project_marker")
+    if any(marker in normalized for marker in GREETING_MARKERS):
+        return IntentResult(Intent.GREETING, "greeting_marker")
+    if any(marker in normalized for marker in UNSUPPORTED_MARKERS):
+        return IntentResult(Intent.UNSUPPORTED, "unsupported_marker")
+    if extract_valid_cas(text):
+        return IntentResult(Intent.DOC, "cas_pattern")
+    if any(marker in normalized for marker in DOC_MARKERS):
+        return IntentResult(Intent.DOC, "doc_marker")
+    if any(marker in normalized for marker in QUERY_MARKERS):
+        return IntentResult(Intent.QUERY, "business_query_marker")
+    return IntentResult(Intent.UNSUPPORTED, "no_supported_marker")
 
 
 INTENT_CASES = (

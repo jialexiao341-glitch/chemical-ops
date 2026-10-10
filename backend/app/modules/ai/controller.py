@@ -10,8 +10,34 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
-from app.core.errors import AuthorizationError, ResourceNotFoundError, BusinessValidationError
 from app.core.observability import get_request_id, metrics, observe_duration
+from app.modules.ai.schema import (
+    AIChatRequest,
+    AIChatResponse,
+    AIConversationPage,
+    AIConversationRead,
+    AIConversationUpdate,
+    AIMessagePage,
+    AIMessageRead,
+    AIPurchaseDraftPreview,
+    AIPurchaseDraftRequest,
+    BriefingRequest,
+    BriefingResponse,
+    ChatTaskCreate,
+    InventoryResult,
+    NLFilterRequest,
+    NLFilterResult,
+    ProductSearchResult,
+    QuoteResult,
+    RFQSearchResult,
+    RouteRequest,
+    TaskContinue,
+    TaskCreate,
+    TaskRead,
+    Text2SQLRequest,
+    Text2SQLResponse,
+    ToolCall,
+)
 from app.modules.ai import briefing as briefing_service
 from app.modules.ai import drafts as drafts_service
 from app.modules.ai import nl_filters as nl_filters_service
@@ -19,22 +45,6 @@ from app.modules.ai import service, routing
 from app.modules.ai import agent_tools
 from app.modules.ai import agent_runtime
 from app.modules.ai import text2sql as text2sql_service
-from app.modules.ai.text2sql import Text2SQLRequest, Text2SQLResponse
-from app.modules.ai.schema import (
-    AIChatRequest,
-    AIChatResponse,
-    AIPurchaseDraftPreview,
-    AIPurchaseDraftRequest,
-    AIConversationPage,
-    AIConversationRead,
-    AIConversationUpdate,
-    AIMessagePage,
-    AIMessageRead,
-    BriefingRequest,
-    BriefingResponse,
-    NLFilterRequest,
-    NLFilterResult,
-)
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection
 from app.modules.system.model import User
 
@@ -54,7 +64,7 @@ def agent_tool_catalog(db: Session = Depends(get_db), user: User = Depends(get_c
 
 
 @router.post("/route", summary="理解会话请求并生成受约束路由")
-async def route_request(data: routing.RouteRequest, db: Session = Depends(get_db),
+async def route_request(data: RouteRequest, db: Session = Depends(get_db),
                         user: User = Depends(require_permission("ai.workspace.read"))) -> dict:
     """校验会话归属并理解当前请求，返回短期复用凭据；此接口不执行业务查询。"""
     context = routing.conversation_context(db, user, data.conversation_id)
@@ -63,60 +73,60 @@ async def route_request(data: routing.RouteRequest, db: Session = Depends(get_db
             "route_token": routing.issue_ticket(decision, user.id, data.question, data.conversation_id)}
 
 
-@router.post("/agent/tools/execute", response_model=agent_tools.InventoryResult | agent_tools.QuoteResult | agent_tools.ProductSearchResult | agent_tools.RFQSearchResult,
+@router.post("/agent/tools/execute", response_model=InventoryResult | QuoteResult | ProductSearchResult | RFQSearchResult,
              summary="执行白名单内的只读 Agent 工具")
-def agent_tool_execute(data: agent_tools.ToolCall, db: Session = Depends(get_db),
+def agent_tool_execute(data: ToolCall, db: Session = Depends(get_db),
                        user: User = Depends(get_current_user)):
     """通过统一护栏执行一个只读工具；身份来自 JWT，不接受请求指定执行人。"""
     return agent_tools.execute_tool(db, user, data)
 
 
-@router.post("/agent/tasks", response_model=agent_runtime.TaskRead, summary="启动只读采购 Agent 任务")
-async def agent_task_create(data: agent_runtime.TaskCreate, db: Session = Depends(get_db),
+@router.post("/agent/tasks", response_model=TaskRead, summary="启动只读采购 Agent 任务")
+async def agent_task_create(data: TaskCreate, db: Session = Depends(get_db),
                             user: User = Depends(get_current_user)):
     """按用户目标运行只读工具循环，返回任务 ID、状态、公开轨迹和来源。"""
     return await agent_runtime.create_task(db, user, data)
 
 
-@router.get("/agent/tasks/{task_id}", response_model=agent_runtime.TaskRead, summary="查询本人 Agent 任务")
+@router.get("/agent/tasks/{task_id}", response_model=TaskRead, summary="查询本人 Agent 任务")
 def agent_task_read(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """回看本人任务；再次检查当前权限和历史证据的资源范围。"""
     return agent_runtime.get_task(db, user, task_id)
 
 
-@router.post("/agent/tasks/start", response_model=agent_runtime.TaskRead, status_code=202, summary="启动采购任务并立即返回编号")
-def agent_task_start(data: agent_runtime.TaskCreate, background: BackgroundTasks,
+@router.post("/agent/tasks/start", response_model=TaskRead, status_code=202, summary="启动采购任务并立即返回编号")
+def agent_task_start(data: TaskCreate, background: BackgroundTasks,
                      db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return agent_runtime.schedule_async(db, user, background, agent_runtime.prepare_task, data)
 
 
-@router.post("/agent/chat/start", response_model=agent_runtime.TaskRead, status_code=202, summary="在聊天会话中启动只读任务")
-def agent_chat_start(data: agent_runtime.ChatTaskCreate, background: BackgroundTasks,
+@router.post("/agent/chat/start", response_model=TaskRead, status_code=202, summary="在聊天会话中启动只读任务")
+def agent_chat_start(data: ChatTaskCreate, background: BackgroundTasks,
                      db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return agent_runtime.schedule_async(db, user, background, agent_runtime.prepare_chat_task, data)
 
 
-@router.post("/agent/chat/{task_id}/continue", response_model=agent_runtime.TaskRead, status_code=202, summary="聊天补充并继续只读任务")
-def agent_chat_continue(task_id: str, data: agent_runtime.TaskContinue, background: BackgroundTasks,
+@router.post("/agent/chat/{task_id}/continue", response_model=TaskRead, status_code=202, summary="聊天补充并继续只读任务")
+def agent_chat_continue(task_id: str, data: TaskContinue, background: BackgroundTasks,
                         db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return agent_runtime.schedule_async(db, user, background, agent_runtime.prepare_chat_continue, task_id, data)
 
 
-@router.post("/agent/tasks/{task_id}/continue/start", response_model=agent_runtime.TaskRead, status_code=202,
+@router.post("/agent/tasks/{task_id}/continue/start", response_model=TaskRead, status_code=202,
              summary="补充采购任务并立即返回续跑状态")
-def agent_task_continue_start(task_id: str, data: agent_runtime.TaskContinue, background: BackgroundTasks,
+def agent_task_continue_start(task_id: str, data: TaskContinue, background: BackgroundTasks,
                               db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return agent_runtime.schedule_async(db, user, background, agent_runtime.prepare_continue, task_id, data)
 
 
-@router.post("/agent/tasks/{task_id}/continue", response_model=agent_runtime.TaskRead, summary="补充信息并继续 Agent 任务")
-async def agent_task_continue(task_id: str, data: agent_runtime.TaskContinue, db: Session = Depends(get_db),
+@router.post("/agent/tasks/{task_id}/continue", response_model=TaskRead, summary="补充信息并继续 Agent 任务")
+async def agent_task_continue(task_id: str, data: TaskContinue, db: Session = Depends(get_db),
                               user: User = Depends(get_current_user)):
     """按版本号继续等待任务；仅接受已返回候选中的产品/询价明细选择。"""
     return await agent_runtime.continue_task(db, user, task_id, data)
 
 
-@router.post("/agent/tasks/{task_id}/cancel", response_model=agent_runtime.TaskRead, summary="取消本人 Agent 任务")
+@router.post("/agent/tasks/{task_id}/cancel", response_model=TaskRead, summary="取消本人 Agent 任务")
 def agent_task_cancel(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """取消运行或等待任务，并阻止旧运行者覆盖取消后的状态。"""
     return agent_runtime.cancel_task(db, user, task_id)

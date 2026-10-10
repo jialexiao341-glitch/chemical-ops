@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.modules.ai.intent import extract_valid_cas
+from app.modules.chemicals.cas import extract_valid_cas
 from app.modules.doc_kb import vector_store
 from app.modules.doc_kb.embedding import embed_texts
 from app.modules.doc_kb.model import AiDocumentSection

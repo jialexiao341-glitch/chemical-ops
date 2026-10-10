@@ -7,7 +7,7 @@ import pytest
 
 from app.core.errors import BusinessValidationError
 from app.modules.ai import agent_prompt, service
-from app.modules.ai.intent import Intent
+from app.modules.ai.schema import Intent
 from app.modules.ai.schema import AIChatMessage, AIChatResponse
 
 

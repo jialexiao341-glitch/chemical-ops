@@ -3,6 +3,9 @@
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
+from app.modules.ai.schema import (
+    QueryPlan,
+)
 
 
 def query_accessible(db, user, citation: dict) -> bool:
@@ -14,7 +17,7 @@ def query_accessible(db, user, citation: dict) -> bool:
         if citation.get("type") == "order_trace":
             from app.modules.ai.order_trace import trace_purchase_order
             return fingerprint(trace_purchase_order(db, user, citation["po_no"])) == fingerprint(citation["order_trace"])
-        plan = text2sql.QueryPlan.model_validate(citation["query_plan"])
+        plan = QueryPlan.model_validate(citation["query_plan"])
         text2sql._validate_plan(db, user, plan)
         fetched = db.execute(text2sql.build_statement(plan, db, user)).mappings().all()
         raw = [{str(k): text2sql._serialize(v) for k, v in row.items()} for row in fetched[:plan.limit]]

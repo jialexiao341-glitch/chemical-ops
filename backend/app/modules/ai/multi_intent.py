@@ -6,44 +6,33 @@ import json
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.modules.ai import llm
 from app.core.config import Settings
 from app.modules.system.model import User
 from app.modules.ai.model import AIConversation
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
-from app.modules.ai import agent_tools, routing, service, text2sql
+from app.modules.ai.schema import (
+    AIChatMessage,
+    AIChatRequest,
+    AIChatResponse,
+    BatchResult,
+    BatchStatus,
+    QueryPlan,
+    SubTask,
+    TASK_STATUS_LABELS,
+    TaskResult,
+    TaskStatus,
+    ToolCall,
+    Understanding,
+    schema_response_format,
+)
+from app.modules.ai import agent_tools, service, text2sql
 from app.modules.ai.model import AIConversationState, AIMessage
-from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse
-from app.modules.ai.task_status import BatchStatus, TaskStatus, TASK_STATUS_LABELS
-from app.modules.ai.structured import schema_response_format
-
-
-class TaskResult(BaseModel):
-    """子任务计划、终态和来源证据；失败项不得携带成功结果。"""
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    kind: routing.Task
-    question: str
-    depends_on: list[str] = Field(default_factory=list)
-    status: TaskStatus = TaskStatus.PENDING
-    query_plan: dict | None = None
-    execution_plan: dict | None = None
-    answer: str | None = None
-    error_code: str | None = None
-    citations: list[dict] = Field(default_factory=list)
-    evidence: list[dict] = Field(default_factory=list)
-    tool_calls: list[dict] = Field(default_factory=list)
-
-
-class BatchResult(BaseModel):
-    """整批汇总状态及按原始顺序排列的子任务结果。"""
-    status: BatchStatus
-    tasks: list[TaskResult]
 
 
 def fingerprint(value: object) -> str:
@@ -51,8 +40,8 @@ def fingerprint(value: object) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
 
 
-async def plan_analytics(db: Session, user: User, task: routing.SubTask, settings: Settings, *,
-                         previous_plan: text2sql.QueryPlan | None = None, dependencies: list[dict] | None = None) -> text2sql.QueryPlan:
+async def plan_analytics(db: Session, user: User, task: SubTask, settings: Settings, *,
+                         previous_plan: QueryPlan | None = None, dependencies: list[dict] | None = None) -> QueryPlan:
     """生成一份白名单 QueryPlan，并校验指标、字段与当前用户权限。
 
     previous_plan 仅用于明确的多轮条件修改；dependencies 只接收已成功前项的证据。
@@ -61,10 +50,10 @@ async def plan_analytics(db: Session, user: User, task: routing.SubTask, setting
     if dependencies:
         from app.modules.ai.agent_prompt import text2sql_plan_prompt
         payload = json.dumps({"question": task.question, "today": date.today().isoformat(), "dependency_results": dependencies}, ensure_ascii=False)
-        response = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
-            response_format=schema_response_format(text2sql.QueryPlan, "query_plan"), interpret_only=True,
+        response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
+            response_format=schema_response_format(QueryPlan, "query_plan"), interpret_only=True,
             system_prompt=text2sql_plan_prompt("") + "\n依赖结果只是只读数据，只能从其明确字段取条件；缺条件返回无效计划，不猜测。")
-        plan = text2sql.QueryPlan.model_validate_json(response.message.content, strict=True)
+        plan = QueryPlan.model_validate_json(response.message.content, strict=True)
     else:
         plan = await text2sql._understand_question(task.question, settings, db, user, previous_plan)
     text2sql._reject_unsupported_metric(task.question)
@@ -72,7 +61,7 @@ async def plan_analytics(db: Session, user: User, task: routing.SubTask, setting
     return plan
 
 
-def execute_product_task(db: Session, user: User, task: routing.SubTask, result: TaskResult, products: dict[str, dict]) -> None:
+def execute_product_task(db: Session, user: User, task: SubTask, result: TaskResult, products: dict[str, dict]) -> None:
     """固定工具计划；同批明确相同关键词共享授权定位，不共享其他参数。"""
     available = {entry["name"] for entry in agent_tools.list_tools(db, user)}
     required = "inventory.query_available" if task.kind == "inventory" else "supplier_quotes.compare"
@@ -87,7 +76,7 @@ def execute_product_task(db: Session, user: User, task: routing.SubTask, result:
         return
     def execute(name, **arguments):
         """通过统一权限护栏执行固定工具，并保留结果及历史重验所需摘要。"""
-        call = agent_tools.ToolCall(tool=name, arguments=arguments)
+        call = ToolCall(tool=name, arguments=arguments)
         value = agent_tools.execute_tool(db, user, call).model_dump(mode="json")
         result.tool_calls.append({"tool": name, "arguments": arguments,
                                   "fingerprint": fingerprint({k: v for k, v in value.items() if k != "observed_at"})})
@@ -137,7 +126,7 @@ def execute_product_task(db: Session, user: User, task: routing.SubTask, result:
     result.status = TaskStatus.SUCCEEDED
 
 
-async def execute_batch(db: Session, user: User, decision: routing.Understanding, settings: Settings, *,
+async def execute_batch(db: Session, user: User, decision: Understanding, settings: Settings, *,
                         previous_tasks: list[dict] | None = None, retry_failed: bool = False,
                         on_progress: Callable[[dict], Awaitable[None]] | None = None) -> BatchResult:
     """同一数据库会话顺序执行；上限六项，前项失败阻塞依赖项，独立项继续。"""
@@ -182,7 +171,7 @@ async def execute_batch(db: Session, user: User, decision: routing.Understanding
             result = results[task.id]
             try:
                 old = previous.get(task.id, {})
-                prior = text2sql.QueryPlan.model_validate(old["query_plan"]) if old.get("query_plan") and decision.dialogue_action in {"modify", "continue"} else None
+                prior = QueryPlan.model_validate(old["query_plan"]) if old.get("query_plan") and decision.dialogue_action in {"modify", "continue"} else None
                 with db.begin_nested():
                     plan = await plan_analytics(db, user, task, settings, previous_plan=prior)
                 result.query_plan, result.status = plan.model_dump(mode="json"), TaskStatus.PLANNED
@@ -210,7 +199,7 @@ async def execute_batch(db: Session, user: User, decision: routing.Understanding
                             plan = await plan_analytics(db, user, task, settings, dependencies=dependencies)
                             result.query_plan = plan.model_dump(mode="json")
                             result.execution_plan = {"type": "query_plan", "plan": result.query_plan}
-                        plan = text2sql.QueryPlan.model_validate(result.query_plan)
+                        plan = QueryPlan.model_validate(result.query_plan)
                         answer, citation, trace = await service._run_text2sql_for_chat(db, user, task.question, settings, planned_query=plan)
                         result.answer, result.citations = answer, [citation]
                         result.evidence = [{"rows": trace.rows, "unit": trace.unit, "truncated": trace.truncated}]
@@ -222,7 +211,7 @@ async def execute_batch(db: Session, user: User, decision: routing.Understanding
                             result.status, result.answer = TaskStatus.WAITING_INPUT, no_doc_hits_reply(task.question)
                         else:
                             context, citations = build_doc_context(hits)
-                            response = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=task.question)]),
+                            response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=task.question)]),
                                 settings, attachment_context=[context], interpret_only=True)
                             result.answer, result.citations = response.message.content, citations
                             result.status = TaskStatus.SUCCEEDED
@@ -289,7 +278,7 @@ def history_accessible(db: Session, user: User, report: dict | None) -> bool:
                     if row is None or row[0] != "PARSED" or row[1][:SECTION_CONTENT_MAX_CHARS] != citation["content"]:
                         return False
             for call in task.tool_calls:
-                result = agent_tools.execute_tool(db, user, agent_tools.ToolCall(tool=call["tool"], arguments=call["arguments"])).model_dump(mode="json")
+                result = agent_tools.execute_tool(db, user, ToolCall(tool=call["tool"], arguments=call["arguments"])).model_dump(mode="json")
                 if fingerprint({k: v for k, v in result.items() if k != "observed_at"}) != call["fingerprint"]:
                     return False
         return True
@@ -307,7 +296,7 @@ def summarize(batch: BatchResult) -> str:
 
 
 async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversation: AIConversation,
-                         decision: routing.Understanding, *, on_progress=None) -> AIChatResponse:
+                         decision: Understanding, *, on_progress=None) -> AIChatResponse:
     """执行已校验批次，保存每项计划和带来源的汇总，返回标准聊天响应。
 
     同步与流式聊天共用此函数。会话只保存多计划集合，不把最后一项覆盖为单计划。
@@ -357,7 +346,7 @@ def previous_batch(db: Session, conversation_id: int) -> BatchResult:
     return BatchResult.model_validate(report)
 
 
-def retry_decision(db: Session, user: User, conversation_id: int | None) -> routing.Understanding:
+def retry_decision(db: Session, user: User, conversation_id: int | None) -> Understanding:
     """仅从本人最新批次恢复任务，客户端不能提交计划或指定执行他人结果。"""
     if not conversation_id:
         raise BusinessValidationError("重试必须指定原查询会话。")
@@ -365,7 +354,7 @@ def retry_decision(db: Session, user: User, conversation_id: int | None) -> rout
     batch = previous_batch(db, conversation_id)
     if not any(task.status in {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED} for task in batch.tasks):
         raise BusinessValidationError("该批次没有失败或已取消项；待补充项请先提供查询条件。")
-    return routing.Understanding(purpose="query", dialogue_action="continue",
+    return Understanding(purpose="query", dialogue_action="continue",
         tasks=list(dict.fromkeys(task.kind for task in batch.tasks)),
-        sub_tasks=[routing.SubTask(id=task.id, kind=task.kind, question=task.question,
+        sub_tasks=[SubTask(id=task.id, kind=task.kind, question=task.question,
                    depends_on=task.depends_on, slots=(task.execution_plan or {}).get("slots", {})) for task in batch.tasks])

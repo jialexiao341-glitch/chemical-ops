@@ -72,7 +72,7 @@ def test_pending_rfq_is_structured_and_resume_reads_current_quotes(task_db, mode
     task_db.commit()
     async def unexpected_model(*args, **kwargs):
         pytest.fail('结构化选择续答不应重新调用模型识别编号')
-    monkeypatch.setattr(runtime.service, 'chat', unexpected_model)
+    monkeypatch.setattr(runtime.llm, 'chat', unexpected_model)
     continued = asyncio.run(runtime.continue_task(task_db, USER, result.id,
         runtime.TaskContinue(question='选择 RFQ-OWN', revision=result.revision, rfq_item_id=11)))
     assert continued.status == 'SUCCEEDED' and '17.000000 CNY/千克' in continued.reply
@@ -169,7 +169,7 @@ def test_transport_failure_has_separate_error_code(task_db, monkeypatch):
     async def understand(*args, **kwargs):
         return runtime.routing.Understanding(purpose='query', tasks=['inventory'])
     monkeypatch.setattr(runtime.routing, 'understand', understand)
-    monkeypatch.setattr(runtime.service, 'chat', disconnected)
+    monkeypatch.setattr(runtime.llm, 'chat', disconnected)
     assert start(task_db).error_code == 'MODEL_SERVICE_ERROR'
 
 

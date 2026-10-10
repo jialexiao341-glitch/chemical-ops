@@ -1,16 +1,34 @@
 """采购 Agent 的只读工具：定位业务对象、读取库存和比较报价。"""
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
-from typing import Annotated, Callable, Literal
+from datetime import datetime, timedelta, timezone
+from typing import Callable
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import case, exists, func, select
 from sqlalchemy.orm import Session, aliased
 
 from app.core.config import get_settings
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
+from app.modules.ai.schema import (
+    InventoryInput,
+    InventoryResult,
+    InventoryRow,
+    InventoryTotal,
+    PositiveID,
+    ProductCandidate,
+    ProductSearchInput,
+    ProductSearchResult,
+    QuoteInput,
+    QuoteResult,
+    QuoteRow,
+    RFQCandidate,
+    RFQSearchInput,
+    RFQSearchResult,
+    Source,
+    ToolCall,
+    ToolSchema,
+)
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.inventory.service import accessible_warehouse_ids
 from app.modules.products.model import Product
@@ -19,85 +37,6 @@ from app.modules.rfqs.model import RFQ, RFQItem, SupplierQuote, SupplierQuoteIte
 from app.modules.suppliers.model import Supplier
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
-
-
-PositiveID = Annotated[int, Field(strict=True, gt=0)]
-
-
-class ToolSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class InventoryInput(ToolSchema):
-    product_id: PositiveID
-    warehouse_id: PositiveID | None = None
-    limit: Annotated[int, Field(strict=True, ge=1, le=100)] = 20
-
-
-class QuoteInput(ToolSchema):
-    product_id: PositiveID
-    rfq_item_id: PositiveID
-    limit: Annotated[int, Field(strict=True, ge=1, le=100)] = 20
-
-
-class ToolCall(ToolSchema):
-    tool: str = Field(min_length=1, max_length=100)
-    arguments: dict[str, object]
-
-
-class ProductSearchInput(ToolSchema):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    keyword: str = Field(min_length=1, max_length=100)
-    limit: Annotated[int, Field(strict=True, ge=1, le=20)] = 10
-
-
-class RFQSearchInput(ToolSchema):
-    product_id: PositiveID
-    rfq_no: str | None = Field(default=None, min_length=1, max_length=32)
-    limit: Annotated[int, Field(strict=True, ge=1, le=20)] = 10
-
-
-class ProductCandidate(ToolSchema):
-    product_id: int
-    product_code: str
-    product_name: str
-    model: str | None
-    packaging_spec: str | None
-    unit_id: int
-    unit_name: str
-
-
-class ProductSearchResult(ToolSchema):
-    tool: Literal["catalog.search_products"] = "catalog.search_products"
-    keyword: str
-    total_rows: int
-    truncated: bool
-    rows: list[ProductCandidate]
-    sources: list["Source"]
-
-
-class RFQCandidate(ToolSchema):
-    rfq_item_id: int
-    rfq_id: int
-    rfq_no: str
-    product_id: int
-    specification: str | None
-    technical_requirements: str | None
-
-
-class RFQSearchResult(ToolSchema):
-    tool: Literal["supplier_quotes.find_rfq_items"] = "supplier_quotes.find_rfq_items"
-    product_id: int
-    total_rows: int
-    truncated: bool
-    rows: list[RFQCandidate]
-    sources: list["Source"]
-
-
-class Source(ToolSchema):
-    resource: str
-    record_id: int
-    parent_id: int | None = None
 
 
 def search_products(db: Session, user: User, arguments: ProductSearchInput) -> ProductSearchResult:
@@ -114,7 +53,7 @@ def search_products(db: Session, user: User, arguments: ProductSearchInput) -> P
         Product.product_name.contains(arguments.keyword, autoescape=True) |
         Product.product_code.contains(arguments.keyword, autoescape=True),
     )
-    from app.modules.ai.intent import extract_valid_cas
+    from app.modules.chemicals.cas import extract_valid_cas
     if extract_valid_cas(arguments.keyword) == [arguments.keyword]:
         from app.modules.chemicals.model import Chemical
         # CAS 定位实际登记的化学品关联规格，仍保留启用状态及多候选消歧。
@@ -152,84 +91,6 @@ def find_rfq_items(db: Session, user: User, arguments: RFQSearchInput) -> RFQSea
     return RFQSearchResult(product_id=arguments.product_id, total_rows=total,
         truncated=total > arguments.limit, rows=[RFQCandidate(**row) for row in rows],
         sources=[Source(resource="rfq_items", record_id=row["rfq_item_id"], parent_id=row["rfq_id"]) for row in rows])
-
-
-class InventoryRow(ToolSchema):
-    balance_id: int
-    warehouse_id: int
-    warehouse_name: str
-    batch_id: int
-    batch_no: str
-    expiry_date: date | None
-    unit_id: int
-    unit_name: str
-    status: str
-    quantity: Decimal
-    locked_quantity: Decimal
-    available_quantity: Decimal
-
-
-class InventoryTotal(ToolSchema):
-    unit_id: int
-    unit_name: str
-    available_quantity: Decimal
-
-
-class InventoryResult(ToolSchema):
-    tool: Literal["inventory.query_available"] = "inventory.query_available"
-    observed_at: datetime
-    product_id: int
-    product_name: str
-    warehouse_id: int | None
-    scope: str = "当前用户可访问仓库；未指定仓库时不是企业全量库存"
-    total_rows: int
-    truncated: bool
-    totals: list[InventoryTotal]
-    scope_warehouse_ids: list[int] = Field(default_factory=list)
-    rows: list[InventoryRow]
-    sources: list[Source]
-    warnings: list[str]
-
-
-class QuoteRow(ToolSchema):
-    quote_id: int
-    quote_item_id: int
-    supplier_id: int
-    supplier_name: str
-    quote_no: str
-    quote_version: int
-    quote_date: date
-    valid_until: date | None
-    currency_code: str
-    unit_id: int
-    unit_name: str
-    supplier_model: str | None
-    tax_rate: Decimal | None
-    unit_price: Decimal
-    quoted_quantity: Decimal
-    moq_quantity: Decimal | None
-    moq_unit_id: int | None
-    lead_days: int | None
-    rank: int | None = None
-
-
-class QuoteResult(ToolSchema):
-    tool: Literal["supplier_quotes.compare"] = "supplier_quotes.compare"
-    observed_at: datetime
-    as_of: date
-    product_id: int
-    rfq_id: int
-    rfq_no: str
-    rfq_item_id: int
-    specification: str | None
-    technical_requirements: str | None
-    scope: str = "同一询价明细；普通用户仅本人询价，采购经理/管理员全部询价"
-    comparison_basis: str = "未税单价；仅在币种、单位、税率、供应商型号相同且明确时排序"
-    total_rows: int
-    truncated: bool
-    rows: list[QuoteRow]
-    sources: list[Source]
-    warnings: list[str]
 
 
 def _product(db: Session, product_id: int):

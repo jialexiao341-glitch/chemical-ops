@@ -9,9 +9,9 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai import service, routing, text2sql
+from app.modules.ai import llm, service, routing, text2sql
 from app.modules.ai.schema import AIChatMessage, AIChatRequest
-from app.modules.ai.structured import schema_response_format
+from app.modules.ai.schema import schema_response_format
 from app.modules.ai.catalog import CATALOG
 from app.modules.ai.agent_prompt import text2sql_plan_prompt
 
@@ -101,7 +101,7 @@ def test_provider_receives_strict_schema_and_response_is_decoded(monkeypatch, ba
         assert payload["response_format"]["json_schema"]["strict"] is True
         return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(plan)}}]})
     original = httpx.AsyncClient
-    monkeypatch.setattr(service.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(respond), **kwargs))
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(respond), **kwargs))
     settings = Settings(_env_file=None, openai_base_url=base, openai_api_key="test-key", llm_max_retries=0)
     response = asyncio.run(service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content="合成计划协议测试")]), settings,
         response_format=schema_response_format(text2sql.QueryPlan, "query_plan"), interpret_only=True))
@@ -112,7 +112,7 @@ def test_truncated_structured_output_is_rejected_before_plan_validation(monkeypa
     def respond(request):
         return httpx.Response(200, json={"status": "incomplete", "output": []})
     original = httpx.AsyncClient
-    monkeypatch.setattr(service.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(respond), **kwargs))
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(respond), **kwargs))
     with pytest.raises(BusinessValidationError, match="无法识别"):
         asyncio.run(service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content="合成问题")]),
             Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=0),

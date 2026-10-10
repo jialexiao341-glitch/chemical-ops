@@ -12,17 +12,26 @@ import logging
 import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, Literal, TypedDict
+from typing import Any, TypedDict
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import Select, and_, case, desc, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
+from app.modules.ai.schema import (
+    AIChatMessage,
+    AIChatRequest,
+    AIQueryTrace,
+    QueryFilter,
+    QueryPlan,
+    Text2SQLRequest,
+    Text2SQLResponse,
+    schema_response_format,
+)
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
 from app.modules.inventory.model import InventoryBalance, InventoryBalanceStatusLog, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
@@ -39,10 +48,8 @@ from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.suppliers.model import Supplier
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
-from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIQueryTrace
-from app.modules.ai.service import chat
-from app.modules.ai.catalog import CATALOG, slot_description
-from app.modules.ai.structured import schema_response_format
+from app.modules.ai.llm import chat
+from app.modules.ai.catalog import CATALOG
 
 
 LOGGER = logging.getLogger("chemicalops.ai.text2sql")
@@ -54,81 +61,11 @@ def _query_hash(question: str) -> str:
     return hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
 
 
-class QueryFilter(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    field: Literal[tuple(sorted({field for spec in CATALOG.values() for field in spec.filters}))] = Field(
-        title="筛选槽位", description="必须属于当前 dataset 的 filters，不能把分组别名用于筛选。各数据集允许值：" + slot_description("filters"))
-    operator: Literal["eq", "contains", "gte", "lte", "in"] = Field(default="eq", title="筛选操作符",
-        description="eq=等于，contains=包含文本，gte=大于等于，lte=小于等于，in=属于集合。in 的 value 必须是数组；其余操作使用单个值。")
-    value: str | int | float | list[str | int | float] = Field(title="筛选值",
-        description="用户明确给出或前置查询明确返回的值，不得猜测ID。状态使用业务编码：finance_invoices 已核验=VERIFIED；finance_payments 已付款=PAID。")
-
-
-class QueryPlan(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    dataset: Literal[tuple(CATALOG)] = Field(title="查询数据集",
-        description="根据问题选择唯一数据集，不能选择无关数据集来凑合法输出。数据集含义：" + slot_description("label"))
-    metric: Literal["count", "amount", "sum_quantity", "records"] = Field(title="统计指标",
-        description="count=记录数量，amount=金额合计，sum_quantity=库存数量合计，records=固定业务明细。发票金额为含税金额；报价单价不得跨产品或单位求和；金额按币种分别统计。各数据集允许值：" + slot_description("metrics"))
-    time_field: Literal[tuple(sorted({field for spec in CATALOG.values() for field in spec.times}))] | None = Field(
-        default="created_at", title="时间口径",
-        description="日期筛选依据的业务时间字段。采购订单本月统计使用 order_date；未限定日期可为 null；无时间字段的数据集必须为 null。各数据集允许值：" + slot_description("times"))
-    date_from: date | None = Field(default=None, title="起始日期",
-        description="包含当天的 ISO 日期 YYYY-MM-DD；不限起始时间为 null。相对时间以输入 today 换算；本月从当月第一天开始。不得晚于 date_to。")
-    date_to: date | None = Field(default=None, title="结束日期",
-        description="包含当天的 ISO 日期 YYYY-MM-DD；不限结束时间为 null。相对时间以输入 today 换算；本月截至 today，不能擅自扩展到未来月底。")
-    group_by: Literal[tuple(sorted({field for spec in CATALOG.values() for field in spec.dimensions}))] | None = Field(
-        default=None, title="分组维度",
-        description="只能是一个维度字符串或 null，不能是数组。按供应商分组使用 supplier，不能使用筛选字段 supplier_name；金额会再按币种分组。各数据集允许值：" + slot_description("dimensions"))
-    filters: list[QueryFilter] = Field(default_factory=list, title="筛选条件",
-        description="按用户明确条件逐项填写；没有条件使用 []，不得猜测。已付款金额须筛选 status=PAID，已核验发票金额须筛选 status=VERIFIED。")
-    order: Literal["asc", "desc"] = Field(default="desc", title="排序方向",
-        description="asc=升序，desc=降序；金额最高、数量最多等排名使用 desc。")
-    limit: int = Field(default=20, ge=1, le=100, title="最多展示条数",
-        description="用户明确最多显示 N 家或 N 条时取 N；未指定取20。仅限制明细展示，不能将展示条数当作全范围统计数量。允许1至100。")
-
-    @model_validator(mode="after")
-    def validate_dates(self):
-        if self.date_from and self.date_to and self.date_from > self.date_to:
-            raise ValueError("时间范围起止顺序错误")
-        if (self.date_from or self.date_to) and not self.time_field:
-            raise ValueError("日期筛选必须指定时间字段")
-        return self
-
-
-class Text2SQLRequest(BaseModel):
-    question: str = Field(min_length=2, max_length=2000)
-    limit: int = Field(default=20, ge=1, le=100)
-
-
-class Text2SQLResponse(BaseModel):
-    question: str
-    plan: QueryPlan
-    sql: str
-    parameterized_sql: str
-    columns: list[str]
-    slots: list[dict[str, Any]]
-    template: str
-    render_columns: list[dict[str, str]]
-    rows: list[dict[str, Any]]
-    source_records: list[dict[str, Any]] = Field(default_factory=list)
-    row_count: int
-    truncated: bool
-    stages: list[str]
-    render: dict[str, Any]
-    unit: str | None
-    unit_note: str | None
-    read_only: Literal[True] = True
-
-
 from app.modules.ai.agent_prompt import text2sql_plan_prompt
 
 
 TABLE_REFERENCE = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", re.I)
 FORBIDDEN_SQL = re.compile(r"\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|CALL|LOAD|OUTFILE|INTO)\b", re.I)
-
 
 
 def validate_sql(sql: str, table_names: frozenset[str]) -> str:
@@ -1200,8 +1137,6 @@ async def _understand_question(question: str, settings: Settings, db: Session, u
             LOGGER.info("AI 查询计划追问使用上一轮安全计划 question_hash=%s dataset=%s", _query_hash(question), previous_plan.dataset)
             return _merge_follow_up_plan(question, previous_plan)
         raise BusinessValidationError("AI 返回的查询计划格式不正确") from exc
-
-
 
 
 class Text2SQLState(TypedDict, total=False):

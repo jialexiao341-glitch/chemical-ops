@@ -11,7 +11,7 @@ from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.ai import agent_tools, controller, history_access, multi_intent, routing, service, text2sql
 from app.modules.ai.catalog import CATALOG
 from app.modules.ai.model import AIConversation, AIConversationState, AIMessage
-from app.modules.ai.task_status import TaskStatus
+from app.modules.ai.schema import TaskStatus
 from app.modules.system.model import User
 from scripts.seed_demo_accounts import ROLE_SCOPES
 from tests.test_agent_read_tools import tool_db

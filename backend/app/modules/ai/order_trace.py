@@ -11,9 +11,9 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.deliveries.model import Delivery, DeliveryItem
+from app.modules.deliveries.model import Delivery
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction
+from app.modules.inventory.model import InventoryBalance, InventoryBatch
 from app.modules.inventory_returns.model import InventoryReturnRequest
 from app.modules.purchase_orders.scope import ORDER_READ_ALL_ROLES
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem

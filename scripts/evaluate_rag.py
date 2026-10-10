@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.core.config import get_settings  # noqa: E402
-from app.modules.ai.intent import Intent  # noqa: E402
+from app.modules.ai.schema import Intent# noqa: E402
 from app.modules.ai.schema import AIChatMessage, AIChatRequest  # noqa: E402
 from app.modules.ai.service import _classify_chat_intent, chat  # noqa: E402
 from app.modules.doc_kb import retrieve as retrieve_module  # noqa: E402

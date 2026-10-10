@@ -6,21 +6,37 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Annotated, Literal, TypedDict
+from typing import TypedDict
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.modules.ai import llm
 from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
+from app.modules.ai.schema import (
+    ACTION,
+    AIChatMessage,
+    AIChatRequest,
+    AskAction,
+    CallAction,
+    ChatTaskCreate,
+    FinishAction,
+    PendingChoice,
+    TaskContinue,
+    TaskCreate,
+    TaskRead,
+    ToolCall,
+    Understanding,
+    Workflow,
+)
 from app.modules.ai import agent_tools as tools, service, routing
 from app.modules.ai.model import AIAgentTask, AIConversationState, AIMessage
-from app.modules.ai.schema import AIChatMessage, AIChatRequest
 from app.modules.inventory.model import Warehouse
 from app.modules.rfqs.model import RFQ
 from app.modules.system.model import User
@@ -70,53 +86,6 @@ workflow.rfq_no 是从用户询价语境提取的原始条件，与产品名称/
 """
 
 
-class TaskCreate(tools.ToolSchema):
-    question: str = Field(min_length=1, max_length=2000)
-    route_token: str | None = Field(default=None, max_length=64000)
-
-
-class TaskContinue(TaskCreate):
-    revision: Annotated[int, Field(strict=True, ge=0)]
-    product_id: tools.PositiveID | None = None
-    rfq_item_id: tools.PositiveID | None = None
-
-
-class ChatTaskCreate(TaskCreate):
-    conversation_id: tools.PositiveID | None = None
-
-
-class CallAction(tools.ToolCall):
-    action: Literal["call_tool"]
-
-
-class AskAction(tools.ToolSchema):
-    action: Literal["ask_user"]
-    question: str = Field(min_length=1, max_length=1000)
-
-
-class FinishAction(tools.ToolSchema):
-    action: Literal["finish"]
-    evidence_steps: list[tools.PositiveID] = Field(min_length=1, max_length=24)
-
-
-ACTION = TypeAdapter(Annotated[CallAction | AskAction | FinishAction, Field(discriminator="action")])
-
-
-class PendingChoice(tools.ToolSchema):
-    entity: Literal["product", "rfq_item"]
-    lookup_arguments: dict
-    candidates: list[dict]
-    revision: int
-
-
-class Workflow(tools.ToolSchema):
-    """条件只用于限定查询；候选和业务事实仍必须由授权工具核验。"""
-    rfq_no: str | None = Field(default=None, min_length=1, max_length=32)
-    pending: PendingChoice | None = None
-    resume_selection: bool = False
-    product_keyword: str | None = None
-
-
 def _rfq_condition(question: str) -> str | None:
     # 识别语义位置，不绑定 RFQ/EVAL 前缀；不把孤立编号猜成询价。
     token = r"([A-Za-z0-9][A-Za-z0-9_.:/-]{1,31})(?![A-Za-z0-9_.:/-])"
@@ -134,17 +103,6 @@ def _rfq_condition(question: str) -> str | None:
     if match and any(word in question[:match.start()] for word in ("库存", "现货", "可用量")):
         return match.group(1)
     return None
-
-
-class TaskRead(tools.ToolSchema):
-    id: str
-    status: Literal["RUNNING", "WAITING_INPUT", "SUCCEEDED", "FAILED", "CANCELLED"]
-    revision: int
-    reply: str
-    error_code: str | None
-    messages: list[str]
-    trace: list[dict]
-    conversation_id: int | None = None
 
 
 @dataclass
@@ -420,7 +378,7 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
     model_settings = settings.model_copy(update={"llm_max_tokens": min(settings.llm_max_tokens, 2048),
         "llm_max_retries": 0})
     for attempt in range(2):
-        reply = await service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
+        reply = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
             model_settings, response_format={"type": "json_object"}, system_prompt=PLANNER_PROMPT, interpret_only=True)
         try:
             return ACTION.validate_json(reply.message.content)
@@ -566,7 +524,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
                 if decision.route == "cancel":
                     current.status, current.reply = "CANCELLED", "已取消本次查询。"
                 elif decision.route in {"capability", "greeting", "guidance"}:
-                    from app.modules.ai.intent import Intent
+                    from app.modules.ai.schema import Intent
                     current.reply, _ = await service._compose_non_query_reply(
                         {"capability": Intent.PROJECT, "greeting": Intent.GREETING, "guidance": Intent.GUIDANCE}[decision.route],
                         "semantic_route", current.messages[-1], settings)
@@ -580,7 +538,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
                 _persist(db, user, current)
                 return {"data": current}
         if current.memory_state.get("understanding_applied_turn") != len(current.messages):
-            decision = routing.Understanding.model_validate(current.memory_state["understanding"])
+            decision = Understanding.model_validate(current.memory_state["understanding"])
             if decision.dialogue_action == "switch":
                 current.selected_product = current.selected_rfq_item = None
                 current.verified_product = current.verified_rfq_item = None
@@ -659,7 +617,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
                 current.verified_rfq_item is None or action.arguments.get("rfq_item_id") != current.verified_rfq_item
             ):
                 raise BusinessValidationError("询价明细 ID 必须来自本轮定位或用户选择")
-            result = tools.execute_tool(db, user, tools.ToolCall(tool=action.tool, arguments=action.arguments))
+            result = tools.execute_tool(db, user, ToolCall(tool=action.tool, arguments=action.arguments))
             if perf_counter() > deadline:
                 raise TimeoutError()
             entry.update(status="SUCCEEDED", result=result.model_dump(mode="json"))
@@ -848,7 +806,7 @@ def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, c
         state.memory_state = _new_memory_state(question)
     memory = state.memory_state
     if incoming_route and not continuing:
-        decision = routing.Understanding.model_validate(incoming_route)
+        decision = Understanding.model_validate(incoming_route)
         memory["understanding"] = incoming_route
         memory.pop("understanding_applied_turn", None)
         memory["route_turn"] = len(state.messages)

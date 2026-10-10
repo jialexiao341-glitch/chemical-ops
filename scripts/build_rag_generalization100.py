@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, text
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 from app.core.config import get_settings  # noqa: E402
-from app.modules.ai.intent import valid_cas_checksum  # noqa: E402
+from app.modules.chemicals.cas import valid_cas_checksum  # noqa: E402
 
 OUTPUT = ROOT / "docs/evaluation/rag-generalization-100-20261009_cases.jsonl"
 PREVIOUS = ROOT / "docs/evaluation/rag-20261009-before_cases.jsonl"
