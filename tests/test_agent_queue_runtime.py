@@ -234,6 +234,9 @@ def test_transport_error_preserves_checkpoint_for_queue_retry(queued_db, monkeyp
     current = claim(queued_db, execution, monkeypatch)
     async def unavailable(*args, **kwargs):
         raise httpx.ConnectError("simulated unavailable model")
+    async def understand(*args, **kwargs):
+        return runtime.routing.Understanding(purpose="query", tasks=["inventory"])
+    monkeypatch.setattr(runtime.routing, "understand", understand)
     monkeypatch.setattr(runtime.service, "chat", unavailable)
     with pytest.raises(httpx.ConnectError):
         asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))

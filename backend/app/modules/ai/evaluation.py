@@ -118,6 +118,7 @@ def run_offline_evaluation() -> dict[str, object]:
     return {
         "suite": "chemicalops-ai-offline-v1",
         "mode": "deterministic_no_llm_no_writes",
+        "intent_scope": "legacy_keyword_regression_only; current semantic routing requires scripts/evaluate_intent_routing.py",
         "case_count": len(results),
         "passed_count": passed_count,
         "failed_count": len(results) - passed_count,

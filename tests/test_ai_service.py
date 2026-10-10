@@ -186,6 +186,11 @@ def test_stream_text_chunks_are_incremental() -> None:
 def test_ai_chat_routes_business_query_to_text2sql(client: TestClient, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.modules.ai import service
 
+    from app.modules.ai import routing
+    async def understand(*args, **kwargs):
+        return routing.Understanding(purpose='query', tasks=['analytics'])
+    monkeypatch.setattr(routing, 'understand', understand)
+
     calls: list[str] = []
 
     from app.modules.ai.schema import AIQueryTrace

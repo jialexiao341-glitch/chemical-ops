@@ -100,6 +100,7 @@ export namespace AgentApi {
     trace: Step[];
   }
   export interface Continue {
+    route_token?: string;
     question: string;
     revision: number;
     product_id?: number;
@@ -121,8 +122,8 @@ export function cancelAgentTaskApi(id: string) {
   return requestClient.post<AgentApi.Task>(`/ai/agent/tasks/${encodeURIComponent(id)}/cancel`);
 }
 
-export function createAgentChatApi(question: string, conversationId?: number) {
-  return requestClient.post<AgentApi.Task>('/ai/agent/chat/start', { question, conversation_id: conversationId });
+export function createAgentChatApi(question: string, conversationId?: number, routeToken?: string) {
+  return requestClient.post<AgentApi.Task>('/ai/agent/chat/start', { question, conversation_id: conversationId, route_token: routeToken });
 }
 export function continueAgentChatApi(id: string, data: AgentApi.Continue) {
   return requestClient.post<AgentApi.Task>(`/ai/agent/chat/${encodeURIComponent(id)}/continue`, data);

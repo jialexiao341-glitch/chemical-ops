@@ -38,9 +38,19 @@ def task_db(tool_db, monkeypatch):
 def model_script(monkeypatch):
     """仅替换外部模型 HTTP 调用；动作校验、Graph、数据库和权限仍执行真实代码。"""
     actions, contexts = [], []
-    async def chat(request, settings, *, response_format, system_prompt):
+    async def chat(request, settings, *, response_format, system_prompt, interpret_only=False):
         """按预期动作响应并保留模型收到的上下文，验证工具结果确实反馈给下一步。"""
         assert response_format == {"type": "json_object"}
+        if system_prompt.startswith(runtime.routing.ROUTING_PROMPT):
+            # 脚本模型仅隔离执行链；真实语义效果由独立评测验证。
+            payload = json.loads(request.messages[0].content)
+            question = payload['question']
+            switching = question.startswith('改查')
+            previous = '' if switching else payload.get('context', {}).get('memory', {}).get('goal', {}).get('intent', '')
+            inventory = '库存' in question or 'inventory' in previous
+            quotes = '报价' in question or '询价' in question or 'quotes' in previous or 'quote' in previous
+            tasks = (['inventory'] if inventory else []) + (['quotes'] if quotes else [])
+            return SimpleNamespace(message=SimpleNamespace(content=json.dumps({'purpose': 'query', 'tasks': tasks or ['inventory'], 'dialogue_action': 'switch' if switching else 'continue'})))
         assert system_prompt == runtime.PLANNER_PROMPT and settings.llm_max_tokens <= 2048
         contexts.append(json.loads(request.messages[0].content))
         action = actions.pop(0)
@@ -159,9 +169,21 @@ def test_ids_cannot_be_guessed_before_lookup(task_db, model_script):
     """模型猜产品/询价 ID 即使数值碰巧正确，也必须被证据来源门拦截。"""
     actions, _ = model_script
     actions.extend([tool('inventory.query_available', product_id=1), tool('supplier_quotes.compare', product_id=1, rfq_item_id=11)])
-    result = start(task_db)
+    result = start(task_db, '查库存并比较报价')
     assert result.status == 'FAILED' and result.error_code == 'TOOL_ERRORS'
     assert all(entry.get('status') != 'SUCCEEDED' for entry in result.trace)
+
+
+def test_excluded_task_cannot_be_restored_by_planner(task_db, model_script, monkeypatch):
+    """即使规划器提出报价调用，也不能执行用户已明确排除的任务。"""
+    async def understand(*args, **kwargs):
+        return runtime.routing.Understanding(purpose="query", tasks=["inventory"], excluded_tasks=["quotes"])
+    monkeypatch.setattr(runtime.routing, "understand", understand)
+    model_script[0].extend([tool("catalog.search_products", keyword="测试乙醇"),
+                           tool("supplier_quotes.find_rfq_items", product_id=1)])
+    result = start(task_db, "查测试乙醇库存，不用比较报价")
+    assert result.error_code == "INTENT_MISMATCH"
+    assert not any(entry.get("tool", "").startswith("supplier_quotes.") and entry.get("status") == "SUCCEEDED" for entry in result.trace)
 
 
 def test_repeat_call_and_step_limit_stop(task_db, model_script, monkeypatch):
@@ -287,6 +309,8 @@ def test_actual_model_adapter_uses_planner_prompt_and_json_protocol(task_db, mon
         """模拟兼容模型的 chat/completions 响应，保留客户端发出的 JSON。"""
         payload = json.loads(request.content)
         requests.append(payload)
+        if payload['messages'][0]['content'].startswith(runtime.routing.ROUTING_PROMPT):
+            return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps({'purpose': 'query', 'tasks': ['inventory']})}}]})
         assert payload['messages'][0]['content'] == runtime.PLANNER_PROMPT
         assert payload['response_format'] == {'type': 'json_object'}
         return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps(actions.pop(0))}}]})
@@ -294,7 +318,7 @@ def test_actual_model_adapter_uses_planner_prompt_and_json_protocol(task_db, mon
     monkeypatch.setattr(runtime.service.httpx, 'AsyncClient', lambda **kwargs: original_client(
         transport=httpx.MockTransport(respond), **kwargs))
     assert start(task_db).status == 'SUCCEEDED'
-    assert len(requests) == 3 and requests[-1]['max_tokens'] == 2048
+    assert len(requests) == 4 and requests[-1]['max_tokens'] == 2048
 
 
 def test_background_api_returns_id_then_persists_wait_and_continues(task_db, model_script, monkeypatch):

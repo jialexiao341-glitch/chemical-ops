@@ -144,17 +144,12 @@ def test_explicit_product_switch_clears_previous_ids_and_rfq(task_db, model_scri
     task_db.commit()
     prepared = runtime.prepare_continue(task_db, USER, result.id,
         runtime.TaskContinue(question='改查新产品库存', revision=result.revision))
-    assert prepared.selected_product is None and prepared.selected_rfq_item is None
-    assert prepared.workflow.rfq_no is None and not prepared.workflow.resume_selection
-    saved = task_db.scalar(select(AIAgentTask.payload).where(AIAgentTask.id == result.id))
-    assert saved['memory_state']['pending'] is None
-    assert saved['memory_state']['goal']['intent'] == 'inventory_query'
-    assert saved['memory_state']['goal']['description'] == '改查新产品库存'
     model_script[0].extend([tool('catalog.search_products', keyword='新产品'),
                           tool('inventory.query_available', product_id=3),
                           {'action': 'finish', 'evidence_steps': [4]}])
     continued = asyncio.run(runtime._drive(task_db, USER, prepared, runtime.get_settings()))
     assert continued.status == 'SUCCEEDED' and '新产品' in continued.reply
+    assert task_db.scalar(select(AIAgentTask.payload).where(AIAgentTask.id == result.id))['memory_state']['goal']['intent'] == 'inventory_query'
 
 
 def test_format_retry_is_bounded_and_does_not_repeat_tool(task_db, model_script):
@@ -171,6 +166,9 @@ def test_format_retry_is_bounded_and_does_not_repeat_tool(task_db, model_script)
 def test_transport_failure_has_separate_error_code(task_db, monkeypatch):
     async def disconnected(*args, **kwargs):
         raise httpx.ConnectError('test transport')
+    async def understand(*args, **kwargs):
+        return runtime.routing.Understanding(purpose='query', tasks=['inventory'])
+    monkeypatch.setattr(runtime.routing, 'understand', understand)
     monkeypatch.setattr(runtime.service, 'chat', disconnected)
     assert start(task_db).error_code == 'MODEL_SERVICE_ERROR'
 

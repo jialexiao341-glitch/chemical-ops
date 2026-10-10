@@ -101,7 +101,6 @@ class Text2SQLResponse(BaseModel):
 
 from app.modules.ai.agent_prompt import text2sql_plan_prompt
 from app.modules.ai.catalog import CATALOG
-from app.modules.ai.intent import Intent, classify_intent
 
 
 TABLE_REFERENCE = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", re.I)
@@ -1152,8 +1151,10 @@ async def _understand_question(question: str, settings: Settings, db: Session, u
     if fallback is not None and "逾期" in question and any(marker in question for marker in ("到货", "收货", "入库")):
         LOGGER.info("AI 查询计划使用安全兜底 question_hash=%s dataset=%s metric=%s", _query_hash(question), fallback.dataset, fallback.metric)
         return fallback
-    prompt = text2sql_plan_prompt(question, previous_plan.model_dump(mode="json") if previous_plan else None)
-    result = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=prompt)]), settings, response_format={"type": "json_object"})
+    prompt = text2sql_plan_prompt("")
+    payload = json.dumps({"question": question, "previous_plan": previous_plan.model_dump(mode="json") if previous_plan else None}, ensure_ascii=False)
+    result = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
+                        response_format={"type": "json_object"}, system_prompt=prompt, interpret_only=True)
     raw = result.message.content
     LOGGER.info("AI 查询计划原始输出 question_hash=%s raw_length=%s raw_hash=%s", _query_hash(question), len(raw), _query_hash(raw))
     try:
@@ -1259,18 +1260,26 @@ async def run_text2sql(
     *,
     previous_plan: QueryPlan | None = None,
     thread_id: str | None = None,
+    planned_query: QueryPlan | None = None,
+    intent_verified: bool = False,
 ) -> Text2SQLResponse:
     """执行 Query Understanding -> Slot Filling -> Planning -> Validation -> Execution。"""
 
-    intent = classify_intent(request.question)
-    if intent.intent is not Intent.QUERY:
-        raise BusinessValidationError("Text2SQL 只支持采购运营相关的查询咨询，请改为查询订单、库存、到货、质量、异常、财务或供应商数据。")
+    if planned_query is None and not intent_verified:
+        from app.modules.ai import routing
+        context = {"query_plan": previous_plan.model_dump(mode="json")} if previous_plan else {}
+        decision = await routing.understand(request.question, context, settings)
+        if decision.route != "query":
+            raise BusinessValidationError("该入口只支持单项业务统计查询；多项查询请使用聊天入口。")
 
     _reject_unsupported_metric(request.question)
 
     runtime = settings or get_settings()
 
     async def understand(state: Text2SQLState) -> dict[str, Any]:
+        if planned_query is not None:
+            return {"plan": planned_query, "slots": _build_slots(planned_query),
+                    "template": _build_query_template(planned_query), "stages": ["query_understanding"]}
         movement_plan = _inventory_movement_trace_plan(db, user, state["question"], state.get("previous_plan"))
         if movement_plan is not None:
             LOGGER.info("AI 查询计划使用库存变动追溯固定查询 question_hash=%s", _query_hash(state["question"]))

@@ -25,7 +25,7 @@ from app.modules.ai.agent_prompt import (
     greeting_reply,
     result_rewrite_prompt,
 )
-from app.modules.ai.intent import Intent, IntentResult, classify_intent
+from app.modules.ai.intent import Intent, IntentResult
 from app.modules.ai.model import AIConversation, AIConversationState, AIMessage, AIQueryLog
 from app.modules.ai.schema import AIChatMessage, AIChatRequest, AIChatResponse, AIQueryTrace
 from app.modules.files import service as file_service
@@ -147,7 +147,7 @@ CHEMICAL_SPECIFIC_DOC_MARKERS = (
     "信号词",
     "ghs",
     "msds",
-    "sds",
+    "tds",
     "安全数据表",
     "安全技术说明书",
     "急救",
@@ -166,31 +166,23 @@ CHEMICAL_SPECIFIC_DOC_MARKERS = (
 )
 
 
-async def _classify_chat_intent(db: Session, question: str) -> IntentResult:
-    """将已登记化学品名称纳入意图判断；命中后仍通过知识库章节提供事实。"""
-
-    result = classify_intent(question)
-    lowered = question.lower()
-    asks_for_specific_properties = any(marker in lowered for marker in CHEMICAL_SPECIFIC_DOC_MARKERS)
-    should_resolve_chemical = (
-        result.intent is Intent.UNSUPPORTED
-        and result.reason == "no_supported_marker"
-        and any(marker in lowered for marker in CHEMICAL_REFERENCE_MARKERS)
-    ) or (result.intent is Intent.DOC and asks_for_specific_properties)
-    if not should_resolve_chemical:
-        return result
-    try:
-        from app.modules.doc_kb.retrieve import resolve_doc_targets
-
-        targets = await resolve_doc_targets(db, question)
-    except Exception as exc:
-        LOGGER.warning("化学品意图实体识别失败 error_type=%s", exc.__class__.__name__)
-        return IntentResult(Intent.DOC, "chemical_target_unresolved") if asks_for_specific_properties else result
-    if targets:
-        return result if result.intent is Intent.DOC else IntentResult(Intent.DOC, "registered_chemical_reference")
-    if asks_for_specific_properties or result.intent is Intent.UNSUPPORTED:
-        return IntentResult(Intent.DOC, "chemical_target_unresolved")
-    return result
+async def _classify_chat_intent(db: Session, question: str, *, user: User, data: AIChatRequest) -> IntentResult:
+    """聊天与 Agent 使用同一语义结果；客户端只能复用后端签发的短期结果。"""
+    from app.modules.ai import routing
+    decision = (routing.read_ticket(data.route_token, user.id, question, data.conversation_id) if data.route_token else
+                await routing.understand(question, routing.conversation_context(db, user, data.conversation_id)))
+    route = decision.route
+    if route == "batch":
+        return IntentResult(Intent.MULTI, "semantic_route", decision.model_dump(mode="json"))
+    if route == "agent":
+        # 普通聊天 API 不静默把 Agent 任务降级为另一种查询。
+        return IntentResult(Intent.CLARIFY, "请使用只读查询任务入口继续该库存或报价查询。")
+    if route in {"clarify", "cancel"}:
+        return IntentResult(Intent.CLARIFY, "已取消本次请求。" if route == "cancel" else
+                            decision.question or "这次请求包含不同处理流程，请先选择要查询的业务数据或化学品资料。")
+    return IntentResult({"capability": Intent.PROJECT, "greeting": Intent.GREETING,
+                         "guidance": Intent.GUIDANCE, "document": Intent.DOC,
+                         "query": Intent.QUERY}.get(route, Intent.UNSUPPORTED), "semantic_route")
 
 
 def _retryable_status(status_code: int) -> bool:
@@ -384,9 +376,10 @@ async def _rewrite_text2sql_answer(result: object, dataset_label: str, settings:
             default=str,
         )
         rewritten = await chat(
-            AIChatRequest(messages=[AIChatMessage(role="user", content=result_rewrite_prompt(payload))]),
+            AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]),
             settings,
             response_format={"type": "json_object"},
+            system_prompt=result_rewrite_prompt(""), interpret_only=True,
         )
         raw = (rewritten.answer or rewritten.message.content or "").strip()
         if not raw:
@@ -413,6 +406,17 @@ async def _compose_non_query_reply(
       失败时退回固定文案，保证永远有回复。
     """
 
+    if intent is Intent.CLARIFY:
+        return reason, "semantic-router"
+    if intent is Intent.GUIDANCE:
+        response = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=question)]), settings,
+                              system_prompt="""# 任务
+回答 ChemicalOps 业务操作指导，不查询或执行真实业务。
+# 约束
+不编造产品现有按钮、实际状态、单据、库存或价格。不确定系统是否支持时明确说明，必要时询问具体页面。
+# 输出
+简洁中文说明操作原则和所需信息；不得声称已经执行任何操作。""", interpret_only=True)
+        return response.message.content, "guidance"
     if intent is Intent.PROJECT:
         return build_project_reply(question), "rule-based"
     if intent is Intent.GREETING:
@@ -442,6 +446,7 @@ async def _run_text2sql_for_chat(
     *,
     previous_plan: object | None = None,
     thread_id: str | None = None,
+    planned_query: object | None = None,
 ) -> tuple[str, dict[str, object], AIQueryTrace]:
     """聊天入口的业务查询路由；Text2SQL 结果不再经过通用聊天上下文。"""
 
@@ -451,7 +456,7 @@ async def _run_text2sql_for_chat(
     query_fields = _query_log_fields(user, question)
     LOGGER.info("AI 查询开始 %s", query_fields)
     order_no = extract_order_trace_no(question)
-    if order_no:
+    if order_no and planned_query is None:
         result = trace_purchase_order(db, user, order_no)
         executed_at = datetime.now()
         rows = [
@@ -507,7 +512,7 @@ async def _run_text2sql_for_chat(
         LOGGER.info("AI 订单追溯完成 %s stage_count=%s", query_fields, len(rows))
         return result["answer"], citation, trace
 
-    result = await run_text2sql(db, user, Text2SQLRequest(question=question), settings, previous_plan=previous_plan, thread_id=thread_id)
+    result = await run_text2sql(db, user, Text2SQLRequest(question=question, limit=getattr(planned_query, "limit", 20)), settings, previous_plan=previous_plan, thread_id=thread_id, planned_query=planned_query, intent_verified=True)
     from app.modules.ai.catalog import CATALOG
 
     executed_at = datetime.now()
@@ -591,10 +596,11 @@ async def _run_text2sql_for_chat(
     return answer, citation, trace
 
 
-async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, str] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None) -> AIChatResponse:
+async def chat(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, str] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None, interpret_only: bool = False) -> AIChatResponse:
     """调用配置的 OpenAI 兼容模型。"""
 
-    _validate_read_only_request(data)
+    if not interpret_only:
+        _validate_read_only_request(data)
     runtime = settings or get_settings()
     if not runtime.agent_enabled:
         raise BusinessValidationError("AI 助手当前未启用")
@@ -844,15 +850,18 @@ def _ensure_conversation(db: Session, user: User, data: AIChatRequest) -> AIConv
 async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatResponse:
     """持久化用户消息并调用模型，再持久化助手回复。"""
 
-    _validate_read_only_request(data)
 
     conversation = _ensure_conversation(db, user, data)
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
     if user_message is None:
         raise BusinessValidationError("至少需要一条用户消息")
     LOGGER.info("AI 请求进入 mode=sync user_id=%s query_length=%s", user.id, len(user_message.content))
-    intent_result = await _classify_chat_intent(db, user_message.content)
+    intent_result = await _classify_chat_intent(db, user_message.content, user=user, data=data)
     LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
+    if intent_result.intent is Intent.MULTI and not data.attachment_file_ids:
+        from app.modules.ai import routing, multi_intent
+        return await multi_intent.reply_for_user(db, user, data, conversation,
+                                                 routing.Understanding.model_validate(intent_result.understanding))
     if intent_result.intent is Intent.DOC and not data.attachment_file_ids:
         from app.modules.doc_kb.retrieve import build_doc_context, no_doc_hits_reply, retrieve_sections
 
@@ -962,7 +971,6 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
 async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> AsyncIterator[str]:
     """通过 SSE 转发 OpenAI 兼容接口的增量内容，并在结束时持久化。"""
 
-    _validate_read_only_request(data)
 
     conversation = _ensure_conversation(db, user, data)
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
@@ -970,8 +978,16 @@ async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> 
         yield f"event: error\ndata: {json.dumps({'message': '至少需要一条用户消息'}, ensure_ascii=False)}\n\n"
         return
     LOGGER.info("AI 请求进入 mode=stream %s", _query_log_fields(user, user_message.content))
-    stream_intent_result = await _classify_chat_intent(db, user_message.content)
+    stream_intent_result = await _classify_chat_intent(db, user_message.content, user=user, data=data)
     LOGGER.info("AI 意图识别 mode=stream user_id=%s intent=%s reason=%s", user.id, stream_intent_result.intent, stream_intent_result.reason)
+    if stream_intent_result.intent is Intent.MULTI and not data.attachment_file_ids:
+        from app.modules.ai import routing, multi_intent
+        result = await multi_intent.reply_for_user(db, user, data, conversation,
+                                                  routing.Understanding.model_validate(stream_intent_result.understanding))
+        async for chunk in _stream_text_chunks(result.answer):
+            yield "event: delta\ndata: " + json.dumps({"content": chunk}, ensure_ascii=False) + "\n\n"
+        yield "event: done\ndata: " + json.dumps(result.model_dump(mode="json", exclude={"message"}), ensure_ascii=False) + "\n\n"
+        return
     if stream_intent_result.intent is Intent.DOC and not data.attachment_file_ids:
         from app.modules.doc_kb.retrieve import build_doc_context, no_doc_hits_reply, retrieve_sections
 

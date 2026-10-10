@@ -18,7 +18,7 @@ import {
   getConversationListApi,
   parseNaturalFiltersApi,
   proposePurchaseRequestDraftApi,
-  streamChatApi,
+  streamChatApi, routeAiRequestApi,
   updateConversationApi,
 } from '#/api';
 import { AI_FILTER_TARGETS } from '#/utils/ai-list-filters';
@@ -27,7 +27,7 @@ import { renderMarkdown } from '#/utils/markdown';
 
 import QueryCharts from './query-charts.vue';
 import AgentChatTask from './agent-chat-task.vue';
-import { acceptTask, isReadonlyAgentQuestion } from './task-view';
+import { acceptTask } from './task-view';
 import assistantLogo from './chemicalops-ai.svg';
 
 defineOptions({ name: 'AiWorkspace' });
@@ -209,7 +209,7 @@ async function refreshAgent(item: UiMessage) {
       ? { ...entry, agentTask: undefined, content: '', streaming: false, agentError: '任务无法读取，请核对登录、权限或服务状态后重试。' } : entry);
   } finally { if (epoch === chatEpoch) scheduleAgentPolling(); }
 }
-async function sendAgent(text: string, continuation?: AgentApi.Continue) {
+async function sendAgent(text: string, continuation?: AgentApi.Continue, routeToken?: string) {
   if (sending.value) return;
   const previous = currentAgent.value;
   if (previous?.status === 'RUNNING') { message.info('正在查询，可先取消当前任务。'); return; }
@@ -226,8 +226,8 @@ async function sendAgent(text: string, continuation?: AgentApi.Continue) {
   scrollToBottom();
   try {
     const task = continuation && previous
-      ? await (previous.conversation_id ? continueAgentChatApi : continueAgentTaskApi)(previous.id, continuation)
-      : await createAgentChatApi(text, activeConversationId.value);
+      ? await (previous.conversation_id ? continueAgentChatApi : continueAgentTaskApi)(previous.id, { ...continuation, route_token: routeToken })
+      : await createAgentChatApi(text, activeConversationId.value, routeToken);
     if (epoch !== chatEpoch) return;
     applyAgent(task, assistantId, epoch);
     activeConversationId.value = task.conversation_id ?? activeConversationId.value;
@@ -311,9 +311,7 @@ async function openConversation(conversation: AiApi.Conversation) {
       citations: Array.isArray(item.citations) ? item.citations : [],
       id: String(item.id),
       queryTrace: (item.citations as any)?.[0]?.query_trace,
-      sourceRecords: Array.isArray((item.citations as any)?.[0]?.source_records)
-        ? (item.citations as any)[0].source_records
-        : [],
+      sourceRecords: (Array.isArray(item.citations) ? item.citations : []).flatMap((citation: any) => citation.source_records ?? []),
       role: item.role === 'user' ? 'user' : 'assistant',
     }));
     // 一项任务只在最新助手回复中展示可交互结果，旧轮保留原追问文字。
@@ -414,18 +412,30 @@ async function onSend() {
     return;
   }
   if (currentAgent.value?.status === 'RUNNING') { message.info('正在查询，可先取消当前任务。'); return; }
-  if (currentAgent.value?.status === 'WAITING_INPUT') {
-    await sendAgent(text, { question: text, revision: currentAgent.value.revision });
-    return;
-  }
-  if (!draftMode.value && (agentMode.value || isReadonlyAgentQuestion(text))) {
-    await sendAgent(text);
-    return;
-  }
   if (draftMode.value) {
     if (!canCreatePurchaseDraft) { draftMode.value = false; message.error('你没有创建采购申请草稿的权限。'); return; }
     await previewPurchaseRequestDraft(text);
     return;
+  }
+  let routeToken: string;
+  const epoch = chatEpoch;
+  sending.value = true;
+  try {
+    const decision = await routeAiRequestApi(text, activeConversationId.value);
+    if (epoch !== chatEpoch) return;
+    routeToken = decision.route_token;
+    if (decision.route === 'agent') {
+      sending.value = false;
+      const continuation = currentAgent.value?.status === 'WAITING_INPUT'
+        ? { question: text, revision: currentAgent.value.revision }
+        : undefined;
+      await sendAgent(text, continuation, routeToken);
+      return;
+    }
+  } catch {
+    return; // 请求层展示错误；保留输入，不能退回前端关键词分流。
+  } finally {
+    sending.value = false;
   }
   inputText.value = '';
   const history = [...messages.value];
@@ -473,9 +483,7 @@ async function onSend() {
           content: payloadDone.answer ?? '',
           citations: Array.isArray(payloadDone.citations) ? payloadDone.citations : [],
           queryTrace: payloadDone.query_trace,
-          sourceRecords: Array.isArray(payloadDone.citations?.[0]?.source_records)
-            ? payloadDone.citations[0].source_records
-            : [],
+          sourceRecords: (Array.isArray(payloadDone.citations) ? payloadDone.citations : []).flatMap((citation: any) => citation.source_records ?? []),
           streaming: false,
         });
         activeConversationId.value = payloadDone.conversation_id;
@@ -488,7 +496,7 @@ async function onSend() {
           streaming: false,
         });
       },
-    });
+    }, routeToken);
   } finally {
     sending.value = false;
     scrollToBottom();

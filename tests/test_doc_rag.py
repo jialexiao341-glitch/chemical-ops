@@ -499,6 +499,10 @@ def _fake_hits():
 
 
 def test_chat_doc_path_injects_context_and_citations(client, demo_password, monkeypatch):
+    from app.modules.ai import routing
+    async def understand(*args, **kwargs):
+        return routing.Understanding(purpose='query', tasks=['document'])
+    monkeypatch.setattr(routing, 'understand', understand)
     captured = {}
 
     async def fake_chat(data, settings=None, **kwargs):
@@ -533,6 +537,10 @@ def test_chat_doc_path_injects_context_and_citations(client, demo_password, monk
 
 
 def test_chat_doc_path_empty_hits_gives_guidance(client, demo_password, monkeypatch):
+    from app.modules.ai import routing
+    async def understand(*args, **kwargs):
+        return routing.Understanding(purpose='query', tasks=['document'])
+    monkeypatch.setattr(routing, 'understand', understand)
     async def fake_retrieve(_db, _question, **_kwargs):
         return []
 
@@ -553,12 +561,16 @@ def test_chat_doc_path_empty_hits_gives_guidance(client, demo_password, monkeypa
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert "没有匹配到已登记化学品的名称或有效 CAS 号" in body["answer"]
+    assert "没有检索到可用的化学品文档摘录" in body["answer"]
     assert body["model"] == "rule-based"
     assert body["citations"] is None
 
 
 def test_stream_doc_path_emits_deltas_and_citations(client, demo_password, monkeypatch):
+    from app.modules.ai import routing
+    async def understand(*args, **kwargs):
+        return routing.Understanding(purpose='query', tasks=['document'])
+    monkeypatch.setattr(routing, 'understand', understand)
     async def fake_retrieve(_db, _question, **_kwargs):
         return _fake_hits()
 

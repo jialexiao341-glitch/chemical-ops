@@ -15,6 +15,7 @@ import { useAccessStore } from '@vben/stores';
 import { requestClient } from '#/api/request';
 
 export * from './agent';
+export * from './task-status';
 
 export namespace AiApi {
   /** 会话摘要 */
@@ -168,6 +169,7 @@ export async function streamChatApi(
   messages: Array<{ content: string; role: 'assistant' | 'user' }>,
   conversationId: null | number,
   handlers: AiApi.StreamHandlers,
+  routeToken?: string,
 ): Promise<void> {
   if (streaming) {
     throw new Error('上一条消息尚未回复完成');
@@ -180,6 +182,7 @@ export async function streamChatApi(
       body: JSON.stringify({
         conversation_id: conversationId ?? undefined,
         messages,
+        route_token: routeToken,
       }),
       headers: {
         Accept: 'text/event-stream',
@@ -252,4 +255,11 @@ export async function streamChatApi(
   } finally {
     streaming = false;
   }
+}
+
+/** 所有自然语言入口采用后端统一语义路由；不在浏览器猜业务意图。 */
+export function routeAiRequestApi(question: string, conversationId?: number) {
+  return requestClient.post<{ route: string; route_token: string }>('/ai/route', {
+    question, conversation_id: conversationId,
+  });
 }

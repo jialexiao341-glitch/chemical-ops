@@ -16,6 +16,7 @@ class AIChatMessage(BaseModel):
 class AIChatRequest(BaseModel):
     """AI 对话请求；附件通过文件 ID 关联到当前用户已上传的文件。"""
 
+    route_token: str | None = Field(default=None, max_length=64000)
     messages: list[AIChatMessage] = Field(min_length=1, max_length=50)
     attachments: list[str] = Field(default_factory=list, max_length=20)
     attachment_file_ids: list[int] = Field(default_factory=list, max_length=20)
@@ -31,6 +32,7 @@ class AIChatResponse(BaseModel):
     provider: str
     usage: dict[str, int] | None = None
     citations: list | None = None
+    batch_result: dict[str, Any] | None = None
     query_trace: "AIQueryTrace | None" = None
     query_slots: list[dict[str, Any]] | None = None
     user_query: str | None = None

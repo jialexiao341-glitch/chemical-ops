@@ -1,4 +1,5 @@
 import type { AgentApi } from '../../../api/ai/agent';
+import { AI_TASK_STATUS_LABELS } from '../../../api/ai/task-status';
 
 /** 字符串分组，去掉无意义的小数零而不经浮点数舍入。 */
 export function agentDisplayNumber(value: string) {
@@ -21,14 +22,9 @@ export function primaryTaskResults(task: AgentApi.Task) {
   return [...latest.values()];
 }
 
-/** 只把现有四工具能处理的库存/询价问题交给 Agent，统计与资料仍走原聊天。 */
-export function isReadonlyAgentQuestion(text: string) {
-  if (/变动|变更|流水|扣减|趋势|统计|图表|冻结原因|安全|危害|用途|储存|存储|SDS|MSDS/i.test(text)) return false;
-  return /库存|可用量|可用数量|比价|比较.*报价|报价.*比较|供应商报价|询价.*报价|查.*报价/.test(text);
-}
-
 export const TASK_LABELS: Record<AgentApi.Task['status'], string> = {
-  RUNNING: '正在查询', WAITING_INPUT: '等待补充', SUCCEEDED: '查询完成', FAILED: '已停止', CANCELLED: '已取消',
+  RUNNING: AI_TASK_STATUS_LABELS.RUNNING, WAITING_INPUT: AI_TASK_STATUS_LABELS.WAITING_INPUT,
+  SUCCEEDED: AI_TASK_STATUS_LABELS.SUCCEEDED, FAILED: AI_TASK_STATUS_LABELS.FAILED, CANCELLED: AI_TASK_STATUS_LABELS.CANCELLED,
 };
 export const TOOL_LABELS: Record<string, string> = {
   'catalog.search_products': '定位产品',

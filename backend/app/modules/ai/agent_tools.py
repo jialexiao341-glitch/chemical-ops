@@ -114,6 +114,17 @@ def search_products(db: Session, user: User, arguments: ProductSearchInput) -> P
         Product.product_name.contains(arguments.keyword, autoescape=True) |
         Product.product_code.contains(arguments.keyword, autoescape=True),
     )
+    from app.modules.ai.intent import extract_valid_cas
+    if extract_valid_cas(arguments.keyword) == [arguments.keyword]:
+        from app.modules.chemicals.model import Chemical
+        # CAS 定位实际登记的化学品关联规格，仍保留启用状态及多候选消歧。
+        base = select(
+            Product.id.label("product_id"), Product.product_code, Product.product_name,
+            Product.model, Product.packaging_spec, Product.unit_id, Unit.unit_name,
+        ).join(Unit, Unit.id == Product.unit_id).join(Chemical, Chemical.id == Product.chemical_id).where(
+            Product.status == "ACTIVE", Unit.status == "ACTIVE", Chemical.status == "ACTIVE",
+            Chemical.cas_no == arguments.keyword,
+        )
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = db.execute(base.order_by(Product.id).limit(arguments.limit)).mappings().all()
     return ProductSearchResult(keyword=arguments.keyword, total_rows=total,

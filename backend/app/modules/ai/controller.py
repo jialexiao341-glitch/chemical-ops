@@ -15,7 +15,7 @@ from app.core.observability import get_request_id, metrics, observe_duration
 from app.modules.ai import briefing as briefing_service
 from app.modules.ai import drafts as drafts_service
 from app.modules.ai import nl_filters as nl_filters_service
-from app.modules.ai import service
+from app.modules.ai import service, routing
 from app.modules.ai import agent_tools
 from app.modules.ai import agent_runtime
 from app.modules.ai import text2sql as text2sql_service
@@ -51,6 +51,16 @@ LOGGER = logging.getLogger('chemicalops.ai.http')
 def agent_tool_catalog(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict[str, object]]:
     """返回认证用户可见的只读工具目录；无权限工具不出现在返回结果中。"""
     return agent_tools.list_tools(db, user)
+
+
+@router.post("/route", summary="理解会话请求并生成受约束路由")
+async def route_request(data: routing.RouteRequest, db: Session = Depends(get_db),
+                        user: User = Depends(require_permission("ai.workspace.read"))) -> dict:
+    """校验会话归属并理解当前请求，返回短期复用凭据；此接口不执行业务查询。"""
+    context = routing.conversation_context(db, user, data.conversation_id)
+    decision = await routing.understand(data.question, context)
+    return {"route": decision.route, "understanding": decision.model_dump(mode="json"),
+            "route_token": routing.issue_ticket(decision, user.id, data.question, data.conversation_id)}
 
 
 @router.post("/agent/tools/execute", response_model=agent_tools.InventoryResult | agent_tools.QuoteResult | agent_tools.ProductSearchResult | agent_tools.RFQSearchResult,
@@ -207,6 +217,11 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
         citations = item.citations
         agent_ref = next((c for c in (citations or []) if isinstance(c, dict) and c.get("type") == "agent_task"), None)
         content = item.content
+        batch_ref = next((c for c in (citations or []) if isinstance(c, dict) and c.get("type") == "multi_intent"), None)
+        if batch_ref and item.message_role == "ASSISTANT":
+            from app.modules.ai.multi_intent import history_accessible
+            if not history_accessible(db, user, batch_ref.get("batch")):
+                content, citations = "这组查询的权限、范围或数据已变化，请重新查询。", []
         if agent_ref and item.message_role == "ASSISTANT":
             # 先重查任务权限；不从历史消息绕过证据鉴权返回旧库存/价格摘要。
             try:

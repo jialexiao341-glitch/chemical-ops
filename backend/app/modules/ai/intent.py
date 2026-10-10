@@ -13,6 +13,9 @@ from enum import StrEnum
 class Intent(StrEnum):
     """AI 支持的入口意图：数据查询 / 文档问答 / 功能介绍 / 问候 / 范围外。"""
 
+    MULTI = "multi"
+    GUIDANCE = "guidance"
+    CLARIFY = "clarify"
     QUERY = "query"
     DOC = "doc"
     PROJECT = "project"
@@ -24,6 +27,7 @@ class Intent(StrEnum):
 class IntentResult:
     intent: Intent
     reason: str
+    understanding: dict | None = None
 
 
 # 打招呼：命中后直接返回固定问候，不调用数据库和大模型。
@@ -257,7 +261,7 @@ def extract_valid_cas(text: str) -> list[str]:
 
 
 def classify_intent(text: str) -> IntentResult:
-    """按确定性规则识别入口意图；不确定时默认拒绝。"""
+    """旧关键词分类器，仅保留离线兼容回归；生产入口统一使用 routing.understand。"""
 
     normalized = text.strip().lower()
     if not normalized:

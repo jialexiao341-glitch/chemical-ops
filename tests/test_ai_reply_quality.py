@@ -51,6 +51,7 @@ def test_rewrite_answer_uses_llm_json(monkeypatch: pytest.MonkeyPatch):
     async def fake_chat(request, settings=None, **kwargs):
         captured["request"] = request
         captured["response_format"] = kwargs.get("response_format")
+        captured["system_prompt"] = kwargs.get("system_prompt")
         return _fake_response('{"answer": "本月华东化工采购金额最高，为 12000.00 元（CNY）。"}')
 
     monkeypatch.setattr(service, "chat", fake_chat)
@@ -66,6 +67,9 @@ def test_rewrite_answer_uses_llm_json(monkeypatch: pytest.MonkeyPatch):
     user_msg = captured["request"].messages[-1].content
     assert "查询本月各供应商采购金额" in user_msg
     assert "采购订单" in user_msg
+    assert json.loads(user_msg)["dataset_label"] == "采购订单"
+    assert "# 角色与任务" in captured["system_prompt"]
+    assert "查询本月各供应商采购金额" not in captured["system_prompt"]
 
 
 def test_rewrite_answer_returns_none_on_model_failure(monkeypatch: pytest.MonkeyPatch):

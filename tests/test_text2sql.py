@@ -135,6 +135,10 @@ class _FakeDB:
 
 
 def test_text2sql_runs_the_langgraph_stages(monkeypatch):
+    from app.modules.ai import routing
+    async def understand(*args, **kwargs):
+        return routing.Understanding(purpose="query", tasks=["analytics"])
+    monkeypatch.setattr(routing, "understand", understand)
     monkeypatch.setattr(text2sql, "get_user_role_codes", lambda *_args: ["SYS_ADMIN"])
     async def fake_understand(_question, _settings, _db, _user):
         return QueryPlan(dataset="purchase_orders", metric="count", limit=5)

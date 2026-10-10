@@ -1,6 +1,6 @@
 import type { AgentApi } from '../../../api/ai/agent';
 import { describe, expect, it } from 'vitest';
-import { acceptTask, inventorySource, waitingCandidates, isReadonlyAgentQuestion, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS } from './task-view';
+import { acceptTask, inventorySource, waitingCandidates, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS } from './task-view';
 
 const waiting: AgentApi.Task = { id: 'a', revision: 2, status: 'WAITING_INPUT', reply: '', error_code: null, messages: [], trace: [
   { step: 1, action: 'call_tool', status: 'SUCCEEDED', result: { tool: 'catalog.search_products', total_rows: 2, truncated: false, rows: [], sources: [] } },
@@ -69,14 +69,5 @@ describe('聊天结果展示', () => {
     ];
     expect(primaryTaskResults({ ...waiting, status: 'SUCCEEDED', trace }).map((entry) => entry.step)).toEqual([2]);
     expect(primaryTaskResults(waiting)).toEqual([]);
-  });
-});
-
-describe('聊天任务分流', () => {
-  it('直接输入库存和询价问题进入只读任务', () => {
-    for (const text of ['帮我查库存', '查乙醇的库存并比较供应商报价', '乙醇各仓库、各批次可用量多少？', '查询乙醇报价']) expect(isReadonlyAgentQuestion(text)).toBe(true);
-  });
-  it('资料、库存流水和其他统计保留原查询流程', () => {
-    for (const text of ['乙醇安全储存要求', '查询乙醇的库存变动和冻结原因', '库存趋势图表', '本月采购订单按状态统计', '你好']) expect(isReadonlyAgentQuestion(text)).toBe(false);
   });
 });
