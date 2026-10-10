@@ -23,6 +23,7 @@ from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.products.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance
+from app.modules.quality_acceptances.scope import acceptance_read_condition
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.file_model import SysFile
@@ -65,7 +66,7 @@ def _exception_scope_condition(db: Session, user: User):
     if "quality.acceptances.read" in permissions:
         from app.modules.quality_acceptances.model import QualityAcceptance
 
-        acceptance_scope = True if roles & {"PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY_MANAGER"} else QualityAcceptance.inspector_id == user.id
+        acceptance_scope = acceptance_read_condition(user, roles)
         visible_acceptances = select(QualityAcceptance.id).where(acceptance_scope)
         scopes.append(and_(
             OperationException.source_type == "QUALITY_ACCEPTANCE",
@@ -144,7 +145,7 @@ def _has_source_scope(db: Session, user: User, data: OperationExceptionCreate) -
     if data.source_type == "QUALITY_ACCEPTANCE" and "quality.acceptances.read" in permissions:
         from app.modules.quality_acceptances.model import QualityAcceptance
 
-        acceptance_scope = True if roles & {"PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY_MANAGER"} else QualityAcceptance.inspector_id == user.id
+        acceptance_scope = acceptance_read_condition(user, roles)
         return db.scalar(select(QualityAcceptance.id).where(QualityAcceptance.id == data.source_id, acceptance_scope)) is not None
     if data.source_type == "INVENTORY_BATCH" and "warehouse.inventory.read" in permissions:
         warehouse_scope = True if roles & {"PROCUREMENT_MANAGER"} else or_(Warehouse.manager_id == user.id, Warehouse.manager_id.is_(None))

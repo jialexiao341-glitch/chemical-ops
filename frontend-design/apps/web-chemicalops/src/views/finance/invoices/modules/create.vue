@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import {
@@ -18,6 +19,8 @@ import { createInvoiceApi, getReconciliationListApi } from '#/api';
 import { formatDate } from '#/utils/format';
 
 const emit = defineEmits(['success']);
+const { hasAccessByCodes } = useAccess();
+const canWrite = computed(() => hasAccessByCodes(['finance.invoices.write']));
 
 /**
  * 录入供应商发票。
@@ -42,6 +45,7 @@ function filterByLabel(input: string, option: { label: string }) {
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (!canWrite.value) return;
     if (!reconciliationId.value) {
       message.warning('请选择对账单');
       return;
@@ -133,7 +137,7 @@ function recalcIncl() {
 </script>
 
 <template>
-  <Modal title="录入发票" class="w-[640px] max-w-[100vw]">
+  <Modal :show-confirm-button="canWrite" title="录入发票" class="w-[640px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert

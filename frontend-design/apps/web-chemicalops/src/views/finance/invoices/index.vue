@@ -8,6 +8,7 @@ import { useRoute } from 'vue-router';
 import { Page, useVbenModal, useVbenDrawer } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
 import { Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import { Button, Input, message, Modal } from 'antdv-next';
 
@@ -29,6 +30,7 @@ import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-det
 defineOptions({ name: 'InvoiceList' });
 const route = useRoute();
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const [Matches, matchesApi] = useVbenDrawer({ connectedComponent: MatchDrawer, destroyOnClose: true });
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
@@ -80,6 +82,7 @@ function runSubmit(row: FinanceApi.Invoice) {
     content: `提交发票 ${row.invoice_no} 进入核验？`,
     okText: '提交核验',
     onOk: async () => {
+      if (!hasAccessByCodes(['finance.invoices.write'])) return;
       await submitInvoiceApi(row.id);
       message.success('已提交核验');
       gridApi.query();
@@ -93,6 +96,7 @@ function runVerify(row: FinanceApi.Invoice) {
     content: `确认对发票 ${row.invoice_no} 完成人工复核？复核后的发票金额可被付款引用；此操作不代表已向税务平台验真。`,
     okText: '确认人工复核',
     onOk: async () => {
+      if (!hasAccessByCodes(['finance.invoices.verify'])) return;
       await verifyInvoiceApi(row.id);
       message.success('发票已完成人工复核');
       gridApi.query();
@@ -114,6 +118,7 @@ function openVoid(row: FinanceApi.Invoice) {
 }
 
 async function onRejectConfirm() {
+  if (!hasAccessByCodes([voiding.value ? 'finance.invoices.write' : 'finance.invoices.verify'])) return;
   if (!rejectReason.value.trim()) {
     message.warning('请填写原因');
     return;
@@ -175,9 +180,9 @@ watch(
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button v-if="hasAccessByCodes(['finance.invoices.read'])" size="small" type="link" @click="matchesApi.setData(row.id).open()">行匹配</Button>
-          <Button v-if="['DRAFT', 'REJECTED'].includes(row.status) && hasAccessByCodes(['finance.invoices.write'])" size="small" type="link" danger @click="openVoid(row)">作废</Button>
+          <Button v-if="hasAccessByCodes(['finance.invoices.write'])" :disabled="!['DRAFT', 'REJECTED'].includes(row.status)" :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '只有草稿或驳回记录可以操作' : undefined" size="small" type="link" danger @click="openVoid(row)">作废</Button>
           <Button
-            v-if="['DRAFT', 'REJECTED'].includes(row.status) && hasAccessByCodes(['finance.invoices.write'])"
+            v-if="hasAccessByCodes(['finance.invoices.write'])" :disabled="!['DRAFT', 'REJECTED'].includes(row.status)" :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '只有草稿或驳回记录可以操作' : undefined"
             size="small"
             type="link"
             @click="runSubmit(row)"
@@ -185,7 +190,9 @@ watch(
             提交核验
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED' && hasAccessByCodes(['finance.invoices.verify'])"
+            v-if="hasAccessByCodes(['finance.invoices.verify'])"
+            :disabled="row.status !== 'SUBMITTED' || String(row.submitted_by) === String(userStore.userInfo?.userId)"
+            :title="String(row.submitted_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'SUBMITTED' ? '当前状态不可审批或复核' : undefined"
             size="small"
             type="link"
             @click="runVerify(row)"
@@ -193,7 +200,9 @@ watch(
             核验
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED' && hasAccessByCodes(['finance.invoices.verify'])"
+            v-if="hasAccessByCodes(['finance.invoices.verify'])"
+            :disabled="row.status !== 'SUBMITTED' || String(row.submitted_by) === String(userStore.userInfo?.userId)"
+            :title="String(row.submitted_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'SUBMITTED' ? '当前状态不可审批或复核' : undefined"
             danger
             size="small"
             type="link"
@@ -208,6 +217,7 @@ watch(
     <!-- 驳回弹窗（原因必填） -->
     <Modal
       v-model:open="rejectVisible"
+      :ok-button-props="{ disabled: !hasAccessByCodes([voiding ? 'finance.invoices.write' : 'finance.invoices.verify']) }"
       cancel-text="取消"
       :ok-text="voiding ? '确认作废' : '确认驳回'"
       :title="voiding ? '作废发票' : '驳回发票'"

@@ -8,6 +8,7 @@ import { useRoute } from 'vue-router';
 import { useAccess } from '@vben/access';
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import { Button, Input, message, Modal } from 'antdv-next';
 
@@ -27,6 +28,7 @@ import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-det
 defineOptions({ name: 'PaymentList' });
 const route = useRoute();
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const canWritePayments = hasAccessByCodes(['finance.payments.write']);
 const canApprovePayments = hasAccessByCodes(['finance.payments.approve']);
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
@@ -84,6 +86,7 @@ function runApprove(row: FinanceApi.Payment) {
     content: `确认审批通过付款 ${row.payment_no}（${row.amount} ${row.currency_code}）？`,
     okText: '审批通过',
     onOk: async () => {
+      if (!hasAccessByCodes(['finance.payments.approve'])) return;
       await approvePaymentApi(row.id);
       message.success('付款申请已批准');
       gridApi.query();
@@ -99,6 +102,7 @@ function openReject(row: FinanceApi.Payment) {
 }
 
 async function onRejectConfirm() {
+  if (!hasAccessByCodes(['finance.payments.approve'])) return;
   if (!rejectReason.value.trim()) {
     message.warning('请填写驳回原因');
     return;
@@ -124,6 +128,7 @@ function openPaid(row: FinanceApi.Payment) {
 }
 
 async function onPaidConfirm() {
+  if (!hasAccessByCodes(['finance.payments.write'])) return;
   if (!paidRef.value.trim()) {
     message.warning('请填写外部流水号');
     return;
@@ -186,7 +191,9 @@ watch(
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="row.status === 'REQUESTED' && canApprovePayments"
+            v-if="canApprovePayments"
+            :disabled="row.status !== 'REQUESTED' || String(row.requested_by) === String(userStore.userInfo?.userId)"
+            :title="String(row.requested_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'REQUESTED' ? '当前状态不可审批或复核' : undefined"
             size="small"
             type="link"
             @click="runApprove(row)"
@@ -194,7 +201,9 @@ watch(
             审批通过
           </Button>
           <Button
-            v-if="row.status === 'REQUESTED' && canApprovePayments"
+            v-if="canApprovePayments"
+            :disabled="row.status !== 'REQUESTED' || String(row.requested_by) === String(userStore.userInfo?.userId)"
+            :title="String(row.requested_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'REQUESTED' ? '当前状态不可审批或复核' : undefined"
             danger
             size="small"
             type="link"
@@ -203,7 +212,9 @@ watch(
             驳回
           </Button>
           <Button
-            v-if="row.status === 'APPROVED' && canWritePayments"
+            v-if="canWritePayments"
+            :disabled="row.status !== 'APPROVED'"
+            :title="row.status !== 'APPROVED' ? '当前状态不支持此操作' : undefined"
             size="small"
             type="link"
             @click="openPaid(row)"
@@ -217,6 +228,7 @@ watch(
     <!-- 驳回弹窗（原因必填） -->
     <Modal
       v-model:open="rejectVisible"
+      :ok-button-props="{ disabled: !hasAccessByCodes(['finance.payments.approve']) }"
       cancel-text="取消"
       ok-text="确认驳回"
       title="驳回付款申请"
@@ -238,6 +250,7 @@ watch(
     <!-- 登记付款弹窗（流水号必填） -->
     <Modal
       v-model:open="paidVisible"
+      :ok-button-props="{ disabled: !hasAccessByCodes(['finance.payments.write']) }"
       cancel-text="取消"
       ok-text="确认登记"
       title="登记人工核对的付款结果"

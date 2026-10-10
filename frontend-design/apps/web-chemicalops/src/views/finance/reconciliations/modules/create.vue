@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import { Alert, Empty, Input, message, Select, Spin } from 'antdv-next';
@@ -8,6 +9,8 @@ import { Alert, Empty, Input, message, Select, Spin } from 'antdv-next';
 import { createReconciliationApi, getPurchaseOrderListApi } from '#/api';
 
 const emit = defineEmits(['success']);
+const { hasAccessByCodes } = useAccess();
+const canWrite = computed(() => hasAccessByCodes(['finance.reconciliations.write']));
 
 /**
  * 创建财务对账单。
@@ -26,6 +29,7 @@ function filterByLabel(input: string, option: { label: string }) {
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (!canWrite.value) return;
     if (!poId.value) {
       message.warning('请选择需要对账的采购订单');
       return;
@@ -70,7 +74,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal title="创建对账单" class="w-[540px] max-w-[100vw]">
+  <Modal :show-confirm-button="canWrite" title="创建对账单" class="w-[540px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert

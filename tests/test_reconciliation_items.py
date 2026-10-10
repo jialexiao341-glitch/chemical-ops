@@ -169,7 +169,7 @@ def test_read_only_finance_and_existing_invoice_block_refresh(client, scenario, 
     assert refresh(client, s, identifier, treatment="NONE").status_code == 400
 
 
-def test_all_returned_can_close_zero_payable_without_payment(client, db_session, scenario):
+def test_all_returned_can_close_zero_payable_without_payment(client, db_session, scenario, demo_password):
     s = scenario
     items = []
     for receipt in s["receipts"]:
@@ -190,7 +190,9 @@ def test_all_returned_can_close_zero_payable_without_payment(client, db_session,
     assert client.post(path + "/confirm", headers=s["headers"], json={}).status_code == 200
     settlement = client.post("/api/v1/finance/settlements", headers=s["headers"], json={"reconciliation_id": identifier})
     assert settlement.status_code == 201, settlement.text
-    assert client.post(f"/api/v1/finance/settlements/{settlement.json()['id']}/confirm", headers=s["headers"]).status_code == 200
+    assert client.post(f"/api/v1/finance/settlements/{settlement.json()['id']}/confirm", headers=s["headers"]).status_code == 400
+    finance_approver = login(client, "finance_manager", demo_password)
+    assert client.post(f"/api/v1/finance/settlements/{settlement.json()['id']}/confirm", headers=finance_approver).status_code == 200
 
 
 def test_submitted_return_and_partial_quality_do_not_confirm(client, db_session, scenario):

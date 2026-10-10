@@ -3,6 +3,7 @@ import type { SystemRoleApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { useVbenForm } from '#/adapter/form';
@@ -10,6 +11,8 @@ import { createRoleApi, updateRoleApi } from '#/api';
 
 import { useCreateFormSchema, useUpdateFormSchema } from '../data';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['system.roles.write']));
 const emit = defineEmits(['success']);
 
 const id = ref<number>();
@@ -24,6 +27,7 @@ const [Form, formApi] = useVbenForm({
 
 const [Drawer, drawerApi] = useVbenDrawer<null | SystemRoleApi.SystemRole>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     const { valid } = await formApi.validate();
     if (!valid) {
       return;
@@ -83,7 +87,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[680px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canConfirm" :title="title" class="w-[680px] max-w-[100vw]">
     <div
       v-if="id"
       class="bg-accent text-muted-foreground mb-4 rounded-md px-3 py-2 text-xs"

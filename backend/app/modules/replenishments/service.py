@@ -141,6 +141,7 @@ def cancel_replenishment(db: Session, user: User, replenishment_id: int) -> Repl
 
 def complete_replenishment(db: Session, user: User, replenishment_id: int, data: ReplenishmentComplete) -> ReplenishmentRequest:
     """将已审批补货申请关联到实际采购订单并标记完成。"""
+    get_replenishment(db, user, replenishment_id)
     value = _require(db, replenishment_id, for_update=True)
     if value.status != "APPROVED":
         raise BusinessValidationError("只有已审批的补货申请可以完成")

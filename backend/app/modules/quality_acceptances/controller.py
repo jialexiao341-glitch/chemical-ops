@@ -13,9 +13,18 @@ from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, Qual
 from app.modules.files import service as file_service
 from app.modules.files.schema import FileAttachmentCreate
 from app.modules.system.model import User
+from app.modules.quality_acceptances.schema import QualityAssignmentOptions
 
 
 router = APIRouter(prefix="/quality-acceptances", tags=["质量验收"])
+
+
+@router.get("/assignment-options", response_model=QualityAssignmentOptions, summary="查询送检指派选项")
+def assignment_options(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("quality.acceptances.assign")),
+) -> QualityAssignmentOptions:
+    return service.assignment_options(db)
 
 
 @router.get("/{acceptance_id}/report-files", response_model=list[QualityReportFile], summary="查询验收报告")
@@ -147,7 +156,7 @@ async def review_report(
 def create_acceptance(
     data: QualityAcceptanceCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("quality.acceptances.write")),
+    user: User = Depends(require_permission("quality.acceptances.assign")),
 ) -> QualityAcceptanceRead:
     """为已收货到货单创建待检验记录。"""
 

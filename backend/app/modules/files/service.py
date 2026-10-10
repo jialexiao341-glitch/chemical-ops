@@ -193,24 +193,29 @@ def _can_access_resource_instance(db: Session, user: User, resource_type: str, r
     """在通用权限之外校验业务资源的数据归属。"""
     if _is_system_admin(db, user):
         return True
-    role_codes = set(get_user_role_codes(db, user.id))
-    if resource_type == "PURCHASE_ORDER":
-        return resource.buyer_id == user.id or (user.department_id is not None and resource.department_id == user.department_id) or bool(role_codes & {"PROCUREMENT_MANAGER", "FINANCE_MANAGER"})
-    if resource_type == "DELIVERY":
-        order = db.get(PurchaseOrder, resource.po_id)
-        return order is not None and _can_access_resource_instance(db, user, "PURCHASE_ORDER", order)
-    if resource_type == "QUALITY_ACCEPTANCE":
-        # 与质量验收详情的数据范围一致：负责检验员可查看自己的验收报告。
-        # 质量负责人可跨检验员复核；其他用户沿用到货单/订单权限链路。
-        if resource.inspector_id == user.id or "QUALITY_MANAGER" in role_codes:
-            return True
-        delivery = db.get(Delivery, resource.delivery_id)
-        return delivery is not None and _can_access_resource_instance(db, user, "DELIVERY", delivery)
-    if resource_type == "OPERATION_EXCEPTION":
-        return resource.owner_id == user.id or bool(role_codes & {"PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY"})
-    if resource_type in {"INVENTORY_RETURN", "REPLENISHMENT"}:
-        return resource.applicant_id == user.id or bool(role_codes & {"PROCUREMENT_MANAGER", "WAREHOUSE"})
-    if resource_type == "FINANCE_INVOICE":
+    # 使用业务详情的同一范围，不让文件入口扩大只读对象集合。
+    from app.modules.purchase_orders.service import read_order
+    from app.modules.deliveries.service import get_delivery
+    from app.modules.quality_acceptances.service import get_acceptance
+    from app.modules.operation_exceptions.service import get_exception
+    from app.modules.inventory_returns.service import get_return
+    from app.modules.replenishments.service import get_replenishment
+    from app.modules.finance.service import get_invoice
+
+    getter = {
+        "PURCHASE_ORDER": read_order,
+        "DELIVERY": get_delivery,
+        "QUALITY_ACCEPTANCE": get_acceptance,
+        "OPERATION_EXCEPTION": get_exception,
+        "INVENTORY_RETURN": get_return,
+        "REPLENISHMENT": get_replenishment,
+        "FINANCE_INVOICE": get_invoice,
+    }.get(resource_type)
+    if getter is not None:
+        try:
+            getter(db, user, resource.id)
+        except ResourceNotFoundError:
+            return False
         return True
     if resource_type == "SUPPLIER_QUALITY_DOCUMENT":
         account = db.scalar(select(SupplierPortalAccount).where(

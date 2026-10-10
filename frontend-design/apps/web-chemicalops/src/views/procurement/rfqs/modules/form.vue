@@ -5,6 +5,7 @@ import type { RfqItemRow } from '../data';
 
 import { computed, nextTick, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { message, Select } from 'antdv-next';
@@ -20,6 +21,8 @@ import {
 } from '#/api';
 import ItemsEditor from '#/components/items-editor/index.vue';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['procurement.rfqs.write']));
 const emit = defineEmits(['success']);
 
 const id = ref<number>();
@@ -161,6 +164,7 @@ function createItemRow(): RfqItemRow {
 
 const [Drawer, drawerApi] = useVbenDrawer<null | RfqApi.Rfq>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     const { valid } = await formApi.validate();
     if (!valid) {
       return;
@@ -255,7 +259,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[1100px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canConfirm" :title="title" class="w-[1100px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
 

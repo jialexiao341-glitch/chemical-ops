@@ -21,6 +21,7 @@ import { PRIORITY_DICT } from '#/constants/dictionary';
 
 import type { RequestItemRow } from '../data';
 
+const canConfirm = computed(() => hasAccessByCodes(['procurement.requests.write']));
 const emit = defineEmits(['success']);
 
 const id = ref<number>();
@@ -209,6 +210,7 @@ function validateItems() {
 
 const [Drawer, drawerApi] = useVbenDrawer<null | PurchaseRequestApi.PurchaseRequest>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     const { valid } = await formApi.validate();
     if (!valid) {
       return;
@@ -298,7 +300,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[1080px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canConfirm" :title="title" class="w-[1080px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
       <div>

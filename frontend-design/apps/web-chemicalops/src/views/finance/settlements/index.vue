@@ -8,6 +8,7 @@ import { useRoute } from 'vue-router';
 import { useAccess } from '@vben/access';
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import { Button, Input, message, Modal } from 'antdv-next';
 
@@ -26,6 +27,7 @@ import FinanceSourceDetail from '#/views/ai/workspace/modules/finance-source-det
 defineOptions({ name: 'SettlementList' });
 const route = useRoute();
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const canWriteSettlements = hasAccessByCodes(['finance.settlements.write']);
 const canApproveSettlements = hasAccessByCodes(['finance.settlements.approve']);
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
@@ -77,6 +79,7 @@ function runConfirm(row: FinanceApi.Settlement) {
     content: `确认结算单 ${row.settlement_no}？确认后将关闭对应对账单，不可撤销。`,
     okText: '确认结算',
     onOk: async () => {
+      if (!hasAccessByCodes(['finance.settlements.approve'])) return;
       await confirmSettlementApi(row.id);
       message.success('结算单已确认，对账单已关闭');
       gridApi.query();
@@ -92,6 +95,7 @@ function openCancel(row: FinanceApi.Settlement) {
 }
 
 async function onCancelConfirm() {
+  if (!hasAccessByCodes(['finance.settlements.write'])) return;
   if (!cancelReason.value.trim()) {
     message.warning('请填写取消原因');
     return;
@@ -151,7 +155,9 @@ watch(
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="row.status === 'DRAFT' && canApproveSettlements"
+            v-if="canApproveSettlements"
+            :disabled="row.status !== 'DRAFT' || String(row.created_by) === String(userStore.userInfo?.userId)"
+            :title="String(row.created_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'DRAFT' ? '当前状态不可审批或复核' : undefined"
             size="small"
             type="link"
             @click="runConfirm(row)"
@@ -159,7 +165,9 @@ watch(
             确认结算
           </Button>
           <Button
-            v-if="row.status === 'DRAFT' && canWriteSettlements"
+            v-if="canWriteSettlements"
+            :disabled="row.status !== 'DRAFT'"
+            :title="row.status !== 'DRAFT' ? '当前状态不支持此操作' : undefined"
             danger
             size="small"
             type="link"
@@ -174,6 +182,7 @@ watch(
     <!-- 取消弹窗（原因必填） -->
     <Modal
       v-model:open="cancelVisible"
+      :ok-button-props="{ disabled: !hasAccessByCodes(['finance.settlements.write']) }"
       cancel-text="返回"
       ok-text="确认取消"
       title="取消结算单"

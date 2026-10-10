@@ -27,6 +27,7 @@ import Form from './modules/form.vue';
 
 defineOptions({ name: 'IssueRequestList' });
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const canWriteIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.write']);
 const canApproveIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.approve']);
 const canExecuteIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.execute']);
@@ -132,7 +133,9 @@ function run(
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="canWriteIssueRequests && ['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteIssueRequests"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             size="small"
             type="link"
             @click="formDrawerApi.setData(row).open()"
@@ -143,7 +146,9 @@ function run(
             详情
           </Button>
           <Button
-            v-if="canWriteIssueRequests && ['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteIssueRequests"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             size="small"
             type="link"
             @click="
@@ -160,7 +165,9 @@ function run(
             提交
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED' && canApproveIssueRequests"
+            v-if="canApproveIssueRequests"
+            :disabled="row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)"
+            :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'SUBMITTED' ? '当前状态不可审批或复核' : undefined"
             size="small"
             type="link"
             @click="
@@ -177,7 +184,9 @@ function run(
             审批通过
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED' && canApproveIssueRequests"
+            v-if="canApproveIssueRequests"
+            :disabled="row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)"
+            :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'SUBMITTED' ? '当前状态不可审批或复核' : undefined"
             danger
             size="small"
             type="link"
@@ -186,7 +195,9 @@ function run(
             驳回
           </Button>
           <Button
-            v-if="row.status === 'APPROVED' && canExecuteIssueRequests"
+            v-if="canExecuteIssueRequests"
+            :disabled="row.status !== 'APPROVED'"
+            :title="row.status !== 'APPROVED' ? '仅已审批申请可执行出库' : undefined"
             size="small"
             type="link"
             @click="
@@ -203,7 +214,9 @@ function run(
             执行出库
           </Button>
           <Button
-            v-if="canWriteIssueRequests && ['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteIssueRequests"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             danger
             size="small"
             type="link"

@@ -3,6 +3,7 @@ import type { IssueRequestApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 import { useUserStore } from '@vben/stores';
 
@@ -19,6 +20,9 @@ import ItemsEditor from '#/components/items-editor/index.vue';
 import { formatQuantity } from '#/utils/format';
 
 const emit = defineEmits(['success']);
+const { hasAccessByCodes } = useAccess();
+const canWrite = computed(() => hasAccessByCodes(['warehouse.inventory.issue.write']));
+const canReadDepartments = hasAccessByCodes(['system.departments.read']);
 const isTechnicalRole = useUserStore().userInfo?.roles?.includes('TECHNICAL') ?? false;
 
 /** 领用明细的编辑行；批次选项直接来自库存余额（含库位与可用量） */
@@ -71,7 +75,7 @@ const [Form, formApi] = useVbenForm({
       label: '领用用途',
       rules: 'required',
     },
-    ...(!isTechnicalRole
+    ...(!isTechnicalRole && canReadDepartments
       ? [
           {
             component: 'ApiSelect' as const,
@@ -150,6 +154,9 @@ function expandRows() {
 
 const [Drawer, drawerApi] = useVbenDrawer<null | IssueRequestApi.IssueRequest>({
   async onConfirm() {
+    if (!canWrite.value) return;
+    const record = drawerApi.getData();
+    if (record && !['DRAFT', 'REJECTED'].includes(record.status)) return;
     const { valid } = await formApi.validate();
     if (!valid) {
       return;
@@ -178,7 +185,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | IssueRequestApi.IssueRequest>({
     }
     const values = await formApi.getValues<any>();
     const payload: IssueRequestApi.Payload = {
-      department_id: isTechnicalRole ? undefined : values.department_id ?? undefined,
+      department_id: isTechnicalRole || !canReadDepartments ? undefined : values.department_id ?? undefined,
       items: items.value.map((item) => ({
         batch_id: Number(item.batch_id),
         location_id: Number(item.location_id),
@@ -273,7 +280,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[980px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canWrite" :title="title" class="w-[980px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
       <div>

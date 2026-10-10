@@ -531,13 +531,6 @@ def test_replenishment_links_cannot_bypass_order_scope(client: TestClient, db_se
     other_buyer = db_session.scalar(select(User).where(User.id != buyer.id).order_by(User.id))
     assert other_buyer is not None
     buyer.department_id = None
-    # 模拟自定义角色授予补货写权限；内置 BUYER 当前未绑定该权限，不修改实际授权。
-    buyer_role = db_session.scalar(select(Role).where(Role.role_code == "BUYER"))
-    write_permission = db_session.scalar(select(Permission).where(
-        Permission.permission_code == "procurement.replenishment.write"
-    ))
-    assert buyer_role is not None and write_permission is not None
-    db_session.add(RolePermission(role_id=buyer_role.id, permission_id=write_permission.id))
     foreign_order = PurchaseOrder(
         po_no=f"RBAC-RP-{uuid4().hex[:12]}", supplier_id=template.supplier_id,
         buyer_id=other_buyer.id, status="ORDERED",
@@ -573,6 +566,135 @@ def test_replenishment_links_cannot_bypass_order_scope(client: TestClient, db_se
     db_session.refresh(approved)
     assert approved.status == "APPROVED" and approved.fulfillment_po_id is None
     assert db_session.scalar(select(func.count(ReplenishmentRequest.id))) == count_before
+
+
+@pytest.mark.parametrize("resource", ["issue-requests", "transfer-requests", "stocktakes"])
+@pytest.mark.parametrize("action", ["approve", "reject"])
+def test_admin_cannot_review_own_warehouse_request(client: TestClient, db_session, resource, action) -> None:
+    admin = db_session.scalar(select(User).where(User.username == "system_admin"))
+    warehouse = db_session.scalar(select(Warehouse))
+    assert admin is not None and warehouse is not None
+    models = {
+        "issue-requests": (InventoryIssueRequest, "issue_no"),
+        "transfer-requests": (InventoryTransferRequest, "transfer_no"),
+        "stocktakes": (InventoryStocktakeRequest, "stocktake_no"),
+    }
+    model, number_field = models[resource]
+    values = {number_field: f"RBAC-{uuid4().hex[:12]}", "applicant_id": admin.id,
+              "purpose": "本人审批拒绝", "status": "SUBMITTED"}
+    if resource == "stocktakes":
+        values["warehouse_id"] = warehouse.id
+    record = model(**values)
+    db_session.add(record)
+    db_session.flush()
+    audit_before = record.approved_by
+    with as_demo_role(db_session, "SYS_ADMIN"):
+        response = client.post(f"/api/v1/inventory/{resource}/{record.id}/{action}",
+                               json={"reason": "本人驳回拒绝"} if action == "reject" else None)
+    assert response.status_code == 400, response.text
+    assert "本人经办" in response.json()["detail"]
+    db_session.refresh(record)
+    assert record.status == "SUBMITTED" and record.approved_by == audit_before
+    assert record.reject_reason is None
+
+
+@pytest.mark.parametrize("role_code", ["SYS_ADMIN", "FINANCE_MANAGER"])
+@pytest.mark.parametrize("resource,action", [
+    ("invoices", "verify"), ("invoices", "reject"),
+    ("payments", "approve"), ("payments", "reject"), ("settlements", "confirm"),
+])
+def test_finance_reviewer_cannot_review_own_record(client: TestClient, db_session, role_code, resource, action) -> None:
+    from datetime import date
+    from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
+    from app.modules.purchase_orders.model import PurchaseOrder
+
+    with as_demo_role(db_session, role_code):
+        actor = app.dependency_overrides[get_current_user]()
+        template = db_session.scalar(select(PurchaseOrder))
+        assert template is not None
+        order = PurchaseOrder(po_no=f"RBAC-{uuid4().hex[:12]}", supplier_id=template.supplier_id,
+                              buyer_id=actor.id, status="COMPLETED")
+        db_session.add(order)
+        db_session.flush()
+        rec = FinanceReconciliation(reconciliation_no=f"RBAC-{uuid4().hex[:12]}", po_id=order.id,
+                                    supplier_id=order.supplier_id, total_amount=0,
+                                    created_by=actor.id, status="CONFIRMED")
+        db_session.add(rec)
+        db_session.flush()
+        common = dict(reconciliation_id=rec.id, po_id=order.id, supplier_id=order.supplier_id)
+        if resource == "invoices":
+            record = FinanceInvoice(**common, invoice_no=f"RBAC-{uuid4().hex[:12]}",
+                                    invoice_number=uuid4().hex, invoice_date=date.today(), amount_excl_tax=1,
+                                    amount_incl_tax=1, submitted_by=actor.id, status="SUBMITTED")
+        elif resource == "payments":
+            record = FinancePayment(**common, payment_no=f"RBAC-{uuid4().hex[:12]}", amount=1,
+                                    payment_method="BANK_TRANSFER", requested_by=actor.id, status="REQUESTED")
+        else:
+            record = FinanceSettlement(**common, settlement_no=f"RBAC-{uuid4().hex[:12]}",
+                                       settlement_amount=0, created_by=actor.id, status="DRAFT")
+        db_session.add(record)
+        db_session.flush()
+        before = record.status
+        response = client.post(f"/api/v1/finance/{resource}/{record.id}/{action}",
+                               json={"reason": "本人驳回拒绝"} if action == "reject" else None)
+        assert response.status_code == 400, response.text
+        assert "本人经办" in response.json()["detail"]
+        db_session.refresh(record)
+        assert record.status == before
+        assert rec.status == "CONFIRMED"
+
+
+def test_builtin_buyer_replenishment_flow_and_foreign_request_scope(client: TestClient, db_session) -> None:
+    """默认采购员可办理本人补货，不能审批或借本人订单完成他人补货。"""
+    from app.modules.purchase_orders.model import PurchaseOrder
+    from app.modules.replenishments.model import ReplenishmentRequest
+
+    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
+    manager = db_session.scalar(select(User).where(User.username == "procurement_manager"))
+    template = db_session.scalar(select(PurchaseOrder).where(PurchaseOrder.status == "COMPLETED"))
+    assert buyer is not None and manager is not None and template is not None and template.items
+    own_order = PurchaseOrder(
+        po_no=f"RBAC-RP-{uuid4().hex[:12]}", supplier_id=template.supplier_id,
+        buyer_id=buyer.id, department_id=buyer.department_id, status="ORDERED",
+    )
+    foreign = ReplenishmentRequest(
+        replenishment_no=f"RBAC-RP-{uuid4().hex[:12]}", supplier_id=template.supplier_id,
+        applicant_id=manager.id, reason="他人补货", status="APPROVED",
+    )
+    db_session.add_all((own_order, foreign))
+    db_session.flush()
+    with as_demo_role(db_session, "BUYER"):
+        created = client.post("/api/v1/replenishments", json={
+            "supplier_id": template.supplier_id, "source_po_id": own_order.id,
+            "reason": "采购员本人补货", "items": [{
+                "product_id": template.items[0].product_id,
+                "unit_id": template.items[0].unit_id, "requested_quantity": "1",
+            }],
+        })
+        assert created.status_code == 201, created.text
+        own_id = created.json()["id"]
+        listed = client.get("/api/v1/replenishments", params={"page_size": 100}).json()
+        expected_ids = set(db_session.scalars(select(ReplenishmentRequest.id).where(
+            ReplenishmentRequest.applicant_id == buyer.id
+        )))
+        assert listed["total"] == len(expected_ids)
+        assert {row["id"] for row in listed["items"]} == expected_ids
+        assert client.get(f"/api/v1/replenishments/{own_id}").status_code == 200
+        assert client.get(f"/api/v1/replenishments/{foreign.id}").status_code == 404
+        for action, body in (("submit", None), ("cancel", None), ("complete", {"fulfillment_po_id": own_order.id})):
+            refused = client.post(f"/api/v1/replenishments/{foreign.id}/{action}", json=body)
+            assert refused.status_code == 404, refused.text
+        assert client.post(f"/api/v1/replenishments/{own_id}/submit").status_code == 200
+        for action, body in (("approve", None), ("reject", {"reason": "越权驳回"})):
+            assert client.post(f"/api/v1/replenishments/{own_id}/{action}", json=body).status_code == 403
+    with as_demo_role(db_session, "PROCUREMENT_MANAGER"):
+        assert client.post(f"/api/v1/replenishments/{own_id}/approve").status_code == 200
+    with as_demo_role(db_session, "BUYER"):
+        completed = client.post(f"/api/v1/replenishments/{own_id}/complete", json={"fulfillment_po_id": own_order.id})
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["status"] == "COMPLETED"
+    db_session.refresh(foreign)
+    assert foreign.status == "APPROVED" and foreign.fulfillment_po_id is None
 
 
 def test_buyer_request_list_count_and_detail_share_department_scope(
@@ -754,6 +876,58 @@ def test_quality_inspector_lists_and_reads_only_assigned_acceptances(
     assert listed.json()["items"] == []
     assert detail.status_code == 404
     assert reports.status_code == 404
+
+
+def test_quality_manager_assigns_acceptance_and_inspector_cannot_self_assign(client: TestClient, db_session) -> None:
+    from app.modules.deliveries.model import Delivery
+    from app.modules.purchase_orders.model import PurchaseOrder
+
+    inspector = db_session.scalar(select(User).where(User.username == "quality_inspector"))
+    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
+    template = db_session.scalar(select(PurchaseOrder))
+    assert inspector is not None and buyer is not None and template is not None
+    delivery = Delivery(delivery_no=f"RBAC-QA-{uuid4().hex[:12]}", po_id=template.id,
+                        supplier_id=template.supplier_id, status="RECEIVED")
+    db_session.add(delivery)
+    db_session.flush()
+    body = {"delivery_id": delivery.id, "inspector_id": inspector.id}
+    before = db_session.scalar(select(func.count(QualityAcceptance.id)))
+    with as_demo_role(db_session, "QUALITY"):
+        assert client.get("/api/v1/quality-acceptances/assignment-options").status_code == 403
+        assert client.post("/api/v1/quality-acceptances", json=body).status_code == 403
+    with as_demo_role(db_session, "QUALITY_MANAGER"):
+        options = client.get("/api/v1/quality-acceptances/assignment-options")
+        assert options.status_code == 200, options.text
+        assert delivery.id in {row["id"] for row in options.json()["deliveries"]}
+        assert inspector.id in {row["id"] for row in options.json()["inspectors"]}
+        assert buyer.id not in {row["id"] for row in options.json()["inspectors"]}
+        assert all(set(row) == {"id", "delivery_no"} for row in options.json()["deliveries"])
+        assert all(set(row) == {"id", "username", "display_name"} for row in options.json()["inspectors"])
+        assert client.post("/api/v1/quality-acceptances", json={"delivery_id": delivery.id}).status_code == 422
+        refused = client.post("/api/v1/quality-acceptances", json={**body, "inspector_id": buyer.id})
+        assert refused.status_code == 400, refused.text
+        inspector.status = "INACTIVE"
+        db_session.flush()
+        assert client.post("/api/v1/quality-acceptances", json=body).status_code == 400
+        db_session.refresh(delivery)
+        assert delivery.status == "RECEIVED"
+        assert db_session.scalar(select(func.count(QualityAcceptance.id))) == before
+        inspector.status = "ACTIVE"
+        db_session.flush()
+        created = client.post("/api/v1/quality-acceptances", json=body)
+        assert created.status_code == 201, created.text
+        assert created.json()["inspector_id"] == inspector.id
+        acceptance_id = created.json()["id"]
+    with as_demo_role(db_session, "QUALITY"):
+        detail = client.get(f"/api/v1/quality-acceptances/{acceptance_id}")
+        assert detail.status_code == 200, detail.text
+        assert client.get(f"/api/v1/quality-acceptances/{acceptance_id}/report-files").status_code == 200
+        listed = client.get("/api/v1/quality-acceptances", params={"page_size": 100})
+        assert listed.status_code == 200
+        expected = set(db_session.scalars(select(QualityAcceptance.id).where(QualityAcceptance.inspector_id == inspector.id)))
+        assert listed.json()["total"] == len(expected)
+    db_session.refresh(delivery)
+    assert delivery.status == "INSPECTING"
 
 
 def test_warehouse_exception_scope_follows_inventory_and_task_assignment(

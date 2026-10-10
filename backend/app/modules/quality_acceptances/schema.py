@@ -11,6 +11,25 @@ class QualityAcceptanceCreate(BaseModel):
     """创建质量验收记录时提交的字段。"""
 
     delivery_id: int = Field(gt=0)
+    inspector_id: int = Field(gt=0)
+
+
+class QualityAssignmentDelivery(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    delivery_no: str
+
+
+class QualityInspectorOption(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    username: str
+    display_name: str
+
+
+class QualityAssignmentOptions(BaseModel):
+    deliveries: list[QualityAssignmentDelivery]
+    inspectors: list[QualityInspectorOption]
 
 
 class QualityAcceptanceResult(BaseModel):

@@ -7,6 +7,7 @@ import { onMounted, ref } from 'vue';
 import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import { Button, Input, message, Modal } from 'antdv-next';
 
@@ -27,6 +28,7 @@ import Form from './modules/form.vue';
 
 defineOptions({ name: 'StocktakeList' });
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const canWriteStocktakes = hasAccessByCodes(['warehouse.inventory.stocktake.write']);
 const canApproveStocktakes = hasAccessByCodes(['warehouse.inventory.stocktake.approve']);
 
@@ -169,8 +171,8 @@ onMounted(async () => {
           </Button>
           <Button
             v-if="canApproveStocktakes"
-            :disabled="row.status !== 'SUBMITTED'"
-            :title="row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
+            :disabled="row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)"
+            :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批' : row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
             size="small"
             type="link"
             @click="
@@ -185,8 +187,8 @@ onMounted(async () => {
           </Button>
           <Button
             v-if="canApproveStocktakes"
-            :disabled="row.status !== 'SUBMITTED'"
-            :title="row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
+            :disabled="row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)"
+            :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批' : row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
             danger
             size="small"
             type="link"

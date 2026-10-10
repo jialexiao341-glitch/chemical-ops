@@ -235,13 +235,13 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     ).status_code == 400
 
     acceptance_response = client.post(
-        "/api/v1/quality-acceptances", headers=quality, json={"delivery_id": delivery["id"]}
+        "/api/v1/quality-acceptances", headers=admin, json={"delivery_id": delivery["id"], "inspector_id": db_session.scalar(select(User.id).where(User.username == "quality_inspector"))}
     )
     assert acceptance_response.status_code == 201, acceptance_response.text
     acceptance = acceptance_response.json()
     assert acceptance["result"] == "PENDING"
     assert client.post(
-        "/api/v1/quality-acceptances", headers=quality, json={"delivery_id": delivery["id"]}
+        "/api/v1/quality-acceptances", headers=admin, json={"delivery_id": delivery["id"], "inspector_id": db_session.scalar(select(User.id).where(User.username == "quality_inspector"))}
     ).status_code == 400
     passed = client.post(
         f"/api/v1/quality-acceptances/{acceptance['id']}/result",

@@ -194,10 +194,10 @@ export async function getAcceptanceApi(id: number) {
  * 为已收货的到货单创建待检验记录。
  * 后端会把到货单置为 INSPECTING。
  */
-export async function createAcceptanceApi(deliveryId: number) {
+export async function createAcceptanceApi(deliveryId: number, inspectorId: number) {
   return requestClient.post<QualityAcceptanceApi.Acceptance>(
     '/quality-acceptances',
-    { delivery_id: deliveryId },
+    { delivery_id: deliveryId, inspector_id: inspectorId },
   );
 }
 
@@ -213,4 +213,8 @@ export async function submitAcceptanceResultApi(
     `/quality-acceptances/${id}/result`,
     data,
   );
+}
+
+export async function getAcceptanceAssignmentOptionsApi() {
+  return requestClient.get<{ deliveries: { id: number; delivery_no: string }[]; inspectors: { id: number; username: string; display_name: string }[] }>('/quality-acceptances/assignment-options');
 }

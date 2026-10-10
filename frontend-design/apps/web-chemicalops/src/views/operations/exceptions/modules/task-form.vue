@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import { DatePicker, Input, message, Select } from 'antdv-next';
@@ -8,6 +9,8 @@ import { DatePicker, Input, message, Select } from 'antdv-next';
 import { createTaskApi, getExceptionAssigneeOptionsApi } from '#/api';
 import { PRIORITY_DICT } from '#/constants/dictionary';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['operations.exceptions.write']));
 const emit = defineEmits(['success']);
 
 /** 新建异常处理任务；创建后后端会把 OPEN/RESOLVED 异常推进为 PROCESSING */
@@ -21,6 +24,7 @@ const loadingUsers = ref(false);
 
 const [Modal, modalApi] = useVbenModal<null | { id: number }>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!title.value.trim()) {
       message.warning('请填写任务标题');
       return;
@@ -74,7 +78,7 @@ const titleText = computed(() => '新建处理任务');
 </script>
 
 <template>
-  <Modal :title="titleText" class="w-[520px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" :title="titleText" class="w-[520px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <div>
         <div class="mb-2 text-sm">

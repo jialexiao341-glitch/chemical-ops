@@ -153,7 +153,8 @@ export function useColumns(
           {
             code: 'delete',
             auth: 'system.roles.write',
-            show: (row: SystemRoleApi.SystemRole) => row.role_code !== 'SYS_ADMIN',
+            disabled: (row: SystemRoleApi.SystemRole) => row.role_code === 'SYS_ADMIN',
+            title: (row: SystemRoleApi.SystemRole) => row.role_code === 'SYS_ADMIN' ? '系统管理员角色不能停用' : undefined,
           },
         ],
       },

@@ -258,6 +258,8 @@ def verify_invoice(db: Session, user: User, invoice_id: int) -> FinanceInvoice:
     _require_finance_scope(db, user, invoice.po_id)
     if invoice.status != "SUBMITTED":
         raise BusinessValidationError("只有已提交的发票可以核验")
+    if invoice.submitted_by == user.id:
+        raise BusinessValidationError("不能复核本人经办的发票")
     from app.modules.finance.invoice_matches import validate_transition
     validate_transition(db, user, invoice, reconciliation, verifying=True)
     invoice.status = "VERIFIED"
@@ -279,6 +281,8 @@ def reject_invoice(db: Session, user: User, invoice_id: int, reason: str) -> Fin
     _require_finance_scope(db, user, invoice.po_id)
     if invoice.status != "SUBMITTED":
         raise BusinessValidationError("只有已提交的发票可以驳回")
+    if invoice.submitted_by == user.id:
+        raise BusinessValidationError("不能复核本人经办的发票")
     invoice.status = "REJECTED"
     invoice.reject_reason = reason
     from app.modules.insights.finance_checks import reopen_for_invoice_change
@@ -344,6 +348,8 @@ def approve_payment(db: Session, user: User, payment_id: int) -> FinancePayment:
     _require_finance_scope(db, user, payment.po_id)
     if payment.status != "REQUESTED":
         raise BusinessValidationError("只有待审批付款可以审批")
+    if payment.requested_by == user.id:
+        raise BusinessValidationError("不能审批本人经办的付款申请")
     if reconciliation.status != "CONFIRMED":
         raise BusinessValidationError("对账单未确认，不能审批付款")
     if _sum_invoices(db, reconciliation.id, verified_only=True) < payment.amount:
@@ -363,6 +369,8 @@ def reject_payment(db: Session, user: User, payment_id: int, reason: str) -> Fin
     _require_finance_scope(db, user, payment.po_id)
     if payment.status != "REQUESTED":
         raise BusinessValidationError("只有待审批付款可以驳回")
+    if payment.requested_by == user.id:
+        raise BusinessValidationError("不能审批本人经办的付款申请")
     payment.status = "REJECTED"
     payment.reject_reason = reason
     add_audit_log(db, actor_id=user.id, action_type="REJECT", resource_type="FINANCE_PAYMENT", resource_id=payment.id, request_summary=f"驳回付款申请：{reason}", result_status="SUCCESS")
@@ -450,6 +458,8 @@ def confirm_settlement(db: Session, user: User, settlement_id: int) -> FinanceSe
     _require_finance_scope(db, user, settlement.po_id)
     if settlement.status != "DRAFT":
         raise BusinessValidationError("只有草稿结算单可以确认")
+    if settlement.created_by == user.id:
+        raise BusinessValidationError("不能确认本人经办的结算单")
     if reconciliation.status != "CONFIRMED" or _sum_payments(db, reconciliation.id, paid_only=True) < reconciliation.total_amount:
         raise BusinessValidationError("对账单未完成足额付款，不能确认结算")
     settlement.status = "CONFIRMED"

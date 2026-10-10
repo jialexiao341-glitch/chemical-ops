@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import {
@@ -15,6 +16,8 @@ import {
 import { createSettlementApi, getReconciliationListApi } from '#/api';
 
 const emit = defineEmits(['success']);
+const { hasAccessByCodes } = useAccess();
+const canWrite = computed(() => hasAccessByCodes(['finance.settlements.write']));
 
 /**
  * 创建采购结算单。
@@ -33,6 +36,7 @@ function filterByLabel(input: string, option: { label: string }) {
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (!canWrite.value) return;
     if (!reconciliationId.value) {
       message.warning('请选择对账单');
       return;
@@ -77,7 +81,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal title="创建结算单" class="w-[560px] max-w-[100vw]">
+  <Modal :show-confirm-button="canWrite" title="创建结算单" class="w-[560px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert

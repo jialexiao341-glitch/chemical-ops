@@ -92,8 +92,8 @@ export function useColumns(
             code: 'edit',
             text: '编辑',
             auth: 'procurement.requests.write',
-            show: (row: PurchaseRequestApi.PurchaseRequest) =>
-              row.status === 'DRAFT' || row.status === 'REJECTED',
+            disabled: (row: PurchaseRequestApi.PurchaseRequest) => !(row.status === 'DRAFT' || row.status === 'REJECTED'),
+            title: (row: PurchaseRequestApi.PurchaseRequest) => !(row.status === 'DRAFT' || row.status === 'REJECTED') ? '当前状态不支持此操作' : undefined,
           },
           {
             code: 'detail',
@@ -103,33 +103,31 @@ export function useColumns(
             code: 'submit',
             text: '提交',
             auth: 'procurement.requests.write',
-            show: (row: PurchaseRequestApi.PurchaseRequest) =>
-              row.status === 'DRAFT' || row.status === 'REJECTED',
+            disabled: (row: PurchaseRequestApi.PurchaseRequest) => !(row.status === 'DRAFT' || row.status === 'REJECTED'),
+            title: (row: PurchaseRequestApi.PurchaseRequest) => !(row.status === 'DRAFT' || row.status === 'REJECTED') ? '当前状态不支持此操作' : undefined,
           },
           {
             code: 'approve',
             text: '审批通过',
             auth: 'procurement.requests.approve',
-            disabled: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId),
-            title: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的记录' : undefined,
-            show: (row: PurchaseRequestApi.PurchaseRequest) =>
-              row.status === 'SUBMITTED' || row.status === 'APPROVING',
+            disabled: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId) || !(['SUBMITTED', 'APPROVING'].includes(row.status)),
+            title: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的记录' : !(['SUBMITTED', 'APPROVING'].includes(row.status)) ? '当前状态不支持此操作' : undefined,
+
           },
           {
             code: 'reject',
             text: '驳回',
             auth: 'procurement.requests.approve',
-            disabled: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId),
-            title: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的记录' : undefined,
-            show: (row: PurchaseRequestApi.PurchaseRequest) =>
-              row.status === 'SUBMITTED' || row.status === 'APPROVING',
+            disabled: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId) || !(['SUBMITTED', 'APPROVING'].includes(row.status)),
+            title: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的记录' : !(['SUBMITTED', 'APPROVING'].includes(row.status)) ? '当前状态不支持此操作' : undefined,
+
           },
           {
             code: 'cancel',
             text: '取消',
             auth: 'procurement.requests.write',
-            show: (row: PurchaseRequestApi.PurchaseRequest) =>
-              !['APPROVED', 'CANCELLED'].includes(row.status),
+            disabled: (row: PurchaseRequestApi.PurchaseRequest) => !(!['APPROVED', 'CANCELLED'].includes(row.status)),
+            title: (row: PurchaseRequestApi.PurchaseRequest) => !(!['APPROVED', 'CANCELLED'].includes(row.status)) ? '当前状态不支持此操作' : undefined,
           },
         ],
         props: { renderMode: 'menu' },

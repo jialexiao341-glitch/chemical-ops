@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import { Alert, Input, message } from 'antdv-next';
@@ -8,6 +9,8 @@ import { Alert, Input, message } from 'antdv-next';
 import { selectQuoteApi } from '#/api';
 import { formatAmount } from '#/utils/format';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['procurement.rfqs.award']));
 const emit = defineEmits(['success']);
 
 /** 中选报价弹窗的载荷 */
@@ -29,6 +32,7 @@ const reason = ref('');
 
 const [Modal, modalApi] = useVbenModal<null | SelectQuotePayload>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!reason.value.trim()) {
       message.warning('请填写中选理由');
       return;
@@ -66,7 +70,7 @@ const title = computed(() => `确认中选 · ${payload.value?.supplierName ?? '
 </script>
 
 <template>
-  <Modal :title="title" class="w-[540px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" :title="title" class="w-[540px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         message="确认后该询价单关闭，其他已提交报价会被置为未中选，且不可撤销。"

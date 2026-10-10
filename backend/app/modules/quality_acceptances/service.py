@@ -9,12 +9,13 @@ from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.quality_acceptances import crud
 from app.modules.quality_acceptances.model import QualityAcceptance
+from app.modules.quality_acceptances.scope import acceptance_read_condition
 from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptanceResult
 from app.modules.notifications.service import notify_users
 from app.modules.operation_exceptions.service import create_automatic_exception
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_role_codes
+from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
 
 
@@ -22,12 +23,6 @@ def _now() -> datetime:
     """返回当前本地时间。"""
 
     return datetime.now()
-
-
-def _can_manage_all(db: Session, user: User) -> bool:
-    """判断用户是否可以查看全部质量验收记录。"""
-
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "QUALITY_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
 
 
 def _require_acceptance(db: Session, acceptance_id: int, *, for_update: bool = False) -> QualityAcceptance:
@@ -42,6 +37,9 @@ def _require_acceptance(db: Session, acceptance_id: int, *, for_update: bool = F
 def create_acceptance(db: Session, user: User, data: QualityAcceptanceCreate) -> QualityAcceptance:
     """为已收货到货单创建待检验记录。"""
 
+    inspector = db.get(User, data.inspector_id)
+    if inspector is None or not _is_inspector(db, inspector):
+        raise BusinessValidationError("请选择有效且具有验收办理权限的质量检验员")
     delivery = crud.get_delivery(db, data.delivery_id, for_update=True)
     if delivery is None:
         raise ResourceNotFoundError("到货单不存在")
@@ -52,7 +50,7 @@ def create_acceptance(db: Session, user: User, data: QualityAcceptanceCreate) ->
     acceptance = QualityAcceptance(
         acceptance_no=f"TEMP-QA-{user.id}-{int(_now().timestamp())}",
         delivery_id=delivery.id,
-        inspector_id=user.id,
+        inspector_id=inspector.id,
         result="PENDING",
         certificate_complete=0,
     )
@@ -65,27 +63,36 @@ def create_acceptance(db: Session, user: User, data: QualityAcceptanceCreate) ->
     return _require_acceptance(db, acceptance.id)
 
 
+def _is_inspector(db: Session, user: User) -> bool:
+    return (user.status == "ACTIVE"
+            and bool({"QUALITY", "QUALITY_MANAGER"} & set(get_user_role_codes(db, user.id)))
+            and {"quality.acceptances.read", "quality.acceptances.write"}
+            <= set(get_user_permission_codes(db, user.id)))
+
+
+def assignment_options(db: Session) -> dict:
+    """只向获准指派者提供待送检单号和有效检验员，不开放系统用户目录。"""
+    deliveries = db.scalars(select(Delivery).where(Delivery.status == "RECEIVED").order_by(Delivery.id.desc())).all()
+    inspectors = [user for user in db.scalars(select(User).where(User.status == "ACTIVE").order_by(User.id))
+                  if _is_inspector(db, user)]
+    return {"deliveries": deliveries, "inspectors": inspectors}
+
+
 def list_acceptances(db: Session, user: User, *, result: str | None, page: int, page_size: int):
     """按用户数据范围分页查询质量验收记录。"""
 
-    delivery_ids = None
-    if not _can_manage_all(db, user):
-        delivery_ids = {
-            delivery.id
-            for delivery in db.scalars(
-                select(Delivery).join(QualityAcceptance, QualityAcceptance.delivery_id == Delivery.id).where(
-                    QualityAcceptance.inspector_id == user.id
-                )
-            ).all()
-        }
-    return crud.list_page(db, delivery_ids=delivery_ids, result=result, page=page, page_size=page_size)
+    condition = acceptance_read_condition(user, get_user_role_codes(db, user.id))
+    return crud.list_page(db, scope_condition=condition, result=result, page=page, page_size=page_size)
 
 
 def get_acceptance(db: Session, user: User, acceptance_id: int, *, for_update: bool = False) -> QualityAcceptance:
     """查询验收记录并校验用户数据范围。"""
 
     acceptance = _require_acceptance(db, acceptance_id, for_update=for_update)
-    if not _can_manage_all(db, user) and acceptance.inspector_id != user.id:
+    if db.scalar(select(QualityAcceptance.id).where(
+        QualityAcceptance.id == acceptance_id,
+        acceptance_read_condition(user, get_user_role_codes(db, user.id)),
+    )) is None:
         raise ResourceNotFoundError(f"质量验收记录 {acceptance_id} 不存在")
     return acceptance
 

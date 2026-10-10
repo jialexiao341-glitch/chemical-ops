@@ -3,6 +3,7 @@ import type { DeliveryApi } from '#/api';
 
 import { computed, ref, watch } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import {
@@ -19,6 +20,8 @@ import {
 import { getDeliveryApi, receiveDeliveryApi } from '#/api';
 import { formatQuantity } from '#/utils/format';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['warehouse.deliveries.write']));
 const emit = defineEmits(['success']);
 
 /** 收货明细行，含用于展示的计划/短交数量 */
@@ -49,6 +52,7 @@ const hasShortDelivery = computed(() =>
 
 const [Modal, modalApi] = useVbenModal<null | DeliveryApi.Delivery>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     const delivery = payload.value;
     if (!delivery) {
       return;
@@ -147,7 +151,7 @@ const columns = [
 </script>
 
 <template>
-  <Modal title="确认收货" class="w-[880px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" title="确认收货" class="w-[880px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert

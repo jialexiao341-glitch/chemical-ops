@@ -50,3 +50,15 @@ def test_cross_domain_writes_and_supplier_ai_are_not_granted() -> None:
     assert "warehouse.inventory.read" not in ROLE_SCOPES["BUYER"]
     assert "warehouse.inventory.read" not in ROLE_SCOPES["TECHNICAL"]
     assert "ai.workspace.read" not in ROLE_SCOPES["SUPPLIER_PORTAL"]
+
+
+def test_buyer_can_handle_replenishments_without_approval() -> None:
+    assert {"procurement.replenishment.read", "procurement.replenishment.write"} <= ROLE_SCOPES["BUYER"]
+    assert "procurement.replenishment.approve" not in ROLE_SCOPES["BUYER"]
+
+
+def test_quality_assignment_is_reserved_for_managers() -> None:
+    assert "quality.acceptances.assign" in ROLE_SCOPES["QUALITY_MANAGER"]
+    assert "quality.acceptances.assign" in ROLE_SCOPES["SYS_ADMIN"]
+    assert "quality.acceptances.assign" not in ROLE_SCOPES["QUALITY"]
+    assert "quality.acceptances.write" in ROLE_SCOPES["QUALITY"]

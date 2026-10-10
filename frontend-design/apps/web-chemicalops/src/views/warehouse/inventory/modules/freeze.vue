@@ -3,12 +3,15 @@ import type { InventoryApi } from '#/api';
 
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import { Alert, Input, message } from 'antdv-next';
 
 import { freezeBalanceApi, unfreezeBalanceApi } from '#/api';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['warehouse.inventory.freeze.write']));
 const emit = defineEmits(['success']);
 
 /**
@@ -29,6 +32,7 @@ const isFreeze = computed(() => payload.value?.action === 'freeze');
 
 const [Modal, modalApi] = useVbenModal<null | FreezePayload>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!reason.value.trim()) {
       message.warning('请填写操作原因');
       return;
@@ -68,7 +72,7 @@ const title = computed(() => (isFreeze.value ? '冻结库存' : '解冻库存'))
 </script>
 
 <template>
-  <Modal :title="title" class="w-[520px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" :title="title" class="w-[520px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         :message="

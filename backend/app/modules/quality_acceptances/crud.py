@@ -19,18 +19,14 @@ def get_by_id(db: Session, acceptance_id: int, *, for_update: bool = False) -> Q
 def list_page(
     db: Session,
     *,
-    delivery_ids: set[int] | None,
+    scope_condition,
     result: str | None,
     page: int,
     page_size: int,
 ) -> tuple[list[QualityAcceptance], int]:
     """按数据范围和结果分页查询验收记录。"""
 
-    conditions = []
-    if delivery_ids is not None:
-        if not delivery_ids:
-            return [], 0
-        conditions.append(QualityAcceptance.delivery_id.in_(delivery_ids))
+    conditions = [scope_condition]
     if result:
         conditions.append(QualityAcceptance.result == result)
     total = db.scalar(select(func.count(QualityAcceptance.id)).where(*conditions)) or 0

@@ -1,12 +1,15 @@
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import { Alert, Empty, message, Select, Spin } from 'antdv-next';
 
-import { createAcceptanceApi, getDeliveryListApi } from '#/api';
+import { createAcceptanceApi, getAcceptanceAssignmentOptionsApi } from '#/api';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['quality.acceptances.assign']));
 const emit = defineEmits(['success']);
 
 /**
@@ -14,18 +17,25 @@ const emit = defineEmits(['success']);
  * 只有「已收货」的到货单可以送检，创建后到货单进入检验中。
  */
 const deliveryId = ref<number>();
+const inspectorId = ref<number>();
+const inspectorOptions = ref<Array<{ label: string; value: number }>>([]);
 const options = ref<Array<{ label: string; value: number }>>([]);
 const loading = ref(false);
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!deliveryId.value) {
       message.warning('请选择需要送检的到货单');
       return;
     }
+    if (!inspectorId.value) {
+      message.warning('请选择负责办理的检验员');
+      return;
+    }
     modalApi.lock();
     try {
-      await createAcceptanceApi(deliveryId.value);
+      await createAcceptanceApi(deliveryId.value, inspectorId.value);
       message.success('已创建质量验收记录');
       emit('success');
       modalApi.close();
@@ -41,14 +51,16 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     deliveryId.value = undefined;
+    inspectorId.value = undefined;
+    options.value = [];
+    inspectorOptions.value = [];
     loading.value = true;
     try {
-      const res = await getDeliveryListApi({
-        page: 1,
-        page_size: 100,
-        status: 'RECEIVED',
-      });
-      options.value = res.items.map((item) => ({
+      const res = await getAcceptanceAssignmentOptionsApi();
+      inspectorOptions.value = res.inspectors.map((item) => ({
+        label: `${item.display_name}（${item.username}）`, value: item.id,
+      }));
+      options.value = res.deliveries.map((item) => ({
         label: `${item.delivery_no}（到货单 #${item.id}）`,
         value: item.id,
       }));
@@ -60,7 +72,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal title="创建质量验收" class="w-[540px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" title="创建质量验收" class="w-[540px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert
@@ -79,6 +91,14 @@ const [Modal, modalApi] = useVbenModal({
           class="w-full"
           placeholder="请选择待送检的到货单"
           show-search
+        />
+        <Select
+          v-model:value="inspectorId"
+          :options="inspectorOptions"
+          class="w-full"
+          placeholder="请选择负责办理的检验员"
+          show-search
+          option-filter-prop="label"
         />
       </div>
     </Spin>

@@ -3,6 +3,7 @@ import type { PlannedRow } from '../data';
 
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import {
@@ -27,6 +28,8 @@ import {
 import { formatQuantity } from '#/utils/format';
 import { getUnitNameMap } from '#/utils/lookup';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['warehouse.deliveries.write']));
 const emit = defineEmits(['success']);
 
 /**
@@ -53,6 +56,7 @@ const totalPlanned = computed(() =>
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!poId.value) {
       message.warning('请先选择采购订单');
       return;
@@ -170,7 +174,7 @@ const columns = [
 </script>
 
 <template>
-  <Modal title="登记到货计划" class="w-[1100px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" title="登记到货计划" class="w-[1100px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert

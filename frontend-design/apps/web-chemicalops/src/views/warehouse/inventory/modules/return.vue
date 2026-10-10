@@ -1,11 +1,14 @@
 <script lang="ts" setup>
 import type { InventoryApi, ReturnSource } from '#/api';
 import { computed, ref } from 'vue';
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 import { Alert, Button, Input, InputNumber, message, Select, Spin } from 'antdv-next';
 import { createInventoryReturnApi, getReturnSourcesApi } from '#/api';
 import { formatQuantity } from '#/utils/format';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['warehouse.inventory.return.write']));
 const emit = defineEmits(['success']);
 const balance = ref<InventoryApi.InventoryBalance>();
 const sources = ref<ReturnSource[]>([]);
@@ -34,6 +37,7 @@ const [Modal, modalApi] = useVbenModal<InventoryApi.InventoryBalance>({
     await load();
   },
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (loading.value || submitting.value || !balance.value || !source.value || !balance.value.batch_id) return;
     if (!reason.value.trim() || !quantity.value || quantity.value <= 0 || quantity.value > maxQuantity.value) {
       message.warning('请选择来源、填写原因，并输入不超过可退数量的正数'); return;
@@ -54,7 +58,7 @@ const [Modal, modalApi] = useVbenModal<InventoryApi.InventoryBalance>({
 </script>
 
 <template>
-  <Modal title="申请供应商退货" class="w-full max-w-full sm:w-[580px]" confirm-text="创建草稿">
+  <Modal :show-confirm-button="canConfirm" title="申请供应商退货" class="w-full max-w-full sm:w-[580px]" confirm-text="创建草稿">
     <Spin :spinning="loading">
       <div class="space-y-4">
         <Alert message="退货申请需审批后再执行出库。财务将按订单行单独确认扣款或待补交口径。" type="info" show-icon />

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AgentApi } from '#/api';
 import { computed, ref, watch } from 'vue';
+import { useAccess } from '@vben/access';
 import { Button } from 'antdv-next';
 import { formatDateTime } from '#/utils/format';
 import { agentDisplayNumber, primaryTaskResults } from './task-view';
@@ -8,6 +9,7 @@ import AgentSourcePopover from './agent-source-popover.vue';
 import { inventorySource, TASK_ERROR_HELP, TASK_LABELS, TOOL_LABELS, waitingCandidates } from './task-view';
 const props = defineProps<{ task: AgentApi.Task; busy: boolean }>();
 const emit = defineEmits<{ continue: [data: AgentApi.Continue]; cancel: []; refresh: [] }>();
+const { hasAccessByCodes } = useAccess();
 const selection = ref<number>();
 const candidates = computed(() => waitingCandidates(props.task));
 const results = computed(() => primaryTaskResults(props.task));
@@ -85,7 +87,7 @@ function visibleWarnings(result: AgentApi.Result) {
         <details v-if="entry.result.total_rows > 0" class="agent-disclosure">
           <summary><span>库存明细</span><span class="agent-count">{{ entry.result.rows.length }}{{ entry.result.truncated ? ` / ${entry.result.total_rows}` : '' }} 条</span></summary>
           <div class="agent-table"><table><caption class="sr-only">库存明细与来源</caption><thead><tr><th>仓库 / 批次</th><th class="agent-numeric">可用量</th><th>状态 / 有效期</th><th>来源</th></tr></thead><tbody>
-            <tr v-for="row in entry.result.rows" :key="row.balance_id"><td><span>{{ row.warehouse_name }}</span><small>{{ row.batch_no }}</small></td><td class="agent-numeric">{{ agentDisplayNumber(row.available_quantity) }} {{ row.unit_name }}</td><td><span>{{ row.status === 'AVAILABLE' ? '可用' : row.status === 'FROZEN' ? '冻结' : row.status }}</span><small>{{ row.expiry_date || '未登记有效期' }}</small></td><td><RouterLink :to="inventorySource(entry.result.product_id, row.warehouse_id)">查看库存 ↗</RouterLink><small>余额 #{{ row.balance_id }}</small></td></tr>
+            <tr v-for="row in entry.result.rows" :key="row.balance_id"><td><span>{{ row.warehouse_name }}</span><small>{{ row.batch_no }}</small></td><td class="agent-numeric">{{ agentDisplayNumber(row.available_quantity) }} {{ row.unit_name }}</td><td><span>{{ row.status === 'AVAILABLE' ? '可用' : row.status === 'FROZEN' ? '冻结' : row.status }}</span><small>{{ row.expiry_date || '未登记有效期' }}</small></td><td><RouterLink v-if="hasAccessByCodes(['warehouse.inventory.read'])" :to="inventorySource(entry.result.product_id, row.warehouse_id)">查看库存 ↗</RouterLink><small>余额 #{{ row.balance_id }}</small></td></tr>
           </tbody></table></div>
         </details>
       </template>
@@ -101,7 +103,7 @@ function visibleWarnings(result: AgentApi.Result) {
           </tbody></table></div>
         </details>
         <p v-if="entry.result.truncated" class="agent-muted">报价已截断，当前结果不代表完整比较。</p>
-        <RouterLink class="agent-source-link" :to="{ path: '/procurement/rfqs', query: { ai_record_id: entry.result.rfq_id } }">查看询价原记录 ↗</RouterLink>
+        <RouterLink v-if="hasAccessByCodes(['procurement.rfqs.read'])" class="agent-source-link" :to="{ path: '/procurement/rfqs', query: { ai_record_id: entry.result.rfq_id } }">查看询价原记录 ↗</RouterLink>
       </template>
       <p v-else-if="entry.result?.total_rows === 0" class="agent-empty">{{ entry.result.tool === 'catalog.search_products' ? '当前授权范围未找到匹配产品。' : '当前授权范围未找到可用询价明细。' }}</p>
       <template v-if="entry.result">

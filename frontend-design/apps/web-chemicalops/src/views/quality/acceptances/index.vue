@@ -26,6 +26,7 @@ import ResultDrawer from './modules/result.vue';
 defineOptions({ name: 'AcceptanceList' });
 const route = useRoute();
 const { hasAccessByCodes } = useAccess();
+const canAssignAcceptances = hasAccessByCodes(['quality.acceptances.assign']);
 const canWriteAcceptances = hasAccessByCodes(['quality.acceptances.write']);
 
 const [Create, createApi] = useVbenModal({
@@ -137,7 +138,7 @@ watch(
     <ReportReview @continue="continueToResult" />
     <Grid table-title="质量验收">
       <template #toolbar-tools>
-        <Button v-if="canWriteAcceptances" type="primary" @click="createApi.open()">
+        <Button v-if="canAssignAcceptances" type="primary" @click="createApi.open()">
           <Plus class="size-5" />
           创建验收
         </Button>

@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import { Alert, DatePicker, Input, message } from 'antdv-next';
@@ -9,6 +10,8 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { updatePurchaseOrderApi } from '#/api';
 import type { PurchaseOrderApi } from '#/api';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['procurement.orders.write']));
 const emit = defineEmits(['success']);
 
 const orderId = ref<number>();
@@ -23,6 +26,7 @@ const [Modal, modalApi] = useVbenModal<null | {
   poNo: string;
 }>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!orderId.value) return;
     modalApi.lock();
     try {
@@ -57,7 +61,7 @@ const title = computed(() => `编辑采购订单草稿 ${poNo.value}`);
 </script>
 
 <template>
-  <Modal :title="title" class="w-[560px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" :title="title" class="w-[560px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         message="草稿阶段仅可修改收货地址、期望到货日和备注；提交审批后不可修改。"

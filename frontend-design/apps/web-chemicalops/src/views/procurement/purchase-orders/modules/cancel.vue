@@ -1,12 +1,15 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import { Alert, Input, message } from 'antdv-next';
 
 import { cancelPurchaseOrderApi } from '#/api';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['procurement.orders.write']));
 const emit = defineEmits(['success']);
 
 /** 取消采购订单，后端要求必须填写原因 */
@@ -16,6 +19,7 @@ const reason = ref('');
 
 const [Modal, modalApi] = useVbenModal<null | { id: number; poNo: string }>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!reason.value.trim()) {
       message.warning('请填写取消原因');
       return;
@@ -50,7 +54,7 @@ const title = computed(() => `取消采购订单 ${poNo.value}`);
 </script>
 
 <template>
-  <Modal :title="title" class="w-[520px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" :title="title" class="w-[520px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         message="只有草稿、审批中或已批准但尚未正式下单的订单可以取消。"

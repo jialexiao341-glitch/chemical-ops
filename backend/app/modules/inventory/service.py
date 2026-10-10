@@ -460,6 +460,8 @@ def approve_issue_request(db: Session, user: User, issue_id: int) -> InventoryIs
     issue = _get_issue_for_user(db, user, issue_id, for_update=True)
     if issue.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的领用申请可以审批")
+    if issue.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的领用申请")
     issue.status = "APPROVED"
     issue.approved_by = user.id
     issue.approved_at = _now()
@@ -474,6 +476,8 @@ def reject_issue_request(db: Session, user: User, issue_id: int, reason: str) ->
     issue = _get_issue_for_user(db, user, issue_id, for_update=True)
     if issue.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的领用申请可以驳回")
+    if issue.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的领用申请")
     issue.status = "REJECTED"
     issue.rejected_at = _now()
     issue.reject_reason = reason
@@ -708,6 +712,8 @@ def approve_transfer_request(db: Session, user: User, transfer_id: int) -> Inven
     transfer = _get_transfer_for_user(db, user, transfer_id, for_update=True)
     if transfer.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的调拨申请可以审批")
+    if transfer.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的调拨申请")
     transfer.status = "APPROVED"
     transfer.approved_by = user.id
     transfer.approved_at = _now()
@@ -722,6 +728,8 @@ def reject_transfer_request(db: Session, user: User, transfer_id: int, reason: s
     transfer = _get_transfer_for_user(db, user, transfer_id, for_update=True)
     if transfer.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的调拨申请可以驳回")
+    if transfer.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的调拨申请")
     transfer.status = "REJECTED"
     transfer.rejected_at = _now()
     transfer.reject_reason = reason
@@ -1036,6 +1044,8 @@ def approve_stocktake_request(db: Session, user: User, stocktake_id: int) -> Inv
     stocktake = _get_stocktake_for_user(db, user, stocktake_id, for_update=True)
     if stocktake.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的盘点申请可以审批")
+    if stocktake.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的盘点申请")
     stocktake.status = "APPROVED"
     stocktake.approved_by = user.id
     stocktake.approved_at = _now()
@@ -1050,6 +1060,8 @@ def reject_stocktake_request(db: Session, user: User, stocktake_id: int, reason:
     stocktake = _get_stocktake_for_user(db, user, stocktake_id, for_update=True)
     if stocktake.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的盘点申请可以驳回")
+    if stocktake.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的盘点申请")
     stocktake.status = "REJECTED"
     stocktake.rejected_at = _now()
     stocktake.reject_reason = reason

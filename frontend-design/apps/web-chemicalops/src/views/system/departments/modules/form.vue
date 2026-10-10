@@ -3,6 +3,7 @@ import type { SystemDepartmentApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { useVbenForm } from '#/adapter/form';
@@ -10,6 +11,8 @@ import { createDepartmentApi, updateDepartmentApi } from '#/api';
 
 import { useCreateFormSchema, useUpdateFormSchema } from '../data';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['system.departments.write']));
 const emit = defineEmits(['success']);
 
 const id = ref<number>();
@@ -23,6 +26,7 @@ const [Form, formApi] = useVbenForm({
 
 const [Drawer, drawerApi] = useVbenDrawer<null | SystemDepartmentApi.SystemDepartment>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     const { valid } = await formApi.validate();
     if (!valid) {
       return;
@@ -79,7 +83,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[600px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canConfirm" :title="title" class="w-[600px] max-w-[100vw]">
     <Form />
   </Drawer>
 </template>

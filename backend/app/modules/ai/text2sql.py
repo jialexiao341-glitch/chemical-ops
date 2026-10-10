@@ -628,12 +628,12 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
     if user is not None and db is not None and plan.dataset == "supplier_quotes":
         if not {"SYS_ADMIN", "PROCUREMENT_MANAGER"}.intersection(get_user_role_codes(db, user.id)):
             stmt = stmt.where(RFQ.requester_id == user.id)
-    if user is not None and db is not None and plan.dataset == "inventory_transactions":
+    if user is not None and db is not None and plan.dataset in {"inventory", "inventory_transactions"}:
         from app.modules.inventory.service import accessible_warehouse_ids
 
         warehouse_ids = accessible_warehouse_ids(db, user)
         if warehouse_ids is not None:
-            stmt = stmt.where(InventoryTransaction.warehouse_id.in_(warehouse_ids))
+            stmt = stmt.where(model.warehouse_id.in_(warehouse_ids))
     if user is not None and db is not None and plan.dataset in {"purchase_orders", "finance_reconciliations", "finance_invoices", "finance_payments"}:
         condition = order_read_condition(user, get_user_role_codes(db, user.id))
         if plan.dataset == "purchase_orders":
@@ -642,8 +642,20 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             stmt = stmt.where(model.po_id.in_(select(PurchaseOrder.id).where(condition)))
     if user is not None and db is not None and plan.dataset == "deliveries":
         roles = set(get_user_role_codes(db, user.id))
-        if "WAREHOUSE" not in roles:
-            stmt = stmt.where(Delivery.po_id.in_(select(PurchaseOrder.id).where(order_read_condition(user, roles))))
+        stmt = stmt.where(Delivery.po_id.in_(select(PurchaseOrder.id).where(order_read_condition(user, roles))))
+    if user is not None and db is not None and plan.dataset == "quality_acceptances":
+        from app.modules.quality_acceptances.scope import acceptance_read_condition
+
+        stmt = stmt.where(acceptance_read_condition(user, get_user_role_codes(db, user.id)))
+    if user is not None and db is not None and plan.dataset == "purchase_requests":
+        if not {"SYS_ADMIN", "PROCUREMENT_MANAGER"}.intersection(get_user_role_codes(db, user.id)):
+            condition = (PurchaseRequest.department_id == user.department_id if user.department_id is not None
+                         else PurchaseRequest.applicant_id == user.id)
+            stmt = stmt.where(condition)
+    if user is not None and db is not None and plan.dataset == "exceptions":
+        from app.modules.operation_exceptions.service import _exception_record_scope_condition
+
+        stmt = stmt.where(_exception_record_scope_condition(db, user))
     if group_keys: stmt = stmt.group_by(*(aliases[group_key] for group_key in group_keys))
     stmt = stmt.order_by(desc("metric_value") if plan.order == "desc" else "metric_value")
     return stmt.limit(plan.limit + 1)

@@ -74,10 +74,10 @@ export function useColumns(
             auth: 'quality.acceptances.write',
             // PENDING（刚创建）和 REINSPECTION（复检中）可录入；
             // 已出最终结果（PASSED/PARTIAL/FAILED）的不允许直接改判
-            show: (row: QualityAcceptanceApi.Acceptance) =>
-              !row.result ||
-              row.result === 'PENDING' ||
-              row.result === 'REINSPECTION',
+            disabled: (row: QualityAcceptanceApi.Acceptance) =>
+              !!row.result && !['PENDING', 'REINSPECTION'].includes(row.result),
+            title: (row: QualityAcceptanceApi.Acceptance) =>
+              !!row.result && !['PENDING', 'REINSPECTION'].includes(row.result) ? '已完成验收，需先发起复检' : undefined,
           },
         ],
       },

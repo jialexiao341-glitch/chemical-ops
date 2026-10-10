@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import { Alert, Input, message, Select, Spin } from 'antdv-next';
@@ -12,6 +13,8 @@ import {
   getWarehouseListApi,
 } from '#/api';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['warehouse.inventory.write']));
 const emit = defineEmits(['success']);
 
 /**
@@ -32,6 +35,7 @@ const submitting = ref(false);
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!deliveryId.value || !warehouseId.value || !locationId.value) {
       message.warning('请先选择到货单、仓库和库位');
       return;
@@ -101,7 +105,7 @@ async function onWarehouseChange(value: number) {
 </script>
 
 <template>
-  <Modal title="库存入库" class="w-[560px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" title="库存入库" class="w-[560px] max-w-[100vw]">
     <Spin :spinning="loadingRefs">
       <div class="space-y-4 px-1">
         <Alert

@@ -164,3 +164,100 @@ def test_ambiguous_document_alias_requires_cas():
     with pytest.raises(BusinessValidationError, match="多个化学品"):
         asyncio.run(resolve_doc_targets(db(), "shared 的闪点"))
     assert asyncio.run(resolve_doc_targets(db(), "shared CAS 64-17-5 的闪点")) == ["64-17-5"]
+
+
+@pytest.mark.parametrize("dataset", ["purchase_requests", "deliveries", "quality_acceptances", "inventory", "exceptions"])
+def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_records(db_session, dataset):
+    from app.modules.purchase_requests.model import PurchaseRequest
+    from app.modules.quality_acceptances.model import QualityAcceptance
+    from app.modules.quality_acceptances import service as quality
+    from app.modules.inventory.model import Warehouse, WarehouseLocation
+    from app.modules.operation_exceptions.model import OperationException
+
+    actor = user(db_session, "quality_inspector" if dataset == "quality_acceptances" else "warehouse_receiver" if dataset == "inventory" else "buyer")
+    other = user(db_session, "system_admin")
+    actor.department_id = None
+    suffix = uuid4().hex[:12]
+    template_order = db_session.scalar(select(PurchaseOrder))
+    order = PurchaseOrder(po_no=f"SQL-SCOPE-{suffix}", supplier_id=template_order.supplier_id, buyer_id=other.id, department_id=None)
+    db_session.add(order); db_session.flush()
+    delivery = Delivery(delivery_no=f"SQL-DEL-{suffix}", po_id=order.id, supplier_id=order.supplier_id, status="RECEIVED")
+    db_session.add(delivery); db_session.flush()
+    if dataset == "purchase_requests":
+        record = PurchaseRequest(request_no=f"SQL-REQ-{suffix}", applicant_id=other.id, purpose="scope regression")
+        authorize = lambda: setattr(record, "applicant_id", actor.id)
+    elif dataset == "deliveries":
+        record = delivery
+        authorize = lambda: setattr(order, "buyer_id", actor.id)
+    elif dataset == "quality_acceptances":
+        record = QualityAcceptance(acceptance_no=f"SQL-QA-{suffix}", delivery_id=delivery.id, inspector_id=other.id, result="PENDING")
+        authorize = lambda: setattr(record, "inspector_id", actor.id)
+    elif dataset == "exceptions":
+        record = OperationException(exception_no=f"SQL-EX-{suffix}", exception_type="DELIVERY", source_type="OTHER", source_id=order.id, owner_id=other.id, description="scope regression")
+        authorize = lambda: setattr(record, "owner_id", actor.id)
+    else:
+        template = db_session.scalar(select(InventoryBalance))
+        warehouse = Warehouse(warehouse_code=f"SQL-WH-{suffix}", warehouse_name="scope regression", manager_id=other.id)
+        db_session.add(warehouse); db_session.flush()
+        location = WarehouseLocation(warehouse_id=warehouse.id, location_code=f"SQL-LOC-{suffix}", location_name="scope regression")
+        db_session.add(location); db_session.flush()
+        record = InventoryBalance(product_id=template.product_id, batch_id=template.batch_id, warehouse_id=warehouse.id, location_id=location.id, unit_id=template.unit_id, quantity=Decimal("1"), locked_quantity=Decimal("0"), status="AVAILABLE")
+        authorize = lambda: setattr(warehouse, "manager_id", actor.id)
+    db_session.add(record); db_session.flush()
+    model = type(record)
+    plan = QueryPlan(dataset=dataset, metric="count", time_field=None)
+    statement = build_statement(plan, db_session, actor).where(model.id == record.id)
+    validate_sql(str(statement), CATALOG[dataset].tables)
+    assert db_session.execute(statement).scalar() == 0
+    resource_type = {"deliveries": "DELIVERY", "quality_acceptances": "QUALITY_ACCEPTANCE", "exceptions": "OPERATION_EXCEPTION"}.get(dataset)
+    if resource_type:
+        from app.modules.files.service import _can_access_resource_instance
+        assert not _can_access_resource_instance(db_session, actor, resource_type, record)
+    if dataset == "quality_acceptances":
+        with pytest.raises(ResourceNotFoundError):
+            quality.get_acceptance(db_session, actor, record.id)
+    authorize(); db_session.flush()
+    statement = build_statement(plan, db_session, actor).where(model.id == record.id)
+    validate_sql(str(statement), CATALOG[dataset].tables)
+    assert db_session.execute(statement).scalar() == 1
+    if resource_type:
+        assert _can_access_resource_instance(db_session, actor, resource_type, record)
+    if dataset == "quality_acceptances":
+        assert quality.get_acceptance(db_session, actor, record.id).id == record.id
+
+
+@pytest.mark.parametrize("username", ["warehouse_receiver", "buyer", "finance_viewer"])
+def test_quality_readonly_scope_matches_detail_total_sql_and_attachment(db_session, username):
+    from app.modules.quality_acceptances.model import QualityAcceptance
+    from app.modules.quality_acceptances import service as quality
+    from app.modules.files.service import _can_access_resource_instance
+
+    actor = user(db_session, username)
+    other = user(db_session, "system_admin")
+    actor.department_id = None
+    template = db_session.scalar(select(PurchaseOrder))
+    suffix = uuid4().hex[:12]
+    order = PurchaseOrder(po_no=f"QA-READ-{suffix}", supplier_id=template.supplier_id, buyer_id=other.id)
+    db_session.add(order); db_session.flush()
+    delivery = Delivery(delivery_no=f"QA-READ-{suffix}", po_id=order.id, supplier_id=order.supplier_id)
+    db_session.add(delivery); db_session.flush()
+    acceptance = QualityAcceptance(acceptance_no=f"QA-READ-{suffix}", delivery_id=delivery.id, inspector_id=other.id, result="PENDING")
+    db_session.add(acceptance); db_session.flush()
+    plan = QueryPlan(dataset="quality_acceptances", metric="count", time_field=None)
+    for visible in (False, True):
+        if visible:
+            order.buyer_id = actor.id
+            db_session.flush()
+        condition = build_statement(plan, db_session, actor).where(QualityAcceptance.id == acceptance.id)
+        validate_sql(str(condition), CATALOG[plan.dataset].tables)
+        assert db_session.execute(condition).scalar() == int(visible)
+        rows, total = quality.list_acceptances(db_session, actor, result=None, page=1, page_size=100)
+        assert total == db_session.execute(build_statement(plan, db_session, actor)).scalar()
+        assert len(rows) == min(total, 100)
+        assert (acceptance.id in {row.id for row in rows}) == visible
+        assert _can_access_resource_instance(db_session, actor, "QUALITY_ACCEPTANCE", acceptance) == visible
+        if visible:
+            assert quality.get_acceptance(db_session, actor, acceptance.id).id == acceptance.id
+        else:
+            with pytest.raises(ResourceNotFoundError):
+                quality.get_acceptance(db_session, actor, acceptance.id)

@@ -3,6 +3,7 @@ import type { QuoteItemRow } from '../data';
 
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
 import {
@@ -21,6 +22,8 @@ import { createQuoteApi, getRfqApi } from '#/api';
 import { formatQuantity } from '#/utils/format';
 import { getSupplierNameMap, getUnitNameMap } from '#/utils/lookup';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['procurement.rfqs.quote']));
 const emit = defineEmits(['success']);
 
 /**
@@ -40,6 +43,7 @@ const loading = ref(false);
 
 const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!supplierId.value) {
       message.warning('请选择报价供应商');
       return;
@@ -158,7 +162,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
 </script>
 
 <template>
-  <Modal :title="title" class="w-[1200px] max-w-[100vw]">
+  <Modal :show-confirm-button="canConfirm" :title="title" class="w-[1200px] max-w-[100vw]">
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert

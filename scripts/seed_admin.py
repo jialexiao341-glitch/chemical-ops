@@ -9,6 +9,7 @@ from app.modules.system.model import Permission, Role, RolePermission, User, Use
 
 
 PERMISSIONS = (
+    ("quality.acceptances.assign", "创建并指派质量验收", "API", "quality.acceptances", "assign"),
     ("system.users.read", "查看用户", "API", "system.users", "read"),
     ("system.users.write", "管理用户", "API", "system.users", "write"),
     ("system.departments.read", "查看部门", "API", "system.departments", "read"),

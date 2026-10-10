@@ -3,6 +3,7 @@ import type { ProductApi } from '#/api';
 
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 import { Alert, Button, Input, InputNumber, Select, Spin, Tag, message } from 'antdv-next';
 
@@ -14,6 +15,8 @@ type CriterionDraft = Omit<ProductApi.QualityCriterion, 'aliases' | 'maximum' | 
   minimum: null | number;
 };
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['master.products.write']));
 const product = ref<null | ProductApi.Product>(null);
 const versions = ref<ProductApi.QualityStandard[]>([]);
 const sourceReference = ref('');
@@ -60,6 +63,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | ProductApi.Product>({
   },
   /** 校验草稿内容，保存为新版本并更新版本列表。 */
   async onConfirm() {
+    if (!canConfirm.value) return;
     if (!product.value) return;
     const source = sourceReference.value.trim();
     if (!source || !criteria.value.length) {
@@ -101,7 +105,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[860px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canConfirm" :title="title" class="w-[860px] max-w-[100vw]">
     <Spin :spinning="loading">
     <div class="space-y-5 pb-4">
       <Alert type="info" show-icon message="由产品维护人员录入经审核的标准" description="每次保存生成新版本。报告核对将引用当时的版本；检测标准不会自动放行库存。" />

@@ -3,6 +3,7 @@ import type { QualityAcceptanceApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { Alert, Button, Input, Select, message } from 'antdv-next';
@@ -11,6 +12,8 @@ import { useVbenForm } from '#/adapter/form';
 import { getAcceptanceReportFilesApi, getAcceptanceReviewTargetsApi, submitAcceptanceResultApi } from '#/api';
 import { ACCEPTANCE_RESULT_DICT } from '#/constants/dictionary';
 
+const { hasAccessByCodes } = useAccess();
+const canConfirm = computed(() => hasAccessByCodes(['quality.acceptances.write']));
 const emit = defineEmits(['success', 'review']);
 
 interface ResultDrawerData extends QualityAcceptanceApi.Acceptance {
@@ -97,6 +100,7 @@ const [Form, formApi] = useVbenForm({
 
 const [Drawer, drawerApi] = useVbenDrawer<null | ResultDrawerData>({
   async onConfirm() {
+    if (!canConfirm.value) return;
     const { valid } = await formApi.validate();
     if (!valid) {
       return;
@@ -203,7 +207,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[640px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canConfirm" :title="title" class="w-[640px] max-w-[100vw]">
     <div class="space-y-4">
       <Alert
         v-if="needReinspectionHint"

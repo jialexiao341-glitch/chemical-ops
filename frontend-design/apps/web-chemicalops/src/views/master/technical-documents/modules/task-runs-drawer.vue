@@ -3,6 +3,7 @@ import type { TechnicalDocumentRun } from '#/api';
 
 import { onBeforeUnmount, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 import { Button, Empty, Spin, Tag, message } from 'antdv-next';
 
@@ -11,6 +12,8 @@ import {
   startTechnicalDocumentFetchApi,
   startTechnicalDocumentIngestApi,
 } from '#/api';
+
+const { hasAccessByCodes } = useAccess();
 
 const runs = ref<TechnicalDocumentRun[]>([]);
 const loading = ref(false);
@@ -73,6 +76,7 @@ function formatDateTime(value: string) {
 }
 
 async function retryRun(run: TechnicalDocumentRun) {
+  if (!hasAccessByCodes(['master.chemicals.write']) || run.status !== 'FAILED') return;
   const casNo = run.result_json?.cas_no;
   const docTypes = run.result_json?.doc_types;
   if (!casNo || !Array.isArray(docTypes) || retryingRunId.value) return;
@@ -111,7 +115,7 @@ onBeforeUnmount(stopPolling);
               <span class="text-base font-semibold">CAS {{ run.result_json?.cas_no || '任务启动中' }}</span>
               <Tag v-if="runAction(run)" class="m-0" color="blue">{{ runAction(run) }}</Tag>
               <time class="ml-auto text-sm text-muted-foreground">{{ formatDateTime(run.started_at) }}</time>
-              <Button v-if="run.status === 'FAILED'" size="small" :loading="retryingRunId === run.run_id" :disabled="Boolean(retryingRunId)" @click="retryRun(run)">重试</Button>
+              <Button v-if="hasAccessByCodes(['master.chemicals.write'])" size="small" :loading="retryingRunId === run.run_id" :disabled="Boolean(retryingRunId) || run.status !== 'FAILED'" :title="run.status !== 'FAILED' ? '只有失败任务可以重试' : undefined" @click="retryRun(run)">重试</Button>
             </header>
             <p class="m-0 break-words text-sm leading-6 text-muted-foreground">{{ runSummary(run) }}</p>
             <details v-if="run.result_json?.stages?.length" class="rounded-md border border-border px-3 py-2">

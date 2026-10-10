@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import type { AgentApi } from '#/api';
 import { computed, ref, watch } from 'vue';
+import { useAccess } from '@vben/access';
 import { Popover } from 'antdv-next';
 import { formatDateTime } from '#/utils/format';
 import { agentSourcePreview } from './task-view';
 const props = defineProps<{ result: AgentApi.Result }>();
+const { hasAccessByCodes } = useAccess();
+const canOpenSource = computed(() => hasAccessByCodes([props.result.tool === 'inventory.query_available' ? 'warehouse.inventory.read' : props.result.tool === 'catalog.search_products' ? 'master.products.read' : 'procurement.rfqs.read']));
 const open = ref(false);
 const index = ref(0);
 const source = computed(() => props.result.sources[index.value]);
@@ -31,7 +34,7 @@ watch(() => props.result, () => { index.value = 0; open.value = false; });
         <p class="source-meta">{{ preview.reference }}</p>
         <div class="source-footer">
           <span v-if="'observed_at' in result">{{ formatDateTime(result.observed_at) }} 查询</span>
-          <RouterLink v-if="preview.to" :to="preview.to" @click="open = false">{{ preview.linkLabel }} ↗</RouterLink>
+          <RouterLink v-if="preview.to && canOpenSource" :to="preview.to" @click="open = false">{{ preview.linkLabel }} ↗</RouterLink>
         </div>
       </section>
     </template>
