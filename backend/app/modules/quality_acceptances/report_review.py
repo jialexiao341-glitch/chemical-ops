@@ -270,7 +270,7 @@ def get_review_record(db: Session, user: User, acceptance_id: int, review_id: in
 def decide_review(db: Session, user: User, acceptance_id: int, review_id: int, decision: QualityReviewDecision) -> QualityReviewHistory:
     """保存一次性人工复核结论；不改变正式验收结果。"""
     acceptance = get_acceptance(db, user, acceptance_id)
-    if user.id == acceptance.inspector_id and "SYS_ADMIN" not in get_user_role_codes(db, user.id):
+    if user.id == acceptance.inspector_id:
         raise BusinessValidationError("检验员不能复核自己负责的验收报告")
     record = db.scalar(select(QualityReportReviewRecord).where(
         QualityReportReviewRecord.id == review_id,

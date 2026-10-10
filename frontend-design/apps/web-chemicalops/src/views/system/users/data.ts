@@ -82,7 +82,7 @@ export function useCreateFormSchema(): VbenFormSchema[] {
 }
 
 /** 编辑用户表单，登录名不可修改，密码留空表示不改 */
-export function useUpdateFormSchema(): VbenFormSchema[] {
+export function useUpdateFormSchema(isCurrentUser = false): VbenFormSchema[] {
   return [
     {
       component: 'Input',
@@ -132,6 +132,7 @@ export function useUpdateFormSchema(): VbenFormSchema[] {
           }));
         },
         class: 'w-full',
+        disabled: isCurrentUser,
         mode: 'multiple',
         placeholder: '请选择角色',
         showSearch: true,
@@ -154,6 +155,7 @@ export function useUpdateFormSchema(): VbenFormSchema[] {
     {
       component: 'Select',
       componentProps: {
+        disabled: isCurrentUser,
         options: USER_STATUS_DICT.options(),
       },
       fieldName: 'status',
@@ -188,6 +190,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
 /** 列表列定义 */
 export function useColumns(
   onActionClick: OnActionClickFn<SystemUserApi.SystemUser>,
+  currentUserId: number,
 ): VxeTableGridColumns {
   return [
     { field: 'username', width: 160, title: '登录名' },
@@ -221,7 +224,13 @@ export function useColumns(
         name: 'CellOperation',
         options: [
           { code: 'edit', auth: 'system.users.write' },
-          { code: 'delete', auth: 'system.users.write' },
+          {
+            code: 'delete',
+            auth: 'system.users.write',
+            disabled: (row: SystemUserApi.SystemUser) => row.id === currentUserId,
+            text: (row: SystemUserApi.SystemUser) =>
+              row.id === currentUserId ? '不能停用当前账号' : '停用',
+          },
         ],
       },
       field: 'operation',

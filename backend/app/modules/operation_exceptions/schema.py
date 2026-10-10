@@ -65,6 +65,14 @@ class OperationExceptionPage(BaseModel):
     page_size: int
 
 
+class OperationExceptionAssigneeRead(BaseModel):
+    """异常经办人候选项的最小字段投影。"""
+
+    id: int
+    username: str
+    display_name: str
+
+
 class OperationTaskCreate(BaseModel):
     """创建异常处理任务时提交的字段。"""
 

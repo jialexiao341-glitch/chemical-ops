@@ -28,7 +28,9 @@ def _now() -> datetime:
 def _can_manage_all(db: Session, user: User) -> bool:
     """判断用户是否可以查看全部到货记录。"""
 
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
+    # 到货单没有独立仓库归属，只能继承采购订单的数据范围。
+    # 仓库岗位负责收货，但该职责不应扩大为跨部门读取全部订单。
+    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(get_user_role_codes(db, user.id)))
 
 
 def _require_delivery(db: Session, delivery_id: int, *, for_update: bool = False) -> Delivery:

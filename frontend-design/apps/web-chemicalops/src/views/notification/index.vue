@@ -4,6 +4,7 @@ import type { NotificationApi } from '#/api';
 import { computed, onMounted, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 
 import { Button, Card, Empty, message, Spin, Switch, Table, Tag } from 'antdv-next';
 
@@ -15,6 +16,8 @@ import {
 import { formatDateTime } from '#/utils/format';
 
 defineOptions({ name: 'NotificationCenter' });
+const { hasAccessByCodes } = useAccess();
+const canWriteNotifications = computed(() => hasAccessByCodes(['system.notifications.write']));
 
 const items = ref<NotificationApi.Notification[]>([]);
 const total = ref(0);
@@ -43,6 +46,7 @@ async function load() {
 }
 
 async function onRead(row: NotificationApi.Notification) {
+  if (!canWriteNotifications.value) return;
   if (row.is_read === 1) {
     return;
   }
@@ -51,6 +55,7 @@ async function onRead(row: NotificationApi.Notification) {
 }
 
 async function onReadAll() {
+  if (!canWriteNotifications.value) return;
   const res = await markAllNotificationsReadApi();
   message.success(`已标记 ${res.updated_count} 条通知为已读`);
   await load();
@@ -89,7 +94,7 @@ onMounted(load);
             <Switch :checked="unreadOnly" size="small" @change="onToggleUnread" />
             只看未读
           </label>
-          <Button :disabled="unreadCount === 0" @click="onReadAll">
+          <Button v-if="canWriteNotifications" :disabled="unreadCount === 0" @click="onReadAll">
             全部标记已读
           </Button>
         </div>
@@ -127,6 +132,7 @@ onMounted(load);
             </template>
             <template v-else-if="column.key === '__action'">
               <Button
+                v-if="canWriteNotifications"
                 :disabled="record.is_read === 1"
                 size="small"
                 type="link"

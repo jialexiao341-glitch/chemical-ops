@@ -26,6 +26,12 @@ export namespace OperationExceptionApi {
     updated_at?: string;
   }
 
+  export interface AssigneeOption {
+    display_name: string;
+    id: number;
+    username: string;
+  }
+
   /** 异常处理任务 */
   export interface Task {
     assignee_id?: null | number;
@@ -81,6 +87,13 @@ export namespace OperationExceptionApi {
     exception_type?: string;
     status?: string;
   }
+}
+
+/** 按当前部门范围查询异常经办人候选项 */
+export async function getExceptionAssigneeOptionsApi() {
+  return requestClient.get<OperationExceptionApi.AssigneeOption[]>(
+    '/operation-exceptions/assignees',
+  );
 }
 
 /** 分页查询运营异常 */

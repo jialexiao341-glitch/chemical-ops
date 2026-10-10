@@ -156,6 +156,7 @@ def test_review_decision_is_saved_without_changing_acceptance(client, db_session
     file = db_session.get(SysFile, attachment.file_id)
     admin_user = db_session.scalar(select(User).where(User.username == "system_admin"))
     assert file is not None and admin_user is not None
+    acceptance.inspector_id = admin_user.id
     snapshot = QualityReportReview(
         acceptance_id=acceptance.id, delivery_item_id=item.id, file_id=file.id,
         file_name=file.file_name, expected_batch_nos=[item.batch_no] if item.batch_no else [],
@@ -175,6 +176,12 @@ def test_review_decision_is_saved_without_changing_acceptance(client, db_session
         headers=inspector, json={"status": "CONFIRMED", "reviewer_note": "自我复核"},
     )
     assert denied.status_code == 403
+    admin = login(client, "system_admin", demo_password)
+    self_review = client.post(
+        f"/api/v1/quality-acceptances/{acceptance.id}/report-reviews/{record.id}/decision",
+        headers=admin, json={"status": "CONFIRMED", "reviewer_note": "管理员自我复核"},
+    )
+    assert self_review.status_code == 400
     response = client.post(
         f"/api/v1/quality-acceptances/{acceptance.id}/report-reviews/{record.id}/decision",
         headers=manager, json={"status": "CONFIRMED", "reviewer_note": "已核对报告来源"},

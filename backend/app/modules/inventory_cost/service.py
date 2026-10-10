@@ -13,6 +13,7 @@ from app.modules.inventory_cost.schema import FifoOutboundCreate
 from app.modules.products.model import Product
 from app.modules.purchase_requests.model import Unit
 from app.modules.system.audit import add_audit_log
+from app.modules.system.crud import get_user_role_codes
 from app.modules.system.model import User
 
 
@@ -23,6 +24,16 @@ def _require_request(db: Session, request_id: int) -> InventoryFifoOutboundReque
         raise ResourceNotFoundError(f"FIFO 出库请求 {request_id} 不存在")
     value.allocations = list(db.scalars(select(InventoryFifoOutboundAllocation).where(InventoryFifoOutboundAllocation.request_id == request_id).order_by(InventoryFifoOutboundAllocation.id)).all())
     return value
+
+
+def _require_warehouse_scope(db: Session, user: User, warehouse: Warehouse) -> None:
+    """FIFO 出库与普通仓储操作使用同一负责人范围。"""
+
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        return
+    if warehouse.manager_id not in {None, user.id}:
+        raise ResourceNotFoundError(f"仓库 {warehouse.id} 不存在")
 
 
 def allocate_outbound_cost(db: Session, transaction: InventoryTransaction, quantity: Decimal) -> Decimal:
@@ -59,7 +70,17 @@ def create_fifo_outbound(db: Session, user: User, data: FifoOutboundCreate) -> I
     """按成本层创建一次 FIFO 出库，并用 request_no 防止重试重复扣减。"""
     existing = db.scalar(select(InventoryFifoOutboundRequest).where(InventoryFifoOutboundRequest.request_no == data.request_no))
     if existing is not None:
-        if existing.product_id == data.product_id and existing.requested_quantity == data.quantity:
+        existing_warehouse = db.get(Warehouse, existing.warehouse_id)
+        if existing_warehouse is None or existing_warehouse.status != "ACTIVE":
+            raise ResourceNotFoundError(f"仓库 {existing.warehouse_id} 不存在")
+        _require_warehouse_scope(db, user, existing_warehouse)
+        if (
+            existing.product_id == data.product_id
+            and existing.warehouse_id == data.warehouse_id
+            and existing.location_id == data.location_id
+            and existing.unit_id == data.unit_id
+            and existing.requested_quantity == data.quantity
+        ):
             return _require_request(db, existing.id)
         raise DuplicateResourceError("FIFO 出库请求号已经用于其他出库请求")
     product = db.get(Product, data.product_id)
@@ -70,6 +91,7 @@ def create_fifo_outbound(db: Session, user: User, data: FifoOutboundCreate) -> I
         raise BusinessValidationError("产品不存在或已停用")
     if warehouse is None or warehouse.status != "ACTIVE":
         raise BusinessValidationError("仓库不存在或已停用")
+    _require_warehouse_scope(db, user, warehouse)
     if location is None or location.status != "ACTIVE" or location.warehouse_id != warehouse.id:
         raise BusinessValidationError("库位不存在、已停用或不属于指定仓库")
     if unit is None or unit.status != "ACTIVE":

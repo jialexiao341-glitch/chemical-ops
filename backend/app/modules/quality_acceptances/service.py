@@ -27,7 +27,7 @@ def _now() -> datetime:
 def _can_manage_all(db: Session, user: User) -> bool:
     """判断用户是否可以查看全部质量验收记录。"""
 
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "QUALITY", "QUALITY_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
+    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "QUALITY_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
 
 
 def _require_acceptance(db: Session, acceptance_id: int, *, for_update: bool = False) -> QualityAcceptance:

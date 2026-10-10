@@ -5,6 +5,8 @@ import type {
 } from '#/adapter/vxe-table';
 import type { PurchaseOrderApi } from '#/api';
 
+import { useUserStore } from '@vben/stores';
+
 import { PURCHASE_ORDER_STATUS_DICT } from '#/constants/dictionary';
 import { formatAmount, formatDate } from '#/utils/format';
 
@@ -39,6 +41,7 @@ export function useColumns(
   onActionClick: OnActionClickFn<PurchaseOrderApi.PurchaseOrder>,
   resolveSupplier: (id?: null | number) => string,
 ): VxeTableGridColumns {
+  const userStore = useUserStore();
   return [
     {
       field: 'po_no',
@@ -111,6 +114,8 @@ export function useColumns(
             code: 'approve',
             text: '审批通过',
             auth: 'procurement.orders.approve',
+            disabled: (row: PurchaseOrderApi.PurchaseOrder) => String(row.buyer_id) === String(userStore.userInfo?.userId),
+            title: (row: PurchaseOrderApi.PurchaseOrder) => String(row.buyer_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的记录' : undefined,
             show: (row: PurchaseOrderApi.PurchaseOrder) =>
               row.status === 'APPROVING',
           },
@@ -118,6 +123,8 @@ export function useColumns(
             code: 'reject',
             text: '驳回',
             auth: 'procurement.orders.approve',
+            disabled: (row: PurchaseOrderApi.PurchaseOrder) => String(row.buyer_id) === String(userStore.userInfo?.userId),
+            title: (row: PurchaseOrderApi.PurchaseOrder) => String(row.buyer_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的记录' : undefined,
             show: (row: PurchaseOrderApi.PurchaseOrder) =>
               row.status === 'APPROVING',
           },

@@ -15,12 +15,11 @@ def get_by_id(db: Session, exception_id: int, *, for_update: bool = False) -> Op
     return db.scalar(statement)
 
 
-def list_page(db: Session, *, owner_id: int | None, exception_type: str | None, status: str | None, page: int, page_size: int) -> tuple[list[OperationException], int]:
+def list_page(db: Session, *, scope_condition, exception_type: str | None, status: str | None, page: int, page_size: int) -> tuple[list[OperationException], int]:
     """按数据范围和筛选条件分页查询异常。"""
 
     conditions = []
-    if owner_id is not None:
-        conditions.append(OperationException.owner_id == owner_id)
+    conditions.append(scope_condition)
     if exception_type:
         conditions.append(OperationException.exception_type == exception_type)
     if status:
@@ -43,10 +42,12 @@ def get_task(db: Session, task_id: int, *, for_update: bool = False) -> Operatio
     return db.scalar(statement)
 
 
-def list_tasks(db: Session, *, exception_id: int, status: str | None, page: int, page_size: int) -> tuple[list[OperationTask], int]:
+def list_tasks(db: Session, *, exception_id: int, assignee_id: int | None = None, status: str | None, page: int, page_size: int) -> tuple[list[OperationTask], int]:
     """按异常和任务状态分页查询处理任务。"""
 
     conditions = [OperationTask.exception_id == exception_id]
+    if assignee_id is not None:
+        conditions.append(OperationTask.assignee_id == assignee_id)
     if status:
         conditions.append(OperationTask.status == status)
     total = db.scalar(select(func.count(OperationTask.id)).where(*conditions)) or 0

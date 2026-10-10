@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.errors import BusinessValidationError
+from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.insights.model import ExceptionActionDecision, ExceptionActionEvent, InsightSnapshot
 from app.modules.operation_exceptions import service as exception_service
 from app.modules.operation_exceptions.model import OperationTask
@@ -73,6 +73,8 @@ def decide(db: Session, user: User, exception_id: int, data: DecisionInput, resu
     if not data.reason.strip():
         raise BusinessValidationError("请填写采纳或驳回原因")
     exception = exception_service.get_exception(db, user, exception_id, for_update=True)
+    if exception.owner_id != user.id and not exception_service._has_source_exception_scope(db, user, exception):
+        raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
     if exception.status in {"CLOSED", "CANCELLED"}:
         raise BusinessValidationError("已关闭或已取消的异常不能处理建议")
     decision = db.scalar(select(ExceptionActionDecision).where(ExceptionActionDecision.exception_id == exception.id).with_for_update())
@@ -85,7 +87,7 @@ def decide(db: Session, user: User, exception_id: int, data: DecisionInput, resu
     if data.decision == "ADOPTED":
         if exception.owner_id is None:
             raise BusinessValidationError("请先在异常详情指定负责人")
-        exception_service._validate_assignee(db, exception.owner_id)
+        exception_service._validate_assignee(db, user, exception.owner_id)
     snapshot = InsightSnapshot(kind="exception-action", object_id=exception.id, result_json=result, created_by=user.id)
     db.add(snapshot)
     db.flush()

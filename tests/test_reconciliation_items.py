@@ -23,6 +23,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def scenario(client, db_session, demo_password):
     headers = login(client, "system_admin", demo_password)
+    approver_headers = login(client, "procurement_manager", demo_password)
     user = db_session.scalar(select(User).where(User.username == "system_admin"))
     products = list(db_session.scalars(select(Product).where(Product.status == "ACTIVE").limit(2)))
     supplier = db_session.scalar(select(Supplier).where(Supplier.status == "ACTIVE"))
@@ -46,7 +47,7 @@ def scenario(client, db_session, demo_password):
         inventory_service.create_inbound(db_session, user, InboundCreate(delivery_id=delivery.id, warehouse_id=location.warehouse_id, location_id=location.id))
     batch = db_session.scalar(select(InventoryBatch).where(InventoryBatch.source_delivery_id == receipts[0].delivery_id, InventoryBatch.product_id == lines[0].product_id))
     balance = db_session.scalar(select(InventoryBalance).where(InventoryBalance.batch_id == batch.id, InventoryBalance.location_id == location.id))
-    return dict(headers=headers, order=order, lines=lines, receipts=receipts, balance=balance, supplier=supplier, user=user)
+    return dict(headers=headers, approver_headers=approver_headers, order=order, lines=lines, receipts=receipts, balance=balance, supplier=supplier, user=user)
 
 
 def return_body(s, quantity="2", linked=True):
@@ -63,7 +64,7 @@ def complete_return(client, s, quantity="2", linked=True):
     assert result.status_code == 201, result.text
     identifier = result.json()["id"]
     for action in ("submit", "approve", "execute"):
-        response = client.post(f"/api/v1/inventory/returns/{identifier}/{action}", headers=s["headers"])
+        response = client.post(f"/api/v1/inventory/returns/{identifier}/{action}", headers=s["approver_headers"] if action == "approve" else s["headers"])
         assert response.status_code == 200, response.text
     return response.json()
 
@@ -179,7 +180,7 @@ def test_all_returned_can_close_zero_payable_without_payment(client, db_session,
     created = client.post("/api/v1/inventory/returns", headers=s["headers"], json={"supplier_id": s["supplier"].id, "reason": "全部退货", "items": items})
     assert created.status_code == 201, created.text
     for action in ("submit", "approve", "execute"):
-        response = client.post(f"/api/v1/inventory/returns/{created.json()['id']}/{action}", headers=s["headers"])
+        response = client.post(f"/api/v1/inventory/returns/{created.json()['id']}/{action}", headers=s["approver_headers"] if action == "approve" else s["headers"])
         assert response.status_code == 200, response.text
     identifier = create_reconciliation(client, s)
     path = f"/api/v1/finance/reconciliations/{identifier}"

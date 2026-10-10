@@ -5,6 +5,8 @@ import type {
 } from '#/adapter/vxe-table';
 import type { PurchaseRequestApi } from '#/api';
 
+import { useUserStore } from '@vben/stores';
+
 import {
   PRIORITY_DICT,
   PURCHASE_REQUEST_STATUS_DICT,
@@ -40,6 +42,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
 export function useColumns(
   onActionClick: OnActionClickFn<PurchaseRequestApi.PurchaseRequest>,
 ): VxeTableGridColumns {
+  const userStore = useUserStore();
   return [
     { field: 'request_no', minWidth: 180, title: '申请编号' },
     { field: 'purpose', minWidth: 200, title: '用途' },
@@ -107,6 +110,8 @@ export function useColumns(
             code: 'approve',
             text: '审批通过',
             auth: 'procurement.requests.approve',
+            disabled: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId),
+            title: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的记录' : undefined,
             show: (row: PurchaseRequestApi.PurchaseRequest) =>
               row.status === 'SUBMITTED' || row.status === 'APPROVING',
           },
@@ -114,6 +119,8 @@ export function useColumns(
             code: 'reject',
             text: '驳回',
             auth: 'procurement.requests.approve',
+            disabled: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId),
+            title: (row: PurchaseRequestApi.PurchaseRequest) => String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的记录' : undefined,
             show: (row: PurchaseRequestApi.PurchaseRequest) =>
               row.status === 'SUBMITTED' || row.status === 'APPROVING',
           },

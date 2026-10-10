@@ -139,7 +139,9 @@ onMounted(async () => {
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="canWriteStocktakes && ['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteStocktakes"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             size="small"
             type="link"
             @click="formDrawerApi.setData(row).open()"
@@ -150,7 +152,9 @@ onMounted(async () => {
             详情
           </Button>
           <Button
-            v-if="canWriteStocktakes && ['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteStocktakes"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             size="small"
             type="link"
             @click="
@@ -164,7 +168,9 @@ onMounted(async () => {
             提交
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED' && canApproveStocktakes"
+            v-if="canApproveStocktakes"
+            :disabled="row.status !== 'SUBMITTED'"
+            :title="row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
             size="small"
             type="link"
             @click="
@@ -178,7 +184,9 @@ onMounted(async () => {
             审批通过
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED' && canApproveStocktakes"
+            v-if="canApproveStocktakes"
+            :disabled="row.status !== 'SUBMITTED'"
+            :title="row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
             danger
             size="small"
             type="link"
@@ -187,7 +195,9 @@ onMounted(async () => {
             驳回
           </Button>
           <Button
-            v-if="row.status === 'APPROVED' && canWriteStocktakes"
+            v-if="canWriteStocktakes"
+            :disabled="row.status !== 'APPROVED'"
+            :title="row.status !== 'APPROVED' ? '仅已审批申请可执行盘点' : undefined"
             size="small"
             type="link"
             @click="
@@ -201,7 +211,9 @@ onMounted(async () => {
             执行盘点
           </Button>
           <Button
-            v-if="canWriteStocktakes && ['DRAFT', 'REJECTED', 'SUBMITTED'].includes(row.status)"
+            v-if="canWriteStocktakes"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             danger
             size="small"
             type="link"

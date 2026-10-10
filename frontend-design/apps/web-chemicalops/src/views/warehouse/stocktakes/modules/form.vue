@@ -3,6 +3,7 @@ import type { StocktakeApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { message, Select } from 'antdv-next';
@@ -21,6 +22,8 @@ import ItemsEditor from '#/components/items-editor/index.vue';
 import { formatQuantity } from '#/utils/format';
 
 const emit = defineEmits(['success']);
+const { hasAccessByCodes } = useAccess();
+const canWrite = computed(() => hasAccessByCodes(['warehouse.inventory.stocktake.write']));
 
 /**
  * 盘点明细编辑行。
@@ -166,6 +169,8 @@ async function onWarehouseChange(value?: null | number) {
 const [Drawer, drawerApi] = useVbenDrawer<null | StocktakeApi.StocktakeRequest>(
   {
     async onConfirm() {
+    const record = drawerApi.getData();
+    if (!canWrite.value || (record && !['DRAFT', 'REJECTED'].includes(record.status))) return;
       const { valid } = await formApi.validate();
       if (!valid) {
         return;
@@ -286,7 +291,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[980px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canWrite" :title="title" class="w-[980px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
 

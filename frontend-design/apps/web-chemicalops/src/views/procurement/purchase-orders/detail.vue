@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
+import { useUserStore } from '@vben/stores';
 import { ArrowLeft } from '@vben/icons';
 
 import {
@@ -49,6 +50,7 @@ defineOptions({ name: 'PurchaseOrderDetail' });
 const route = useRoute();
 const router = useRouter();
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 
 const order = ref<PurchaseOrderApi.PurchaseOrder>();
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
@@ -180,6 +182,7 @@ async function runAction(action: () => Promise<any>, successText: string) {
 
 const orderPayload = computed(() => ({
   id: order.value?.id ?? 0,
+  operatorId: order.value?.buyer_id ?? 0,
   poNo: order.value?.po_no ?? '',
 }));
 
@@ -224,6 +227,8 @@ onMounted(load);
             </Button>
             <Button
               v-if="order.status === 'APPROVING' && hasAccessByCodes(['procurement.orders.approve'])"
+              :disabled="String(order.buyer_id) === String(userStore.userInfo?.userId)"
+              :title="String(order.buyer_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的订单' : undefined"
               :loading="acting"
               type="primary"
               @click="
@@ -234,6 +239,8 @@ onMounted(load);
             </Button>
             <Button
               v-if="order.status === 'APPROVING' && hasAccessByCodes(['procurement.orders.approve'])"
+              :disabled="String(order.buyer_id) === String(userStore.userInfo?.userId)"
+              :title="String(order.buyer_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的订单' : undefined"
               :loading="acting"
               danger
               @click="

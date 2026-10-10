@@ -53,6 +53,10 @@ const selectedFile = computed(() => files.value.find((item) => item.id === selec
 const mismatchCount = computed(() => review.value?.checks.filter((item) => item.status !== 'MATCH').length ?? 0);
 const standardIssueCount = computed(() => review.value?.checks.filter((item) => ['MISSING', 'OUTSIDE_STANDARD', 'UNVERIFIED'].includes(item.standard_status)).length ?? 0);
 const currentHistory = computed(() => history.value.find((item) => item.id === review.value?.review_id));
+const canDecideReview = computed(() =>
+  hasAccessByCodes(['quality.acceptances.review']) &&
+  String(acceptance.value?.inspector_id) !== String(userStore.userInfo?.userId),
+);
 const currentCorrections = computed(() => {
   const byName = new Map<string, QualityAcceptanceApi.Correction>();
   for (const item of corrections.value) byName.set(item.item_name, item);
@@ -400,11 +404,12 @@ defineExpose({ drawerApi });
         <div v-if="review.review_id" class="space-y-3 rounded-lg border border-border p-4">
           <h4 class="text-sm font-semibold">人工复核</h4>
           <p class="text-xs text-muted-foreground">确认表示已核查这份分析记录，不代表验收合格或库存放行。</p>
-          <Input.TextArea v-model:value="reviewerNote" :rows="2" :maxlength="2000" :disabled="!hasAccessByCodes(['quality.acceptances.review']) || !['PENDING', 'CORRECTION_SUBMITTED'].includes(currentHistory?.status ?? '')" placeholder="填写核查依据、待补材料或修正意见" />
-          <div v-if="currentHistory?.status === 'PENDING' && hasAccessByCodes(['quality.acceptances.review'])" class="space-y-2">
+          <p v-if="!canDecideReview && hasAccessByCodes(['quality.acceptances.review']) && ['PENDING', 'CORRECTION_SUBMITTED'].includes(currentHistory?.status ?? '')" class="text-xs text-muted-foreground">经办人不能复核本人负责的验收报告。</p>
+          <Input.TextArea v-model:value="reviewerNote" :rows="2" :maxlength="2000" :disabled="!canDecideReview || !['PENDING', 'CORRECTION_SUBMITTED'].includes(currentHistory?.status ?? '')" placeholder="填写核查依据、待补材料或修正意见" />
+          <div v-if="currentHistory?.status === 'PENDING' && canDecideReview" class="space-y-2">
             <Select v-model:value="correctionItems" mode="multiple" class="w-full" :options="review.checks.map((item) => ({ label: item.item_name, value: item.item_name }))" placeholder="标记需修正时请选择具体检测项目" />
           </div>
-          <div v-if="['PENDING', 'CORRECTION_SUBMITTED'].includes(currentHistory?.status ?? '') && hasAccessByCodes(['quality.acceptances.review'])" class="flex justify-end gap-2">
+          <div v-if="['PENDING', 'CORRECTION_SUBMITTED'].includes(currentHistory?.status ?? '') && canDecideReview" class="flex justify-end gap-2">
             <Button v-if="currentHistory?.status === 'PENDING'" :loading="deciding" @click="decide('NEEDS_CORRECTION')">标记需修正</Button>
             <Button type="primary" :loading="deciding" @click="decide('CONFIRMED')">确认已复核</Button>
           </div>

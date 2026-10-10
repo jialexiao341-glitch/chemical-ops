@@ -2,13 +2,13 @@
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, exists, false, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.inventory.model import InventoryBatch
+from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.insights.model import ExceptionActionDecision
 from app.modules.operation_exceptions import crud
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment
@@ -20,10 +20,11 @@ from app.modules.operation_exceptions.schema import (
     OperationTaskUpdate,
 )
 from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.products.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_role_codes
+from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.file_model import SysFile
 from app.modules.system.model import Department, User
 
@@ -34,10 +35,125 @@ def _now() -> datetime:
     return datetime.now()
 
 
-def _can_manage_all(db: Session, user: User) -> bool:
-    """判断用户是否可以查看全部异常。"""
+def _exception_scope_condition(db: Session, user: User):
+    """按来源对象读取范围或用户责任部门限制异常记录。"""
 
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY"} & set(get_user_role_codes(db, user.id)))
+    roles = set(get_user_role_codes(db, user.id))
+    if "SYS_ADMIN" in roles:
+        return True
+
+    scopes = []
+    permissions = set(get_user_permission_codes(db, user.id))
+    order_scope = order_read_condition(user, roles)
+    if "procurement.orders.read" in permissions:
+        visible_orders = select(PurchaseOrder.id).where(order_scope)
+        scopes.append(and_(
+            OperationException.source_type == "PURCHASE_ORDER",
+            OperationException.source_id.in_(visible_orders),
+        ))
+        visible_deliveries = select(Delivery.id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(order_scope)
+        scopes.append(and_(
+            OperationException.source_type == "DELIVERY",
+            OperationException.source_id.in_(visible_deliveries),
+        ))
+        visible_delivery_items = select(DeliveryItem.id).join(Delivery, Delivery.id == DeliveryItem.delivery_id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(order_scope)
+        scopes.append(and_(
+            OperationException.source_type == "DELIVERY_ITEM",
+            OperationException.source_id.in_(visible_delivery_items),
+        ))
+
+    if "quality.acceptances.read" in permissions:
+        from app.modules.quality_acceptances.model import QualityAcceptance
+
+        acceptance_scope = True if roles & {"PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY_MANAGER"} else QualityAcceptance.inspector_id == user.id
+        visible_acceptances = select(QualityAcceptance.id).where(acceptance_scope)
+        scopes.append(and_(
+            OperationException.source_type == "QUALITY_ACCEPTANCE",
+            OperationException.source_id.in_(visible_acceptances),
+        ))
+
+    if "warehouse.inventory.read" in permissions:
+        warehouse_scope = True if roles & {"PROCUREMENT_MANAGER"} else or_(
+            Warehouse.manager_id == user.id,
+            Warehouse.manager_id.is_(None),
+        )
+        visible_batches = select(InventoryBalance.batch_id).join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(warehouse_scope)
+        scopes.append(and_(
+            OperationException.source_type == "INVENTORY_BATCH",
+            OperationException.source_id.in_(visible_batches),
+        ))
+        visible_products = select(InventoryBalance.product_id).join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(warehouse_scope)
+        scopes.append(and_(
+            OperationException.source_type == "PRODUCT",
+            OperationException.source_id.in_(visible_products),
+        ))
+
+    if "master.products.read" in permissions:
+        scopes.append(and_(
+            OperationException.source_type == "PRODUCT",
+            OperationException.source_id.in_(select(Product.id).where(Product.status == "ACTIVE")),
+        ))
+    return or_(*scopes) if scopes else false()
+
+
+def _exception_record_scope_condition(db: Session, user: User):
+    """合并来源/部门、负责人和任务指派范围。"""
+
+    if "SYS_ADMIN" in set(get_user_role_codes(db, user.id)):
+        return True
+    return or_(
+        OperationException.owner_id == user.id,
+        exists(select(OperationTask.id).where(
+            OperationTask.exception_id == OperationException.id,
+            OperationTask.assignee_id == user.id,
+        )),
+        _exception_scope_condition(db, user),
+    )
+
+
+def _has_exception_scope(db: Session, user: User, exception: OperationException) -> bool:
+    return db.scalar(select(OperationException.id).where(
+        OperationException.id == exception.id,
+        _exception_record_scope_condition(db, user),
+    )) is not None
+
+
+def _has_source_exception_scope(db: Session, user: User, exception: OperationException) -> bool:
+    return db.scalar(select(OperationException.id).where(
+        OperationException.id == exception.id,
+        _exception_scope_condition(db, user),
+    )) is not None
+
+
+def _has_source_scope(db: Session, user: User, data: OperationExceptionCreate) -> bool:
+    """验证手工异常引用的来源记录处于当前用户可读范围。"""
+
+    roles = set(get_user_role_codes(db, user.id))
+    if "SYS_ADMIN" in roles:
+        return True
+    permissions = set(get_user_permission_codes(db, user.id))
+    order_scope = order_read_condition(user, roles)
+    if data.source_type == "PURCHASE_ORDER" and "procurement.orders.read" in permissions:
+        return db.scalar(select(PurchaseOrder.id).where(PurchaseOrder.id == data.source_id, order_scope)) is not None
+    if data.source_type in {"DELIVERY", "DELIVERY_ITEM"} and "procurement.orders.read" in permissions:
+        delivery_id = data.source_id
+        if data.source_type == "DELIVERY_ITEM":
+            delivery_id = db.scalar(select(DeliveryItem.delivery_id).where(DeliveryItem.id == data.source_id))
+        if delivery_id is not None:
+            return db.scalar(select(Delivery.id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(Delivery.id == delivery_id, order_scope)) is not None
+    if data.source_type == "QUALITY_ACCEPTANCE" and "quality.acceptances.read" in permissions:
+        from app.modules.quality_acceptances.model import QualityAcceptance
+
+        acceptance_scope = True if roles & {"PROCUREMENT_MANAGER", "WAREHOUSE", "QUALITY_MANAGER"} else QualityAcceptance.inspector_id == user.id
+        return db.scalar(select(QualityAcceptance.id).where(QualityAcceptance.id == data.source_id, acceptance_scope)) is not None
+    if data.source_type == "INVENTORY_BATCH" and "warehouse.inventory.read" in permissions:
+        warehouse_scope = True if roles & {"PROCUREMENT_MANAGER"} else or_(Warehouse.manager_id == user.id, Warehouse.manager_id.is_(None))
+        return db.scalar(select(InventoryBalance.id).join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(InventoryBalance.batch_id == data.source_id, warehouse_scope).limit(1)) is not None
+    if data.source_type == "PRODUCT" and "master.products.read" in permissions:
+        return db.scalar(select(Product.id).where(Product.id == data.source_id, Product.status == "ACTIVE")) is not None
+    if data.source_type == "OTHER":
+        return data.owner_id == user.id
+    return False
 
 
 def _require_exception(db: Session, exception_id: int, *, for_update: bool = False) -> OperationException:
@@ -81,6 +197,13 @@ def _validate_source(db: Session, data: OperationExceptionCreate) -> None:
 def create_exception(db: Session, user: User, data: OperationExceptionCreate) -> OperationException:
     """登记一条采购运营异常。"""
 
+    if data.source_type == "OTHER":
+        if data.responsible_department_id is None:
+            data.responsible_department_id = user.department_id
+        if data.owner_id is None:
+            data.owner_id = user.id
+    if not _has_source_scope(db, user, data):
+        raise ResourceNotFoundError("异常来源不存在或不在当前用户数据范围内")
     _validate_source(db, data)
     duplicate = db.scalar(select(OperationException).where(OperationException.exception_type == data.exception_type, OperationException.source_type == data.source_type, OperationException.source_id == data.source_id, OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED"))))
     if duplicate is not None:
@@ -161,15 +284,15 @@ def create_automatic_exception(
 def list_exceptions(db: Session, user: User, *, exception_type: str | None, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询异常。"""
 
-    owner_id = None if _can_manage_all(db, user) else user.id
-    return crud.list_page(db, owner_id=owner_id, exception_type=exception_type, status=status, page=page, page_size=page_size)
+    scope = _exception_record_scope_condition(db, user)
+    return crud.list_page(db, scope_condition=scope, exception_type=exception_type, status=status, page=page, page_size=page_size)
 
 
 def get_exception(db: Session, user: User, exception_id: int, *, for_update: bool = False) -> OperationException:
     """查询异常并校验负责人数据范围。"""
 
     exception = _require_exception(db, exception_id, for_update=for_update)
-    if not _can_manage_all(db, user) and exception.owner_id != user.id:
+    if not _has_exception_scope(db, user, exception):
         raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
     return exception
 
@@ -178,13 +301,13 @@ def update_exception(db: Session, user: User, exception_id: int, data: Operation
     """指派负责人并推进异常状态。"""
 
     exception = get_exception(db, user, exception_id, for_update=True)
+    if exception.owner_id != user.id and not _has_source_exception_scope(db, user, exception):
+        raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
     if exception.status in {"CLOSED", "CANCELLED"}:
         raise BusinessValidationError("已关闭或已取消的异常不能修改")
     values = data.model_dump(exclude_unset=True)
     if "owner_id" in values and data.owner_id is not None:
-        owner = db.get(User, data.owner_id)
-        if owner is None or owner.status != "ACTIVE":
-            raise BusinessValidationError("异常负责人不存在或已停用")
+        _validate_assignee(db, user, data.owner_id)
     next_status = data.status
     if next_status:
         if next_status in {"RESOLVED", "CLOSED"}:
@@ -245,7 +368,7 @@ def _can_access_task(db: Session, user: User, task: OperationTask) -> bool:
     """判断用户是否可以访问异常任务。"""
 
     exception = _require_exception(db, task.exception_id)
-    return _can_manage_all(db, user) or exception.owner_id == user.id or task.assignee_id == user.id
+    return _has_source_exception_scope(db, user, exception) or exception.owner_id == user.id or task.assignee_id == user.id
 
 
 def _require_task(db: Session, task_id: int, *, for_update: bool = False) -> OperationTask:
@@ -257,35 +380,61 @@ def _require_task(db: Session, task_id: int, *, for_update: bool = False) -> Ope
     return task
 
 
-def _validate_assignee(db: Session, assignee_id: int | None) -> None:
-    """校验任务负责人处于启用状态。"""
+def _validate_assignee(db: Session, user: User, assignee_id: int | None) -> None:
+    """校验异常经办人处于允许的部门范围且启用。"""
 
     if assignee_id is not None:
         assignee = db.get(User, assignee_id)
         if assignee is None or assignee.status != "ACTIVE":
             raise BusinessValidationError("任务负责人不存在或已停用")
+        roles = set(get_user_role_codes(db, user.id))
+        if "SYS_ADMIN" not in roles and assignee.department_id != user.department_id:
+            raise ResourceNotFoundError("异常经办人不存在或不在当前用户数据范围内")
+
+
+def list_assignee_options(db: Session, user: User) -> list[User]:
+    """返回异常可指派范围内的启用用户，不暴露系统用户目录。"""
+
+    roles = set(get_user_role_codes(db, user.id))
+    statement = select(User).where(User.status == "ACTIVE")
+    if "SYS_ADMIN" not in roles:
+        if user.department_id is None:
+            statement = statement.where(User.id == user.id)
+        else:
+            statement = statement.where(User.department_id == user.department_id)
+    return list(db.scalars(statement.order_by(User.id)).all())
 
 
 def list_tasks(db: Session, user: User, exception_id: int, *, status: str | None, page: int, page_size: int):
     """按异常查询处理任务，并校验用户数据范围。"""
 
     exception = _require_exception(db, exception_id)
-    if not _can_manage_all(db, user) and exception.owner_id != user.id:
+    has_full_exception_scope = _has_source_exception_scope(db, user, exception) or exception.owner_id == user.id
+    if not has_full_exception_scope:
         assigned = db.scalar(
             select(OperationTask.id).where(OperationTask.exception_id == exception_id, OperationTask.assignee_id == user.id)
         )
         if assigned is None:
             raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
-    return crud.list_tasks(db, exception_id=exception.id, status=status, page=page, page_size=page_size)
+    return crud.list_tasks(
+        db,
+        exception_id=exception.id,
+        assignee_id=None if has_full_exception_scope else user.id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
 
 
 def create_task(db: Session, user: User, exception_id: int, data: OperationTaskCreate) -> OperationTask:
     """为异常创建处理任务。"""
 
     exception = get_exception(db, user, exception_id)
+    if exception.owner_id != user.id and not _has_source_exception_scope(db, user, exception):
+        raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
     if exception.status in {"CLOSED", "CANCELLED"}:
         raise BusinessValidationError("已关闭或已取消的异常不能新增处理任务")
-    _validate_assignee(db, data.assignee_id)
+    _validate_assignee(db, user, data.assignee_id)
     task = OperationTask(exception_id=exception.id, **data.model_dump())
     db.add(task)
     if exception.status in {"OPEN", "RESOLVED"}:
@@ -314,7 +463,7 @@ def update_task(db: Session, user: User, task_id: int, data: OperationTaskUpdate
     if task.status == "CANCELLED":
         raise BusinessValidationError("已取消的任务不能修改")
     if "assignee_id" in values:
-        _validate_assignee(db, data.assignee_id)
+        _validate_assignee(db, user, data.assignee_id)
     next_status = data.status
     if next_status:
         allowed = {

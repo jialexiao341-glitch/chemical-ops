@@ -226,6 +226,10 @@ def update_role(db: Session, role_id: int, data: RoleUpdate) -> Role:
         raise BusinessValidationError("系统管理员角色不能停用")
     if data.permission_ids is not None:
         _require_permissions(db, data.permission_ids)
+        if role.role_code == "SYS_ADMIN":
+            all_permission_ids = set(db.scalars(select(Permission.id)).all())
+            if set(data.permission_ids) != all_permission_ids:
+                raise BusinessValidationError("系统管理员角色必须保留全部权限")
         db.query(RolePermission).filter_by(role_id=role_id).delete()
         for permission_id in sorted(set(data.permission_ids)):
             db.add(RolePermission(role_id=role_id, permission_id=permission_id))

@@ -33,6 +33,9 @@ const showDot = computed(() => unreadCount.value > 0);
 const canReadNotifications = computed(() =>
   (accessStore.accessCodes ?? []).includes('system.notifications.read'),
 );
+const canWriteNotifications = computed(() =>
+  (accessStore.accessCodes ?? []).includes('system.notifications.write'),
+);
 
 /** 顶部用户菜单：只保留与当前系统相关的入口 */
 const menus = computed(() => [
@@ -98,6 +101,7 @@ async function loadNotifications() {
 }
 
 async function markRead(id: number | string) {
+  if (!canWriteNotifications.value) return;
   const numericId = Number(id);
   try {
     await markNotificationReadApi(numericId);
@@ -112,6 +116,7 @@ async function markRead(id: number | string) {
 }
 
 async function handleMakeAll() {
+  if (!canWriteNotifications.value) return;
   try {
     await markAllNotificationsReadApi();
     notifications.value.forEach((item) => (item.isRead = true));
@@ -207,6 +212,7 @@ watch(
     <template #notification>
       <Notification
         v-if="canReadNotifications"
+        :allow-mark-read="canWriteNotifications"
         :dot="showDot"
         :notifications="notifications"
         @clear="handleNoticeClear"

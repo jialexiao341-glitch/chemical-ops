@@ -9,6 +9,7 @@ from app.core.errors import ResourceNotFoundError
 from app.modules.operation_exceptions import service
 from app.modules.operation_exceptions.schema import (
     OperationExceptionCreate,
+    OperationExceptionAssigneeRead,
     OperationExceptionPage,
     OperationExceptionRead,
     OperationExceptionUpdate,
@@ -24,6 +25,13 @@ from app.modules.system.model import User
 
 
 router = APIRouter(prefix="/operation-exceptions", tags=["运营异常"])
+
+
+@router.get("/assignees", response_model=list[OperationExceptionAssigneeRead], summary="查询异常经办人选项")
+def list_assignee_options(db: Session = Depends(get_db), user: User = Depends(require_permission("operations.exceptions.read"))) -> list[User]:
+    """按当前部门范围返回经办候选人的最小字段。"""
+
+    return service.list_assignee_options(db, user)
 
 
 @router.post("", response_model=OperationExceptionRead, status_code=status.HTTP_201_CREATED, summary="登记运营异常")

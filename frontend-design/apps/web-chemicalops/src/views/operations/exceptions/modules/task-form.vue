@@ -5,7 +5,7 @@ import { useVbenModal } from '@vben/common-ui';
 
 import { DatePicker, Input, message, Select } from 'antdv-next';
 
-import { createTaskApi, getUserListApi } from '#/api';
+import { createTaskApi, getExceptionAssigneeOptionsApi } from '#/api';
 import { PRIORITY_DICT } from '#/constants/dictionary';
 
 const emit = defineEmits(['success']);
@@ -59,13 +59,11 @@ const [Modal, modalApi] = useVbenModal<null | { id: number }>({
     }
     loadingUsers.value = true;
     try {
-      const res = await getUserListApi({ page: 1, page_size: 100 });
-      userOptions.value = res.items
-        .filter((item) => !item.status || item.status === 'ACTIVE')
-        .map((item) => ({
+      const res = await getExceptionAssigneeOptionsApi();
+      userOptions.value = res.map((item) => ({
           label: `${item.display_name || item.username}（${item.username}）`,
           value: item.id,
-        }));
+      }));
     } finally {
       loadingUsers.value = false;
     }

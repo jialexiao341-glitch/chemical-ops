@@ -24,6 +24,7 @@ import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 import { useColumns, useGridFormSchema } from './data';
 import ApproveModal from './modules/approve.vue';
 import CancelModal from './modules/cancel.vue';
+import EditModal from './modules/edit.vue';
 
 defineOptions({ name: 'PurchaseOrderList' });
 const route = useRoute();
@@ -37,6 +38,11 @@ const [Approve, approveApi] = useVbenModal({
 
 const [Cancel, cancelApi] = useVbenModal({
   connectedComponent: CancelModal,
+  destroyOnClose: true,
+});
+
+const [Edit, editApi] = useVbenModal({
+  connectedComponent: EditModal,
   destroyOnClose: true,
 });
 
@@ -76,8 +82,12 @@ function onActionClick({
   code,
   row,
 }: OnActionClickParams<PurchaseOrderApi.PurchaseOrder>) {
-  const payload = { id: row.id, poNo: row.po_no };
+  const payload = { id: row.id, operatorId: row.buyer_id, poNo: row.po_no };
   switch (code) {
+    case 'edit': {
+      editApi.setData({ id: row.id, poNo: row.po_no, order: row }).open();
+      break;
+    }
     case 'approve': {
       approveApi.setData({ ...payload, action: 'approve' }).open();
       break;
@@ -165,6 +175,7 @@ watch(
   <Page auto-content-height>
     <Approve @success="gridApi.query()" />
     <Cancel @success="gridApi.query()" />
+    <Edit @success="gridApi.query()" />
     <Grid table-title="采购订单">
       <template #toolbar-tools>
         <Button @click="gridApi.query()">刷新</Button>

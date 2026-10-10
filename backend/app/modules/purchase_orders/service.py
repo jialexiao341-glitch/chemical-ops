@@ -17,6 +17,7 @@ from app.modules.purchase_orders.schema import (
     PurchaseOrderUpdate,
 )
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem
+from app.modules.purchase_requests.service import get_request as get_scoped_purchase_request
 from app.modules.rfqs.model import RFQItem, SupplierQuoteItem
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_role_codes
@@ -58,7 +59,7 @@ def _add_event(db: Session, order: PurchaseOrder, user_id: int, event_type: str,
     )
 
 
-def _validate_source(db: Session, data: PurchaseOrderCreate):
+def _validate_source(db: Session, user: User, data: PurchaseOrderCreate):
     """校验比价结果、中选报价和产品明细可以生成采购订单。"""
 
     comparison = crud.get_comparison(db, data.comparison_id)
@@ -73,8 +74,8 @@ def _validate_source(db: Session, data: PurchaseOrderCreate):
         raise BusinessValidationError("报价尚未被确认中选")
     if quote.rfq.source_request_id is None:
         raise BusinessValidationError("只有关联采购申请的询价才能生成订单")
-    source_request = db.get(PurchaseRequest, quote.rfq.source_request_id)
-    if source_request is None or source_request.status != "APPROVED":
+    source_request = get_scoped_purchase_request(db, user, quote.rfq.source_request_id)
+    if source_request.status != "APPROVED":
         raise BusinessValidationError("来源采购申请不存在或未审批通过")
     if not quote.items:
         raise BusinessValidationError("中选报价没有报价明细")
@@ -97,9 +98,7 @@ def _validate_source(db: Session, data: PurchaseOrderCreate):
 def create_order(db: Session, user: User, data: PurchaseOrderCreate) -> PurchaseOrder:
     """根据已确认的中选报价生成采购订单草稿。"""
 
-    comparison, quote, source_request, rfq_items, quote_items = _validate_source(db, data)
-    if not _can_manage_all(db, user) and user.department_id is not None and source_request.department_id != user.department_id:
-        raise ResourceNotFoundError("报价来源采购申请不存在")
+    comparison, quote, source_request, rfq_items, quote_items = _validate_source(db, user, data)
     existing_order = db.scalar(select(PurchaseOrder.id).where(PurchaseOrder.source_quote_id == quote.id))
     if existing_order is not None:
         raise BusinessValidationError("该中选报价已经生成采购订单，不能重复下单")
@@ -219,6 +218,8 @@ def act_on_order(db: Session, user: User, order_id: int, data: PurchaseOrderAppr
     order = get_order(db, user, order_id, for_update=True)
     if order.status != "APPROVING":
         raise BusinessValidationError("只有审批中的采购订单可以处理")
+    if order.buyer_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的采购订单")
     approval = crud.get_pending_approval(db, order.id, for_update=True)
     if approval is None:
         raise BusinessValidationError("当前订单没有待处理审批节点")

@@ -183,6 +183,11 @@ def create_inbound(db: Session, user: User, data: InboundCreate):
     delivery = db.scalar(select(Delivery).where(Delivery.id == data.delivery_id).with_for_update())
     if delivery is None:
         raise ResourceNotFoundError("到货单不存在")
+    # 入库必须同时满足目标仓库范围和到货单来源订单范围。
+    # warehouse.inventory.write 本身不应允许把任意跨域到货单写入授权仓库。
+    from app.modules.purchase_orders.service import read_order
+
+    read_order(db, user, delivery.po_id)
     if delivery.status != "ACCEPTED":
         raise BusinessValidationError("只有质量验收通过的到货单可以入库")
     _require_warehouse_scope(db, user, data.warehouse_id)
@@ -257,12 +262,6 @@ def create_inbound(db: Session, user: User, data: InboundCreate):
     return transactions, balances
 
 
-def _can_manage_issue_requests(db: Session, user: User) -> bool:
-    """判断用户是否可以查看和处理全部领用申请。"""
-
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
-
-
 def _require_issue(db: Session, issue_id: int, *, for_update: bool = False) -> InventoryIssueRequest:
     """查询库存领用申请，不存在时抛出业务异常。"""
 
@@ -273,12 +272,26 @@ def _require_issue(db: Session, issue_id: int, *, for_update: bool = False) -> I
 
 
 def _get_issue_for_user(db: Session, user: User, issue_id: int, *, for_update: bool = False) -> InventoryIssueRequest:
-    """查询领用申请并校验申请人数据范围。"""
+    """查询领用申请并校验申请人或仓库范围。"""
 
     issue = _require_issue(db, issue_id, for_update=for_update)
-    if not _can_manage_issue_requests(db, user) and issue.applicant_id != user.id:
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        return issue
+    if "WAREHOUSE" in roles:
+        if not issue.items:
+            raise ResourceNotFoundError(f"库存领用申请 {issue_id} 不存在")
+        for item in issue.items:
+            _require_warehouse_scope(db, user, item.warehouse_id)
+    elif issue.applicant_id != user.id:
         raise ResourceNotFoundError(f"库存领用申请 {issue_id} 不存在")
     return issue
+
+
+def _validate_issue_warehouse_scope(db: Session, user: User, items: list) -> None:
+    if "WAREHOUSE" in set(get_user_role_codes(db, user.id)):
+        for item in items:
+            _require_warehouse_scope(db, user, item.warehouse_id)
 
 
 def _validate_issue_items(db: Session, items: list) -> None:
@@ -326,6 +339,7 @@ def create_issue_request(db: Session, user: User, data: InventoryIssueRequestCre
         department = db.get(Department, department_id)
         if department is None or department.status != "ACTIVE":
             raise BusinessValidationError(f"领用部门 {department_id} 不存在或已停用")
+    _validate_issue_warehouse_scope(db, user, data.items)
     _validate_issue_items(db, data.items)
     issue = InventoryIssueRequest(
         issue_no="TEMP",
@@ -347,8 +361,14 @@ def create_issue_request(db: Session, user: User, data: InventoryIssueRequestCre
 def list_issue_requests(db: Session, user: User, *, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询库存领用申请。"""
 
-    applicant_id = None if _can_manage_issue_requests(db, user) else user.id
-    return crud.list_issue_requests(db, applicant_id=applicant_id, status=status, page=page, page_size=page_size)
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        applicant_id, warehouse_ids = None, None
+    elif "WAREHOUSE" in roles:
+        applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
+    else:
+        applicant_id, warehouse_ids = user.id, None
+    return crud.list_issue_requests(db, applicant_id=applicant_id, warehouse_ids=warehouse_ids, status=status, page=page, page_size=page_size)
 
 
 def list_issue_request_options(db: Session) -> list[dict]:
@@ -405,6 +425,7 @@ def update_issue_request(db: Session, user: User, issue_id: int, data: Inventory
         if department is None or department.status != "ACTIVE":
             raise BusinessValidationError(f"领用部门 {data.department_id} 不存在或已停用")
     if data.items is not None:
+        _validate_issue_warehouse_scope(db, user, data.items)
         _validate_issue_items(db, data.items)
         issue.items.clear()
         issue.items.extend(_build_issue_items(issue.id, data.items))
@@ -436,7 +457,7 @@ def submit_issue_request(db: Session, user: User, issue_id: int) -> InventoryIss
 def approve_issue_request(db: Session, user: User, issue_id: int) -> InventoryIssueRequest:
     """审批通过库存领用申请。"""
 
-    issue = _require_issue(db, issue_id, for_update=True)
+    issue = _get_issue_for_user(db, user, issue_id, for_update=True)
     if issue.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的领用申请可以审批")
     issue.status = "APPROVED"
@@ -450,7 +471,7 @@ def approve_issue_request(db: Session, user: User, issue_id: int) -> InventoryIs
 def reject_issue_request(db: Session, user: User, issue_id: int, reason: str) -> InventoryIssueRequest:
     """驳回库存领用申请。"""
 
-    issue = _require_issue(db, issue_id, for_update=True)
+    issue = _get_issue_for_user(db, user, issue_id, for_update=True)
     if issue.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的领用申请可以驳回")
     issue.status = "REJECTED"
@@ -478,7 +499,7 @@ def execute_issue_request(db: Session, user: User, issue_id: int) -> InventoryIs
     """锁定领用申请和库存余额，执行一次库存出库。"""
 
     try:
-        issue = _require_issue(db, issue_id, for_update=True)
+        issue = _get_issue_for_user(db, user, issue_id, for_update=True)
         if issue.status != "APPROVED":
             raise BusinessValidationError("只有已审批的领用申请可以执行出库")
         if not issue.items:
@@ -531,12 +552,6 @@ def execute_issue_request(db: Session, user: User, issue_id: int) -> InventoryIs
     return _require_issue(db, issue.id)
 
 
-def _can_manage_transfer_requests(db: Session, user: User) -> bool:
-    """判断用户是否可以查看和处理全部调拨申请。"""
-
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
-
-
 def _require_transfer(db: Session, transfer_id: int, *, for_update: bool = False) -> InventoryTransferRequest:
     """查询库存调拨申请，不存在时抛出业务异常。"""
 
@@ -550,9 +565,25 @@ def _get_transfer_for_user(db: Session, user: User, transfer_id: int, *, for_upd
     """查询调拨申请并校验申请人数据范围。"""
 
     transfer = _require_transfer(db, transfer_id, for_update=for_update)
-    if not _can_manage_transfer_requests(db, user) and transfer.applicant_id != user.id:
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        return transfer
+    if "WAREHOUSE" in roles:
+        if not transfer.items:
+            raise ResourceNotFoundError(f"库存调拨申请 {transfer_id} 不存在")
+        for item in transfer.items:
+            _require_warehouse_scope(db, user, item.source_warehouse_id)
+            _require_warehouse_scope(db, user, item.target_warehouse_id)
+    elif transfer.applicant_id != user.id:
         raise ResourceNotFoundError(f"库存调拨申请 {transfer_id} 不存在")
     return transfer
+
+
+def _validate_transfer_warehouse_scope(db: Session, user: User, items: list) -> None:
+    if "WAREHOUSE" in set(get_user_role_codes(db, user.id)):
+        for item in items:
+            _require_warehouse_scope(db, user, item.source_warehouse_id)
+            _require_warehouse_scope(db, user, item.target_warehouse_id)
 
 
 def _validate_transfer_items(db: Session, items: list) -> None:
@@ -603,6 +634,7 @@ def _build_transfer_items(transfer_id: int, items: list) -> list[InventoryTransf
 def create_transfer_request(db: Session, user: User, data: InventoryTransferRequestCreate) -> InventoryTransferRequest:
     """创建库存调拨申请草稿。"""
 
+    _validate_transfer_warehouse_scope(db, user, data.items)
     _validate_transfer_items(db, data.items)
     transfer = InventoryTransferRequest(transfer_no="TEMP", applicant_id=user.id, purpose=data.purpose, status="DRAFT")
     db.add(transfer)
@@ -618,8 +650,14 @@ def create_transfer_request(db: Session, user: User, data: InventoryTransferRequ
 def list_transfer_requests(db: Session, user: User, *, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询库存调拨申请。"""
 
-    applicant_id = None if _can_manage_transfer_requests(db, user) else user.id
-    return crud.list_transfer_requests(db, applicant_id=applicant_id, status=status, page=page, page_size=page_size)
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        applicant_id, warehouse_ids = None, None
+    elif "WAREHOUSE" in roles:
+        applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
+    else:
+        applicant_id, warehouse_ids = user.id, None
+    return crud.list_transfer_requests(db, applicant_id=applicant_id, warehouse_ids=warehouse_ids, status=status, page=page, page_size=page_size)
 
 
 def get_transfer_request(db: Session, user: User, transfer_id: int) -> InventoryTransferRequest:
@@ -636,6 +674,7 @@ def update_transfer_request(db: Session, user: User, transfer_id: int, data: Inv
         raise BusinessValidationError("只有草稿或已驳回的调拨申请可以修改")
     values = data.model_dump(exclude_unset=True)
     if data.items is not None:
+        _validate_transfer_warehouse_scope(db, user, data.items)
         _validate_transfer_items(db, data.items)
         transfer.items.clear()
         transfer.items.extend(_build_transfer_items(transfer.id, data.items))
@@ -666,7 +705,7 @@ def submit_transfer_request(db: Session, user: User, transfer_id: int) -> Invent
 def approve_transfer_request(db: Session, user: User, transfer_id: int) -> InventoryTransferRequest:
     """审批通过库存调拨申请。"""
 
-    transfer = _require_transfer(db, transfer_id, for_update=True)
+    transfer = _get_transfer_for_user(db, user, transfer_id, for_update=True)
     if transfer.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的调拨申请可以审批")
     transfer.status = "APPROVED"
@@ -680,7 +719,7 @@ def approve_transfer_request(db: Session, user: User, transfer_id: int) -> Inven
 def reject_transfer_request(db: Session, user: User, transfer_id: int, reason: str) -> InventoryTransferRequest:
     """驳回库存调拨申请。"""
 
-    transfer = _require_transfer(db, transfer_id, for_update=True)
+    transfer = _get_transfer_for_user(db, user, transfer_id, for_update=True)
     if transfer.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的调拨申请可以驳回")
     transfer.status = "REJECTED"
@@ -725,7 +764,7 @@ def execute_transfer_request(db: Session, user: User, transfer_id: int) -> Inven
     """锁定源、目标库存并以一个事务完成库存调拨。"""
 
     try:
-        transfer = _require_transfer(db, transfer_id, for_update=True)
+        transfer = _get_transfer_for_user(db, user, transfer_id, for_update=True)
         if transfer.status != "APPROVED":
             raise BusinessValidationError("只有已审批的调拨申请可以执行")
         if not transfer.items:
@@ -830,12 +869,6 @@ def execute_transfer_request(db: Session, user: User, transfer_id: int) -> Inven
     return _require_transfer(db, transfer.id)
 
 
-def _can_manage_stocktake_requests(db: Session, user: User) -> bool:
-    """判断用户是否可以查看和处理全部盘点申请。"""
-
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
-
-
 def _require_stocktake(db: Session, stocktake_id: int, *, for_update: bool = False) -> InventoryStocktakeRequest:
     """查询库存盘点申请，不存在时抛出业务异常。"""
 
@@ -849,7 +882,12 @@ def _get_stocktake_for_user(db: Session, user: User, stocktake_id: int, *, for_u
     """查询盘点申请并校验申请人数据范围。"""
 
     stocktake = _require_stocktake(db, stocktake_id, for_update=for_update)
-    if not _can_manage_stocktake_requests(db, user) and stocktake.applicant_id != user.id:
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        return stocktake
+    if "WAREHOUSE" in roles:
+        _require_warehouse_scope(db, user, stocktake.warehouse_id)
+    elif stocktake.applicant_id != user.id:
         raise ResourceNotFoundError(f"库存盘点申请 {stocktake_id} 不存在")
     return stocktake
 
@@ -920,6 +958,8 @@ def _build_stocktake_items(db: Session, stocktake_id: int, items: list) -> list[
 def create_stocktake_request(db: Session, user: User, data: InventoryStocktakeRequestCreate) -> InventoryStocktakeRequest:
     """创建库存盘点申请草稿并保存账面数量快照。"""
 
+    if "WAREHOUSE" in set(get_user_role_codes(db, user.id)):
+        _require_warehouse_scope(db, user, data.warehouse_id)
     _validate_stocktake_items(db, data.warehouse_id, data.location_id, data.items)
     stocktake = InventoryStocktakeRequest(
         stocktake_no="TEMP", applicant_id=user.id, warehouse_id=data.warehouse_id, location_id=data.location_id, purpose=data.purpose, status="DRAFT"
@@ -937,8 +977,14 @@ def create_stocktake_request(db: Session, user: User, data: InventoryStocktakeRe
 def list_stocktake_requests(db: Session, user: User, *, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询库存盘点申请。"""
 
-    applicant_id = None if _can_manage_stocktake_requests(db, user) else user.id
-    return crud.list_stocktake_requests(db, applicant_id=applicant_id, status=status, page=page, page_size=page_size)
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        applicant_id, warehouse_ids = None, None
+    elif "WAREHOUSE" in roles:
+        applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
+    else:
+        applicant_id, warehouse_ids = user.id, None
+    return crud.list_stocktake_requests(db, applicant_id=applicant_id, warehouse_ids=warehouse_ids, status=status, page=page, page_size=page_size)
 
 
 def get_stocktake_request(db: Session, user: User, stocktake_id: int) -> InventoryStocktakeRequest:
@@ -955,6 +1001,8 @@ def update_stocktake_request(db: Session, user: User, stocktake_id: int, data: I
         raise BusinessValidationError("只有草稿或已驳回的盘点申请可以修改")
     values = data.model_dump(exclude_unset=True)
     if data.items is not None:
+        if "WAREHOUSE" in set(get_user_role_codes(db, user.id)):
+            _require_warehouse_scope(db, user, stocktake.warehouse_id)
         _validate_stocktake_items(db, stocktake.warehouse_id, stocktake.location_id, data.items)
         stocktake.items.clear()
         stocktake.items.extend(_build_stocktake_items(db, stocktake.id, data.items))
@@ -985,7 +1033,7 @@ def submit_stocktake_request(db: Session, user: User, stocktake_id: int) -> Inve
 def approve_stocktake_request(db: Session, user: User, stocktake_id: int) -> InventoryStocktakeRequest:
     """审批通过库存盘点申请。"""
 
-    stocktake = _require_stocktake(db, stocktake_id, for_update=True)
+    stocktake = _get_stocktake_for_user(db, user, stocktake_id, for_update=True)
     if stocktake.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的盘点申请可以审批")
     stocktake.status = "APPROVED"
@@ -999,7 +1047,7 @@ def approve_stocktake_request(db: Session, user: User, stocktake_id: int) -> Inv
 def reject_stocktake_request(db: Session, user: User, stocktake_id: int, reason: str) -> InventoryStocktakeRequest:
     """驳回库存盘点申请。"""
 
-    stocktake = _require_stocktake(db, stocktake_id, for_update=True)
+    stocktake = _get_stocktake_for_user(db, user, stocktake_id, for_update=True)
     if stocktake.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的盘点申请可以驳回")
     stocktake.status = "REJECTED"
@@ -1044,7 +1092,7 @@ def execute_stocktake_request(db: Session, user: User, stocktake_id: int) -> Inv
     """锁定库存余额，校验账面快照后一次性完成盘点差异调整。"""
 
     try:
-        stocktake = _require_stocktake(db, stocktake_id, for_update=True)
+        stocktake = _get_stocktake_for_user(db, user, stocktake_id, for_update=True)
         if stocktake.status != "APPROVED":
             raise BusinessValidationError("只有已审批的盘点申请可以执行")
         if not stocktake.items:

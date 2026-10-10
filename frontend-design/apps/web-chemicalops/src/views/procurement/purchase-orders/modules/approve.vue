@@ -1,13 +1,20 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
+import { useUserStore } from '@vben/stores';
 
 import { Alert, Input, message } from 'antdv-next';
 
 import { approvePurchaseOrderApi, rejectPurchaseOrderApi } from '#/api';
 
 const emit = defineEmits(['success']);
+const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
+const operatorId = ref<number>();
+const canApprove = computed(() => hasAccessByCodes(['procurement.orders.approve']));
+const isOwn = computed(() => String(operatorId.value) === String(userStore.userInfo?.userId));
 
 /** 采购订单审批：通过时意见选填，驳回时必填 */
 const orderId = ref<number>();
@@ -19,10 +26,12 @@ const isApprove = computed(() => action.value === 'approve');
 
 const [Modal, modalApi] = useVbenModal<null | {
         action: 'approve' | 'reject';
+        operatorId: number;
         id: number;
         poNo: string;
       }>({
   async onConfirm() {
+    if (!canApprove.value || isOwn.value) return;
     if (!isApprove.value && !opinion.value.trim()) {
       message.warning('驳回时必须填写审批意见');
       return;
@@ -50,6 +59,7 @@ const [Modal, modalApi] = useVbenModal<null | {
   onOpenChange(isOpen) {
     if (isOpen) {
       const data = modalApi.getData();
+      operatorId.value = data?.operatorId;
       action.value = data?.action ?? 'approve';
       orderId.value = data?.id;
       poNo.value = data?.poNo ?? '';
@@ -64,11 +74,11 @@ const title = computed(() =>
 </script>
 
 <template>
-  <Modal :title="title" class="w-[520px] max-w-[100vw]">
+  <Modal :show-confirm-button="canApprove" :confirm-disabled="isOwn" :title="title" class="w-[520px] max-w-[100vw]">
     <div class="space-y-4 px-1">
       <Alert
         :message="
-          isApprove
+          isOwn ? '不能审批本人经办的记录，请由其他有审批权限的人员处理。' : isApprove
             ? '审批通过后订单进入已批准状态，可执行正式下单。'
             : '驳回后订单会回到草稿状态，采购员可修改后重新提交。'
         "

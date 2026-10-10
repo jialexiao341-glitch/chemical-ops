@@ -7,9 +7,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.deliveries.model import Delivery
 from app.modules.products.model import Product
-from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.purchase_orders.service import get_order
+from app.modules.deliveries.service import get_delivery
 from app.modules.purchase_requests.model import Unit
 from app.modules.replenishments.model import ReplenishmentItem, ReplenishmentRequest
 from app.modules.replenishments.schema import ReplenishmentComplete, ReplenishmentCreate
@@ -46,12 +46,13 @@ def create_replenishment(db: Session, user: User, data: ReplenishmentCreate) -> 
     if supplier is None or supplier.status != "ACTIVE":
         raise BusinessValidationError("补货供应商不存在或已停用")
     if data.source_po_id is not None:
-        order = db.get(PurchaseOrder, data.source_po_id)
-        if order is None or order.supplier_id != data.supplier_id:
+        order = get_order(db, user, data.source_po_id)
+        if order.supplier_id != data.supplier_id:
             raise BusinessValidationError("来源采购订单不存在或不属于指定供应商")
     if data.source_delivery_id is not None:
-        delivery = db.get(Delivery, data.source_delivery_id)
-        if delivery is None or delivery.supplier_id != data.supplier_id or (data.source_po_id is not None and delivery.po_id != data.source_po_id):
+        delivery = get_delivery(db, user, data.source_delivery_id)
+        get_order(db, user, delivery.po_id)
+        if delivery.supplier_id != data.supplier_id or (data.source_po_id is not None and delivery.po_id != data.source_po_id):
             raise BusinessValidationError("来源到货单不存在或与供应商、采购订单不匹配")
     products = {item.product_id: db.get(Product, item.product_id) for item in data.items}
     units = {item.unit_id: db.get(Unit, item.unit_id) for item in data.items}
@@ -104,6 +105,8 @@ def approve_replenishment(db: Session, user: User, replenishment_id: int) -> Rep
     value = _require(db, replenishment_id, for_update=True)
     if value.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的补货申请可以审批")
+    if value.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的补货申请")
     value.status = "APPROVED"
     value.approved_by = user.id
     value.approved_at = _now()
@@ -116,6 +119,8 @@ def reject_replenishment(db: Session, user: User, replenishment_id: int, reason:
     value = _require(db, replenishment_id, for_update=True)
     if value.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的补货申请可以驳回")
+    if value.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的补货申请")
     value.status = "REJECTED"
     value.rejected_at = _now()
     value.reject_reason = reason
@@ -139,8 +144,8 @@ def complete_replenishment(db: Session, user: User, replenishment_id: int, data:
     value = _require(db, replenishment_id, for_update=True)
     if value.status != "APPROVED":
         raise BusinessValidationError("只有已审批的补货申请可以完成")
-    order = db.get(PurchaseOrder, data.fulfillment_po_id)
-    if order is None or order.supplier_id != value.supplier_id or order.status not in {"ORDERED", "PARTIAL", "COMPLETED"}:
+    order = get_order(db, user, data.fulfillment_po_id)
+    if order.supplier_id != value.supplier_id or order.status not in {"ORDERED", "PARTIAL", "COMPLETED"}:
         raise BusinessValidationError("实际补货采购订单不存在、不属于供应商或尚未正式下单")
     value.fulfillment_po_id = order.id
     value.status = "COMPLETED"

@@ -83,7 +83,7 @@ function onActionClick({
   code,
   row,
 }: OnActionClickParams<PurchaseRequestApi.PurchaseRequest>) {
-  const payload = { id: row.id, requestNo: row.request_no ?? '' };
+  const payload = { id: row.id, operatorId: row.applicant_id, requestNo: row.request_no ?? '' };
   switch (code) {
     case 'approve': {
       if (!hasAccessByCodes(['procurement.requests.approve'])) return;

@@ -6,9 +6,11 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 import pytest
 
 from app.core.auth import get_current_user
+from app.core.db import get_db
 from app.main import app
 from app.core.security import hash_password
 from app.modules.system.model import Permission, Role, RolePermission, User, UserRole
@@ -16,13 +18,23 @@ from app.modules.rfqs.model import RFQ
 from app.modules.inventory.model import (
     InventoryBalance,
     InventoryBalanceStatusLog,
+    InventoryBatch,
+    InventoryIssueItem,
+    InventoryIssueRequest,
+    InventoryStocktakeItem,
+    InventoryStocktakeRequest,
+    InventoryTransferItem,
+    InventoryTransferRequest,
     InventoryTransaction,
     Warehouse,
     WarehouseLocation,
 )
 from app.modules.insights.model import InsightSnapshot
 from app.modules.purchase_requests.model import PurchaseRequest
+from app.modules.quality_acceptances.model import QualityAcceptance
+from app.modules.operation_exceptions.model import OperationException, OperationTask
 from app.modules.system.model import Department
+from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.suppliers.model import Supplier
 from tests.conftest import login
 from scripts.seed_demo_accounts import ROLE_SCOPES
@@ -62,6 +74,29 @@ def test_system_admin_role_cannot_be_disabled_through_single_or_batch_routes(
     assert single.status_code == 400
     assert batch.status_code == 400
     assert role.status == "ACTIVE"
+
+
+def test_system_admin_role_cannot_lose_permissions_through_update_route(
+    client: TestClient, db_session
+) -> None:
+    role = db_session.scalar(select(Role).where(Role.role_code == "SYS_ADMIN"))
+    assert role is not None
+    permission_ids_before = set(
+        db_session.scalars(select(RolePermission.permission_id).where(RolePermission.role_id == role.id)).all()
+    )
+    assert permission_ids_before
+
+    with as_demo_role(db_session, "SYS_ADMIN"):
+        response = client.patch(
+            f"/api/v1/system/roles/{role.id}",
+            json={"permission_ids": [min(permission_ids_before)]},
+        )
+
+    permission_ids_after = set(
+        db_session.scalars(select(RolePermission.permission_id).where(RolePermission.role_id == role.id)).all()
+    )
+    assert response.status_code == 400
+    assert permission_ids_after == permission_ids_before
 
 
 def test_system_admin_cannot_disable_own_account_through_single_or_batch_routes(
@@ -177,6 +212,26 @@ def test_combined_technical_and_warehouse_roles_keep_warehouse_scope(
     assert technical_role is not None and warehouse_role is not None
     assert user is not None and other_user is not None
 
+    expected_warehouse_permissions = db_session.scalars(
+        select(Permission).where(Permission.permission_code.in_({
+            "warehouse.inventory.issue.read",
+            "warehouse.inventory.issue.execute",
+            "warehouse.inventory.transfer.read",
+            "warehouse.inventory.transfer.write",
+            "warehouse.inventory.stocktake.read",
+            "warehouse.inventory.stocktake.write",
+            "warehouse.inventory.transfers.export",
+        }))
+    ).all()
+    bound_permission_ids = set(db_session.scalars(
+        select(RolePermission.permission_id).where(RolePermission.role_id == warehouse_role.id)
+    ).all())
+    db_session.add_all(
+        RolePermission(role_id=warehouse_role.id, permission_id=permission.id)
+        for permission in expected_warehouse_permissions
+        if permission.id not in bound_permission_ids
+    )
+
     own_warehouse = Warehouse(
         warehouse_code=f"RBAC-OWN-{user.id}", warehouse_name="RBAC 本人授权仓库",
         manager_id=user.id, status="ACTIVE",
@@ -198,6 +253,14 @@ def test_combined_technical_and_warehouse_roles_keep_warehouse_scope(
         status="ACTIVE",
     )
     db_session.add(foreign_location)
+    db_session.flush()
+    foreign_target_location = WarehouseLocation(
+        warehouse_id=foreign_warehouse.id,
+        location_code=f"RBAC-OTHER-TARGET-{user.id}",
+        location_name="RBAC 他人仓库目标库位",
+        status="ACTIVE",
+    )
+    db_session.add(foreign_target_location)
     db_session.flush()
     foreign_balance = InventoryBalance(
         warehouse_id=foreign_warehouse.id,
@@ -233,8 +296,53 @@ def test_combined_technical_and_warehouse_roles_keep_warehouse_scope(
         ),
     ))
     db_session.add(UserRole(user_id=user.id, role_id=warehouse_role.id))
+    foreign_issue = InventoryIssueRequest(
+        issue_no=f"RBAC-ISSUE-{user.id}", applicant_id=user.id,
+        purpose="跨仓库领用范围", status="APPROVED",
+    )
+    foreign_issue.items = [InventoryIssueItem(
+        line_no=1, product_id=source_balance.product_id,
+        warehouse_id=foreign_warehouse.id, location_id=foreign_location.id,
+        batch_id=source_balance.batch_id, unit_id=source_balance.unit_id,
+        requested_quantity=1,
+    )]
+    foreign_transfer = InventoryTransferRequest(
+        transfer_no=f"RBAC-TRANSFER-{user.id}", applicant_id=user.id,
+        purpose="跨仓库调拨范围", status="APPROVED",
+    )
+    foreign_transfer.items = [InventoryTransferItem(
+        line_no=1, product_id=source_balance.product_id,
+        source_warehouse_id=foreign_warehouse.id,
+        source_location_id=foreign_location.id,
+        target_warehouse_id=foreign_warehouse.id,
+        target_location_id=foreign_target_location.id,
+        batch_id=source_balance.batch_id, unit_id=source_balance.unit_id,
+        requested_quantity=1,
+    )]
+    foreign_stocktake = InventoryStocktakeRequest(
+        stocktake_no=f"RBAC-STOCKTAKE-{user.id}", applicant_id=user.id,
+        warehouse_id=foreign_warehouse.id, location_id=foreign_location.id,
+        purpose="跨仓库盘点范围", status="APPROVED",
+    )
+    foreign_stocktake.items = [InventoryStocktakeItem(
+        line_no=1, product_id=source_balance.product_id,
+        location_id=foreign_location.id, batch_id=source_balance.batch_id,
+        unit_id=source_balance.unit_id, book_quantity=1, counted_quantity=1,
+    )]
+    db_session.add_all((foreign_issue, foreign_transfer, foreign_stocktake))
     db_session.flush()
+    assert "WAREHOUSE" in get_user_role_codes(db_session, user.id)
+    assert "warehouse.inventory.transfer.read" in get_user_permission_codes(db_session, user.id)
 
+    # 执行接口会在拒绝时 rollback；每个请求使用保存点，避免回滚角色和业务夹具。
+    connection = db_session.connection()
+    previous_db_override = app.dependency_overrides[get_db]
+
+    def request_db():
+        with Session(bind=connection, join_transaction_mode="create_savepoint") as session:
+            yield session
+
+    app.dependency_overrides[get_db] = request_db
     app.dependency_overrides[get_current_user] = lambda: user
     try:
         warehouses = client.get("/api/v1/inventory/warehouses")
@@ -270,8 +378,201 @@ def test_combined_technical_and_warehouse_roles_keep_warehouse_scope(
             .where((Warehouse.manager_id == user.id) | Warehouse.manager_id.is_(None))
         )
         assert transactions.json()["total"] == expected_transaction_total
+
+        issue_list = client.get("/api/v1/inventory/issue-requests", params={"page_size": 100})
+        transfer_list = client.get("/api/v1/inventory/transfer-requests", params={"page_size": 100})
+        stocktake_list = client.get("/api/v1/inventory/stocktakes", params={"page_size": 100})
+        assert issue_list.status_code == transfer_list.status_code == stocktake_list.status_code == 200
+        assert foreign_issue.id not in {row["id"] for row in issue_list.json()["items"]}
+        assert foreign_transfer.id not in {row["id"] for row in transfer_list.json()["items"]}
+        assert foreign_stocktake.id not in {row["id"] for row in stocktake_list.json()["items"]}
+        assert client.get(f"/api/v1/inventory/issue-requests/{foreign_issue.id}").status_code == 404
+        assert client.post(f"/api/v1/inventory/issue-requests/{foreign_issue.id}/execute").status_code == 404
+        transfer_detail = client.get(f"/api/v1/inventory/transfer-requests/{foreign_transfer.id}")
+        assert transfer_detail.status_code == 404, transfer_detail.text
+        transfer_execute = client.post(f"/api/v1/inventory/transfer-requests/{foreign_transfer.id}/execute")
+        assert transfer_execute.status_code == 404, transfer_execute.text
+        exported = client.post(
+            "/api/v1/batch/warehouse.inventory.transfers/export",
+            json={"ids": [foreign_transfer.id]},
+        )
+        assert exported.status_code == 404, exported.text
+        deleted = client.post(
+            "/api/v1/batch/warehouse.inventory.transfers/delete",
+            json={"ids": [foreign_transfer.id]},
+        )
+        assert deleted.status_code == 404, deleted.text
+        assert client.get(f"/api/v1/inventory/stocktakes/{foreign_stocktake.id}").status_code == 404
+        assert client.post(f"/api/v1/inventory/stocktakes/{foreign_stocktake.id}/execute").status_code == 404
+        db_session.expire_all()
+        assert foreign_issue.status == foreign_transfer.status == foreign_stocktake.status == "APPROVED"
+        assert foreign_balance.quantity == 1
+        assert "warehouse.inventory.transfer.read" in get_user_permission_codes(db_session, user.id)
+
+        assert client.post("/api/v1/inventory/issue-requests", json={
+            "purpose": "拒绝跨仓库领用申请",
+            "items": [{
+                "product_id": source_balance.product_id,
+                "warehouse_id": foreign_warehouse.id,
+                "location_id": foreign_location.id,
+                "batch_id": source_balance.batch_id,
+                "unit_id": source_balance.unit_id,
+                "requested_quantity": "1",
+            }],
+        }).status_code == 404
+        assert client.post("/api/v1/inventory/transfer-requests", json={
+            "purpose": "拒绝跨仓库调拨",
+            "items": [{
+                "product_id": source_balance.product_id,
+                "source_warehouse_id": foreign_warehouse.id,
+                "source_location_id": foreign_location.id,
+                "target_warehouse_id": foreign_warehouse.id,
+                "target_location_id": foreign_target_location.id,
+                "batch_id": source_balance.batch_id,
+                "unit_id": source_balance.unit_id,
+                "requested_quantity": "1",
+            }],
+        }).status_code == 404
+        assert client.post("/api/v1/inventory/stocktakes", json={
+            "warehouse_id": foreign_warehouse.id,
+            "location_id": foreign_location.id,
+            "purpose": "拒绝跨仓库盘点",
+            "items": [{
+                "product_id": source_balance.product_id,
+                "location_id": foreign_location.id,
+                "batch_id": source_balance.batch_id,
+                "unit_id": source_balance.unit_id,
+                "counted_quantity": "1",
+            }],
+        }).status_code == 404
     finally:
+        app.dependency_overrides[get_db] = previous_db_override
         app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_notifications_keep_recipient_scope_and_read_only_permission(client: TestClient, db_session) -> None:
+    """通知列表/总数/未读统计和批量已读均限制接收人，只读角色不能标记。"""
+    from app.modules.notifications.model import Notification
+
+    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
+    quality_manager = db_session.scalar(select(User).where(User.username == "quality_manager"))
+    assert buyer is not None and quality_manager is not None
+    own = Notification(recipient_id=buyer.id, notification_type="RBAC", title="本人通知", content="本人", is_read=0)
+    foreign = Notification(recipient_id=quality_manager.id, notification_type="RBAC", title="他人通知", content="他人", is_read=0)
+    db_session.add_all((own, foreign))
+    db_session.flush()
+    with as_demo_role(db_session, "BUYER"):
+        listed = client.get("/api/v1/notifications", params={"page_size": 100, "unread_only": True})
+        assert listed.status_code == 200
+        assert own.id in {item["id"] for item in listed.json()["items"]}
+        assert all(item["recipient_id"] == buyer.id for item in listed.json()["items"])
+        expected = db_session.scalar(select(func.count(Notification.id)).where(
+            Notification.recipient_id == buyer.id, Notification.is_read == 0))
+        assert listed.json()["total"] == expected
+        assert client.get("/api/v1/notifications/unread-count").json()["unread_count"] == expected
+        assert client.patch(f"/api/v1/notifications/{foreign.id}/read").status_code == 404
+        assert client.post("/api/v1/notifications/read-all").json()["updated_count"] == expected
+    db_session.refresh(foreign)
+    assert foreign.is_read == 0
+    with as_demo_role(db_session, "QUALITY_MANAGER"):
+        assert client.get("/api/v1/notifications").status_code == 200
+        assert client.patch(f"/api/v1/notifications/{foreign.id}/read").status_code == 403
+        assert client.post("/api/v1/notifications/read-all").status_code == 403
+    db_session.refresh(foreign)
+    assert foreign.is_read == 0
+
+
+@pytest.mark.parametrize("role_code", ["PROCUREMENT_MANAGER", "SYS_ADMIN"])
+@pytest.mark.parametrize("resource", ["purchase-requests", "purchase-orders", "inventory/returns", "replenishments"])
+@pytest.mark.parametrize("action", ["approve", "reject"])
+def test_procurement_approver_cannot_review_own_work(client: TestClient, db_session, role_code, resource, action) -> None:
+    """经办审批分离同时约束采购经理与管理员，通过和驳回均不得修改本人记录。"""
+    from app.modules.inventory_returns.model import InventoryReturnRequest
+    from app.modules.purchase_orders.model import PurchaseOrder
+    from app.modules.replenishments.model import ReplenishmentRequest
+
+    supplier = db_session.scalar(select(Supplier).where(Supplier.status == "ACTIVE"))
+    assert supplier is not None
+    with as_demo_role(db_session, role_code):
+        actor = app.dependency_overrides[get_current_user]()
+        suffix = uuid4().hex[:12]
+        if resource == "purchase-requests":
+            record = PurchaseRequest(request_no=f"RBAC-{suffix}", applicant_id=actor.id,
+                                     department_id=actor.department_id, purpose="审批分离", status="APPROVING")
+        elif resource == "purchase-orders":
+            record = PurchaseOrder(po_no=f"RBAC-{suffix}", supplier_id=supplier.id,
+                                   buyer_id=actor.id, department_id=actor.department_id, status="APPROVING")
+        elif resource == "inventory/returns":
+            record = InventoryReturnRequest(return_no=f"RBAC-{suffix}", supplier_id=supplier.id,
+                                            applicant_id=actor.id, reason="审批分离", status="SUBMITTED")
+        else:
+            record = ReplenishmentRequest(replenishment_no=f"RBAC-{suffix}", supplier_id=supplier.id,
+                                         applicant_id=actor.id, reason="审批分离", status="SUBMITTED")
+        db_session.add(record)
+        db_session.flush()
+        status_before = record.status
+        response = client.post(f"/api/v1/{resource}/{record.id}/{action}",
+                               json={"opinion": "审批分离", "reason": "审批分离"})
+        assert response.status_code == 400, response.text
+        assert "本人经办" in response.json()["detail"]
+        db_session.refresh(record)
+        assert record.status == status_before
+
+
+def test_replenishment_links_cannot_bypass_order_scope(client: TestClient, db_session) -> None:
+    """补货来源订单、单独到货来源和完成订单均须属于经办人的采购范围。"""
+    from app.modules.deliveries.model import Delivery
+    from app.modules.purchase_orders.model import PurchaseOrder
+    from app.modules.replenishments.model import ReplenishmentRequest
+
+    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
+    template = db_session.scalar(select(PurchaseOrder).where(PurchaseOrder.status == "COMPLETED"))
+    assert buyer is not None and template is not None and template.items
+    other_buyer = db_session.scalar(select(User).where(User.id != buyer.id).order_by(User.id))
+    assert other_buyer is not None
+    buyer.department_id = None
+    # 模拟自定义角色授予补货写权限；内置 BUYER 当前未绑定该权限，不修改实际授权。
+    buyer_role = db_session.scalar(select(Role).where(Role.role_code == "BUYER"))
+    write_permission = db_session.scalar(select(Permission).where(
+        Permission.permission_code == "procurement.replenishment.write"
+    ))
+    assert buyer_role is not None and write_permission is not None
+    db_session.add(RolePermission(role_id=buyer_role.id, permission_id=write_permission.id))
+    foreign_order = PurchaseOrder(
+        po_no=f"RBAC-RP-{uuid4().hex[:12]}", supplier_id=template.supplier_id,
+        buyer_id=other_buyer.id, status="ORDERED",
+    )
+    assert foreign_order.buyer_id != buyer.id
+    db_session.add(foreign_order)
+    db_session.flush()
+    delivery = Delivery(
+        delivery_no=f"RBAC-RP-{uuid4().hex[:12]}", po_id=foreign_order.id,
+        supplier_id=foreign_order.supplier_id, status="IN_TRANSIT",
+    )
+    approved = ReplenishmentRequest(
+        replenishment_no=f"RBAC-RP-{uuid4().hex[:12]}", supplier_id=foreign_order.supplier_id,
+        applicant_id=buyer.id, reason="范围回归", status="APPROVED",
+    )
+    db_session.add_all((delivery, approved))
+    db_session.flush()
+    body = {
+        "supplier_id": foreign_order.supplier_id, "reason": "拒绝越界来源",
+        "items": [{"product_id": template.items[0].product_id,
+                   "unit_id": template.items[0].unit_id, "requested_quantity": "1"}],
+    }
+    count_before = db_session.scalar(select(func.count(ReplenishmentRequest.id)))
+    with as_demo_role(db_session, "BUYER"):
+        for source in ({"source_po_id": foreign_order.id}, {"source_delivery_id": delivery.id}):
+            response = client.post("/api/v1/replenishments", json={**body, **source})
+            assert response.status_code == 404, response.text
+        response = client.post(
+            f"/api/v1/replenishments/{approved.id}/complete",
+            json={"fulfillment_po_id": foreign_order.id},
+        )
+        assert response.status_code == 404, response.text
+    db_session.refresh(approved)
+    assert approved.status == "APPROVED" and approved.fulfillment_po_id is None
+    assert db_session.scalar(select(func.count(ReplenishmentRequest.id))) == count_before
 
 
 def test_buyer_request_list_count_and_detail_share_department_scope(
@@ -329,6 +630,67 @@ def test_buyer_request_list_count_and_detail_share_department_scope(
         app.dependency_overrides.pop(get_current_user, None)
 
 
+def test_buyer_cannot_move_or_create_requests_outside_department_or_link_them_to_rfq(
+    client: TestClient, db_session
+) -> None:
+    buyer = db_session.scalar(select(User).where(User.username == "buyer", User.status == "ACTIVE"))
+    assert buyer is not None
+    suffix = uuid4().hex[:10]
+    own_department = Department(
+        department_code=f"RBAC-OWN-{suffix}", department_name="申请人部门", status="ACTIVE",
+    )
+    other_department = Department(
+        department_code=f"RBAC-FOREIGN-{suffix}", department_name="其他部门", status="ACTIVE",
+    )
+    db_session.add_all((own_department, other_department))
+    db_session.flush()
+    buyer.department_id = own_department.id
+    own_request = PurchaseRequest(
+        request_no=f"RBAC-OWN-{suffix}", applicant_id=buyer.id,
+        department_id=own_department.id, purpose="本人部门申请", status="DRAFT",
+    )
+    foreign_request = PurchaseRequest(
+        request_no=f"RBAC-FOREIGN-{suffix}", applicant_id=buyer.id,
+        department_id=other_department.id, purpose="跨部门申请", status="APPROVED",
+    )
+    db_session.add_all((own_request, foreign_request))
+    db_session.flush()
+
+    app.dependency_overrides[get_current_user] = lambda: buyer
+    try:
+        created = client.post(
+            "/api/v1/purchase-requests",
+            json={
+                "department_id": other_department.id,
+                "purpose": "跨部门创建",
+                "items": [{"requested_name": "测试物料", "quantity": 1, "unit_id": 1}],
+            },
+        )
+        moved = client.patch(
+            f"/api/v1/purchase-requests/{own_request.id}",
+            json={"department_id": other_department.id},
+        )
+        linked = client.post(
+            "/api/v1/rfqs",
+            json={
+                "source_request_id": foreign_request.id,
+                "items": [{
+                    "source_request_item_id": 1, "requested_name": "跨部门明细",
+                    "quantity": 1, "unit_id": 1,
+                }],
+                "supplier_ids": [1],
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert created.status_code == 404
+    assert moved.status_code == 404
+    assert linked.status_code == 404
+    db_session.refresh(own_request)
+    assert own_request.department_id == own_department.id
+
+
 def test_supplier_portal_cannot_call_internal_ai_api(client: TestClient, db_session) -> None:
     with as_demo_role(db_session, "SUPPLIER_PORTAL"):
         response = client.get("/api/v1/ai/agent/tools")
@@ -357,6 +719,170 @@ def test_business_insights_require_ai_permission_in_addition_to_resource_permiss
         response = client.get("/api/v1/insights/batch-impact/999999")
 
     assert response.status_code == 403
+
+
+def test_quality_inspector_lists_and_reads_only_assigned_acceptances(
+    client: TestClient, db_session
+) -> None:
+    inspector = db_session.scalar(
+        select(User).where(User.username == "quality_inspector", User.status == "ACTIVE")
+    )
+    role = db_session.scalar(select(Role).where(Role.role_code == "QUALITY"))
+    acceptance = db_session.scalar(select(QualityAcceptance).order_by(QualityAcceptance.id))
+    assert inspector is not None and role is not None and acceptance is not None
+
+    acceptance.inspector_id = inspector.id
+    other = User(
+        username=f"quality-other-{uuid4().hex[:10]}", password_hash="unused-test-hash",
+        display_name="其他质量检验员", status="ACTIVE",
+    )
+    db_session.add(other)
+    db_session.flush()
+    db_session.add(UserRole(user_id=other.id, role_id=role.id))
+    db_session.flush()
+
+    app.dependency_overrides[get_current_user] = lambda: other
+    try:
+        listed = client.get("/api/v1/quality-acceptances", params={"page_size": 100})
+        detail = client.get(f"/api/v1/quality-acceptances/{acceptance.id}")
+        reports = client.get(f"/api/v1/quality-acceptances/{acceptance.id}/report-files")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 0
+    assert listed.json()["items"] == []
+    assert detail.status_code == 404
+    assert reports.status_code == 404
+
+
+def test_warehouse_exception_scope_follows_inventory_and_task_assignment(
+    client: TestClient, db_session
+) -> None:
+    warehouse_role = db_session.scalar(select(Role).where(Role.role_code == "WAREHOUSE"))
+    user = db_session.scalar(
+        select(User).join(UserRole, UserRole.user_id == User.id)
+        .where(UserRole.role_id == warehouse_role.id, User.status == "ACTIVE")
+        .order_by(User.id)
+    )
+    other_user = db_session.scalar(select(User).where(User.status == "ACTIVE", User.id != user.id).order_by(User.id))
+    source = db_session.scalar(select(InventoryBalance).where(InventoryBalance.quantity > 0).order_by(InventoryBalance.id))
+    assert warehouse_role is not None and user is not None and other_user is not None and source is not None
+
+    own_warehouse = Warehouse(
+        warehouse_code=f"EX-OWN-{user.id}", warehouse_name="异常范围本人仓库",
+        manager_id=user.id, status="ACTIVE",
+    )
+    foreign_warehouse = Warehouse(
+        warehouse_code=f"EX-OTHER-{user.id}", warehouse_name="异常范围其他仓库",
+        manager_id=other_user.id, status="ACTIVE",
+    )
+    db_session.add_all((own_warehouse, foreign_warehouse))
+    db_session.flush()
+    own_location = WarehouseLocation(
+        warehouse_id=own_warehouse.id, location_code=f"EX-OWN-{user.id}",
+        location_name="本人库位", status="ACTIVE",
+    )
+    foreign_location = WarehouseLocation(
+        warehouse_id=foreign_warehouse.id, location_code=f"EX-OTHER-{user.id}",
+        location_name="其他库位", status="ACTIVE",
+    )
+    own_batch = InventoryBatch(
+        product_id=source.product_id, batch_no=f"EX-OWN-{user.id}", status="ACTIVE",
+    )
+    foreign_batch = InventoryBatch(
+        product_id=source.product_id, batch_no=f"EX-OTHER-{user.id}", status="ACTIVE",
+    )
+    db_session.add_all((own_location, foreign_location, own_batch, foreign_batch))
+    db_session.flush()
+    db_session.add_all((
+        InventoryBalance(
+            warehouse_id=own_warehouse.id, location_id=own_location.id,
+            product_id=source.product_id, batch_id=own_batch.id, unit_id=source.unit_id,
+            quantity=1, locked_quantity=0, status="AVAILABLE",
+        ),
+        InventoryBalance(
+            warehouse_id=foreign_warehouse.id, location_id=foreign_location.id,
+            product_id=source.product_id, batch_id=foreign_batch.id, unit_id=source.unit_id,
+            quantity=1, locked_quantity=0, status="AVAILABLE",
+        ),
+    ))
+    own_exception = OperationException(
+        exception_no=f"EX-SCOPE-OWN-{user.id}", exception_type="INVENTORY_EXPIRY",
+        source_type="INVENTORY_BATCH", source_id=own_batch.id,
+        severity="MEDIUM", description="本人授权仓库来源", status="OPEN",
+    )
+    foreign_exception = OperationException(
+        exception_no=f"EX-SCOPE-OTHER-{user.id}", exception_type="INVENTORY_EXPIRY",
+        source_type="INVENTORY_BATCH", source_id=foreign_batch.id,
+        severity="MEDIUM", description="其他仓库来源", status="OPEN",
+    )
+    assigned_exception = OperationException(
+        exception_no=f"EX-SCOPE-TASK-{user.id}", exception_type="OTHER",
+        source_type="OTHER", source_id=987654321, owner_id=other_user.id,
+        severity="LOW", description="仅通过处理任务访问", status="OPEN",
+    )
+    db_session.add_all((own_exception, foreign_exception, assigned_exception))
+    db_session.flush()
+    assigned_task = OperationTask(
+        exception_id=assigned_exception.id, title="本人被指派任务", assignee_id=user.id,
+        priority="NORMAL", status="OPEN",
+    )
+    unrelated_task = OperationTask(
+        exception_id=assigned_exception.id, title="其他经办任务", assignee_id=other_user.id,
+        priority="NORMAL", status="OPEN",
+    )
+    db_session.add_all((assigned_task, unrelated_task))
+    db_session.flush()
+
+    app.dependency_overrides[get_current_user] = lambda: user
+    try:
+        listed = client.get("/api/v1/operation-exceptions", params={"page_size": 100})
+        own_detail = client.get(f"/api/v1/operation-exceptions/{own_exception.id}")
+        foreign_detail = client.get(f"/api/v1/operation-exceptions/{foreign_exception.id}")
+        assigned_detail = client.get(f"/api/v1/operation-exceptions/{assigned_exception.id}")
+        tasks = client.get(f"/api/v1/operation-exceptions/{assigned_exception.id}/tasks")
+        unrelated_task_detail = client.get(
+            f"/api/v1/operation-exceptions/{assigned_exception.id}/tasks/{unrelated_task.id}"
+        )
+        candidates = client.get("/api/v1/operation-exceptions/assignees")
+        foreign_source_create = client.post("/api/v1/operation-exceptions", json={
+            "exception_type": "INVENTORY_EXPIRY",
+            "source_type": "INVENTORY_BATCH",
+            "source_id": foreign_batch.id,
+            "severity": "MEDIUM",
+            "description": "不允许引用其他仓库库存来源",
+        })
+        create_unrelated_task = client.post(
+            f"/api/v1/operation-exceptions/{assigned_exception.id}/tasks",
+            json={"title": "不能从被指派任务扩展异常管理权"},
+        )
+        task_count_before = db_session.scalar(select(func.count(OperationTask.id)))
+        adopt_unrelated_action = client.post(
+            f"/api/v1/insights/exception-action/{assigned_exception.id}/decision",
+            json={"decision": "ADOPTED", "reason": "不能借 AI 扩大异常管理范围"},
+        )
+        assert db_session.scalar(select(func.count(OperationTask.id))) == task_count_before
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert listed.status_code == 200
+    listed_ids = {item["id"] for item in listed.json()["items"]}
+    assert own_exception.id in listed_ids
+    assert foreign_exception.id not in listed_ids
+    assert assigned_exception.id in listed_ids
+    assert own_detail.status_code == 200
+    assert foreign_detail.status_code == 404
+    assert assigned_detail.status_code == 200
+    assert tasks.status_code == 200
+    assert tasks.json()["total"] == 1
+    assert [item["id"] for item in tasks.json()["items"]] == [assigned_task.id]
+    assert unrelated_task_detail.status_code == 404
+    assert candidates.status_code == 200
+    assert user.id in {item["id"] for item in candidates.json()}
+    assert foreign_source_create.status_code == 404
+    assert create_unrelated_task.status_code == 404
+    assert adopt_unrelated_action.status_code == 404, adopt_unrelated_action.text
 
 
 def test_procurement_role_cannot_read_financial_records_through_insight(

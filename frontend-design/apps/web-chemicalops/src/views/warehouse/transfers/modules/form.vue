@@ -3,6 +3,7 @@ import type { TransferRequestApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { message } from 'antdv-next';
@@ -21,6 +22,8 @@ import ItemsEditor from '#/components/items-editor/index.vue';
 import { formatQuantity } from '#/utils/format';
 
 const emit = defineEmits(['success']);
+const { hasAccessByCodes } = useAccess();
+const canWrite = computed(() => hasAccessByCodes(['warehouse.inventory.transfer.write']));
 
 /**
  * 调拨明细编辑行。
@@ -149,6 +152,8 @@ const [Drawer, drawerApi] = useVbenDrawer<
   null | TransferRequestApi.TransferRequest
 >({
   async onConfirm() {
+    const record = drawerApi.getData();
+    if (!canWrite.value || (record && !['DRAFT', 'REJECTED'].includes(record.status))) return;
     const { valid } = await formApi.validate();
     if (!valid) {
       return;
@@ -307,7 +312,7 @@ defineExpose({ drawerApi });
 </script>
 
 <template>
-  <Drawer :title="title" class="w-[1080px] max-w-[100vw]">
+  <Drawer :show-confirm-button="canWrite" :title="title" class="w-[1080px] max-w-[100vw]">
     <div class="space-y-6">
       <Form />
       <div>

@@ -19,11 +19,14 @@ withDefaults(
   defineProps<{
     /** 显示圆点 */
     dot?: boolean;
+    /** 是否允许标记已读 */
+    allowMarkRead?: boolean;
     /** 消息列表 */
     notifications?: NotificationItem[];
   }>(),
   {
     dot: false,
+    allowMarkRead: true,
     notifications: () => [],
   },
 );
@@ -76,6 +79,7 @@ defineExpose({ toggle });
       <div class="flex items-center justify-between p-4 py-3">
         <div class="text-foreground">{{ $t('ui.widgets.notifications') }}</div>
         <VbenIconButton
+          v-if="allowMarkRead"
           :disabled="notifications.length <= 0"
           :tooltip="$t('ui.widgets.markAllAsRead')"
           @click="handleMakeAll"
@@ -119,7 +123,7 @@ defineExpose({ toggle });
                   <slot name="action" :item="item">
                     <slot name="action-prepend" :item="item"></slot>
                     <VbenIconButton
-                      v-if="!item.isRead"
+                      v-if="allowMarkRead && !item.isRead"
                       size="xs"
                       variant="ghost"
                       class="h-6 px-2"

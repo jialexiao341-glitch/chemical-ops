@@ -8,6 +8,7 @@ import type { SystemUserApi } from '#/api';
 import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import { Button, message, Modal } from 'antdv-next';
 
@@ -19,6 +20,7 @@ import Form from './modules/form.vue';
 
 defineOptions({ name: 'SystemUser' });
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const canWriteUsers = hasAccessByCodes(['system.users.write']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
@@ -31,7 +33,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns(onActionClick),
+    columns: useColumns(onActionClick, Number(userStore.userInfo?.userId)),
     height: 'auto',
     keepSource: true,
     proxyConfig: {

@@ -36,6 +36,15 @@ def _can_manage_all(db: Session, user: User) -> bool:
     return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(get_user_role_codes(db, user.id)))
 
 
+def _validate_department_scope(db: Session, user: User, department_id: int | None) -> None:
+    """阻止普通申请人把申请创建或转移到自身部门范围之外。"""
+
+    if _can_manage_all(db, user):
+        return
+    if department_id != user.department_id:
+        raise ResourceNotFoundError("采购申请部门不存在")
+
+
 def _require_request(db: Session, request_id: int, *, for_update: bool = False) -> PurchaseRequest:
     """查询采购申请，不存在时抛出业务异常。"""
 
@@ -88,6 +97,7 @@ def create_request(db: Session, user: User, data: PurchaseRequestCreate) -> Purc
     """创建采购申请草稿和明细。"""
 
     department_id = data.department_id if data.department_id is not None else user.department_id
+    _validate_department_scope(db, user, department_id)
     _validate_department(db, department_id)
     _validate_items(db, data.items)
     request = PurchaseRequest(
@@ -157,6 +167,7 @@ def update_request(db: Session, user: User, request_id: int, data: PurchaseReque
         raise BusinessValidationError("只有草稿或已驳回的采购申请可以修改")
     values = data.model_dump(exclude_unset=True)
     if "department_id" in values:
+        _validate_department_scope(db, user, data.department_id)
         _validate_department(db, data.department_id)
     if data.items is not None:
         _validate_items(db, data.items)
@@ -211,7 +222,10 @@ def act_on_request(
 ) -> PurchaseRequest:
     """处理当前审批节点，并完成采购申请状态流转。"""
 
+    get_request(db, user, request_id)
     request = _require_request(db, request_id, for_update=True)
+    if request.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的采购申请")
     approval = crud.get_pending_approval(db, request_id, for_update=True)
     # SUBMITTED 是旧数据和现有数据库种子使用的状态；两者都表示存在待审批节点。
     if request.status not in {"SUBMITTED", "APPROVING"} or approval is None:

@@ -73,6 +73,7 @@ export function useUpdateFormSchema(isSystemAdmin = false): VbenFormSchema[] {
       componentProps: {
         api: loadPermissionOptions,
         class: 'w-full',
+        disabled: isSystemAdmin,
         mode: 'multiple',
         placeholder: '留空表示不调整权限',
         showSearch: true,

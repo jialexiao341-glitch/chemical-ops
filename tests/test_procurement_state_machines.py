@@ -12,11 +12,28 @@ from app.modules.purchase_requests.model import Unit
 from app.modules.suppliers.model import Supplier
 from app.modules.rfqs.model import SupplierQuote
 from app.core.security import hash_password
-from app.modules.system.model import User
+from app.modules.system.model import Department, User
 from .conftest import login
 
 
 pytestmark = pytest.mark.integration
+
+
+def test_warehouse_role_does_not_expand_delivery_scope(monkeypatch) -> None:
+    """仓库收货职责不应把采购订单来源范围扩展为全域。"""
+
+    from types import SimpleNamespace
+
+    from app.modules.deliveries import service as delivery_service
+
+    role_codes = {"WAREHOUSE"}
+    monkeypatch.setattr(delivery_service, "get_user_role_codes", lambda _db, _user_id: list(role_codes))
+    user = SimpleNamespace(id=7)
+
+    assert delivery_service._can_manage_all(object(), user) is False
+
+    role_codes.add("PROCUREMENT_MANAGER")
+    assert delivery_service._can_manage_all(object(), user) is True
 
 
 def test_rfq_to_purchase_order_to_quality_acceptance(
@@ -27,6 +44,14 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     manager = login(client, "procurement_manager", demo_password)
     warehouse = login(client, "warehouse_receiver", demo_password)
     quality = login(client, "quality_inspector", demo_password)
+    admin = login(client, "system_admin", demo_password)
+    manager_user = db_session.scalar(select(User).where(User.username == "procurement_manager"))
+    warehouse_user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    department = db_session.scalar(select(Department).where(Department.status == "ACTIVE"))
+    assert manager_user is not None and warehouse_user is not None and department is not None
+    manager_user.department_id = department.id
+    warehouse_user.department_id = None
+    db_session.flush()
     supplier = db_session.scalar(select(Supplier).where(Supplier.status == "ACTIVE").order_by(Supplier.id))
     product = db_session.scalar(select(Product).where(Product.status == "ACTIVE").order_by(Product.id))
     if supplier is None or product is None:
@@ -58,7 +83,7 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     assert submitted_request.json()["status"] in {"SUBMITTED", "APPROVING"}
     approved_request = client.post(
         f"/api/v1/purchase-requests/{request_id}/approve",
-        headers=manager,
+        headers=admin,
         json={"opinion": "测试采购申请通过"},
     )
     assert approved_request.status_code == 200, approved_request.text
@@ -127,6 +152,18 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     assert selected.status_code == 200, selected.text
     assert selected.json()["status"] == "CLOSED"
 
+    buyer_user = db_session.scalar(select(User).where(User.username == "buyer", User.status == "ACTIVE"))
+    assert buyer_user is not None
+    buyer_user.department_id = None
+    db_session.flush()
+    buyer = login(client, "buyer", demo_password)
+    denied_foreign_order = client.post(
+        "/api/v1/purchase-orders",
+        headers=buyer,
+        json={"comparison_id": comparison_id, "quote_id": quote_id},
+    )
+    assert denied_foreign_order.status_code == 404
+
     created_order = client.post(
         "/api/v1/purchase-orders",
         headers=manager,
@@ -143,7 +180,7 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     assert submitted.json()["status"] == "APPROVING"
     approved = client.post(
         f"/api/v1/purchase-orders/{order_id}/approve",
-        headers=manager,
+        headers=admin,
         json={"opinion": "状态机测试审批"},
     )
     assert approved.status_code == 200, approved.text
@@ -152,10 +189,15 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     assert placed.status_code == 200, placed.text
     assert placed.json()["status"] == "ORDERED"
 
+    delivery_payload = {"po_id": order_id, "items": [{"po_item_id": order_item["id"], "planned_quantity": str(order_item["order_quantity"])}]}
+    denied_registration = client.post("/api/v1/deliveries", headers=warehouse, json=delivery_payload)
+    assert denied_registration.status_code == 404, denied_registration.text
+    warehouse_user.department_id = department.id
+    db_session.flush()
     registered = client.post(
         "/api/v1/deliveries",
         headers=warehouse,
-        json={"po_id": order_id, "items": [{"po_item_id": order_item["id"], "planned_quantity": str(order_item["order_quantity"])}]},
+        json=delivery_payload,
     )
     assert registered.status_code == 201, registered.text
     delivery = registered.json()

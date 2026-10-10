@@ -94,7 +94,7 @@ defineExpose({ drawerApi });
       v-if="isSystemAdmin"
       class="bg-accent text-muted-foreground mb-4 rounded-md px-3 py-2 text-xs"
     >
-      系统管理员角色为内置角色，不能停用。
+      系统管理员角色为内置角色，不能停用或调整权限。
     </div>
     <Form />
   </Drawer>

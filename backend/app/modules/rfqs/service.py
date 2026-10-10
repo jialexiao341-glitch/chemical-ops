@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
+from app.modules.purchase_requests.service import get_request as get_scoped_purchase_request
 from app.modules.rfqs import crud
 from app.modules.rfqs.model import QuoteComparison, QuoteComparisonItem, RFQ, RFQItem, RFQSupplier, SupplierQuote, SupplierQuoteItem
 from app.modules.rfqs.schema import (
@@ -94,6 +95,8 @@ def _replace_suppliers(rfq: RFQ, supplier_ids: list[int]) -> None:
 def create_rfq(db: Session, user: User, data: RFQCreate) -> RFQ:
     """创建询价草稿。"""
 
+    if data.source_request_id is not None:
+        get_scoped_purchase_request(db, user, data.source_request_id)
     _validate_item_refs(db, data.items, data.source_request_id)
     _validate_suppliers(db, data.supplier_ids)
     rfq = RFQ(
@@ -141,6 +144,8 @@ def update_rfq(db: Session, user: User, rfq_id: int, data: RFQUpdate) -> RFQ:
         raise BusinessValidationError("只有草稿状态的询价单可以修改")
     values = data.model_dump(exclude_unset=True)
     if "items" in values:
+        if rfq.source_request_id is not None:
+            get_scoped_purchase_request(db, user, rfq.source_request_id)
         _validate_item_refs(db, data.items or [], rfq.source_request_id)
         _replace_items(db, rfq, data.items or [])
         values.pop("items")

@@ -128,7 +128,9 @@ function run(
       <template #operation="{ row }">
         <div class="flex flex-wrap justify-center gap-0">
           <Button
-            v-if="canWriteTransfers && ['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteTransfers"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             size="small"
             type="link"
             @click="formDrawerApi.setData(row).open()"
@@ -139,7 +141,9 @@ function run(
             详情
           </Button>
           <Button
-            v-if="canWriteTransfers && ['DRAFT', 'REJECTED'].includes(row.status)"
+            v-if="canWriteTransfers"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             size="small"
             type="link"
             @click="
@@ -153,7 +157,9 @@ function run(
             提交
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED' && canApproveTransfers"
+            v-if="canApproveTransfers"
+            :disabled="row.status !== 'SUBMITTED'"
+            :title="row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
             size="small"
             type="link"
             @click="
@@ -167,7 +173,9 @@ function run(
             审批通过
           </Button>
           <Button
-            v-if="row.status === 'SUBMITTED' && canApproveTransfers"
+            v-if="canApproveTransfers"
+            :disabled="row.status !== 'SUBMITTED'"
+            :title="row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
             danger
             size="small"
             type="link"
@@ -176,7 +184,9 @@ function run(
             驳回
           </Button>
           <Button
-            v-if="row.status === 'APPROVED' && canWriteTransfers"
+            v-if="canWriteTransfers"
+            :disabled="row.status !== 'APPROVED'"
+            :title="row.status !== 'APPROVED' ? '仅已审批申请可执行调拨' : undefined"
             size="small"
             type="link"
             @click="
@@ -190,7 +200,9 @@ function run(
             执行调拨
           </Button>
           <Button
-            v-if="canWriteTransfers && ['DRAFT', 'REJECTED', 'SUBMITTED'].includes(row.status)"
+            v-if="canWriteTransfers"
+            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
+            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
             danger
             size="small"
             type="link"

@@ -4,6 +4,7 @@ import type { SystemUserApi } from '#/api';
 import { computed, nextTick, ref } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
+import { useUserStore } from '@vben/stores';
 
 import { useVbenForm } from '#/adapter/form';
 import { createUserApi, updateUserApi } from '#/api';
@@ -13,6 +14,8 @@ import { useCreateFormSchema, useUpdateFormSchema } from '../data';
 const emit = defineEmits(['success']);
 
 const id = ref<number>();
+const isCurrentUser = ref(false);
+const userStore = useUserStore();
 
 /**
  * 新增与编辑使用不同的表单结构：
@@ -66,9 +69,10 @@ const [Drawer, drawerApi] = useVbenDrawer<null | SystemUserApi.SystemUser>({
     }
     const data = drawerApi.getData();
     id.value = data?.id;
+    isCurrentUser.value = data?.id === Number(userStore.userInfo?.userId);
     // schema 随模式切换，切换后需要重置校验状态
     formApi.setState({
-      schema: data ? useUpdateFormSchema() : useCreateFormSchema(),
+      schema: data ? useUpdateFormSchema(isCurrentUser.value) : useCreateFormSchema(),
     });
     formApi.reset();
 
@@ -99,7 +103,7 @@ defineExpose({ drawerApi });
       v-if="id"
       class="bg-accent text-muted-foreground mb-4 rounded-md px-3 py-2 text-xs"
     >
-      角色留空表示保持原有角色不变；密码留空表示不修改密码。
+      角色留空表示保持原有角色不变；密码留空表示不修改密码。<template v-if="isCurrentUser">当前账号的角色和启用状态不能在此修改。</template>
     </div>
     <Form />
   </Drawer>

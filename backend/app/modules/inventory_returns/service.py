@@ -3,7 +3,7 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
@@ -27,9 +27,17 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _can_manage_all(db: Session, user: User) -> bool:
-    """判断用户是否可以处理全部退货申请。"""
-    return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER", "WAREHOUSE"} & set(get_user_role_codes(db, user.id)))
+def _ensure_return_scope(db: Session, user: User, value: InventoryReturnRequest) -> None:
+    """退货整单必须完全落在用户可见的仓库范围内。"""
+    roles = set(get_user_role_codes(db, user.id))
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        return
+    if "WAREHOUSE" in roles:
+        for item in value.items:
+            inventory_service._require_warehouse_scope(db, user, item.warehouse_id)
+        return
+    if value.applicant_id != user.id:
+        raise ResourceNotFoundError(f"退货申请 {value.id} 不存在")
 
 
 def _describe_items(db: Session, requests: list[InventoryReturnRequest]) -> None:
@@ -208,7 +216,22 @@ def create_return(db: Session, user: User, data: ReturnCreate) -> InventoryRetur
 
 def list_returns(db: Session, user: User, *, status: str | None, page: int, page_size: int):
     """分页查询退货申请。"""
-    conditions = [] if _can_manage_all(db, user) else [InventoryReturnRequest.applicant_id == user.id]
+    roles = set(get_user_role_codes(db, user.id))
+    conditions = []
+    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+        pass
+    elif "WAREHOUSE" in roles:
+        warehouse_ids = inventory_service.accessible_warehouse_ids(db, user) or set()
+        if not warehouse_ids:
+            conditions.append(InventoryReturnRequest.id == -1)
+        else:
+            outside_scope = select(InventoryReturnItem.id).where(
+                InventoryReturnItem.return_request_id == InventoryReturnRequest.id,
+                InventoryReturnItem.warehouse_id.not_in(warehouse_ids),
+            )
+            conditions.append(~exists(outside_scope))
+    else:
+        conditions.append(InventoryReturnRequest.applicant_id == user.id)
     if status:
         conditions.append(InventoryReturnRequest.status == status)
     total = db.scalar(select(func.count(InventoryReturnRequest.id)).where(*conditions)) or 0
@@ -220,8 +243,7 @@ def list_returns(db: Session, user: User, *, status: str | None, page: int, page
 def get_return(db: Session, user: User, return_id: int) -> InventoryReturnRequest:
     """查询退货详情并校验申请人数据范围。"""
     value = _require(db, return_id)
-    if not _can_manage_all(db, user) and value.applicant_id != user.id:
-        raise ResourceNotFoundError(f"退货申请 {return_id} 不存在")
+    _ensure_return_scope(db, user, value)
     return value
 
 
@@ -253,10 +275,13 @@ def submit_return(db: Session, user: User, return_id: int) -> InventoryReturnReq
 
 def approve_return(db: Session, user: User, return_id: int) -> InventoryReturnRequest:
     """审批退货申请。"""
-    _lock_source_orders(db, _require(db, return_id))
+    _lock_source_orders(db, get_return(db, user, return_id))
     value = _require(db, return_id, for_update=True)
+    _ensure_return_scope(db, user, value)
     if value.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的退货申请可以审批")
+    if value.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的退货申请")
     value.status = "APPROVED"
     value.approved_by = user.id
     value.approved_at = _now()
@@ -266,10 +291,13 @@ def approve_return(db: Session, user: User, return_id: int) -> InventoryReturnRe
 
 def reject_return(db: Session, user: User, return_id: int, reason: str) -> InventoryReturnRequest:
     """驳回退货申请。"""
-    _lock_source_orders(db, _require(db, return_id))
+    _lock_source_orders(db, get_return(db, user, return_id))
     value = _require(db, return_id, for_update=True)
+    _ensure_return_scope(db, user, value)
     if value.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的退货申请可以驳回")
+    if value.applicant_id == user.id:
+        raise BusinessValidationError("不能审批本人经办的退货申请")
     value.status = "REJECTED"
     value.rejected_at = _now()
     value.reject_reason = reason
@@ -293,11 +321,12 @@ def cancel_return(db: Session, user: User, return_id: int) -> InventoryReturnReq
 def execute_return(db: Session, user: User, return_id: int) -> InventoryReturnRequest:
     """锁定退货申请和库存余额，原子执行库存退货出库。"""
     try:
-        value = _require(db, return_id)
+        value = get_return(db, user, return_id)
         if value.status != "APPROVED":
             raise BusinessValidationError("只有已审批的退货申请可以执行")
         _lock_source_orders(db, value)
         value = _require(db, return_id, for_update=True)
+        _ensure_return_scope(db, user, value)
         if value.status != "APPROVED":
             raise BusinessValidationError("只有已审批的退货申请可以执行")
         payload = ReturnCreate(supplier_id=value.supplier_id, po_id=value.po_id, delivery_id=value.delivery_id, reason=value.reason, items=[{key: getattr(item, key) for key in ("product_id", "warehouse_id", "location_id", "batch_id", "unit_id", "requested_quantity", "source_delivery_item_id", "source_po_item_id")} for item in value.items])

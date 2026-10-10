@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.modules.inventory.model import InventoryBalance, InventoryTransaction
+from app.modules.inventory.model import Warehouse
 from app.modules.inventory_cost.model import InventoryCostAllocation
+from app.modules.deliveries.model import Delivery
+from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.system.model import User
 
 from .conftest import login
 
@@ -22,6 +26,26 @@ def get_available_balance(db_session):
     if balance is None:
         pytest.skip("数据库中没有可用库存余额")
     return balance
+
+
+def test_fifo_outbound_uses_warehouse_owner_scope(monkeypatch) -> None:
+    """FIFO 出库不允许仅凭动作权限跨负责人仓库执行。"""
+
+    from types import SimpleNamespace
+
+    from app.core.errors import ResourceNotFoundError
+    from app.modules.inventory_cost import service as cost_service
+
+    monkeypatch.setattr(cost_service, "get_user_role_codes", lambda _db, _user_id: ["WAREHOUSE"])
+    with pytest.raises(ResourceNotFoundError):
+        cost_service._require_warehouse_scope(
+            object(), SimpleNamespace(id=7), Warehouse(id=10, manager_id=99)
+        )
+
+    monkeypatch.setattr(cost_service, "get_user_role_codes", lambda _db, _user_id: ["SYS_ADMIN"])
+    cost_service._require_warehouse_scope(
+        object(), SimpleNamespace(id=7), Warehouse(id=10, manager_id=99)
+    )
 
 
 def test_error_response_contains_chinese_message(client: TestClient, demo_password: str) -> None:
@@ -42,6 +66,38 @@ def test_buyer_cannot_freeze_inventory(client: TestClient, demo_password: str) -
     response = client.post("/api/v1/inventory/balances/1/freeze", headers=headers, json={"reason": "无权限测试"})
     assert response.status_code == 403
     assert response.json()["message"] == "无权访问"
+
+
+def test_warehouse_cannot_inbound_foreign_department_delivery(
+    client: TestClient, db_session, demo_password: str
+) -> None:
+    """入库同时校验授权仓库和到货单来源订单范围。"""
+
+    warehouse_user = db_session.scalar(
+        select(User).where(User.username == "warehouse_receiver", User.status == "ACTIVE")
+    )
+    if warehouse_user is None:
+        pytest.skip("测试数据库需要仓库账号")
+    delivery = db_session.scalar(
+        select(Delivery)
+        .join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id)
+        .where(Delivery.status == "ACCEPTED", PurchaseOrder.buyer_id != warehouse_user.id)
+        .order_by(Delivery.id)
+    )
+    if delivery is None:
+        pytest.skip("测试数据库需要仓库账号和由其他采购员创建的已验收到货单")
+
+    # 无部门仓库用户只能读取本人采购订单，确保该来源单越界。
+    warehouse_user.department_id = None
+    db_session.flush()
+    headers = login(client, "warehouse_receiver", demo_password)
+    response = client.post(
+        "/api/v1/inventory/inbounds",
+        headers=headers,
+        json={"delivery_id": delivery.id, "warehouse_id": 1, "location_id": 1},
+    )
+
+    assert response.status_code == 404
 
 
 def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session, demo_password: str) -> None:

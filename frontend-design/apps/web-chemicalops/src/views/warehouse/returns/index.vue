@@ -4,6 +4,7 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
 import { ref } from 'vue';
 import { useAccess } from '@vben/access';
+import { useUserStore } from '@vben/stores';
 import { Page } from '@vben/common-ui';
 import { Alert, Button, Input, message, Modal } from 'antdv-next';
 
@@ -14,6 +15,7 @@ import { formatQuantity } from '#/utils/format';
 
 defineOptions({ name: 'InventoryReturns' });
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const busy = ref(false);
 const rejectRow = ref<InventoryReturn>();
 const reason = ref('');
@@ -93,9 +95,9 @@ function submitReject() {
             <Button v-if="['DRAFT', 'REJECTED'].includes(row.status)" size="small" type="link" :disabled="busy" @click="confirmAction(row, 'cancel')">取消</Button>
             <Button v-if="row.status === 'APPROVED'" size="small" type="link" :disabled="busy" @click="confirmAction(row, 'execute')">执行出库</Button>
           </template>
-          <template v-if="row.status === 'SUBMITTED' && hasAccessByCodes(['warehouse.inventory.return.approve'])">
-            <Button size="small" type="link" :disabled="busy" @click="confirmAction(row, 'approve')">审批通过</Button>
-            <Button size="small" danger type="link" :disabled="busy" @click="reject(row)">驳回</Button>
+          <template v-if="hasAccessByCodes(['warehouse.inventory.return.approve'])">
+            <Button size="small" type="link" :disabled="busy || row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)" :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的退货申请' : row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined" @click="confirmAction(row, 'approve')">审批通过</Button>
+            <Button size="small" danger type="link" :disabled="busy || row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)" :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的退货申请' : row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined" @click="reject(row)">驳回</Button>
           </template>
         </div>
       </template>

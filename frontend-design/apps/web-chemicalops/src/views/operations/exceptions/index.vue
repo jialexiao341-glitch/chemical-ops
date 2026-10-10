@@ -13,7 +13,7 @@ import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Button } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getExceptionListApi, getUserListApi } from '#/api';
+import { getExceptionAssigneeOptionsApi, getExceptionListApi } from '#/api';
 import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
@@ -68,8 +68,8 @@ function onActionClick({
 onMounted(async () => {
   // 负责人 ID → 姓名（失败时降级显示 #ID）
   try {
-    const users = await getUserListApi({ page: 1, page_size: 100 });
-    const map = new Map(users.items.map((item) => [item.id, item.display_name || item.username]));
+    const users = await getExceptionAssigneeOptionsApi();
+    const map = new Map(users.map((item) => [item.id, item.display_name || item.username]));
     resolveOwner.value = (id) => {
       if (!id) {
         return '-';

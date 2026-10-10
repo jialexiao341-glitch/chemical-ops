@@ -27,7 +27,7 @@ import {
   getCommentListApi,
   getExceptionApi,
   getTaskListApi,
-  getUserListApi,
+  getExceptionAssigneeOptionsApi,
   updateExceptionApi,
   updateTaskApi,
 } from '#/api';
@@ -140,13 +140,11 @@ const [Drawer, drawerApi] = useVbenDrawer<
       ownerId.value = exception?.owner_id ?? undefined;
       // 负责人下拉按需加载一次
       if (canWriteExceptions && userOptions.value.length === 0) {
-        const users = await getUserListApi({ page: 1, page_size: 100 });
-        userOptions.value = users.items
-          .filter((item) => !item.status || item.status === 'ACTIVE')
-          .map((item) => ({
+        const users = await getExceptionAssigneeOptionsApi();
+        userOptions.value = users.map((item) => ({
             label: `${item.display_name || item.username}（${item.username}）`,
             value: item.id,
-          }));
+        }));
       }
     } finally {
       loading.value = false;

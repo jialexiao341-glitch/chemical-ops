@@ -36,7 +36,9 @@ const canDelete = computed(
   () => props.deleteMode !== 'readonly'
     && hasAccessByCodes([props.deletePermission ?? (
       props.deleteMode === 'master'
-        ? props.resource === 'master.suppliers' ? 'master.suppliers.deactivate' : `${props.resource}.delete`
+        ? props.resource.startsWith('system.')
+          ? props.writePermission ?? `${props.resource}.write`
+          : props.resource === 'master.suppliers' ? 'master.suppliers.deactivate' : `${props.resource}.delete`
         : props.writePermission ?? `${props.resource}.write`
     )]),
 );

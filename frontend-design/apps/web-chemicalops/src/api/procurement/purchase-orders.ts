@@ -124,9 +124,9 @@ export async function createPurchaseOrderApi(data: {
 export async function updatePurchaseOrderApi(
   id: number,
   data: {
-    delivery_address?: string;
+    delivery_address?: null | string;
     expected_arrival_date?: null | string;
-    note?: string;
+    note?: null | string;
   },
 ) {
   return requestClient.request<PurchaseOrderApi.PurchaseOrder>(`/purchase-orders/${id}`, { data, method: 'PATCH' });

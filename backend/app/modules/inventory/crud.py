@@ -1,6 +1,6 @@
 """库存模块的数据访问操作。"""
 
-from sqlalchemy import and_, func, insert, or_, select
+from sqlalchemy import and_, exists, func, insert, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.inventory.model import (
@@ -8,8 +8,10 @@ from app.modules.inventory.model import (
     InventoryBalanceStatusLog,
     InventoryBatch,
     InventoryIssueRequest,
+    InventoryIssueItem,
     InventoryTransaction,
     InventoryTransferRequest,
+    InventoryTransferItem,
     InventoryStocktakeRequest,
     Warehouse,
     WarehouseLocation,
@@ -198,12 +200,26 @@ def get_issue_request(db: Session, issue_id: int, *, for_update: bool = False) -
     return db.scalar(statement)
 
 
-def list_issue_requests(db: Session, *, applicant_id: int | None, status: str | None, page: int, page_size: int) -> tuple[list[InventoryIssueRequest], int]:
+def list_issue_requests(db: Session, *, applicant_id: int | None, warehouse_ids: set[int] | None = None, status: str | None, page: int, page_size: int) -> tuple[list[InventoryIssueRequest], int]:
     """按申请人和状态分页查询库存领用申请。"""
 
     conditions = []
     if applicant_id is not None:
         conditions.append(InventoryIssueRequest.applicant_id == applicant_id)
+    if warehouse_ids is not None:
+        if not warehouse_ids:
+            conditions.append(InventoryIssueRequest.id == -1)
+        else:
+            in_scope = select(InventoryIssueItem.id).where(
+                InventoryIssueItem.issue_request_id == InventoryIssueRequest.id,
+                InventoryIssueItem.warehouse_id.in_(warehouse_ids),
+            )
+            outside_scope = select(InventoryIssueItem.id).where(
+                InventoryIssueItem.issue_request_id == InventoryIssueRequest.id,
+                InventoryIssueItem.warehouse_id.not_in(warehouse_ids),
+            )
+            conditions.append(exists(in_scope))
+            conditions.append(~exists(outside_scope))
     if status:
         conditions.append(InventoryIssueRequest.status == status)
     total = db.scalar(select(func.count(InventoryIssueRequest.id)).where(*conditions)) or 0
@@ -229,12 +245,30 @@ def get_transfer_request(db: Session, transfer_id: int, *, for_update: bool = Fa
     return db.scalar(statement)
 
 
-def list_transfer_requests(db: Session, *, applicant_id: int | None, status: str | None, page: int, page_size: int) -> tuple[list[InventoryTransferRequest], int]:
+def list_transfer_requests(db: Session, *, applicant_id: int | None, warehouse_ids: set[int] | None = None, status: str | None, page: int, page_size: int) -> tuple[list[InventoryTransferRequest], int]:
     """按申请人和状态分页查询库存调拨申请。"""
 
     conditions = []
     if applicant_id is not None:
         conditions.append(InventoryTransferRequest.applicant_id == applicant_id)
+    if warehouse_ids is not None:
+        if not warehouse_ids:
+            conditions.append(InventoryTransferRequest.id == -1)
+        else:
+            in_scope = select(InventoryTransferItem.id).where(
+                InventoryTransferItem.transfer_request_id == InventoryTransferRequest.id,
+                InventoryTransferItem.source_warehouse_id.in_(warehouse_ids),
+                InventoryTransferItem.target_warehouse_id.in_(warehouse_ids),
+            )
+            outside_scope = select(InventoryTransferItem.id).where(
+                InventoryTransferItem.transfer_request_id == InventoryTransferRequest.id,
+                or_(
+                    InventoryTransferItem.source_warehouse_id.not_in(warehouse_ids),
+                    InventoryTransferItem.target_warehouse_id.not_in(warehouse_ids),
+                ),
+            )
+            conditions.append(exists(in_scope))
+            conditions.append(~exists(outside_scope))
     if status:
         conditions.append(InventoryTransferRequest.status == status)
     total = db.scalar(select(func.count(InventoryTransferRequest.id)).where(*conditions)) or 0
@@ -260,12 +294,14 @@ def get_stocktake_request(db: Session, stocktake_id: int, *, for_update: bool = 
     return db.scalar(statement)
 
 
-def list_stocktake_requests(db: Session, *, applicant_id: int | None, status: str | None, page: int, page_size: int) -> tuple[list[InventoryStocktakeRequest], int]:
+def list_stocktake_requests(db: Session, *, applicant_id: int | None, warehouse_ids: set[int] | None = None, status: str | None, page: int, page_size: int) -> tuple[list[InventoryStocktakeRequest], int]:
     """按申请人和状态分页查询库存盘点申请。"""
 
     conditions = []
     if applicant_id is not None:
         conditions.append(InventoryStocktakeRequest.applicant_id == applicant_id)
+    if warehouse_ids is not None:
+        conditions.append(InventoryStocktakeRequest.warehouse_id.in_(warehouse_ids) if warehouse_ids else InventoryStocktakeRequest.id == -1)
     if status:
         conditions.append(InventoryStocktakeRequest.status == status)
     total = db.scalar(select(func.count(InventoryStocktakeRequest.id)).where(*conditions)) or 0
