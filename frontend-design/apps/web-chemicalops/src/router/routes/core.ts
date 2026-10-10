@@ -48,6 +48,12 @@ const coreRoutes: RouteRecordRaw[] = [
     redirect: LOGIN_PATH,
     children: [
       {
+        name: 'Register',
+        path: 'register',
+        component: () => import('#/views/_core/authentication/register.vue'),
+        meta: { title: '注册申请' },
+      },
+      {
         name: 'Login',
         path: 'login',
         component: () => import('#/views/_core/authentication/login.vue'),

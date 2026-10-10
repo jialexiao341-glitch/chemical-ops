@@ -47,10 +47,13 @@ from app.modules.supplier_portal.schema import (
 from app.modules.system.audit import add_audit_log
 from app.modules.system.file_model import SysFile, SysFileAttachment
 from app.modules.system.model import User
+from app.modules.system import crud as system_crud
 
 
 def _supplier_id(db: Session, user: User) -> int:
     """读取当前登录用户绑定的供应商。"""
+    if set(system_crud.get_user_role_codes(db, user.id)) != {"SUPPLIER_PORTAL"}:
+        raise AuthorizationError("仅供应商门户角色账号可访问供应商业务")
     account = db.scalar(select(SupplierPortalAccount).where(SupplierPortalAccount.user_id == user.id, SupplierPortalAccount.status == "ACTIVE"))
     if account is None:
         raise AuthorizationError("当前用户未绑定有效的供应商门户账号")

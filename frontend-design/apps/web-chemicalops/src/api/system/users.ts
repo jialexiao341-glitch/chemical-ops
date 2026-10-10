@@ -3,6 +3,20 @@ import type { PageQuery, PageResult } from '#/api/request';
 import { requestClient } from '#/api/request';
 
 export namespace SystemUserApi {
+  export interface SupplierBindingOption {
+    id: number;
+    supplier_code: string;
+    supplier_name: string;
+  }
+
+  export interface SupplierBinding {
+    status: string;
+    supplier_code: string;
+    supplier_id: number;
+    supplier_name: string;
+    supplier_status: string;
+  }
+
   /** 系统用户，对应后端 UserRead */
   export interface SystemUser {
     created_at?: string;
@@ -13,6 +27,8 @@ export namespace SystemUserApi {
     phone?: null | string;
     /** 详情/更新接口返回已绑定角色；分页列表为 null */
     role_ids?: null | number[];
+    role_codes: string[];
+    role_names: string[];
     status: string;
     updated_at?: string;
     username: string;
@@ -64,4 +80,20 @@ export async function updateUserApi(
 /** 停用用户（软删除） */
 export async function deleteUserApi(id: number) {
   return requestClient.delete<SystemUserApi.SystemUser>(`/system/users/${id}`);
+}
+
+export async function getSupplierBindingOptionsApi() {
+  return requestClient.get<SystemUserApi.SupplierBindingOption[]>('/system/supplier-binding-options');
+}
+
+export async function getUserSupplierBindingApi(id: number) {
+  return requestClient.get<SystemUserApi.SupplierBinding | null>(`/system/users/${id}/supplier-binding`);
+}
+
+export async function setUserSupplierBindingApi(id: number, supplierId: number) {
+  return requestClient.put<SystemUserApi.SupplierBinding>(`/system/users/${id}/supplier-binding`, { supplier_id: supplierId });
+}
+
+export async function reviewRegistrationApi(id: number, decision: 'approve' | 'reject', reason = '') {
+  return requestClient.post<SystemUserApi.SystemUser>(`/system/users/${id}/registration-review`, { decision, reason });
 }

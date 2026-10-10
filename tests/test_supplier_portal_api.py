@@ -97,9 +97,13 @@ def test_internal_buyer_cannot_use_supplier_portal(client: TestClient, db_sessio
     assert response.json()["message"] == "无权访问"
 
 
-def test_internal_admin_without_supplier_binding_cannot_use_supplier_portal(client: TestClient, demo_password: str) -> None:
+def test_internal_admin_without_supplier_binding_cannot_use_supplier_portal(client: TestClient, db_session, demo_password: str) -> None:
     """系统管理员没有供应商门户绑定时也不能冒充供应商访问门户。"""
 
+    # 显式构造未绑定状态，避免依赖开发库管理员的实际演示绑定。
+    admin_id = db_session.scalar(select(User.id).where(User.username == "system_admin"))
+    db_session.query(SupplierPortalAccount).filter_by(user_id=admin_id).update({"status": "INACTIVE"})
+    db_session.flush()
     admin = login(client, "system_admin", demo_password)
     response = client.get("/api/v1/supplier-portal/orders", headers=admin)
     assert response.status_code == 403
@@ -221,6 +225,10 @@ def test_supplier_quality_document_upload_and_download_are_binding_scoped(client
     assert downloaded.content == b"COA: batch verified"
 
     admin = login(client, "system_admin", demo_password)
+    # 未绑定账号不得读取；该状态仅在测试事务内设置，结束后回滚。
+    admin_id = db_session.scalar(select(User.id).where(User.username == "system_admin"))
+    db_session.query(SupplierPortalAccount).filter_by(user_id=admin_id).update({"status": "INACTIVE"})
+    db_session.flush()
     forbidden = client.get(f"/api/v1/supplier-portal/quality-documents/{document_id}/download", headers=admin)
     assert forbidden.status_code == 403
 

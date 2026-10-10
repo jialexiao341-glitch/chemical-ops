@@ -29,16 +29,16 @@ SAMPLES = (
 
 
 def main() -> None:
-    """创建或刷新仅面向 supplier_portal_demo 的演示询价。"""
+    """创建或刷新仅面向 supplier_portal 的演示询价。"""
     if get_settings().app_env.lower() not in {"development", "dev"}:
         raise RuntimeError("该演示数据脚本只允许在 development 环境运行")
 
     now = datetime.now()
     today = date.today()
     with SessionLocal() as db:
-        user = db.scalar(select(User).where(User.username == "supplier_portal_demo", User.status == "ACTIVE"))
+        user = db.scalar(select(User).where(User.username == "supplier_portal", User.status == "ACTIVE"))
         if user is None:
-            raise RuntimeError("找不到有效的 supplier_portal_demo 用户，请先运行演示账号种子脚本")
+            raise RuntimeError("找不到有效的 supplier_portal 用户，请先运行演示账号种子脚本")
         account = db.scalar(
             select(SupplierPortalAccount).where(
                 SupplierPortalAccount.user_id == user.id,

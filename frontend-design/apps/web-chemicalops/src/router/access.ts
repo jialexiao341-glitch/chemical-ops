@@ -22,6 +22,10 @@ function filterRoutesByVisibleChildren(
 ): GenerateMenuAndRoutesOptions['routes'] {
   const filtered: RouteRecordRaw[] = [];
   for (const route of routes) {
+    // 管理员在内部业务页面管理供应商，不展示供应商本人使用的门户入口。
+    if (route.name === 'SupplierPortal' && authorities.includes('SYS_ADMIN')) {
+      continue;
+    }
     if (!route.children?.length) {
       const routeAuthorities = route.meta?.authority;
       const hasAuthority =

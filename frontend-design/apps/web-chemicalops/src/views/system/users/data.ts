@@ -13,7 +13,7 @@ export function useCreateFormSchema(): VbenFormSchema[] {
       component: 'Input',
       componentProps: { maxlength: 64 },
       fieldName: 'username',
-      label: '登录名',
+      label: '账号名',
       rules: 'required',
     },
     {
@@ -81,14 +81,14 @@ export function useCreateFormSchema(): VbenFormSchema[] {
   ];
 }
 
-/** 编辑用户表单，登录名不可修改，密码留空表示不改 */
+/** 编辑用户表单，账号名不可修改，密码留空表示不改 */
 export function useUpdateFormSchema(isCurrentUser = false): VbenFormSchema[] {
   return [
     {
       component: 'Input',
       componentProps: { disabled: true },
       fieldName: 'username',
-      label: '登录名',
+      label: '账号名',
     },
     {
       component: 'VbenInputPassword',
@@ -156,7 +156,7 @@ export function useUpdateFormSchema(isCurrentUser = false): VbenFormSchema[] {
       component: 'Select',
       componentProps: {
         disabled: isCurrentUser,
-        options: USER_STATUS_DICT.options(),
+        options: USER_STATUS_DICT.options().filter((item) => !['PENDING', 'REJECTED'].includes(item.value)),
       },
       fieldName: 'status',
       label: '状态',
@@ -169,7 +169,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
   return [
     {
       component: 'Input',
-      componentProps: { allowClear: true, placeholder: '请输入登录名或姓名' },
+      componentProps: { allowClear: true, placeholder: '请输入账号名或姓名' },
       fieldName: 'keyword',
       label: '关键字',
     },
@@ -180,7 +180,6 @@ export function useGridFormSchema(): VbenFormSchema[] {
         options: USER_STATUS_DICT.options(),
         placeholder: '全部状态',
       },
-      defaultValue: 'ACTIVE',
       fieldName: 'status',
       label: '状态',
     },
@@ -191,10 +190,12 @@ export function useGridFormSchema(): VbenFormSchema[] {
 export function useColumns(
   onActionClick: OnActionClickFn<SystemUserApi.SystemUser>,
   currentUserId: number,
+  isAdmin = false,
 ): VxeTableGridColumns {
   return [
-    { field: 'username', width: 160, title: '登录名' },
+    { field: 'username', width: 160, title: '账号名' },
     { field: 'display_name', minWidth: 140, title: '显示姓名' },
+    { field: 'role_names', minWidth: 170, title: '角色身份', formatter: ({ row }: { row: SystemUserApi.SystemUser }) => row.role_names?.join('、') || '未分配角色' },
     { field: 'email', minWidth: 180, title: '邮箱' },
     { field: 'phone', width: 140, title: '手机号' },
     {
@@ -223,10 +224,19 @@ export function useColumns(
         },
         name: 'CellOperation',
         options: [
-          { code: 'edit', auth: 'system.users.write' },
+          { code: 'edit', auth: 'system.users.write', show: (row: SystemUserApi.SystemUser) => !['PENDING', 'REJECTED'].includes(row.status) },
+          { code: 'review-registration', text: '审核注册', show: (row: SystemUserApi.SystemUser) => isAdmin && row.status === 'PENDING' },
+          {
+            code: 'bind-supplier',
+            auth: 'system.users.write',
+            text: '绑定供应商',
+            show: (row: SystemUserApi.SystemUser) => row.role_codes?.length === 1 && row.role_codes[0] === 'SUPPLIER_PORTAL',
+            disabled: (row: SystemUserApi.SystemUser) => row.status !== 'ACTIVE',
+          },
           {
             code: 'delete',
             auth: 'system.users.write',
+            show: (row: SystemUserApi.SystemUser) => !['PENDING', 'REJECTED'].includes(row.status),
             disabled: (row: SystemUserApi.SystemUser) => row.id === currentUserId,
             text: (row: SystemUserApi.SystemUser) =>
               row.id === currentUserId ? '不能停用当前账号' : '停用',
@@ -236,7 +246,7 @@ export function useColumns(
       field: 'operation',
       fixed: 'right',
       title: '操作',
-      width: 140,
+      width: 250,
     },
   ];
 }

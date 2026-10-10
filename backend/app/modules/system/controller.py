@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
-from app.core.errors import ResourceNotFoundError
+from app.core.errors import AuthorizationError, ResourceNotFoundError
 from app.modules.system import crud, service
 from app.modules.system.model import User
 from app.modules.system.schema import (
@@ -25,16 +25,46 @@ from app.modules.system.schema import (
     RolePage,
     RoleRead,
     RoleUpdate,
+    SupplierBindingOption,
+    SupplierBindingRead,
+    SupplierBindingUpdate,
     TokenResponse,
     UserCreate,
     UserPage,
     UserRead,
     UserUpdate,
+    RegistrationCreate,
+    RegistrationRead,
+    RegistrationReview,
+    RegistrationRoleRead,
 )
 
 
 router = APIRouter(tags=["系统管理"])
 auth_router = APIRouter(prefix="/auth", tags=["登录认证"])
+
+
+def _registration_admin(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> User:
+    if "SYS_ADMIN" not in crud.get_user_role_codes(db, user.id):
+        raise AuthorizationError("仅系统管理员可以审批注册申请")
+    return user
+
+
+@auth_router.get("/registration-roles", response_model=list[RegistrationRoleRead], summary="查询可申请角色")
+def registration_roles(db: Session = Depends(get_db)):
+    return service.registration_roles(db)
+
+
+@auth_router.post("/register", response_model=RegistrationRead, status_code=201, summary="提交注册申请")
+def register(data: RegistrationCreate, db: Session = Depends(get_db)):
+    user = service.register_user(db, data)
+    return RegistrationRead(username=user.username, status=user.status)
+
+
+@router.post("/system/users/{user_id}/registration-review", response_model=UserRead, summary="审批注册申请")
+def review_registration(user_id: int, data: RegistrationReview, db: Session = Depends(get_db),
+                        user: User = Depends(_registration_admin)):
+    return service.review_registration(db, user_id, data, actor_id=user.id)
 
 
 def _avatar_data_url(user: User) -> str | None:
@@ -61,7 +91,7 @@ def _avatar_data_url(user: User) -> str | None:
 def _current_user_response(db: Session, user: User) -> CurrentUserRead:
     """组装当前用户、角色和权限信息。"""
 
-    data = UserRead.model_validate(user).model_dump()
+    data = service.user_read(db, user).model_dump()
     data["role_codes"] = crud.get_user_role_codes(db, user.id)
     data["permission_codes"] = crud.get_user_permission_codes(db, user.id)
     data["avatar"] = _avatar_data_url(user)
@@ -126,7 +156,7 @@ def create_user(data: UserCreate, db: Session = Depends(get_db), _: User = Depen
 @router.get("/system/users", response_model=UserPage, summary="分页查询用户")
 def list_users(
     keyword: str | None = Query(default=None, description="按用户名或显示姓名模糊查询"),
-    status: str | None = Query(default=None, pattern="^(ACTIVE|LOCKED|INACTIVE)$", description="用户状态"),
+    status: str | None = Query(default=None, pattern="^(ACTIVE|LOCKED|INACTIVE|PENDING|REJECTED)$", description="用户状态"),
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
     db: Session = Depends(get_db),
@@ -138,22 +168,42 @@ def list_users(
     return UserPage(items=items, total=total, page=page, page_size=page_size)
 
 
+@router.get("/system/supplier-binding-options", response_model=list[SupplierBindingOption], summary="查询可绑定供应商")
+def supplier_binding_options(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("system.users.write")),
+):
+    return service.list_supplier_binding_options(db)
+
+
+@router.get("/system/users/{user_id}/supplier-binding", response_model=SupplierBindingRead | None, summary="查询用户供应商绑定")
+def get_user_supplier_binding(
+    user_id: int, db: Session = Depends(get_db),
+    _: User = Depends(require_permission("system.users.write")),
+):
+    return service.get_supplier_binding(db, user_id)
+
+
+@router.put("/system/users/{user_id}/supplier-binding", response_model=SupplierBindingRead, summary="保存用户供应商绑定")
+def set_user_supplier_binding(
+    user_id: int, data: SupplierBindingUpdate, db: Session = Depends(get_db),
+    user: User = Depends(require_permission("system.users.write")),
+):
+    return service.set_supplier_binding(db, user_id, data.supplier_id, actor_id=user.id)
+
+
 @router.get("/system/users/{user_id}", response_model=UserRead, summary="查询用户详情")
 def get_user(user_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("system.users.read"))) -> UserRead:
     """按用户 ID 查询用户详情（含已绑定角色 ID，供编辑回填）。"""
 
-    read = UserRead.model_validate(service._require_user(db, user_id))
-    read.role_ids = crud.get_user_role_ids(db, user_id)
-    return read
+    return service.user_read(db, service._require_user(db, user_id))
 
 
 @router.patch("/system/users/{user_id}", response_model=UserRead, summary="更新用户")
 def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db), user: User = Depends(require_permission("system.users.write"))) -> UserRead:
     """部分更新用户资料、密码、状态和角色。"""
 
-    read = UserRead.model_validate(service.update_user(db, user_id, data, actor_id=user.id))
-    read.role_ids = crud.get_user_role_ids(db, user_id)
-    return read
+    return service.user_read(db, service.update_user(db, user_id, data, actor_id=user.id))
 
 
 @router.delete("/system/users/{user_id}", response_model=UserRead, summary="停用用户")

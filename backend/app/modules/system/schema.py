@@ -1,8 +1,9 @@
 """系统管理模块的 Pydantic 请求和响应模型。"""
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UserCreate(BaseModel):
@@ -66,6 +67,71 @@ class UserRead(BaseModel):
     updated_at: datetime
     # 详情/更新接口会填充；分页列表不逐行查角色，保持 None
     role_ids: list[int] | None = None
+    role_codes: list[str] = Field(default_factory=list)
+    role_names: list[str] = Field(default_factory=list)
+
+
+class RegistrationCreate(BaseModel):
+    """公开注册只能申请一个非管理员角色，其他管理字段禁止提交。"""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+    username: str = Field(min_length=8, max_length=16, pattern=r"^[A-Za-z0-9_]+$")
+    password: str = Field(min_length=8, max_length=16)
+    display_name: str = Field(min_length=1, max_length=100)
+    role_code: str = Field(min_length=1, max_length=64)
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=32)
+    avatar_base64: str | None = Field(default=None, max_length=3_000_000)
+
+    @field_validator("username", "password")
+    @classmethod
+    def require_mixed_case(cls, value: str) -> str:
+        if not any("A" <= char <= "Z" for char in value) or not any("a" <= char <= "z" for char in value):
+            raise ValueError("账号名和密码均须为 8–16 位，并同时包含大写和小写字母")
+        return value
+
+
+class RegistrationRoleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    role_code: str
+    role_name: str
+
+
+class RegistrationRead(BaseModel):
+    username: str
+    status: str
+
+
+class RegistrationReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: Literal["approve", "reject"]
+    reason: str = Field(default="", max_length=500)
+
+
+class SupplierBindingUpdate(BaseModel):
+    """管理员为用户选择一个启用的供应商。"""
+
+    supplier_id: int = Field(gt=0)
+
+
+class SupplierBindingOption(BaseModel):
+    """绑定选择器仅返回供应商编号和名称。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_code: str
+    supplier_name: str
+
+
+class SupplierBindingRead(BaseModel):
+    """用户当前的供应商绑定，包括停用状态。"""
+
+    supplier_id: int
+    supplier_code: str
+    supplier_name: str
+    supplier_status: str
+    status: str
 
 
 class UserPage(BaseModel):

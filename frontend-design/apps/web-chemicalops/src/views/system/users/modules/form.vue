@@ -22,7 +22,7 @@ const userStore = useUserStore();
 
 /**
  * 新增与编辑使用不同的表单结构：
- * 新增必须填登录名和初始密码；编辑时登录名只读、密码留空即不修改。
+ * 新增必须填账号名和初始密码；编辑时账号名只读、密码留空即不修改。
  */
 const [Form, formApi] = useVbenForm({
   layout: 'vertical',

@@ -210,18 +210,18 @@ ROLE_NAMES = {
 }
 
 USERS = (
-    ("system_admin", "系统管理员", "MANAGEMENT", "SYS_ADMIN"),
-    ("procurement_manager", "采购经理", "PROCUREMENT", "PROCUREMENT_MANAGER"),
-    ("buyer", "采购员", "PROCUREMENT", "BUYER"),
-    ("technical_engineer", "技术研发人员", "R_AND_D", "TECHNICAL"),
-    ("warehouse_receiver", "仓库收货人员", "WAREHOUSE", "WAREHOUSE"),
-    ("quality_inspector", "质量检验人员", "QUALITY", "QUALITY"),
-    ("quality_manager", "质量负责人", "QUALITY", "QUALITY_MANAGER"),
-    ("finance_viewer", "财务查看者", "FINANCE", "FINANCE_VIEWER"),
-    ("management_viewer", "管理层查看者", "MANAGEMENT", "MANAGEMENT_VIEWER"),
-    ("finance_clerk", "财务专员", "FINANCE", "FINANCE_CLERK"),
-    ("finance_manager", "财务经理", "FINANCE", "FINANCE_MANAGER"),
-    ("supplier_portal_demo", "供应商门户账号", "MANAGEMENT", "SUPPLIER_PORTAL"),
+    ("system_admin", "陈明远", "MANAGEMENT", "SYS_ADMIN"),
+    ("procurement_manager", "周文博", "PROCUREMENT", "PROCUREMENT_MANAGER"),
+    ("buyer", "林晓彤", "PROCUREMENT", "BUYER"),
+    ("technical_engineer", "徐子航", "R_AND_D", "TECHNICAL"),
+    ("warehouse_receiver", "赵志成", "WAREHOUSE", "WAREHOUSE"),
+    ("quality_inspector", "何雨晴", "QUALITY", "QUALITY"),
+    ("quality_manager", "孙嘉宁", "QUALITY", "QUALITY_MANAGER"),
+    ("finance_viewer", "郑思涵", "FINANCE", "FINANCE_VIEWER"),
+    ("management_viewer", "吴承泽", "MANAGEMENT", "MANAGEMENT_VIEWER"),
+    ("finance_clerk", "许静怡", "FINANCE", "FINANCE_CLERK"),
+    ("finance_manager", "陆景川", "FINANCE", "FINANCE_MANAGER"),
+    ("supplier_portal", "沈佳禾", "MANAGEMENT", "SUPPLIER_PORTAL"),
 )
 
 
@@ -295,6 +295,10 @@ def main() -> None:
         created_users = []
         for username, display_name, department_code, role_code in USERS:
             user = db.scalar(select(User).where(User.username == username))
+            if user is None and username == "supplier_portal":
+                user = db.scalar(select(User).where(User.username == "supplier_portal_demo"))
+                if user is not None:
+                    user.username = username
             if user is None:
                 user = User(
                     username=username,
@@ -310,7 +314,8 @@ def main() -> None:
             if binding is None:
                 db.add(UserRole(user_id=user.id, role_id=roles[role_code].id))
 
-        portal_user = db.scalar(select(User).where(User.username == "supplier_portal_demo"))
+        db.flush()
+        portal_user = db.scalar(select(User).where(User.username == "supplier_portal"))
         supplier = db.scalar(select(Supplier).where(Supplier.status == "ACTIVE").order_by(Supplier.id))
         if portal_user is not None and supplier is not None:
             account = db.scalar(select(SupplierPortalAccount).where(SupplierPortalAccount.user_id == portal_user.id))

@@ -23,13 +23,11 @@ import {
   updateProfileApi,
 } from '#/api';
 import { USER_STATUS_DICT } from '#/constants/dictionary';
+import AvatarPicker from '#/components/avatar-picker.vue';
 import { useAuthStore } from '#/store';
 import { formatDateTime } from '#/utils/format';
 
 defineOptions({ name: 'UserProfile' });
-
-const AVATAR_MAX_EDGE = 256;
-const AVATAR_PICK_LIMIT = 5 * 1024 * 1024;
 
 const authStore = useAuthStore();
 const currentUser = ref<AuthApi.CurrentUser>();
@@ -37,7 +35,6 @@ const departmentName = ref('');
 const loading = ref(false);
 const saving = ref(false);
 const avatarUploading = ref(false);
-const avatarInput = ref<HTMLInputElement>();
 
 // 可编辑资料字段
 const displayName = ref('');
@@ -82,78 +79,14 @@ async function load() {
   }
 }
 
-/** 选文件：canvas 等比压缩到最长边 256px 的 JPEG，再 base64 上传 */
-function pickAvatar() {
-  avatarInput.value?.click();
-}
-
-function readImage(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('图片解码失败'));
-    };
-    img.src = url;
-  });
-}
-
-async function onAvatarFile(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = '';
-  if (!file) {
-    return;
-  }
-  if (!file.type.startsWith('image/')) {
-    message.warning('请选择图片文件');
-    return;
-  }
-  if (file.size > AVATAR_PICK_LIMIT) {
-    message.warning('原图不能超过 5MB');
-    return;
-  }
+async function onAvatarChange(value: null | string) {
   avatarUploading.value = true;
   try {
-    const img = await readImage(file);
-    const scale = Math.min(1, AVATAR_MAX_EDGE / Math.max(img.width, img.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(img.width * scale));
-    canvas.height = Math.max(1, Math.round(img.height * scale));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      throw new Error('Canvas 不可用');
-    }
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
-
-    currentUser.value = await updateProfileApi({ avatar_base64: base64 });
+    currentUser.value = await updateProfileApi({ avatar_base64: value });
     await authStore.fetchUserInfo();
-    message.success('头像已更新');
-  } catch (error) {
-    // 请求层已弹出后端错误；本地解码错误单独提示
-    if (error instanceof Error && !String(error).includes('请求')) {
-      message.error(error.message);
-    }
-  } finally {
-    avatarUploading.value = false;
-  }
-}
-
-async function onClearAvatar() {
-  avatarUploading.value = true;
-  try {
-    currentUser.value = await updateProfileApi({ avatar_base64: null });
-    await authStore.fetchUserInfo();
-    message.success('头像已移除');
+    message.success(value ? '头像已更新' : '头像已移除');
   } catch {
-    // 请求层已弹出错误
+    // 请求层已展示错误，保留原头像。
   } finally {
     avatarUploading.value = false;
   }
@@ -267,55 +200,11 @@ onMounted(load);
         <!-- 个人信息 -->
         <Card class="profile-card" title="基本资料">
           <div class="space-y-6">
-            <!-- 头像 -->
-            <div class="flex items-center gap-4">
-              <img
-                v-if="currentUser?.avatar"
-                :src="currentUser.avatar"
-                alt="头像"
-                class="border-border size-16 rounded-full border object-cover"
-              />
-              <div
-                v-else
-                class="bg-accent text-muted-foreground flex size-16 items-center justify-center rounded-full"
-              >
-                <IconifyIcon icon="lucide:user" class="size-7" />
-              </div>
-              <div class="min-w-0 space-y-1.5">
-                <div class="text-muted-foreground text-xs">
-                  支持 JPG/PNG/GIF/WebP，上传后自动压缩到
-                  {{ AVATAR_MAX_EDGE }}px
-                </div>
-                <div class="flex gap-2">
-                  <Button
-                    :loading="avatarUploading"
-                    size="small"
-                    @click="pickAvatar"
-                  >
-                    {{ currentUser?.avatar ? '更换头像' : '上传头像' }}
-                  </Button>
-                  <Button
-                    v-if="currentUser?.avatar"
-                    danger
-                    size="small"
-                    @click="onClearAvatar"
-                  >
-                    移除
-                  </Button>
-                </div>
-              </div>
-              <input
-                ref="avatarInput"
-                accept="image/*"
-                class="hidden"
-                type="file"
-                @change="onAvatarFile"
-              />
-            </div>
+            <AvatarPicker :value="currentUser?.avatar" :loading="avatarUploading" @update:value="onAvatarChange" />
 
             <div class="profile-facts grid gap-4 rounded-xl p-4 sm:grid-cols-2">
               <div>
-                <div class="profile-fact-label">登录账号</div>
+                <div class="profile-fact-label">账号名</div>
                 <div class="font-medium">{{ currentUser?.username ?? '-' }}</div>
               </div>
               <div>

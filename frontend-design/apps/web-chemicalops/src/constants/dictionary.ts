@@ -43,6 +43,8 @@ export const ENABLE_STATUS_DICT = buildDict([
 
 /** 用户状态，比通用启用状态多一个锁定 */
 export const USER_STATUS_DICT = buildDict([
+  { color: 'processing', label: '待审核', value: 'PENDING' },
+  { color: 'error', label: '已拒绝', value: 'REJECTED' },
   { color: 'success', label: '启用', value: 'ACTIVE' },
   { color: 'warning', label: '锁定', value: 'LOCKED' },
   { color: 'default', label: '停用', value: 'INACTIVE' },

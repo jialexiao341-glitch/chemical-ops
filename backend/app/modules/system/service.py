@@ -8,10 +8,13 @@ import hashlib
 from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import AuthenticationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.core.security import create_access_token, hash_password, verify_password
 from app.modules.system import crud
+from app.modules.suppliers.model import Supplier
+from app.modules.supplier_portal.model import SupplierPortalAccount
 from app.modules.system.model import Department, Permission, Role, RolePermission, User, UserRole
 from app.modules.system.audit import add_audit_log
 from app.modules.system.schema import (
@@ -24,6 +27,10 @@ from app.modules.system.schema import (
     ProfileUpdate,
     RoleCreate,
     RoleUpdate,
+    SupplierBindingRead,
+    RegistrationCreate,
+    RegistrationReview,
+    UserRead,
     UserCreate,
     UserUpdate,
 )
@@ -59,7 +66,127 @@ def _require_department(db: Session, department_id: int | None) -> None:
 def list_users(db: Session, keyword: str | None, status: str | None, page: int, page_size: int):
     """查询用户分页列表。"""
 
-    return crud.list_users(db, keyword, status, page, page_size)
+    users, total = crud.list_users(db, keyword, status, page, page_size)
+    reads = {user.id: UserRead.model_validate(user) for user in users}
+    if reads:
+        for user_id, code, name in db.execute(
+            select(UserRole.user_id, Role.role_code, Role.role_name)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(UserRole.user_id.in_(reads), Role.status == "ACTIVE").order_by(Role.id)
+        ):
+            reads[user_id].role_codes.append(code)
+            reads[user_id].role_names.append(name)
+    return list(reads.values()), total
+
+
+def user_read(db: Session, user: User) -> UserRead:
+    read = UserRead.model_validate(user)
+    read.role_ids = crud.get_user_role_ids(db, user.id)
+    roles = db.execute(select(Role.role_code, Role.role_name).join(UserRole, UserRole.role_id == Role.id)
+                       .where(UserRole.user_id == user.id, Role.status == "ACTIVE").order_by(Role.id)).all()
+    read.role_codes = [row[0] for row in roles]
+    read.role_names = [row[1] for row in roles]
+    return read
+
+
+def registration_roles(db: Session):
+    return db.scalars(select(Role).where(Role.status == "ACTIVE", Role.role_code != "SYS_ADMIN").order_by(Role.id)).all()
+
+
+def register_user(db: Session, data: RegistrationCreate) -> User:
+    role = db.scalar(select(Role).where(Role.role_code == data.role_code, Role.status == "ACTIVE"))
+    if role is None or role.role_code == "SYS_ADMIN":
+        raise BusinessValidationError("请选择有效的非管理员角色")
+    if not data.display_name.strip():
+        raise BusinessValidationError("请填写姓名")
+    if crud.get_user_by_username(db, data.username) or (data.email and db.scalar(select(User.id).where(User.email == data.email))):
+        raise DuplicateResourceError("账号名或邮箱已被使用")
+    user = User(username=data.username, display_name=data.display_name.strip(), password_hash=hash_password(data.password),
+                email=data.email or None, phone=data.phone or None, avatar=_decode_avatar(data.avatar_base64), status="PENDING")
+    try:
+        db.add(user)
+        db.flush()
+        db.add(UserRole(user_id=user.id, role_id=role.id))
+        add_audit_log(db, actor_id=None, action_type="REGISTER_USER", resource_type="system.users",
+                      resource_id=user.id, request_summary=f"申请角色：{role.role_code}", result_status="PENDING")
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise DuplicateResourceError("账号名或邮箱已被使用") from None
+    return user
+
+
+def review_registration(db: Session, user_id: int, data: RegistrationReview, *, actor_id: int) -> UserRead:
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None:
+        raise ResourceNotFoundError(f"用户 {user_id} 不存在")
+    if user.status != "PENDING":
+        raise BusinessValidationError("只能审批待审核的注册申请")
+    codes = crud.get_user_role_codes(db, user_id)
+    if data.decision == "approve" and (not codes or "SYS_ADMIN" in codes):
+        raise BusinessValidationError("注册申请角色已失效，请拒绝申请后重新注册")
+    user.status = "ACTIVE" if data.decision == "approve" else "REJECTED"
+    user.token_version += 1
+    add_audit_log(db, actor_id=actor_id, action_type="REVIEW_REGISTRATION", resource_type="system.users",
+                  resource_id=user.id, request_summary=f"{data.decision}：{data.reason.strip()}", result_status=user.status)
+    db.commit()
+    return user_read(db, user)
+
+
+def list_supplier_binding_options(db: Session):
+    """同一供应商可以绑定多个账号，仅启用供应商可供选择。"""
+
+    return db.scalars(select(Supplier).where(Supplier.status == "ACTIVE").order_by(Supplier.supplier_code)).all()
+
+
+def get_supplier_binding(db: Session, user_id: int) -> SupplierBindingRead | None:
+    """回填当前绑定，即使供应商或绑定已停用也保留展示。"""
+
+    _require_user(db, user_id)
+    row = db.execute(
+        select(SupplierPortalAccount, Supplier)
+        .join(Supplier, Supplier.id == SupplierPortalAccount.supplier_id)
+        .where(SupplierPortalAccount.user_id == user_id)
+    ).first()
+    if row is None:
+        return None
+    account, supplier = row
+    return SupplierBindingRead(
+        supplier_id=supplier.id, supplier_code=supplier.supplier_code,
+        supplier_name=supplier.supplier_name, supplier_status=supplier.status, status=account.status,
+    )
+
+
+def set_supplier_binding(db: Session, user_id: int, supplier_id: int, *, actor_id: int) -> SupplierBindingRead:
+    """串行更新同一用户的唯一绑定，记录变更前后供应商。"""
+
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None:
+        raise ResourceNotFoundError(f"用户 {user_id} 不存在")
+    if user.status != "ACTIVE":
+        raise BusinessValidationError("只能为启用的用户绑定供应商")
+    if set(crud.get_user_role_codes(db, user_id)) != {"SUPPLIER_PORTAL"}:
+        raise BusinessValidationError("只能为供应商门户角色账号绑定供应商")
+    supplier = db.scalar(select(Supplier).where(Supplier.id == supplier_id).with_for_update())
+    if supplier is None:
+        raise ResourceNotFoundError(f"供应商 {supplier_id} 不存在")
+    if supplier.status != "ACTIVE":
+        raise BusinessValidationError("只能绑定启用的供应商")
+    account = db.scalar(select(SupplierPortalAccount).where(SupplierPortalAccount.user_id == user_id))
+    if account is None or account.supplier_id != supplier_id or account.status != "ACTIVE":
+        previous = f"{account.supplier_id}/{account.status}" if account else "未绑定"
+        if account is None:
+            db.add(SupplierPortalAccount(user_id=user_id, supplier_id=supplier_id, status="ACTIVE"))
+        else:
+            account.supplier_id = supplier_id
+            account.status = "ACTIVE"
+        add_audit_log(
+            db, actor_id=actor_id, action_type="BIND_SUPPLIER", resource_type="system.users",
+            resource_id=user_id, request_summary=f"供应商绑定：{previous} -> {supplier_id}/ACTIVE",
+            result_status="SUCCESS",
+        )
+    db.commit()
+    return get_supplier_binding(db, user_id)
 
 
 def ensure_active_system_admin_remains(db: Session, excluded_user_ids: set[int]) -> None:
@@ -113,6 +240,8 @@ def update_user(
 
     user = _require_user(db, user_id)
     values = data.model_dump(exclude_unset=True, exclude={"password", "role_ids"})
+    if user.status in {"PENDING", "REJECTED"}:
+        raise BusinessValidationError("注册申请只能通过专用审批操作处理")
     current_role_codes = set(crud.get_user_role_codes(db, user_id))
     if actor_id == user_id and values.get("status", user.status) != "ACTIVE":
         raise BusinessValidationError("不能停用当前登录账号")
@@ -137,6 +266,10 @@ def update_user(
     _require_department(db, data.department_id)
     if data.role_ids is not None:
         crud.replace_user_roles(db, user.id, data.role_ids)
+        if next_role_codes != {"SUPPLIER_PORTAL"}:
+            account = db.scalar(select(SupplierPortalAccount).where(SupplierPortalAccount.user_id == user.id))
+            if account is not None:
+                account.status = "INACTIVE"
     return crud.update_entity(db, user, values)
 
 
@@ -144,6 +277,8 @@ def delete_user(db: Session, user_id: int, *, actor_id: int | None = None) -> Us
     """软删除用户并保留历史操作记录。"""
 
     user = _require_user(db, user_id)
+    if user.status in {"PENDING", "REJECTED"}:
+        raise BusinessValidationError("注册申请只能通过专用审批操作处理")
     if actor_id == user_id:
         raise BusinessValidationError("不能停用当前登录账号")
     if user.status == "ACTIVE" and "SYS_ADMIN" in crud.get_user_role_codes(db, user_id):
@@ -371,6 +506,9 @@ def login(db: Session, data: LoginRequest, client_ip: str = "unknown") -> tuple[
         and user.status == "ACTIVE"
         and password_matches
     )
+    if user is not None and password_matches and user.status in {"PENDING", "REJECTED"}:
+        db.commit()
+        raise AuthenticationError("注册申请待管理员审批" if user.status == "PENDING" else "注册申请已被拒绝，请联系管理员")
     if not password_valid:
         lock_triggered = False
         for key, row in attempts.items():

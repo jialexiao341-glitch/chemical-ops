@@ -56,6 +56,24 @@ export async function loginApi(data: AuthApi.LoginParams) {
   return requestClient.post<AuthApi.LoginResult>('/auth/login', data);
 }
 
+export interface RegistrationPayload {
+  avatar_base64?: string;
+  username: string;
+  password: string;
+  display_name: string;
+  role_code: string;
+  email?: string;
+  phone?: string;
+}
+
+export async function getRegistrationRolesApi() {
+  return requestClient.get<{ role_code: string; role_name: string }[]>('/auth/registration-roles');
+}
+
+export async function registerApi(data: RegistrationPayload) {
+  return requestClient.post<{ status: string; username: string }>('/auth/register', data);
+}
+
 /**
  * 查询当前登录用户，包含角色码与权限码。
  *
