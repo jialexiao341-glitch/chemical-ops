@@ -79,6 +79,46 @@ def test_missing_product_is_waiting_and_never_invented(tool_db):
     assert all(not task.evidence for task in batch.tasks)
 
 
+def test_inventory_sums_all_matching_specifications_and_rechecks_history(tool_db):
+    from sqlalchemy import text
+    tool_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '200kg', 1)"))
+    tool_db.execute(text("INSERT INTO inventory_balances VALUES (6, 1, 2, 3, 1, 'AVAILABLE', 40, 10)"))
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
+    task = batch.tasks[0]
+    assert task.status == TaskStatus.SUCCEEDED
+    assert "110 千克" in task.answer and "5 升" in task.answer and "2 个规格" in task.answer
+    assert [call['arguments']['product_id'] for call in task.tool_calls if call['tool']=='inventory.query_available'] == [1, 3]
+    assert multi.history_accessible(tool_db, USER, batch.model_dump(mode='json'))
+    tool_db.execute(text("UPDATE warehouses SET manager_id=8 WHERE id=1"))
+    assert not multi.history_accessible(tool_db, USER, batch.model_dump(mode='json'))
+
+
+def test_similar_names_require_real_chemical_identity(tool_db):
+    from sqlalchemy import text
+    tool_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
+    tool_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
+    tool_db.execute(text("INSERT INTO md_products (id,product_name,status,product_code,unit_id) VALUES (3,'其他测试乙醇衍生品','ACTIVE','P-OTHER',1)"))
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
+    assert batch.tasks[0].status == TaskStatus.WAITING_INPUT
+    assert not any(call['tool']=='inventory.query_available' for call in batch.tasks[0].tool_calls)
+    tool_db.execute(text("INSERT INTO md_chemicals VALUES (1,'ACTIVE')"))
+    tool_db.execute(text("UPDATE md_products SET chemical_id=1 WHERE id IN (1,3)"))
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
+    assert batch.tasks[0].status == TaskStatus.SUCCEEDED
+
+
+def test_inventory_comparison_and_advice_use_actual_totals_without_unit_conversion(tool_db):
+    from sqlalchemy import text
+    tool_db.execute(text("INSERT INTO md_products VALUES (3,'测试甲醇','ACTIVE','P-METH',NULL,NULL,1)"))
+    tool_db.execute(text("INSERT INTO inventory_balances VALUES (6,1,2,3,1,'AVAILABLE',50,0)"))
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task(),
+        product_task('t2', slots={'product_keyword':'测试甲醇'}, question='查询测试甲醇库存')), Settings(_env_file=None)))
+    answer = multi.summarize(batch, '乙醇和甲醇哪个多？需要什么行动？')
+    assert '80 千克；测试甲醇 50 千克' in answer and '按数量从多到少' in answer
+    assert '其他单位' in answer and '安全库存' in answer and '未创建或执行' in answer
+    assert '### 2.' in answer
+
+
 @pytest.mark.parametrize("stream", [False, True])
 def test_api_multiple_query_plans_execute_persist_and_reload(client, db_session, monkeypatch, stream):
     """同步/流式共用批次执行，真实 SQL 保存两份计划，并以单次路由凭据复用。"""
@@ -107,6 +147,12 @@ def test_api_multiple_query_plans_execute_persist_and_reload(client, db_session,
         if stream:
             import json
             payload = next(json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ") and '"batch_result"' in line)
+            events = [frame.split('\ndata: ', 1) for frame in response.text.strip().split('\n\n')]
+            deltas = [json.loads(value)['content'] for event, value in events if event == 'event: delta']
+            assert len(deltas) > 1 and ''.join(deltas) == payload['answer']
+            progress = [json.loads(value) for event, value in events if event == 'event: progress']
+            assert progress and all(set(task) == {'id', 'kind', 'question', 'status'} for snapshot in progress for task in snapshot['tasks'])
+            assert events[-1][0] == 'event: done'
         else:
             payload = response.json()
         batch = payload["batch_result"]

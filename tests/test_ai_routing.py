@@ -64,7 +64,34 @@ def test_model_failure_clarifies(monkeypatch):
     async def unavailable(*args, **kwargs):
         raise TimeoutError()
     monkeypatch.setattr(llm, "chat", unavailable)
-    assert asyncio.run(routing.understand("查乙醇库存")).route == "clarify"
+    result = asyncio.run(routing.understand("查乙醇库存"))
+    assert result.route == "clarify"
+    assert "无需补充" in result.question and "尚未执行" in result.question
+
+
+def test_invalid_six_task_contract_is_regenerated_before_execution(monkeypatch):
+    calls = []
+    async def model(request, settings, **kwargs):
+        calls.append(kwargs['system_prompt'])
+        tasks = [{"id": f"t{i}", "kind": "analytics", "question": f"统计第{i}类单据数量"} for i in range(1, 7)]
+        payload = {"purpose": "query", "tasks": ["analytics"] * (6 if len(calls) == 1 else 1), "sub_tasks": tasks}
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))
+    monkeypatch.setattr(llm, "chat", model)
+    result = asyncio.run(routing.understand("分别统计六类单据数量"))
+    assert result.route == "batch" and len(result.sub_tasks) == 6
+    assert len(calls) == 2 and "错误位置" in calls[1]
+
+
+def test_incomplete_model_response_is_regenerated_once(monkeypatch):
+    calls = []
+    async def model(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise BusinessValidationError("AI 服务返回了无法识别的结果")
+        return SimpleNamespace(message=SimpleNamespace(content='{"purpose":"query","tasks":["analytics"]}'))
+    monkeypatch.setattr(llm, "chat", model)
+    assert asyncio.run(routing.understand("统计采购订单数量")).route == "query"
+    assert len(calls) == 2
 
 
 def test_route_ticket_binds_user_question_conversation_and_signature():

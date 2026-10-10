@@ -56,6 +56,8 @@ ROUTING_PROMPT = """# 角色与任务
 - 单项查询也输出一条 sub_tasks；指代和“第几项”必须在其 question 中还原为明确对象与完整条件，不能只复述“修改第二项”。
 - sub_tasks 每项仅有 id（t1、t2…）、kind、question、slots、depends_on。任务按依赖顺序排列；仅真实依赖前项结果时填写 depends_on。
 - “订单数量和订单金额”拆成两个 analytics 子任务，各自生成计划；“乙醇和甲醇库存”拆成两个 inventory 子任务。
+- tasks 只列去重后的类别，不是子任务清单；六项统计的 tasks=[analytics]，sub_tasks 才包含六项。
+- “哪个多/比较上述结果/针对结果该采取什么行动”属于查询结果的比较与建议，不是新的数据库指标，不另建 analytics 子任务，也不能因此漏掉原有查询。将完整原始问题保留在顶层 question，供结果汇总回答比较与建议；建议不等于执行写操作。
 - 库存与报价共享明确的产品关键词，但分别成为两个子任务。不同币种、单位、指标禁止直接相加。
 - 所有子任务均为只读；含要求写操作的复合请求整体标 unsupported，不得静默漏掉写操作。
 
@@ -127,16 +129,27 @@ async def understand(question: str, context: dict | None = None, settings=None) 
     if normalized in {"你好", "您好", "hello", "hi"}:
         return Understanding(purpose="greeting")
     from app.modules.ai.schema import AIChatRequest, AIChatMessage
-    runtime = (settings or get_settings()).model_copy(update={"llm_temperature": 0, "llm_max_tokens": 3000})
+    runtime = (settings or get_settings()).model_copy(update={"llm_temperature": 0, "llm_max_tokens": 6000})
     payload = {"question": question, "context": context or {}, "today": datetime.now().astimezone().date().isoformat()}
-    try:
-        response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
-                                      runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=ROUTING_PROMPT, interpret_only=True)
-        return Understanding.model_validate_json(response.message.content, strict=True)
-    except Exception as exc:
-        # 失败不能退回宽泛关键词猜测或触发工具。
-        LOGGER.warning("AI 意图理解失败 error_type=%s", type(exc).__name__)
-        return Understanding(purpose="clarify", question="暂时无法可靠理解这次请求，请说明想咨询功能、查询业务数据，还是查看化学品资料。")
+    repair = ""
+    for attempt in range(2):
+        try:
+            response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
+                                          runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=ROUTING_PROMPT + repair, interpret_only=True)
+            return Understanding.model_validate_json(response.message.content, strict=True)
+        except ValidationError as exc:
+            # 只反馈结构错误位置，不把模型原始输出或用户数据写入日志。
+            errors = [{"type": error["type"], "loc": error["loc"]} for error in exc.errors()[:6]]
+            LOGGER.warning("AI 意图结构校验失败 attempt=%s errors=%s", attempt + 1, errors)
+            repair = "\n上次输出未通过结构校验，请从原问题重新理解并修正，不改变用户范围。错误位置：" + json.dumps(errors)
+        except Exception as exc:
+            LOGGER.warning("AI 意图理解服务失败 error_type=%s", type(exc).__name__)
+            # 截断/空响应允许重新生成一次；网络错误已有通信层重试。
+            if attempt == 0 and isinstance(exc, BusinessValidationError) and str(exc) in {"AI 服务返回了无法识别的结果", "AI 服务返回了空答案"}:
+                continue
+            break
+    # 技术失败不能伪装成用户条件不明确，也不能回退关键词猜测执行工具。
+    return Understanding(purpose="clarify", question="本次请求暂未完成识别，尚未执行查询。请稍后重试，无需补充已有的查询条件。")
 
 
 def issue_ticket(decision: Understanding, user_id: int, question: str, conversation_id: int | None) -> str:

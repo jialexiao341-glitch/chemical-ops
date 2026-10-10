@@ -106,6 +106,9 @@ def test_single_query_history_hides_answer_and_sources_after_revocation(tool_db,
 
 def test_waiting_batch_evidence_is_rechecked_after_permission_revocation(tool_db, monkeypatch):
     tool_db.execute(text("INSERT INTO md_products VALUES (3, '测试甲醇', 'ACTIVE', 'P-MET', '分析纯', '20kg', 1)"))
+    # 模糊命中不同化学品且没有共同登记身份，仍应等待消歧。
+    tool_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
+    tool_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
     batch = asyncio.run(multi_intent.execute_batch(tool_db, SimpleNamespace(id=7), decision(
         product_task(slots={"product_keyword": "测试"}), product_task("t2", slots={"product_keyword": "测试"})), Settings(_env_file=None)))
     assert all(task.status == TaskStatus.WAITING_INPUT for task in batch.tasks)
