@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
 from app.core.db import get_db
+from app.core.rate_limit import limit_document
 from app.modules.quality_acceptances import service
 from app.modules.quality_acceptances import report_review
 from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptancePage, QualityAcceptanceRead, QualityAcceptanceResult, QualityCorrectionAction, QualityCorrectionRead, QualityReportFile, QualityReportReview, QualityReportReviewRequest, QualityReportSummary, QualityReviewDecision, QualityReviewHistory, QualityReviewTarget
@@ -141,7 +142,7 @@ def download_report_file(
     return Response(content=content, media_type=value.mime_type, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(value.file_name)}"})
 
 
-@router.post("/{acceptance_id}/report-review", response_model=QualityReportReview, summary="只读核对验收报告")
+@router.post("/{acceptance_id}/report-review", response_model=QualityReportReview, summary="只读核对验收报告", dependencies=[Depends(limit_document)])
 async def review_report(
     acceptance_id: int,
     data: QualityReportReviewRequest,

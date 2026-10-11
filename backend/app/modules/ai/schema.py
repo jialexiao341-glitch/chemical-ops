@@ -122,6 +122,26 @@ class AIMessagePage(BaseModel):
     total: int
 
 
+class AIMessageSnapshot(BaseModel):
+    """历史缓存的原始消息快照；展示前仍需重验引用和权限。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    conversation_id: int
+    message_role: Literal["USER", "ASSISTANT", "SYSTEM", "TOOL"]
+    content: str
+    citations: list | None
+    created_at: datetime
+
+
+class AIHistorySnapshot(BaseModel):
+    """持久化消息分页的短期缓存，不保存已过滤的授权结论。"""
+
+    items: list[AIMessageSnapshot]
+    total: int
+
+
 class BriefingRequest(BaseModel):
     """生成运营晨报时提交的字段。"""
 

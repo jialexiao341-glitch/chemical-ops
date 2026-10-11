@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
 from app.core.db import get_db
+from app.core.rate_limit import limit_document
 from app.modules.jobs import service
 from app.modules.jobs.schema import SchedulerJobRunRead, TechnicalDocumentPipelineCreate, TechnicalDocumentPreviewRead, TechnicalDocumentRead, TechnicalDocumentSourceRead
 from app.modules.jobs import technical_documents
@@ -86,7 +87,7 @@ def technical_document_source_file(
     return Response(content=content, media_type=media_type, headers=headers)
 
 
-@router.post("/technical-documents/fetch", response_model=SchedulerJobRunRead, summary="仅抓取并保存 TDS/MSDS 至 MinIO")
+@router.post("/technical-documents/fetch", response_model=SchedulerJobRunRead, summary="仅抓取并保存 TDS/MSDS 至 MinIO", dependencies=[Depends(limit_document)])
 def start_technical_document_fetch(
     data: TechnicalDocumentPipelineCreate,
     background_tasks: BackgroundTasks,
@@ -102,7 +103,7 @@ def start_technical_document_fetch(
     return technical_documents.schedule_pipeline(db, user, data, background_tasks, "fetch")
 
 
-@router.post("/technical-documents/ingest", response_model=SchedulerJobRunRead, summary="解析 MinIO 资料并写入结构化及向量知识库")
+@router.post("/technical-documents/ingest", response_model=SchedulerJobRunRead, summary="解析 MinIO 资料并写入结构化及向量知识库", dependencies=[Depends(limit_document)])
 def start_technical_document_ingest(
     data: TechnicalDocumentPipelineCreate,
     background_tasks: BackgroundTasks,

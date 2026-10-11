@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import case, exists, func, select
 from sqlalchemy.orm import Session, aliased
 
 from app.core.config import get_settings
+from app.core.cache import cached
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
 from app.modules.ai.schema import (
     InventoryInput,
@@ -40,6 +41,12 @@ from app.modules.system.model import User
 
 
 def search_products(db: Session, user: User, arguments: ProductSearchInput) -> ProductSearchResult:
+    """缓存名称、编码和 CAS 对应的主数据候选，执行入口仍先做权限校验。"""
+    return cached(db, "product_catalog", ("search", arguments.keyword, arguments.limit),
+                  TypeAdapter(ProductSearchResult), lambda: _search_products(db, arguments))
+
+
+def _search_products(db: Session, arguments: ProductSearchInput) -> ProductSearchResult:
     """按名称或编码查启用产品，返回规格候选；多个命中由 Runtime 追问选择。
 
     统一执行入口要求产品读取权限；关键词使用绑定参数并转义 LIKE 通配符。

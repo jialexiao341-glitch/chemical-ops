@@ -2,9 +2,12 @@
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
+from pydantic import TypeAdapter
 
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
+from app.core.cache import cached
+from app.core.config import get_settings
 from app.modules.products import crud, service
 from app.modules.products.schema import ProductCreate, ProductPage, ProductRead, ProductUpdate, UnitRead
 from app.modules.quality_acceptances import standards
@@ -56,7 +59,9 @@ def list_units(db: Session = Depends(get_db), _: User = Depends(require_permissi
 def get_product(product_id: int, db: Session = Depends(get_db), _: object = Depends(require_permission("master.products.read"))) -> ProductRead:
     """根据产品 ID 查询详情。"""
 
-    return service.get_product(db, product_id)
+    return cached(db, "product_catalog", ("detail", product_id), TypeAdapter(ProductRead),
+                  lambda: ProductRead.model_validate(service.get_product(db, product_id)),
+                  ttl=get_settings().redis_cache_ttl_seconds)
 
 
 @router.get("/{product_id}/quality-standards", response_model=list[QualityStandardRead], summary="查询产品检测标准版本")

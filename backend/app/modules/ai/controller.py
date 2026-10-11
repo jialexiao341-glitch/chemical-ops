@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.modules.ai import conversation_store
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
+from app.core.rate_limit import limit_ai
 from app.core.observability import get_request_id, metrics, observe_duration
 from app.modules.ai.schema import (
     AIChatRequest,
@@ -53,7 +54,7 @@ from app.modules.system.model import User
 router = APIRouter(
     prefix="/ai",
     tags=["AI 助手"],
-    dependencies=[Depends(require_permission("ai.workspace.read"))],
+    dependencies=[Depends(require_permission("ai.workspace.read")), Depends(limit_ai)],
 )
 LOGGER = logging.getLogger('chemicalops.ai.http')
 

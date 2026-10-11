@@ -1,0 +1,30 @@
+{
+  "environment": {
+    "python": "3.11.0",
+    "database": "SQLite in-memory",
+    "redis_version": "7.4.11",
+    "transport": "localhost Docker"
+  },
+  "sample": {
+    "products": 5001,
+    "query": "CAS exact match",
+    "threads": 1,
+    "cache_hits": 99,
+    "cache_misses": 1,
+    "hit_ratio": 0.99
+  },
+  "latency": {
+    "without_cache": {
+      "requests": 100,
+      "sql_select_count": 300,
+      "mean_ms": 2.2009,
+      "p95_ms": 3.0252
+    },
+    "cache_aside": {
+      "requests": 100,
+      "sql_select_count": 3,
+      "mean_ms": 1.3628,
+      "p95_ms": 2.0391
+    }
+  }
+}

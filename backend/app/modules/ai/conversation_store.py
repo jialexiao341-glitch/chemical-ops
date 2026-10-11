@@ -10,10 +10,13 @@ from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, inspect, select
 from sqlalchemy.orm import Session
+from pydantic import TypeAdapter
 
 from app.core.errors import BusinessValidationError
+from app.core.cache import cached
+from app.core.config import get_settings
 from app.modules.ai.model import AIConversation, AIConversationState, AIMessage, AIQueryLog
-from app.modules.ai.schema import AIChatRequest, AIQueryTrace
+from app.modules.ai.schema import AIChatRequest, AIQueryTrace, AIHistorySnapshot, AIMessageSnapshot
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
 
@@ -160,14 +163,21 @@ def update_conversation(db: Session, user: User, conversation_id: int, *, title:
     return conversation
 
 
-def list_messages(db: Session, user: User, conversation_id: int, *, limit: int = 100) -> tuple[list[AIMessage], int]:
+def list_messages(db: Session, user: User, conversation_id: int, *, limit: int = 100) -> tuple[list[AIMessageSnapshot], int]:
     """读取当前用户会话消息。"""
 
     get_owned_conversation(db, user, conversation_id)
+    snapshot = cached(db, "ai_history", (user.id, conversation_id, limit), TypeAdapter(AIHistorySnapshot),
+                      lambda: _load_messages(db, conversation_id, limit),
+                      ttl=get_settings().redis_session_ttl_seconds)
+    return snapshot.items, snapshot.total
+
+
+def _load_messages(db: Session, conversation_id: int, limit: int) -> AIHistorySnapshot:
     condition = AIMessage.conversation_id == conversation_id
     total = db.scalar(select(func.count(AIMessage.id)).where(condition)) or 0
     items = list(db.scalars(select(AIMessage).where(condition).order_by(AIMessage.created_at.asc(), AIMessage.id.asc()).limit(limit)).all())
-    return items, total
+    return AIHistorySnapshot(items=[AIMessageSnapshot.model_validate(item) for item in items], total=total)
 
 
 def ensure_conversation(db: Session, user: User, data: AIChatRequest) -> AIConversation:

@@ -76,6 +76,25 @@ class Settings(BaseSettings):
     business_alerts_scheduler_enabled: bool = False
     idempotency_required: bool = False
 
+    redis_enabled: bool = False
+    redis_url: str = "redis://127.0.0.1:6380/0"
+    redis_key_prefix: str = "chemicalops"
+    redis_timeout_seconds: float = Field(default=0.3, gt=0, le=5)
+    redis_cache_ttl_seconds: int = Field(default=300, ge=1, le=3600)
+    redis_session_ttl_seconds: int = Field(default=60, ge=1, le=600)
+    redis_rate_limit_enabled: bool = False
+    ai_rate_limit_requests: int = Field(default=30, ge=1)
+    document_rate_limit_requests: int = Field(default=5, ge=1)
+    rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
+
+    @model_validator(mode="after")
+    def validate_redis(self):
+        if self.redis_rate_limit_enabled and not self.redis_enabled:
+            raise ValueError("启用 Redis 限流时必须设置 REDIS_ENABLED=true")
+        if not self.redis_key_prefix.strip():
+            raise ValueError("REDIS_KEY_PREFIX 不能为空")
+        return self
+
     technical_document_execution_mode: Literal["in_process", "database"] = "database"
     agent_execution_mode: Literal["in_process", "database"] = "database"
     task_poll_interval_seconds: float = Field(default=1.0, ge=0.1, le=60)
