@@ -10,22 +10,32 @@
 | Redis | `127.0.0.1:6380` | 可重建缓存，不启用 RDB/AOF |
 | minio-init | 无宿主端口 | 创建三个配置的私有桶，完成后退出 |
 
-表中的卷名是 Compose 逻辑名，实际名称由 `chemicalops` 项目名前缀生成。这里不接管其他项目的卷。
+表中的卷名是 Compose 逻辑名，默认实际名称由 `chemicalops` 项目名前缀生成。本机迁移使用 `compose.existing-data.yaml` 复用原 MinIO 卷。
 
 MySQL 继续由项目 `.env` 中的连接配置指向现有本机实例。异步任务使用 MySQL 持久队列，RabbitMQ 已退役，故不纳入本配置。其他项目的 Elasticsearch、Neo4j 等容器也不在管理范围内。
 
-## 本次整理与现有实例
+## 本机容器分组与数据
 
-本次只整理文件并校验配置，没有启动、停止、重建或迁移容器，也没有修改项目 `.env`。
+本机 Redis、MinIO、Qdrant 统一由 `chemicalops` Compose 项目管理，在 Docker Desktop 中显示为同一可展开分组。前后端与 MySQL 继续采用现有本机启动方式。
 
-| 当前实例 | 当前归属及数据状态 | 后续迁移前需处理 |
+| 当前实例 | 数据与网络 | 回退保留 |
 | --- | --- | --- |
-| `chemicalops-redis-1` | 已在 `chemicalops` 项目中，原入口为本目录的 Redis 文件 | 缓存可重建；实际切换时核对端口 |
-| `docker-minio-1` | RAGFlow 的 `docker` 项目，卷为 `docker_minio_data` | 核对是否被其他项目共用；备份并迁移所需桶与对象 |
-| `chemicalops-qdrant` | 独立容器，未挂载数据卷 | 先生成集合快照并导出，再恢复到新持久卷；不能直接删除旧容器 |
-| `chemicalops-messaging-rabbitmq-1` | 已停止的历史实例 | 不自动启动或清理，保留原数据 |
+| `chemicalops-redis-1` | 保留原端口与缓存配置 | 缓存可重建 |
+| `chemicalops-minio-1` | 复用 `docker_minio_data`；保留 `docker_ragflow` 网络及 `minio`、`docker-minio-1` 别名 | `chemicalops-minio-rollback` 停止保留 |
+| `chemicalops-qdrant-1` | 原数据复制到持久卷 `chemicalops_chemicalops_qdrant_data` | `chemicalops-qdrant-rollback` 停止保留原容器数据 |
+| `chemicalops-messaging-rabbitmq-1` | 已停止的历史实例 | 不启动或清理 |
 
-现有 MinIO、Qdrant 正占用上表端口，不能直接启动一套新实例替代它们。新配置使用独立命名卷，不会自动包含旧实例中的文件或向量。实际切换需另行安排备份、恢复和端口交接。
+迁移前停止写入并备份了两个服务的完整数据目录，备份位于 `storage/container-backups/`（不提交 Git）。旧容器仅供回退，不应与新服务同时启动；旧 MinIO 与新 MinIO 共用同一数据卷。不要删除数据卷或使用 `down -v`。
+
+**本机后续管理必须同时指定两个配置文件**，否则 MinIO 会使用默认的新卷且缺少 RAGFlow 网络：
+
+```powershell
+docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.existing-data.yaml up -d redis qdrant minio
+docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.existing-data.yaml ps
+docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.existing-data.yaml stop
+```
+
+`compose.existing-data.yaml` 依赖本机已有的 `docker_minio_data` 卷和 `docker_ragflow` 网络，其他环境使用默认统一入口即可。不要重新从 RAGFlow 原 Compose 文件启动旧 MinIO 服务，以免争用端口及数据卷。
 
 ## 配置校验
 
@@ -47,7 +57,7 @@ CHEMICALOPS_REDIS_PORT=6380
 
 后端对应 `MINIO_ENDPOINT`、`MINIO_PUBLIC_ENDPOINT`、`QDRANT_HOST` / `QDRANT_PORT` 和 `REDIS_URL`。只调整上述容器端口变量不会自动修改后端连接配置。
 
-## 统一管理入口
+## 新环境统一管理入口
 
 完成旧实例的数据迁移与端口交接后，或在这些端口尚未被占用的新环境中，使用：
 

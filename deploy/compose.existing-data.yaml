@@ -1,0 +1,20 @@
+# 本机迁移：保留原 MinIO 数据卷及 RAGFlow 内网访问。
+# 与 compose.yaml 一起使用，其他环境只需 compose.yaml。
+services:
+  minio:
+    networks:
+      default:
+      ragflow:
+        aliases:
+          - minio
+          - docker-minio-1
+
+volumes:
+  chemicalops_minio_data:
+    external: true
+    name: docker_minio_data
+
+networks:
+  ragflow:
+    external: true
+    name: docker_ragflow
