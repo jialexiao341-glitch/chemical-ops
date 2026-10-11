@@ -177,9 +177,6 @@ watch(
     <Cancel @success="gridApi.query()" />
     <Edit @success="gridApi.query()" />
     <Grid table-title="采购订单">
-      <template #toolbar-tools>
-        <Button @click="gridApi.query()">刷新</Button>
-      </template>
       <template #po_no="{ row }">
         <Button
           size="small"

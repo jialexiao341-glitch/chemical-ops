@@ -24,6 +24,7 @@ import { $t } from '#/locales';
 import BatchActions from '#/components/batch/batch-actions.vue';
 
 import { useVbenForm } from './form';
+import { fitBusinessColumns } from './grid-columns';
 
 const operationMenuOpenStates = new WeakMap<object, Map<string, Ref<boolean>>>();
 
@@ -493,6 +494,9 @@ export const useVbenVxeGrid = <
 ) => {
   const options = rest[0] as any;
   options.class = ['chemicalops-grid', options.class];
+  if (Array.isArray(options.gridOptions?.columns) && options.gridOptions.fit !== false) {
+    options.gridOptions.columns = fitBusinessColumns(options.gridOptions.columns);
+  }
   if (options.formOptions) {
     const formOptions = options.formOptions;
     options.formOptions = {
@@ -513,7 +517,7 @@ export const useVbenVxeGrid = <
         ...field,
         formItemClass: [
           field.formItemClass,
-          field.component === 'Select' ? 'chemicalops-filter-choice' : '',
+          ['Select', 'ApiSelect', 'TreeSelect', 'ApiTreeSelect'].includes(field.component) ? 'chemicalops-filter-choice' : '',
           field.component === 'RangePicker' ? 'chemicalops-filter-range' : '',
         ].filter(Boolean).join(' '),
       })),

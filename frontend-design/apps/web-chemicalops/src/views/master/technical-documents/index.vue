@@ -180,8 +180,8 @@ onMounted(() => {
     <PreviewDrawer />
     <div class="flex h-full flex-col gap-3">
       <section class="rounded bg-card p-4">
-        <div class="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2 2xl:flex-nowrap">
-          <div class="flex min-w-0 shrink-0 items-center gap-2">
+        <div class="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
             <span class="shrink-0 font-medium">拉取新资料</span>
             <Select
               v-model:value="selectedChemicalId"
@@ -204,7 +204,7 @@ onMounted(() => {
               placeholder="全部类型"
             />
           </div>
-          <div class="flex shrink-0 items-center gap-2">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
             <div class="flex items-center gap-2">
               <span class="shrink-0">处理类型</span>
               <Select
@@ -220,7 +220,7 @@ onMounted(() => {
               <Button v-if="canWriteTechnicalDocuments" type="primary" :loading="busy" @click="startIngest">写入知识库</Button>
             </div>
           </div>
-          <div class="flex shrink-0 items-center gap-2">
+          <div class="ml-auto flex shrink-0 items-center gap-2">
             <Button @click="resetSearch">重置</Button>
             <Button type="primary" @click="searchDocuments">搜索</Button>
           </div>

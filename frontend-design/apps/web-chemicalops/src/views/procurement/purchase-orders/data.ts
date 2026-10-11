@@ -45,7 +45,7 @@ export function useColumns(
   return [
     {
       field: 'po_no',
-      minWidth: 180,
+      minWidth: 220,
       slots: { default: 'po_no' },
       title: '订单编号',
     },
@@ -53,7 +53,7 @@ export function useColumns(
       field: 'supplier_id',
       formatter: ({ row }: { row: PurchaseOrderApi.PurchaseOrder }) =>
         resolveSupplier(row.supplier_id),
-      minWidth: 180,
+      minWidth: 220,
       title: '供应商',
     },
     {

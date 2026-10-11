@@ -35,7 +35,7 @@ export function useColumns(
   onActionClick: OnActionClickFn<RfqApi.Rfq>,
 ): VxeTableGridColumns {
   return [
-    { field: 'rfq_no', minWidth: 180, title: '询价单号' },
+    { field: 'rfq_no', minWidth: 220, title: '询价单号' },
     { field: 'source_request_id', title: '来源申请', width: 110 },
     {
       field: 'quote_deadline',
