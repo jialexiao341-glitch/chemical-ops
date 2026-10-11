@@ -64,7 +64,7 @@ export namespace AgentApi {
         observed_at: string;
         scope: string;
         warnings: string[];
-        totals: Array<{ available_quantity: string; unit_name: string }>;
+        totals: Array<{ available_quantity: string; unit_name: string; unit_id?: number }>;
         rows: InventoryRow[];
       })
     | (ResultBase & {
@@ -91,6 +91,7 @@ export namespace AgentApi {
     evidence_steps?: number[];
   }
   export interface Task {
+    can_select_all_products?: boolean;
     id: string;
     conversation_id?: null | number;
     status: 'CANCELLED' | 'FAILED' | 'RUNNING' | 'SUCCEEDED' | 'WAITING_INPUT';
@@ -101,6 +102,7 @@ export namespace AgentApi {
     trace: Step[];
   }
   export interface Continue {
+    all_products?: boolean;
     route_token?: string;
     question: string;
     revision: number;

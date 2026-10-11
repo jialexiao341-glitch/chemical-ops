@@ -44,6 +44,7 @@ ROUTING_PROMPT = """# 角色与任务
 - purpose: capability（能做什么）、guidance（如何操作）、query（请求真实数据）、greeting、unsupported、clarify。
 - dialogue_action: new、continue、modify、switch、cancel。否定的任务记入 excluded_tasks，并从 tasks 删除。
 - tasks: inventory（指定产品可用库存）、quotes（指定产品报价比较）、analytics（统计/流水/预警/订单等业务查询）、document（化学品性质/安全资料）。
+- 化学品的特性、物理化学性质、用途、危害等事实问答统一走 document 检索，不得作为 guidance 或闲聊直接凭模型记忆回答；例如“甲醇有什么特性吗？”也是 document。无资料时明确依据不足，不改走无来源的自由回答。
 - CAS、产品名和单号是对象参数，不直接决定任务类别。问候不覆盖同一句实际请求。
 - “怎么用/支持哪些条件/不足时怎么处理”通常是咨询或指导，不触发真实库存查询。
 - query 必须有 tasks；intent 不清楚时 purpose=clarify 并给出一个具体 question。

@@ -338,7 +338,7 @@ async def retrieve_sections(
 
         metadata = db.execute(
             select(
-                AiDocumentSection.id,
+                AiDocumentSection,
                 AiDocument.id,
                 AiDocument.title,
                 AiDocument.name_zh,
@@ -349,15 +349,21 @@ async def retrieve_sections(
             .join(AiDocument, AiDocument.id == AiDocumentSection.document_id)
             .where(AiDocumentSection.id.in_(merged))
         ).all()
-        for section_id, document_id, document_title, name_zh, source_url, parse_status, updated_at in metadata:
-            hit = merged.get(section_id)
-            if hit:
+        verified = set()
+        for section, document_id, document_title, name_zh, source_url, parse_status, updated_at in metadata:
+            hit = merged.get(section.id)
+            if hit and parse_status == 'PARSED' and section.content.strip() and (not targets or section.cas_no in targets):
+                verified.add(section.id)
+                hit.content = section.content
+                hit.cas_no, hit.doc_type = section.cas_no, section.doc_type
+                hit.section_no, hit.section_key, hit.title = section.section_no, section.section_key, section.title
                 hit.document_id = document_id
                 hit.document_title = document_title
                 hit.source_url = source_url
-                hit.name_zh = hit.name_zh or name_zh
+                hit.name_zh = name_zh
                 hit.parse_status = parse_status
                 hit.updated_at = updated_at.isoformat() if updated_at else None
+        merged = {key: hit for key, hit in merged.items() if key in verified}
 
     ordered = sorted(merged.values(), key=lambda item: -(item.score + _field_relevance(question, item.doc_type, item.section_no, item.content)))
     selected = ordered[:top_k]
@@ -377,7 +383,7 @@ def build_doc_context(hits: list[DocSectionHit], *, max_chars: int = CONTEXT_MAX
 
     header = (
         "以下是来自 ChemicalOps 化学品知识库的已校验文档摘录（MSDS/TDS/物性页）。"
-        "只能依据摘录回答，禁止编造摘录中没有的数据；回答末尾用括号注明来源"
+        "只能依据摘录回答，禁止编造摘录中没有的数据；每个事实段落后用括号注明对应来源"
         "（物质名 + 章节，如：来源：乙醇 MSDS SECTION 9）。"
         "如果摘录不足以回答，请说明本次提供的摘录不足，不能据此断言整个知识库未收录。\n"
     )
@@ -387,7 +393,8 @@ def build_doc_context(hits: list[DocSectionHit], *, max_chars: int = CONTEXT_MAX
     for hit in hits:
         label = hit.name_zh or hit.title or hit.cas_no
         section_no = f" SECTION {hit.section_no}" if hit.section_no is not None else ""
-        block = f"### {label}（{hit.cas_no} · {hit.doc_type}{section_no} · {hit.section_key}）\n{hit.content[:SECTION_CONTENT_MAX_CHARS]}"
+        excerpt = hit.content[:SECTION_CONTENT_MAX_CHARS]
+        block = f"### {label}（{hit.cas_no} · {hit.doc_type}{section_no} · {hit.section_key}）\n{excerpt}"
         if used + len(block) > max_chars and parts:
             break
         parts.append(block)
@@ -395,6 +402,7 @@ def build_doc_context(hits: list[DocSectionHit], *, max_chars: int = CONTEXT_MAX
         citations.append(
             {
                 "type": "doc_kb",
+                "context_included": True,
                 "document_id": hit.document_id,
                 "section_id": hit.id,
                 "document_title": hit.document_title,
@@ -408,7 +416,7 @@ def build_doc_context(hits: list[DocSectionHit], *, max_chars: int = CONTEXT_MAX
                 "score": round(hit.score, 4),
                 "parse_status": hit.parse_status,
                 "updated_at": hit.updated_at,
-                "content": hit.content[:SECTION_CONTENT_MAX_CHARS],
+                "content": excerpt,
             }
         )
     return header + "\n\n".join(parts), citations

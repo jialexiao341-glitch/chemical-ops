@@ -299,6 +299,11 @@ def _hit_payload(section_id, cas="64-17-5", content="Flash point13C"):
 
 
 def test_retrieve_merges_vector_and_bridge(monkeypatch: pytest.MonkeyPatch, db_session):
+    from sqlalchemy import select
+    from app.modules.doc_kb.model import AiDocument, AiDocumentSection
+    section_id = db_session.scalar(select(AiDocumentSection.id).join(AiDocument)
+        .where(AiDocument.parse_status == 'PARSED', AiDocumentSection.cas_no == '64-17-5').limit(1))
+    assert section_id is not None
     async def fake_embed(_texts, _settings=None):
         return [[0.1, 0.2]]
 
@@ -310,7 +315,7 @@ def test_retrieve_merges_vector_and_bridge(monkeypatch: pytest.MonkeyPatch, db_s
     monkeypatch.setattr(
         vector_store,
         "search_sections",
-        lambda *_args, **_kwargs: [{"id": 1, "score": 0.95, "payload": {"cas_no": "64-17-5", "content": "vector content"}}],
+        lambda *_args, **_kwargs: [{"id": section_id, "score": 0.95, "payload": {"cas_no": "64-17-5", "content": "vector content"}}],
     )
 
     hits = asyncio.run(retrieve_sections(db_session, "乙醇的闪点", top_k=10))
@@ -340,6 +345,11 @@ def test_retrieve_falls_back_to_bridge_when_embed_fails(monkeypatch: pytest.Monk
 
 
 def test_retrieve_vector_only_when_no_target(db_session, monkeypatch: pytest.MonkeyPatch):
+    from sqlalchemy import select
+    from app.modules.doc_kb.model import AiDocument, AiDocumentSection
+    section = db_session.scalar(select(AiDocumentSection).join(AiDocument)
+        .where(AiDocument.parse_status == 'PARSED').limit(1))
+    assert section is not None
     async def fake_embed(_texts, _settings=None):
         return [[0.5]]
 
@@ -348,14 +358,15 @@ def test_retrieve_vector_only_when_no_target(db_session, monkeypatch: pytest.Mon
     monkeypatch.setattr(
         retrieve_module.vector_store,
         "search_sections",
-        lambda *_args, **_kwargs: [_hit_payload(99, cas="75-05-8", content="Acetonitrile properties")],
+        lambda *_args, **_kwargs: [_hit_payload(section.id, cas="75-05-8", content="Acetonitrile properties")],
     )
 
     hits = asyncio.run(retrieve_sections(db_session, "flash point of some unknown solvent"))
 
     assert len(hits) == 1
     assert hits[0].source == "vector"
-    assert hits[0].cas_no == "75-05-8"
+    assert hits[0].cas_no == section.cas_no
+    assert hits[0].content == section.content
 
 
 def test_property_boilerplate_does_not_displace_structured_fields(db_session, monkeypatch):

@@ -1,12 +1,19 @@
 import type { AgentApi } from '../../../api/ai/agent';
 import { describe, expect, it } from 'vitest';
-import { acceptTask, inventoryProductLabel, inventorySource, waitingCandidates, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS } from './task-view';
+import { acceptTask, inventoryProductLabel, inventorySource, inventorySummary, waitingCandidates, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS } from './task-view';
 
 const waiting: AgentApi.Task = { id: 'a', revision: 2, status: 'WAITING_INPUT', reply: '', error_code: null, messages: [], trace: [
   { step: 1, action: 'call_tool', status: 'SUCCEEDED', result: { tool: 'catalog.search_products', total_rows: 2, truncated: false, rows: [], sources: [] } },
 ] };
 
 describe('采购任务状态与来源', () => {
+  it('全选结论只汇总完整 totals，按单位分别合计并保留小数精度', () => {
+    const task = { ...waiting, status: 'SUCCEEDED', trace: [
+      { step: 1, status: 'SUCCEEDED', result: { tool: 'inventory.query_available', product_id: 1, totals: [{ unit_id: 1, unit_name: '升', available_quantity: '1954.000000' }, { unit_id: 2, unit_name: '千克', available_quantity: '0.1' }] } },
+      { step: 2, status: 'SUCCEEDED', result: { tool: 'inventory.query_available', product_id: 2, totals: [{ unit_id: 1, unit_name: '升', available_quantity: '216.250000' }, { unit_id: 2, unit_name: '千克', available_quantity: '0.2' }] } },
+    ] } as AgentApi.Task;
+    expect(inventorySummary(task)).toBe('已汇总 2 个规格，当前授权仓库内账面可用库存合计：2,170.25 升、0.3 千克。');
+  });
   it('五种任务终态和过程态都提供明确的界面文案', () => {
     expect(TASK_LABELS).toEqual({
       RUNNING: '正在查询',

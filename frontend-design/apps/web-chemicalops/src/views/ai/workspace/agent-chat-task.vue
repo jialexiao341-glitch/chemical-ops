@@ -5,15 +5,16 @@ import { computed, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { Button } from 'antdv-next';
 import { formatDateTime } from '#/utils/format';
-import { agentDisplayNumber, inventoryProductLabel, primaryTaskResults } from './task-view';
+import { agentDisplayNumber, inventoryProductLabel, inventorySummary, primaryTaskResults } from './task-view';
 import AgentSourcePopover from './agent-source-popover.vue';
 import { inventorySource, TASK_ERROR_HELP, TASK_LABELS, TOOL_LABELS, waitingCandidates } from './task-view';
 const props = withDefaults(defineProps<{ task: AgentApi.Task; busy: boolean; showActions?: boolean; progress?: AiApi.BatchProgress; compactDetails?: boolean }>(), { showActions: true, compactDetails: false });
-const emit = defineEmits<{ continue: [data: AgentApi.Continue]; cancel: []; refresh: [] }>();
+const emit = defineEmits<{ continue: [data: AgentApi.Continue] }>();
 const { hasAccessByCodes } = useAccess();
-const selection = ref<number>();
+const selection = ref<number | 'all'>();
 const candidates = computed(() => waitingCandidates(props.task));
 const results = computed(() => primaryTaskResults(props.task));
+const showInventorySummary = computed(() => !props.compactDetails && props.task.status === 'SUCCEEDED' && results.value.length > 1 && results.value.every((entry) => entry.result?.tool === 'inventory.query_available'));
 const inventoryContext = computed(() => {
   const inventory = results.value.flatMap((entry) => entry.result?.tool === 'inventory.query_available' ? [entry.result] : []);
   return {
@@ -26,6 +27,10 @@ watch(() => props.task.revision, () => { selection.value = undefined; });
 function choose() {
   const data: AgentApi.Continue = { question: '使用本次选中的候选继续原查询目标', revision: props.task.revision };
   if (candidates.value?.tool === 'catalog.search_products') {
+    if (selection.value === 'all') {
+      emit('continue', { ...data, all_products: true, question: '全选本次产品候选，汇总查询全部规格的库存' });
+      return;
+    }
     const row = candidates.value.rows.find((item) => item.product_id === selection.value);
     if (!row) return;
     data.product_id = row.product_id;
@@ -53,20 +58,26 @@ function visibleWarnings(result: AgentApi.Result) {
         <span>{{ TASK_LABELS[task.status] }}</span>
         <span class="agent-readonly">只读查询</span>
       </div>
-      <div v-if="showActions !== false" class="agent-actions">
-        <Button v-if="!progress" type="text" size="small" :disabled="busy" @click="emit('refresh')">刷新任务</Button>
-        <Button v-if="['RUNNING', 'WAITING_INPUT'].includes(task.status)" type="text" size="small" :disabled="busy" @click="emit('cancel')">取消</Button>
-      </div>
     </header>
 
+    <template v-if="showInventorySummary">
+      <p class="agent-reply"><strong>{{ inventorySummary(task) }}</strong><AgentSourcePopover v-for="entry in results" :key="entry.step" :result="entry.result!" /></p>
+      <p class="agent-muted">查询范围：{{ inventoryContext.scopes.join('；') }}。不同单位分别合计，未按包装或纯物质含量换算。</p>
+      <p v-if="inventoryContext.warnings.length" class="agent-muted">{{ inventoryContext.warnings.join(' ') }}</p>
+      <details class="mt-3 border-t border-border/50 pt-2">
+        <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">规格明细与数据来源（{{ results.length }} 个规格）</summary>
+        <AgentChatTask :task="task" :busy="false" :show-actions="false" compact-details />
+      </details>
+    </template>
+    <template v-else>
     <template v-if="progress">
       <p class="agent-reply" aria-live="polite">已完成 {{ progress.completed }}/{{ progress.total }} 项查询</p>
       <ol class="agent-prose"><li v-for="entry in progress.tasks" :key="entry.id">{{ entry.question }} · {{ AI_TASK_STATUS_LABELS[entry.status] }}</li></ol>
-      <p class="agent-muted">取消会停止未完成项，已完成结果保留。</p>
+      <p class="agent-muted">查询进度会自动更新，已完成结果会保留。</p>
     </template>
     <template v-else>
       <p v-if="task.status !== 'SUCCEEDED' || !results.length" class="agent-reply">{{ task.status === 'RUNNING' ? '正在核对产品和业务数据…' : task.reply }}</p>
-      <p v-if="task.status === 'RUNNING'" class="agent-muted">查询会自动更新；若服务中断，可取消后重新查询。</p>
+      <p v-if="task.status === 'RUNNING'" class="agent-muted">查询结果会自动更新。</p>
     </template>
     <p v-if="task.error_code" class="agent-error">{{ TASK_ERROR_HELP[task.error_code] || '请核对条件、权限及模型服务后重新查询。' }}（{{ task.error_code }}）</p>
 
@@ -75,9 +86,13 @@ function visibleWarnings(result: AgentApi.Result) {
         <legend>{{ candidates.tool === 'catalog.search_products' ? '选择需要查询的规格' : '选择需要比较的询价' }}</legend>
         <div class="agent-choices">
           <template v-if="candidates.tool === 'catalog.search_products'">
+            <label v-if="!candidates.truncated && task.can_select_all_products" class="agent-choice">
+              <input v-model="selection" type="radio" :name="task.id" value="all" />
+              <span class="agent-choice-copy"><strong>全选 · 查询全部规格</strong><span>汇总本次 {{ candidates.rows.length }} 个规格，按库存计量单位分别合计</span></span>
+            </label>
             <label v-for="row in candidates.rows" :key="row.product_id" class="agent-choice">
               <input v-model="selection" type="radio" :name="task.id" :value="row.product_id" />
-              <span class="agent-choice-copy"><strong>{{ row.product_name }}</strong><span>{{ row.model || '未登记型号' }} · {{ row.packaging_spec || '未登记包装' }} · {{ row.unit_name }}</span><small>{{ row.product_code }}</small></span>
+              <span class="agent-choice-copy"><strong>{{ row.product_name }}</strong><span>{{ row.model || '未登记型号' }} · 包装：{{ row.packaging_spec || '未登记' }} · 计量单位：{{ row.unit_name }}</span><small>{{ row.product_code }}</small></span>
             </label>
           </template>
           <template v-else-if="candidates.tool === 'supplier_quotes.find_rfq_items'">
@@ -92,7 +107,6 @@ function visibleWarnings(result: AgentApi.Result) {
     </form>
     <p v-else-if="task.status === 'WAITING_INPUT'" class="agent-muted">在下方输入框补充信息，即可继续。</p>
     <p v-if="!compactDetails && task.status === 'SUCCEEDED' && results.length" class="agent-intro">根据本次查询结果，可以确认以下信息：</p>
-    <p v-if="results.filter((entry) => entry.result?.tool === 'inventory.query_available').length > 1" class="agent-muted">以下为各规格的独立可用量与来源，不是全部规格合计。</p>
     <template v-if="compactDetails && inventoryContext.scopes.length">
       <p class="agent-muted">查询范围：{{ inventoryContext.scopes.join('；') }}。</p>
       <p v-if="inventoryContext.warnings.length" class="agent-muted">{{ inventoryContext.warnings.join(' ') }}</p>
@@ -130,7 +144,7 @@ function visibleWarnings(result: AgentApi.Result) {
       <p v-else-if="entry.result?.total_rows === 0" class="agent-empty">{{ entry.result.tool === 'catalog.search_products' ? '当前授权范围未找到匹配产品。' : '当前授权范围未找到可用询价明细。' }}</p>
       <template v-if="entry.result">
         <div v-if="entry.result.tool !== 'inventory.query_available' && visibleWarnings(entry.result).length" class="agent-notice"><span aria-hidden="true">ⓘ</span><div><p v-for="warning in visibleWarnings(entry.result)" :key="warning">{{ warning }}</p></div></div>
-        <p v-if="'observed_at' in entry.result && !(compactDetails && entry.result.tool === 'inventory.query_available')" class="agent-snapshot">{{ formatDateTime(entry.result.observed_at) }}（本地时间）查询快照 · 刷新任务不会重新查询业务数据</p>
+        <p v-if="'observed_at' in entry.result && !(compactDetails && entry.result.tool === 'inventory.query_available')" class="agent-snapshot">{{ formatDateTime(entry.result.observed_at) }}（本地时间）查询快照</p>
       </template>
       <AgentSourcePopover v-if="entry.result && !['inventory.query_available', 'supplier_quotes.compare'].includes(entry.result.tool)" :result="entry.result" />
     </section>
@@ -150,6 +164,7 @@ function visibleWarnings(result: AgentApi.Result) {
         </li>
       </ol>
     </details>
+    </template>
   </article>
 </template>
 <style scoped>
@@ -159,7 +174,7 @@ function visibleWarnings(result: AgentApi.Result) {
 .agent-prose li { padding-left: 3px; margin: 8px 0; }
 .agent-prose li::marker, .agent-prose strong { font-weight: 600; }
 .agent-prose :deep(.source-pill) { margin-left: 6px; vertical-align: middle; }
-.agent-header, .agent-state, .agent-actions, .agent-result-heading { display: flex; align-items: center; }
+.agent-header, .agent-state, .agent-result-heading { display: flex; align-items: center; }
 .agent-header { justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .agent-state { gap: 8px; font-size: 13px; font-weight: 600; }
 .agent-state-icon { display: grid; place-items: center; width: 24px; height: 24px; color: hsl(var(--primary)); background: hsl(var(--primary) / .08); border-radius: 50%; }
@@ -167,8 +182,6 @@ function visibleWarnings(result: AgentApi.Result) {
 .is-succeeded .agent-state-icon { color: #27845f; background: #edf8f1; }
 .is-failed .agent-state-icon { color: hsl(var(--destructive)); background: hsl(var(--destructive) / .08); }
 .agent-readonly { margin-left: 4px; padding-left: 12px; border-left: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); font-size: 12px; font-weight: 400; }
-.agent-actions { gap: 4px; }
-.agent-actions :deep(button) { color: hsl(var(--muted-foreground)); font-size: 12px; }
 .agent-reply { margin: 12px 0; white-space: pre-wrap; }
 .agent-muted, .agent-comparison { color: hsl(var(--muted-foreground)); font-size: 12px; margin: 8px 0; }
 .agent-result { margin-top: 16px; }

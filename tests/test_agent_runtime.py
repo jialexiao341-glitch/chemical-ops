@@ -89,7 +89,7 @@ def test_full_goal_drives_four_tools_with_evidence_and_persisted_trace(task_db, 
     assert len(contexts) == 5 and not actions
     assert contexts[1]['current_turn_steps'][0]['result']['rows'][0]['product_id'] == 1
     assert contexts[2]['current_turn_steps'][1]['result']['totals'][0]['available_quantity'] == '80.000000'
-    assert '80.000000 千克' in result.reply and '8.000000 CNY/千克' in result.reply
+    assert '80 千克' in result.reply and '8.000000 CNY/千克' in result.reply
     assert runtime.get_task(task_db, USER, result.id).trace == result.trace
     assert result.trace[-1]['evidence_steps'] == [2, 4]
 
@@ -108,6 +108,45 @@ def test_multiple_products_pause_and_selected_candidate_continues(task_db, model
     continued = asyncio.run(runtime.continue_task(task_db, USER, result.id,
         runtime.TaskContinue(question='选择分析纯', revision=result.revision, product_id=1)))
     assert continued.status == 'SUCCEEDED' and continued.trace[2]['tool'] == 'inventory.query_available'
+
+
+def test_inventory_summary_queries_all_specs_and_keeps_units_separate(task_db, model_script):
+    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
+    task_db.execute(text("INSERT INTO inventory_balances VALUES (6, 1, 1, 3, 1, 'AVAILABLE', 7.25, 0)"))
+    task_db.commit()
+    actions, _ = model_script
+    actions.append(tool('catalog.search_products', keyword='测试乙醇'))
+    result = start(task_db, '汇总查看测试乙醇全部规格库存')
+    assert result.status == 'SUCCEEDED'
+    inventory = [e['result'] for e in result.trace if e.get('tool') == 'inventory.query_available']
+    assert {row['product_id'] for row in inventory} == {1, 3}
+    assert '87.25 千克' in result.reply and '5 升' in result.reply
+    assert '已汇总 2 个规格' in result.reply
+
+
+def test_select_all_rechecks_candidates_and_queries_each_spec(task_db, model_script):
+    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
+    task_db.commit()
+    actions, _ = model_script
+    actions.append(tool('catalog.search_products', keyword='测试乙醇'))
+    result = start(task_db)
+    assert result.status == 'WAITING_INPUT' and result.can_select_all_products
+    # 自动续跑重新定位；已停用候选不再查询。
+    task_db.execute(text("UPDATE md_products SET status='INACTIVE' WHERE id=3"))
+    task_db.commit()
+    continued = asyncio.run(runtime.continue_task(task_db, USER, result.id,
+        runtime.TaskContinue(question='全选全部规格库存', revision=result.revision, all_products=True)))
+    assert continued.status == 'SUCCEEDED'
+    assert [e['result']['product_id'] for e in continued.trace if e.get('tool') == 'inventory.query_available'] == [1]
+
+
+def test_select_all_without_pending_candidates_is_rejected(task_db, model_script):
+    actions, _ = model_script
+    actions.append({'action': 'ask_user', 'question': '需要查询哪个产品？'})
+    result = start(task_db)
+    with pytest.raises(BusinessValidationError, match='全选'):
+        asyncio.run(runtime.continue_task(task_db, USER, result.id,
+            runtime.TaskContinue(question='全选', revision=result.revision, all_products=True)))
 
 
 def test_multiple_rfqs_pause_and_keep_confirmed_product_on_continue(task_db, model_script):
@@ -418,7 +457,7 @@ def test_chat_turns_persist_and_background_updates_latest_reply(chat_task_db, mo
     chat_task_db.expire_all()
     replies = chat_task_db.scalars(select(AIMessage).where(AIMessage.message_role == 'ASSISTANT').order_by(AIMessage.id)).all()
     assert len(replies) == 2 and replies[0].content == '请补充产品名称'
-    assert '80.000000 千克' in replies[1].content
+    assert '80 千克' in replies[1].content
     assert replies[1].citations == [{'type': 'agent_task', 'task_id': state.task_id}]
     assert len(chat_task_db.scalars(select(AIConversation)).all()) == 1
     memory = chat_task_db.scalar(select(AIConversationState)).memory_state
@@ -475,7 +514,7 @@ def test_ordinary_chat_context_is_loaded_before_pronoun_task(chat_task_db, model
     ]
     assert result.status == 'SUCCEEDED' and not actions
     assert '999999' not in result.reply
-    assert ('80.000000 千克' if intent == 'inventory' else '8.000000 CNY/千克') in result.reply
+    assert ('80 千克' if intent == 'inventory' else '8.000000 CNY/千克') in result.reply
 
 
 def test_chat_api_returns_conversation_and_reloadable_task(chat_task_db, model_script):

@@ -538,6 +538,7 @@ class TaskCreate(ToolSchema):
 class TaskContinue(TaskCreate):
     revision: Annotated[int, Field(strict=True, ge=0)]
     product_id: PositiveID | None = None
+    all_products: bool = False
     rfq_item_id: PositiveID | None = None
 
 
@@ -575,10 +576,13 @@ class Workflow(ToolSchema):
     pending: PendingChoice | None = None
     resume_selection: bool = False
     product_keyword: str | None = None
+    all_products: bool = False
+    verified_products: list[int] = Field(default_factory=list)
 
 
 class TaskRead(ToolSchema):
     id: str
+    can_select_all_products: bool = False
     status: Literal["RUNNING", "WAITING_INPUT", "SUCCEEDED", "FAILED", "CANCELLED"]
     revision: int
     reply: str

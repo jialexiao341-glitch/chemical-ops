@@ -239,14 +239,16 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
                 current = None
                 if isinstance(section_id, int) and isinstance(document_id, int):
                     current = db.execute(
-                        select(AiDocument.parse_status)
+                        select(AiDocument.parse_status, AiDocumentSection.content)
                         .join(AiDocumentSection, AiDocumentSection.document_id == AiDocument.id)
                         .where(AiDocument.id == document_id, AiDocumentSection.id == section_id)
-                    ).scalar_one_or_none()
+                    ).first()
                 source_status = (
                     "unverified"
                     if not isinstance(section_id, int) or not isinstance(document_id, int)
-                    else "available" if current == "PARSED" else "missing"
+                    else "missing" if current is None or current[0] != "PARSED"
+                    else "unverified" if not citation.get("content")
+                    else "available" if current[1].startswith(citation["content"]) else "changed"
                 )
                 normalized.append({**citation, "source_status": source_status})
             citations = normalized

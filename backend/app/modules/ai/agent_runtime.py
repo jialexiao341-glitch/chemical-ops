@@ -5,6 +5,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from time import perf_counter
 from typing import TypedDict
 from uuid import uuid4
@@ -283,6 +284,7 @@ def get_task(db: Session, user: User, task_id: str) -> TaskRead:
     task = _load(db, user, task_id)
     _check_trace_access(db, user, task.payload["trace"])
     return TaskRead(id=task.id, status=task.status, revision=task.revision, reply=task.reply,
+        can_select_all_products=(task.payload.get('memory_state') or {}).get('goal', {}).get('intent') == 'inventory_query',
         error_code=task.error_code, messages=task.payload["messages"], trace=task.payload["trace"],
         conversation_id=(task.payload.get("chat") or {}).get("conversation_id"))
 
@@ -380,11 +382,21 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
 def _summary(entries: list[dict]) -> str:
     """从后端已验证数据生成数值摘要，避免模型自由改写金额、数量或来源。"""
     lines = []
+    inventory = [e['result'] for e in entries if e['tool'] == 'inventory.query_available']
+    if len(inventory) > 1:
+        totals = {}
+        for result in inventory:
+            for row in result['totals']:
+                key = (row['unit_id'], row['unit_name'])
+                totals[key] = totals.get(key, Decimal(0)) + Decimal(str(row['available_quantity']))
+        amounts = '、'.join(f'{value.normalize():f} {unit}' for (_, unit), value in totals.items())
+        lines.append(f'已汇总 {len(inventory)} 个规格，当前授权仓库内账面可用量合计：{amounts or "无库存记录"}。不同单位分别合计，未按包装或纯物质含量换算。')
     for entry in entries:
         result = entry["result"]
         if entry["tool"] == "inventory.query_available":
-            totals = "、".join(f"{row['available_quantity']} {row['unit_name']}" for row in result["totals"])
-            lines.append(f"{result['product_name']}：当前授权仓库内账面可用量 {totals or '无库存记录'}。")
+            totals = "、".join(f"{Decimal(str(row['available_quantity'])).normalize():f} {row['unit_name']}" for row in result["totals"])
+            label = f"{result['product_name']}（规格 #{result['product_id']}）" if len(inventory) > 1 else result['product_name']
+            lines.append(f"{label}：当前授权仓库内账面可用量 {totals or '无库存记录'}。")
         elif entry["tool"] == "supplier_quotes.compare":
             lines.append(f"询价 {result['rfq_no']}：找到 {result['total_rows']} 条符合条件的最新报价。")
             lines.extend(f"{row['supplier_name']}：{row['unit_price']} {row['currency_code']}/{row['unit_name']}"
@@ -395,7 +407,7 @@ def _summary(entries: list[dict]) -> str:
     return "\n".join(dict.fromkeys(lines))
 
 
-def _resolve_candidates(state: RunState, result: dict) -> None:
+def _resolve_candidates(state: RunState, result: dict, db: Session) -> None:
     """将唯一命中登记为本轮证据；多个候选强制等待用户，不由模型选第一项。"""
     if result["tool"] not in {"catalog.search_products", "supplier_quotes.find_rfq_items"}:
         return
@@ -403,6 +415,22 @@ def _resolve_candidates(state: RunState, result: dict) -> None:
     key = "product_id" if product else "rfq_item_id"
     chosen = state.selected_product if product else state.selected_rfq_item
     ids = {row[key] for row in result["rows"]}
+    aggregate = state.workflow.all_products
+    question = state.memory_state.get('goal', {}).get('description', state.messages[-1])
+    if product and state.selected_product is None and any(word in question for word in ('汇总', '全部', '所有', '合计')):
+        from app.modules.ai.multi_intent import _inventory_family
+        aggregate = aggregate or (not result['truncated'] and bool(ids) and
+                                 _inventory_family(db, result['rows'], result['keyword']))
+    if product and aggregate and state.memory_state.get('goal', {}).get('intent') == 'inventory_query':
+        if result['truncated'] or not ids:
+            raise BusinessValidationError('全选查询需要完整的当前产品候选，请缩小检索范围')
+        state.workflow.all_products = True
+        state.workflow.verified_products = sorted(ids)
+        state.workflow.resume_selection = True
+        state.workflow.product_keyword = result['keyword']
+        state.workflow.pending = None
+        state.verified_product = min(ids)
+        return
     if chosen is not None and chosen in ids:
         verified = chosen
     elif result["total_rows"] == 1 and not result["truncated"] and chosen is None:
@@ -457,6 +485,12 @@ def _resume_action(state: RunState) -> CallAction | FinishAction | None:
         if warehouse:
             args["warehouse_id"] = int(warehouse.group(1))
         return args
+    if state.workflow.all_products and state.workflow.verified_products:
+        completed_products = {e['result']['product_id'] for e in entries if e.get('tool') == 'inventory.query_available'}
+        for product_id in state.workflow.verified_products:
+            if product_id not in completed_products:
+                return call('inventory.query_available', **{**business_args('inventory.query_available'), 'product_id': product_id})
+        return FinishAction(action='finish', evidence_steps=[e['step'] for e in entries if e.get('tool') == 'inventory.query_available'])
     if needs_inventory and "inventory.query_available" not in completed:
         return call("inventory.query_available", **business_args("inventory.query_available"))
     if needs_quotes and "supplier_quotes.find_rfq_items" not in completed:
@@ -595,7 +629,8 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
                 if keyword != current.workflow.product_keyword:
                     raise BusinessValidationError("产品已定位，请沿用当前产品查询库存或询价")
             if action.tool in {"inventory.query_available", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"}:
-                if current.verified_product is None or action.arguments.get("product_id") != current.verified_product:
+                verified_ids = current.workflow.verified_products if action.tool == 'inventory.query_available' and current.workflow.all_products else [current.verified_product]
+                if current.verified_product is None or action.arguments.get("product_id") not in verified_ids:
                     raise BusinessValidationError("产品 ID 必须来自本轮定位或用户选择")
             if action.tool == "supplier_quotes.compare" and (
                 current.verified_rfq_item is None or action.arguments.get("rfq_item_id") != current.verified_rfq_item
@@ -606,7 +641,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
                 raise TimeoutError()
             entry.update(status="SUCCEEDED", result=result.model_dump(mode="json"))
             current.failures = 0
-            _resolve_candidates(current, entry["result"])
+            _resolve_candidates(current, entry["result"], db)
         except AuthorizationError:
             entry["error_code"] = "PERMISSION_DENIED"
             raise
@@ -705,6 +740,14 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
     workflow = Workflow.model_validate(task.payload.get("workflow") or {})
     pending = workflow.pending
     product_choice, rfq_choice = data.product_id, data.rfq_item_id
+    if data.all_products:
+        latest = next((e for e in reversed(task.payload['trace']) if e.get('tool') == 'catalog.search_products' and e.get('status') == 'SUCCEEDED'), None)
+        if (data.product_id is not None or data.rfq_item_id is not None or not pending or pending.entity != 'product'
+                or pending.revision != task.revision or not latest or latest['result']['truncated']
+                or (task.payload.get('memory_state') or {}).get('goal', {}).get('intent') != 'inventory_query'):
+            raise BusinessValidationError('全选必须来自本轮完整的库存产品候选')
+        workflow.all_products = True
+        workflow.verified_products = []
     # 纯文字续答也可选择唯一的完整编号；前缀、多个命中不会自动选第一项。
     if pending and product_choice is None and rfq_choice is None:
         field = "product_code" if pending.entity == "product" else "rfq_no"
@@ -728,11 +771,11 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
         if pending and (pending.entity != ("product" if key == "product_id" else "rfq_item") or
                         chosen not in {row[key] for row in pending.candidates} or pending.revision != task.revision):
             raise BusinessValidationError("选择必须来自本轮待确认的候选")
-    product = product_choice or task.payload.get("selected_product")
+    product = None if data.all_products else product_choice or task.payload.get("selected_product")
     rfq_item = rfq_choice or task.payload.get("selected_rfq_item")
     if product_choice is not None and product_choice != task.payload.get("selected_product"):
         rfq_item = rfq_choice
-    if pending and (product_choice or rfq_choice):
+    if pending and (product_choice or rfq_choice or data.all_products):
         workflow.resume_selection = True
         if rfq_choice:
             chosen_row = next(row for row in pending.candidates if row["rfq_item_id"] == rfq_choice)
@@ -750,7 +793,7 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
             raise BusinessValidationError("该续答不是库存或报价任务，请重新识别请求")
         memory["understanding"] = decision.model_dump(mode="json")
         memory["route_turn"] = len(task.payload["messages"]) + 1
-    if product_choice or rfq_choice:
+    if product_choice or rfq_choice or data.all_products:
         memory["route_turn"] = len(task.payload["messages"]) + 1
         memory["understanding_applied_turn"] = len(task.payload["messages"]) + 1
     messages = [*task.payload["messages"], data.question]

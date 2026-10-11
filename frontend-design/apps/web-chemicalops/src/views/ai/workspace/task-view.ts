@@ -9,6 +9,27 @@ export function agentDisplayNumber(value: string) {
   return integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (significant ? `.${significant}` : '');
 }
 
+/** 汇总完整 totals，使用定点整数保留数量精度，按原始单位分别合计。 */
+export function inventorySummary(task: AgentApi.Task) {
+  const inventory = primaryTaskResults(task).flatMap((entry) => entry.result?.tool === 'inventory.query_available' ? [entry.result] : []);
+  const totals = new Map<number | string, { amount: bigint; scale: number; unit: string }>();
+  for (const result of inventory) for (const row of result.totals) {
+    const [integer = '0', fraction = ''] = row.available_quantity.split('.');
+    const amount = BigInt(integer + fraction);
+    const key = row.unit_id ?? row.unit_name;
+    const previous = totals.get(key) ?? { amount: 0n, scale: 0, unit: row.unit_name };
+    const scale = Math.max(previous.scale, fraction.length);
+    totals.set(key, { amount: previous.amount * 10n ** BigInt(scale - previous.scale) + amount * 10n ** BigInt(scale - fraction.length), scale, unit: row.unit_name });
+  }
+  const quantities = [...totals.values()].map(({ amount, scale, unit }) => {
+    const sign = amount < 0n ? '-' : '';
+    const digits = (amount < 0n ? -amount : amount).toString().padStart(scale + 1, '0');
+    const value = scale ? `${sign}${digits.slice(0, -scale)}.${digits.slice(-scale)}` : `${sign}${digits}`;
+    return `${agentDisplayNumber(value)} ${unit}`;
+  });
+  return `已汇总 ${inventory.length} 个规格，当前授权仓库内账面可用库存合计：${quantities.join('、') || '无库存记录'}。`;
+}
+
 /** 完成态只展示模型引用的实际证据，所有中间定位步骤留在折叠轨迹中。 */
 export function primaryTaskResults(task: AgentApi.Task) {
   const finish = task.trace.at(-1);

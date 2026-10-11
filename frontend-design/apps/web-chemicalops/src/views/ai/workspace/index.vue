@@ -11,7 +11,7 @@ import { Button, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
 
 import {
   deleteConversationApi,
-  createAgentChatApi, continueAgentChatApi, continueAgentTaskApi, getAgentTaskApi, cancelAgentTaskApi,
+  createAgentChatApi, continueAgentChatApi, continueAgentTaskApi, getAgentTaskApi,
   createPurchaseRequestApi,
   generateBriefingApi,
   getAIMessagesApi,
@@ -27,6 +27,8 @@ import { renderMarkdown } from '#/utils/markdown';
 
 import QueryEvidence from './query-evidence.vue';
 import AgentChatTask from './agent-chat-task.vue';
+import AgentSourcePopover from './agent-source-popover.vue';
+import { answerSources } from './answer-sources';
 import { acceptTask, primaryTaskResults } from './task-view';
 import assistantLogo from './chemicalops-ai.svg';
 
@@ -86,7 +88,6 @@ interface UiMessage {
     label: string;
     record_id?: null | number;
   }>;
-  openCitationIds?: number[];
   role: 'assistant' | 'user';
   /** 流式回复是否仍在输出 */
   streaming?: boolean;
@@ -174,6 +175,16 @@ function visibleSourceRecords(item: UiMessage) {
   return (item.sourceRecords ?? []).filter((record) => canReadDataset(record.dataset));
 }
 
+function sourceGroups(item: UiMessage) {
+  const groups = new Map<string, ReturnType<typeof answerSources>>();
+  for (const source of answerSources(item.citations, canReadDataset)) {
+    const entries = groups.get(source.label) ?? [];
+    entries.push(source);
+    groups.set(source.label, entries);
+  }
+  return [...groups].map(([label, entries]) => ({ label, entries }));
+}
+
 /** 每个子任务只关联自己的来源，历史回放与即时回复复用同一引用。 */
 function queryViews(item: UiMessage): Array<UiMessage & { question?: string }> {
   const batch = item.citations?.find((citation) => citation.type === 'multi_intent')?.batch;
@@ -231,7 +242,7 @@ async function refreshAgent(item: UiMessage) {
 async function sendAgent(text: string, continuation?: AgentApi.Continue, routeToken?: string) {
   if (sending.value) return;
   const previous = currentAgent.value;
-  if (previous?.status === 'RUNNING') { message.info('正在查询，可先取消当前任务。'); return; }
+  if (previous?.status === 'RUNNING') { message.info('正在查询，请等待结果自动更新。'); return; }
   const epoch = ++chatEpoch;
   stopAgentPolling();
   const assistantId = nextId();
@@ -268,20 +279,6 @@ async function sendAgent(text: string, continuation?: AgentApi.Continue, routeTo
 async function continueAgent(item: UiMessage, data: AgentApi.Continue) {
   if (item.agentTask?.id !== currentAgent.value?.id) return;
   await sendAgent(data.question, data);
-}
-async function cancelAgent(item: UiMessage) {
-  if (!item.agentTaskId || sending.value) return;
-  const epoch = chatEpoch;
-  sending.value = true;
-  stopAgentPolling();
-  const generation = (agentReads.get(item.agentTaskId) ?? 0) + 1;
-  agentReads.set(item.agentTaskId, generation);
-  try {
-    const task = await cancelAgentTaskApi(item.agentTaskId);
-    if (agentReads.get(item.agentTaskId) === generation) applyAgent(task, item.id, epoch);
-  }
-  catch { if (epoch === chatEpoch) message.error('未确认取消结果，请刷新任务核对。'); }
-  if (epoch === chatEpoch) { sending.value = false; scheduleAgentPolling(); }
 }
 let messageSeed = 0;
 function nextId() {
@@ -434,7 +431,7 @@ async function onSend(retryFailed = false) {
   if (!text || sending.value || historyLoading.value) {
     return;
   }
-  if (currentAgent.value?.status === 'RUNNING') { message.info('正在查询，可先取消当前任务。'); return; }
+  if (currentAgent.value?.status === 'RUNNING') { message.info('正在查询，请等待结果自动更新。'); return; }
   if (draftMode.value) {
     if (!canCreatePurchaseDraft) { draftMode.value = false; message.error('你没有创建采购申请草稿的权限。'); return; }
     await previewPurchaseRequestDraft(text);
@@ -667,31 +664,6 @@ function confirmCreatePurchaseDraft(item: UiMessage) {
 }
 
 
-
-function toggleCitation(messageId: string, sectionId: number) {
-  messages.value = messages.value.map((item) => {
-    if (item.id !== messageId) return item;
-    const open = item.openCitationIds ?? [];
-    return {
-      ...item,
-      openCitationIds: open.includes(sectionId)
-        ? open.filter((id) => id !== sectionId)
-        : [...open, sectionId],
-    };
-  });
-}
-
-function safeCitationUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:'
-      ? url.href
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function openDataset(dataset: string) {
   if (!canReadDataset(dataset)) return;
@@ -931,7 +903,7 @@ async function selectSlashCommand(command?: SlashCommand) {
   if (command === 'briefing-push' && !canPushBriefing) return;
 
   if (command === 'agent') {
-    if (currentAgent.value?.status === 'WAITING_INPUT' || currentAgent.value?.status === 'RUNNING') { message.info('请先完成或取消当前查询。'); return; }
+    if (currentAgent.value?.status === 'WAITING_INPUT' || currentAgent.value?.status === 'RUNNING') { message.info('请先完成当前查询。'); return; }
     agentMode.value = true;
     draftMode.value = false;
     return;
@@ -1142,6 +1114,11 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                 class="ai-assistant-message min-w-0 px-4 py-3 text-sm"
                 :class="[item.queryTrace?.rows?.length || item.agentTask || queryViews(item).length || batchToolViews(item).length || item.batchProgress ? 'w-full max-w-[1100px]' : 'max-w-[85%]', { 'is-agent': item.agentTask }]"
               >
+                <div v-if="item.content && !item.agentTask && !item.streaming" class="mt-2 flex flex-wrap items-center gap-2">
+                  <AgentSourcePopover v-for="group in sourceGroups(item)" :key="group.label" :entries="group.entries" :source-label="group.label" @open-record="openSourceRecord" @open-dataset="openDataset" />
+                  <span v-if="!sourceGroups(item).length" class="text-muted-foreground text-xs">来源依据：本条回复未提供可核验的资料或数据来源，请勿将其中事实性内容视为已核实结论。</span>
+                  <span v-else-if="sourceGroups(item).some((group) => group.entries.some((source) => source.status))" class="text-muted-foreground text-xs">部分来源已失效或尚未核验，请查看来源状态并重新查询。</span>
+                </div>
                 <div
                   v-if="item.content && !item.agentTask"
                   class="chat-md [&_a]:text-blue-500 [&_a]:underline [&_code]:bg-black/20 [&_code]:rounded [&_code]:px-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:my-1"
@@ -1150,8 +1127,8 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                 <span v-else-if="item.streaming && !item.batchProgress" class="animate-pulse">
                   正在思考…
                 </span>
-                <AgentChatTask v-if="item.agentTask" :task="item.agentTask" :busy="sending" @continue="continueAgent(item, $event)" @cancel="cancelAgent(item)" @refresh="refreshAgent(item)" />
-                <AgentChatTask v-if="item.batchProgress" :task="progressTask(item)" :progress="item.batchProgress" :busy="false" :show-actions="!item.cancelPending" @cancel="streamAbort?.abort()" />
+                <AgentChatTask v-if="item.agentTask" :task="item.agentTask" :busy="sending" @continue="continueAgent(item, $event)" />
+                <AgentChatTask v-if="item.batchProgress" :task="progressTask(item)" :progress="item.batchProgress" :busy="false" :show-actions="!item.cancelPending" />
                 <Button v-if="canRetryBatch(item)" type="text" size="small" @click="retryBatch">重试未完成项</Button>
                 <Button v-if="item.cancelPending && !sending" type="text" size="small" @click="reloadActiveConversation">刷新会话</Button>
                 <div v-if="item.agentError" role="alert"><p>{{ item.agentError }}</p><Button size="small" @click="refreshAgent(item)">重试读取</Button></div>
@@ -1198,50 +1175,6 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                     <AgentChatTask :task="entry.task" :busy="false" :show-actions="false" />
                   </template>
                 </template>
-                <details v-if="item.citations?.some((citation) => citation.type === 'doc_kb')" class="mt-3 border-t border-border/50 pt-2">
-                  <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">
-                    资料来源（{{ item.citations.filter((citation) => citation.type === 'doc_kb').length }}）
-                  </summary>
-                  <div class="mt-2 space-y-2">
-                    <article
-                      v-for="citation in item.citations.filter((value) => value.type === 'doc_kb')"
-                      :key="citation.section_id ?? `${citation.cas_no}-${citation.section_key}`"
-                      class="rounded-md border border-border/70 bg-background/70 p-2 text-xs"
-                    >
-                      <div class="flex flex-wrap items-center gap-2">
-                        <span class="font-medium">{{ citation.document_title || citation.title || citation.name_zh || citation.cas_no }}</span>
-                        <Tag v-if="citation.source_status === 'missing' || (citation.source_status !== 'unverified' && citation.parse_status && citation.parse_status !== 'PARSED')" color="red" class="!mr-0">来源已不存在或不可用</Tag>
-                        <Tag v-else-if="citation.source_status === 'unverified'" color="orange" class="!mr-0">历史来源信息不完整，无法核验</Tag>
-                        <Tag v-else color="green" class="!mr-0">来源有效</Tag>
-                      </div>
-                      <div class="text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                        <span>CAS {{ citation.cas_no || '—' }}</span>
-                        <span>{{ citation.doc_type || '资料' }}{{ citation.section_no ? ` · SECTION ${citation.section_no}` : '' }}</span>
-                        <span>{{ citation.section_key || citation.title || '章节' }}</span>
-                        <span v-if="citation.document_id">文档 #{{ citation.document_id }}</span>
-                        <span v-if="citation.updated_at">更新于 {{ formatDateTime(citation.updated_at) }}</span>
-                      </div>
-                      <a
-                        v-if="safeCitationUrl(citation.source_url)"
-                        class="mt-2 inline-flex text-blue-600 hover:underline"
-                        :href="safeCitationUrl(citation.source_url)"
-                        rel="noopener noreferrer"
-                        target="_blank"
-                      >打开原始来源</a>
-                      <button
-                        v-if="citation.content"
-                        class="mt-2 cursor-pointer text-blue-600 hover:underline"
-                        type="button"
-                        @click="toggleCitation(item.id, citation.section_id ?? -1)"
-                      >
-                        {{ (item.openCitationIds ?? []).includes(citation.section_id ?? -1) ? '收起章节摘录' : '预览章节摘录' }}
-                      </button>
-                      <p v-if="(item.openCitationIds ?? []).includes(citation.section_id ?? -1)" class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-border/60 pt-2 leading-5">
-                        {{ citation.content }}
-                      </p>
-                    </article>
-                  </div>
-                </details>
               </div>
             </div>
           </Spin>
