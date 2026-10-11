@@ -143,14 +143,14 @@ const logoDark = computed(() => preferences.logo.sourceDark);
   font-size: 15px;
 }
 
-.chemicalops-auth :deep(.side-content input) {
+.chemicalops-auth :deep(.side-content input:not(.ant-select-input)) {
   min-height: 48px;
   border-color: #cdd9e6;
   background: #fff;
   color: #102b49;
 }
 
-.chemicalops-auth :deep(.side-content input::placeholder) {
+.chemicalops-auth :deep(.side-content input:not(.ant-select-input)::placeholder) {
   color: #8496a9;
 }
 
@@ -183,13 +183,13 @@ const logoDark = computed(() => preferences.logo.sourceDark);
   color: #afc1d3;
 }
 
-.chemicalops-auth.dark :deep(.side-content input) {
+.chemicalops-auth.dark :deep(.side-content input:not(.ant-select-input)) {
   border-color: #3a5068;
   background: #172b42;
   color: #eef5fb;
 }
 
-.chemicalops-auth.dark :deep(.side-content input::placeholder) {
+.chemicalops-auth.dark :deep(.side-content input:not(.ant-select-input)::placeholder) {
   color: #9db0c3;
 }
 
