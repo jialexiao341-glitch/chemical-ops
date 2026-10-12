@@ -4,7 +4,7 @@ import { AI_TASK_STATUS_LABELS } from '#/api';
 import { computed, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { Button } from 'antdv-next';
-import { formatDateTime } from '#/utils/format';
+import { formatDate, formatDateTime } from '#/utils/format';
 import { agentDisplayNumber, inventoryProductLabel, inventorySummary, primaryTaskResults } from './task-view';
 import AgentSourcePopover from './agent-source-popover.vue';
 import { inventorySource, TASK_ERROR_HELP, TASK_LABELS, TOOL_LABELS, waitingCandidates } from './task-view';
@@ -123,7 +123,7 @@ function visibleWarnings(result: AgentApi.Result) {
         <details v-if="entry.result.total_rows > 0" class="agent-disclosure">
           <summary><span>库存明细</span><span class="agent-count">{{ entry.result.rows.length }}{{ entry.result.truncated ? ` / ${entry.result.total_rows}` : '' }} 条</span></summary>
           <div class="agent-table"><table><caption class="sr-only">库存明细与来源</caption><thead><tr><th>仓库 / 批次</th><th class="agent-numeric">可用量</th><th>状态 / 有效期</th><th>来源</th></tr></thead><tbody>
-            <tr v-for="row in entry.result.rows" :key="row.balance_id"><td><span>{{ row.warehouse_name }}</span><small>{{ row.batch_no }}</small></td><td class="agent-numeric">{{ agentDisplayNumber(row.available_quantity) }} {{ row.unit_name }}</td><td><span>{{ row.status === 'AVAILABLE' ? '可用' : row.status === 'FROZEN' ? '冻结' : row.status }}</span><small>{{ row.expiry_date || '未登记有效期' }}</small></td><td><RouterLink v-if="hasAccessByCodes(['warehouse.inventory.read'])" :to="inventorySource(entry.result.product_id, row.warehouse_id)">查看库存 ↗</RouterLink><small>余额 #{{ row.balance_id }}</small></td></tr>
+            <tr v-for="row in entry.result.rows" :key="row.balance_id"><td><span>{{ row.warehouse_name }}</span><small>{{ row.batch_no }}</small></td><td class="agent-numeric">{{ agentDisplayNumber(row.available_quantity) }} {{ row.unit_name }}</td><td><span>{{ row.status === 'AVAILABLE' ? '可用' : row.status === 'FROZEN' ? '冻结' : row.status }}</span><small>{{ row.expiry_date ? formatDate(row.expiry_date) : '未登记有效期' }}</small></td><td><RouterLink v-if="hasAccessByCodes(['warehouse.inventory.read'])" :to="inventorySource(entry.result.product_id, row.warehouse_id)">查看库存 ↗</RouterLink><small>余额 #{{ row.balance_id }}</small></td></tr>
           </tbody></table></div>
         </details>
       </template>
@@ -135,7 +135,7 @@ function visibleWarnings(result: AgentApi.Result) {
         <details v-if="entry.result.total_rows > 0" class="agent-disclosure">
           <summary><span>查看报价与可比组排名</span><span class="agent-count">{{ entry.result.rows.length }}{{ entry.result.truncated ? ` / ${entry.result.total_rows}` : '' }} 条</span></summary>
           <div class="agent-table"><table><caption class="sr-only">报价明细；不同可比组不能相互比较</caption><thead><tr><th>供应商 / 报价</th><th class="agent-numeric">未税单价</th><th>型号 / 税率</th><th>组内排名</th><th>报价量 / 起订量 / 交期</th><th>日期 / 有效期</th></tr></thead><tbody>
-            <tr v-for="row in entry.result.rows" :key="row.quote_item_id"><td>{{ row.supplier_name }}<small>{{ row.quote_no }} · v{{ row.quote_version }}</small></td><td class="agent-numeric">{{ agentDisplayNumber(row.unit_price) }}<small>{{ row.currency_code }}/{{ row.unit_name }}</small></td><td>{{ row.supplier_model ?? '未登记' }}<small>{{ row.tax_rate === null ? '税率未知' : `${agentDisplayNumber(row.tax_rate)}%` }}</small></td><td>{{ row.rank ?? '不排序' }}</td><td>{{ agentDisplayNumber(row.quoted_quantity) }} {{ row.unit_name }}<small>起订量 {{ row.moq_quantity === null ? '未登记' : agentDisplayNumber(row.moq_quantity) }}（单位见原记录）</small><small>{{ row.lead_days === null ? '未登记交期' : `${row.lead_days} 天` }}</small></td><td>{{ row.quote_date }}<small>{{ row.valid_until || '未登记有效期' }}</small></td></tr>
+            <tr v-for="row in entry.result.rows" :key="row.quote_item_id"><td>{{ row.supplier_name }}<small>{{ row.quote_no }} · v{{ row.quote_version }}</small></td><td class="agent-numeric">{{ agentDisplayNumber(row.unit_price) }}<small>{{ row.currency_code }}/{{ row.unit_name }}</small></td><td>{{ row.supplier_model ?? '未登记' }}<small>{{ row.tax_rate === null ? '税率未知' : `${agentDisplayNumber(row.tax_rate)}%` }}</small></td><td>{{ row.rank ?? '不排序' }}</td><td>{{ agentDisplayNumber(row.quoted_quantity) }} {{ row.unit_name }}<small>起订量 {{ row.moq_quantity === null ? '未登记' : agentDisplayNumber(row.moq_quantity) }}（单位见原记录）</small><small>{{ row.lead_days === null ? '未登记交期' : `${row.lead_days} 天` }}</small></td><td>{{ formatDate(row.quote_date) }}<small>{{ row.valid_until ? formatDate(row.valid_until) : '未登记有效期' }}</small></td></tr>
           </tbody></table></div>
         </details>
         <p v-if="entry.result.truncated" class="agent-muted">报价已截断，当前结果不代表完整比较。</p>

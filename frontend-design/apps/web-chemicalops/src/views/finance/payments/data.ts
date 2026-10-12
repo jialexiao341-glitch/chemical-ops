@@ -1,5 +1,6 @@
 import type { VbenFormSchema } from '#/adapter/form';
-import type { VxeTableGridColumns } from '#/adapter/vxe-table';
+import type { OnActionClickFn, VxeTableGridColumns } from '#/adapter/vxe-table';
+import type { FinanceApi } from '#/api';
 
 import { PAYMENT_METHOD_DICT, PAYMENT_STATUS_DICT } from '#/constants/dictionary';
 import { formatAmount, formatDateTime } from '#/utils/format';
@@ -23,6 +24,8 @@ export function useGridFormSchema(): VbenFormSchema[] {
 /** 列表列定义 */
 export function useColumns(
   resolveSupplier: (id?: null | number) => string,
+  onActionClick: OnActionClickFn<FinanceApi.Payment>,
+  currentUserId?: string | number,
 ): VxeTableGridColumns {
   return [
     { field: 'payment_no', minWidth: 170, title: '付款单号' },
@@ -72,11 +75,21 @@ export function useColumns(
     },
     {
       align: 'center',
+      cellRender: {
+        attrs: { onClick: onActionClick },
+        name: 'CellOperation',
+        options: [
+          { code: 'detail', text: '详情', auth: 'finance.payments.read' },
+          { code: 'approve', text: '审批通过', auth: 'finance.payments.approve', show: (row: FinanceApi.Payment) => row.status === 'REQUESTED' && String(row.requested_by) !== String(currentUserId) },
+          { code: 'reject', text: '驳回', auth: 'finance.payments.approve', danger: true, show: (row: FinanceApi.Payment) => row.status === 'REQUESTED' && String(row.requested_by) !== String(currentUserId) },
+          { code: 'paid', text: '登记付款', auth: 'finance.payments.write', show: (row: FinanceApi.Payment) => row.status === 'APPROVED' },
+        ],
+        props: { menuCodes: ['approve', 'reject', 'paid'], menuText: '更多', renderMode: 'menu' },
+      },
       field: 'operation',
       fixed: 'right',
-      slots: { default: 'operation' },
       title: '操作',
-      width: 190,
+      width: 110,
     },
   ];
 }

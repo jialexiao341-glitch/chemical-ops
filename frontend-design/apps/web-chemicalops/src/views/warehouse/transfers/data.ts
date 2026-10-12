@@ -1,5 +1,5 @@
 import type { VbenFormSchema } from '#/adapter/form';
-import type { VxeTableGridColumns } from '#/adapter/vxe-table';
+import type { OnActionClickFn, VxeTableGridColumns } from '#/adapter/vxe-table';
 import type { TransferRequestApi } from '#/api';
 
 import { APPROVAL_FLOW_STATUS_DICT } from '#/constants/dictionary';
@@ -21,8 +21,11 @@ export function useGridFormSchema(): VbenFormSchema[] {
   ];
 }
 
-/** 列表列定义（操作按钮在 index.vue 的 operation 插槽里按状态渲染） */
-export function useColumns(): VxeTableGridColumns {
+/** 列表列定义 */
+export function useColumns(
+  onActionClick: OnActionClickFn<TransferRequestApi.TransferRequest>,
+  currentUserId?: string | number,
+): VxeTableGridColumns {
   return [
     { field: 'transfer_no', minWidth: 170, title: '调拨单号' },
     { field: 'purpose', minWidth: 220, title: '用途' },
@@ -55,11 +58,46 @@ export function useColumns(): VxeTableGridColumns {
     },
     {
       align: 'center',
+      cellRender: {
+        attrs: { onClick: onActionClick },
+        name: 'CellOperation',
+        options: [
+          { code: 'detail', text: '详情' },
+          {
+            code: 'edit', text: '编辑', auth: 'warehouse.inventory.transfer.write',
+            show: (row: TransferRequestApi.TransferRequest) => ['DRAFT', 'REJECTED'].includes(row.status),
+          },
+          {
+            code: 'submit', text: '提交', auth: 'warehouse.inventory.transfer.write',
+            show: (row: TransferRequestApi.TransferRequest) => ['DRAFT', 'REJECTED'].includes(row.status),
+          },
+          {
+            code: 'approve', text: '审批通过', auth: 'warehouse.inventory.transfer.approve',
+            show: (row: TransferRequestApi.TransferRequest) => row.status === 'SUBMITTED' && String(row.applicant_id) !== String(currentUserId),
+          },
+          {
+            code: 'reject', text: '驳回', auth: 'warehouse.inventory.transfer.approve', danger: true,
+            show: (row: TransferRequestApi.TransferRequest) => row.status === 'SUBMITTED' && String(row.applicant_id) !== String(currentUserId),
+          },
+          {
+            code: 'execute', text: '执行调拨', auth: 'warehouse.inventory.transfer.write',
+            show: (row: TransferRequestApi.TransferRequest) => row.status === 'APPROVED',
+          },
+          {
+            code: 'cancel', text: '取消', auth: 'warehouse.inventory.transfer.write', danger: true,
+            show: (row: TransferRequestApi.TransferRequest) => ['DRAFT', 'REJECTED'].includes(row.status),
+          },
+        ],
+        props: {
+          menuCodes: ['edit', 'submit', 'approve', 'reject', 'execute', 'cancel'],
+          menuText: '更多',
+          renderMode: 'menu',
+        },
+      },
       field: 'operation',
       fixed: 'right',
-      slots: { default: 'operation' },
       title: '操作',
-      width: 260,
+      width: 110,
     },
   ];
 }

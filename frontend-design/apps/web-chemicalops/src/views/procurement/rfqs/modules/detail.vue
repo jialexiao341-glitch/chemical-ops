@@ -33,7 +33,7 @@ import {
   QUOTE_STATUS_DICT,
   RFQ_STATUS_DICT,
 } from '#/constants/dictionary';
-import { formatAmount, formatDateTime, formatQuantity } from '#/utils/format';
+import { formatAmount, formatDate, formatDateTime, formatQuantity } from '#/utils/format';
 import { getSupplierNameMap } from '#/utils/lookup';
 
 import QuoteModal from './quote.vue';
@@ -400,7 +400,7 @@ defineExpose({ drawerApi });
                   {{ formatQuantity(record.quantity) }}
                 </template>
                 <template v-else-if="column.key === 'required_delivery_date'">
-                  {{ record.required_delivery_date ?? '-' }}
+                  {{ formatDate(record.required_delivery_date) }}
                 </template>
               </template>
             </Table>
@@ -425,6 +425,9 @@ defineExpose({ drawerApi });
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'supplier_id'">
                   {{ supplierName(record.supplier_id) }}
+                </template>
+                <template v-else-if="column.key === 'quote_date' || column.key === 'valid_until'">
+                  {{ formatDate(record[column.key]) }}
                 </template>
                 <template v-else-if="column.key === 'status'">
                   <Tag :color="QUOTE_STATUS_DICT.color(record.status)">

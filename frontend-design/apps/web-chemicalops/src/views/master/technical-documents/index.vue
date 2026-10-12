@@ -10,6 +10,7 @@ import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getChemicalListApi, getTechnicalDocumentsApi, startTechnicalDocumentFetchApi, startTechnicalDocumentIngestApi } from '#/api';
 
 import { Button, Select, message } from 'antdv-next';
+import { formatDateTime } from '#/utils/format';
 
 import PreviewDrawerContent from './modules/preview.vue';
 import TaskRunsDrawer from './modules/task-runs-drawer.vue';
@@ -58,7 +59,7 @@ const columns = [
   { field: 'parse_status', title: '知识库状态', width: 130, formatter: ({ row }: { row: TechnicalDocumentSource }) => ({ PARSED: '已写入', THIN: '内容偏少', REJECTED: '质检未通过', PENDING: row.ingestible ? '待写入' : '仅文件预览' })[row.parse_status] || row.parse_status },
   { field: 'file_size', title: '文件大小', width: 110, formatter: ({ cellValue }: { cellValue: number }) => cellValue < 1024 * 1024 ? `${Math.ceil(cellValue / 1024)} KB` : `${(cellValue / 1024 / 1024).toFixed(1)} MB` },
   { field: 'section_count', title: '章节数', width: 90 },
-  { field: 'updated_at', title: '更新时间', width: 180 },
+  { field: 'updated_at', title: '更新时间', width: 180, formatter: ({ cellValue }: { cellValue?: null | string }) => formatDateTime(cellValue) },
   {
     align: 'center',
     cellRender: {

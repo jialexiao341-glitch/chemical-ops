@@ -30,7 +30,6 @@ const route = useRoute();
 const { hasAccessByCodes } = useAccess();
 const userStore = useUserStore();
 const canWritePayments = hasAccessByCodes(['finance.payments.write']);
-const canApprovePayments = hasAccessByCodes(['finance.payments.approve']);
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
 const [Create, createApi] = useVbenModal({
@@ -56,7 +55,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns((id) => resolveSupplier.value(id)),
+    columns: useColumns((id) => resolveSupplier.value(id), onActionClick, userStore.userInfo?.userId),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -80,6 +79,18 @@ const [Grid, gridApi] = useVbenVxeGrid({
     },
   } as VxeTableGridOptions<FinanceApi.Payment>,
 });
+
+function onActionClick({ code, row }: { code: string; row: FinanceApi.Payment }) {
+  if (code === 'detail') {
+    financeSourceDetail.value?.open({ id: row.id, kind: 'payments' });
+  } else if (code === 'approve') {
+    runApprove(row);
+  } else if (code === 'reject') {
+    openReject(row);
+  } else if (code === 'paid') {
+    openPaid(row);
+  }
+}
 
 function runApprove(row: FinanceApi.Payment) {
   Modal.confirm({
@@ -187,41 +198,6 @@ watch(
           <Plus class="size-5" />
           发起付款
         </Button>
-      </template>
-      <template #operation="{ row }">
-        <div class="flex flex-wrap justify-center gap-0">
-          <Button
-            v-if="canApprovePayments"
-            :disabled="row.status !== 'REQUESTED' || String(row.requested_by) === String(userStore.userInfo?.userId)"
-            :title="String(row.requested_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'REQUESTED' ? '当前状态不可审批或复核' : undefined"
-            size="small"
-            type="link"
-            @click="runApprove(row)"
-          >
-            审批通过
-          </Button>
-          <Button
-            v-if="canApprovePayments"
-            :disabled="row.status !== 'REQUESTED' || String(row.requested_by) === String(userStore.userInfo?.userId)"
-            :title="String(row.requested_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'REQUESTED' ? '当前状态不可审批或复核' : undefined"
-            danger
-            size="small"
-            type="link"
-            @click="openReject(row)"
-          >
-            驳回
-          </Button>
-          <Button
-            v-if="canWritePayments"
-            :disabled="row.status !== 'APPROVED'"
-            :title="row.status !== 'APPROVED' ? '当前状态不支持此操作' : undefined"
-            size="small"
-            type="link"
-            @click="openPaid(row)"
-          >
-            登记付款
-          </Button>
-        </div>
       </template>
     </Grid>
 

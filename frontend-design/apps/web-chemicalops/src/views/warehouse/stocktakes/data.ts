@@ -1,5 +1,5 @@
 import type { VbenFormSchema } from '#/adapter/form';
-import type { VxeTableGridColumns } from '#/adapter/vxe-table';
+import type { OnActionClickFn, VxeTableGridColumns } from '#/adapter/vxe-table';
 import type { StocktakeApi } from '#/api';
 
 import { APPROVAL_FLOW_STATUS_DICT } from '#/constants/dictionary';
@@ -21,9 +21,11 @@ export function useGridFormSchema(): VbenFormSchema[] {
   ];
 }
 
-/** 列表列定义（操作按钮在 index.vue 的 operation 插槽里按状态渲染） */
+/** 列表列定义 */
 export function useColumns(
   resolveWarehouse: (id?: null | number) => string,
+  onActionClick: OnActionClickFn<StocktakeApi.StocktakeRequest>,
+  currentUserId?: string | number,
 ): VxeTableGridColumns {
   return [
     { field: 'stocktake_no', minWidth: 170, title: '盘点单号' },
@@ -63,11 +65,67 @@ export function useColumns(
     },
     {
       align: 'center',
+      cellRender: {
+        attrs: { onClick: onActionClick },
+        name: 'CellOperation',
+        options: [
+          { code: 'detail', text: '详情' },
+          {
+            code: 'edit',
+            text: '编辑',
+            auth: 'warehouse.inventory.stocktake.write',
+            show: (row: StocktakeApi.StocktakeRequest) =>
+              ['DRAFT', 'REJECTED'].includes(row.status),
+          },
+          {
+            code: 'submit',
+            text: '提交',
+            auth: 'warehouse.inventory.stocktake.write',
+            show: (row: StocktakeApi.StocktakeRequest) =>
+              ['DRAFT', 'REJECTED'].includes(row.status),
+          },
+          {
+            code: 'approve',
+            text: '审批通过',
+            auth: 'warehouse.inventory.stocktake.approve',
+            show: (row: StocktakeApi.StocktakeRequest) =>
+              row.status === 'SUBMITTED' &&
+              String(row.applicant_id) !== String(currentUserId),
+          },
+          {
+            code: 'reject',
+            text: '驳回',
+            auth: 'warehouse.inventory.stocktake.approve',
+            danger: true,
+            show: (row: StocktakeApi.StocktakeRequest) =>
+              row.status === 'SUBMITTED' &&
+              String(row.applicant_id) !== String(currentUserId),
+          },
+          {
+            code: 'execute',
+            text: '执行盘点',
+            auth: 'warehouse.inventory.stocktake.write',
+            show: (row: StocktakeApi.StocktakeRequest) => row.status === 'APPROVED',
+          },
+          {
+            code: 'cancel',
+            text: '取消',
+            auth: 'warehouse.inventory.stocktake.write',
+            danger: true,
+            show: (row: StocktakeApi.StocktakeRequest) =>
+              ['DRAFT', 'REJECTED'].includes(row.status),
+          },
+        ],
+        props: {
+          menuCodes: ['edit', 'submit', 'approve', 'reject', 'execute', 'cancel'],
+          menuText: '更多',
+          renderMode: 'menu',
+        },
+      },
       field: 'operation',
       fixed: 'right',
-      slots: { default: 'operation' },
       title: '操作',
-      width: 260,
+      width: 110,
     },
   ];
 }

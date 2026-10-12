@@ -29,7 +29,6 @@ const route = useRoute();
 const { hasAccessByCodes } = useAccess();
 const userStore = useUserStore();
 const canWriteSettlements = hasAccessByCodes(['finance.settlements.write']);
-const canApproveSettlements = hasAccessByCodes(['finance.settlements.approve']);
 const financeSourceDetail = ref<InstanceType<typeof FinanceSourceDetail>>();
 
 const [Create, createApi] = useVbenModal({
@@ -49,7 +48,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns((id) => resolveSupplier.value(id)),
+    columns: useColumns((id) => resolveSupplier.value(id), onActionClick, userStore.userInfo?.userId),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -73,6 +72,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
     },
   } as VxeTableGridOptions<FinanceApi.Settlement>,
 });
+
+function onActionClick({ code, row }: { code: string; row: FinanceApi.Settlement }) {
+  if (code === 'confirm') runConfirm(row);
+  else if (code === 'cancel') openCancel(row);
+}
 
 function runConfirm(row: FinanceApi.Settlement) {
   Modal.confirm({
@@ -151,31 +155,6 @@ watch(
           <Plus class="size-5" />
           创建结算单
         </Button>
-      </template>
-      <template #operation="{ row }">
-        <div class="flex flex-wrap justify-center gap-0">
-          <Button
-            v-if="canApproveSettlements"
-            :disabled="row.status !== 'DRAFT' || String(row.created_by) === String(userStore.userInfo?.userId)"
-            :title="String(row.created_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'DRAFT' ? '当前状态不可审批或复核' : undefined"
-            size="small"
-            type="link"
-            @click="runConfirm(row)"
-          >
-            确认结算
-          </Button>
-          <Button
-            v-if="canWriteSettlements"
-            :disabled="row.status !== 'DRAFT'"
-            :title="row.status !== 'DRAFT' ? '当前状态不支持此操作' : undefined"
-            danger
-            size="small"
-            type="link"
-            @click="openCancel(row)"
-          >
-            取消
-          </Button>
-        </div>
       </template>
     </Grid>
 

@@ -52,7 +52,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns((id) => resolveSupplier.value(id)),
+    columns: useColumns((id) => resolveSupplier.value(id), onActionClick, userStore.userInfo?.userId),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -76,6 +76,22 @@ const [Grid, gridApi] = useVbenVxeGrid({
     },
   } as VxeTableGridOptions<FinanceApi.Invoice>,
 });
+
+function onActionClick({ code, row }: { code: string; row: FinanceApi.Invoice }) {
+  if (code === 'detail') {
+    financeSourceDetail.value?.open({ id: row.id, kind: 'invoices' });
+  } else if (code === 'matches') {
+    matchesApi.setData(row.id).open();
+  } else if (code === 'void') {
+    openVoid(row);
+  } else if (code === 'submit') {
+    runSubmit(row);
+  } else if (code === 'verify') {
+    runVerify(row);
+  } else if (code === 'reject') {
+    openReject(row);
+  }
+}
 
 function runSubmit(row: FinanceApi.Invoice) {
   Modal.confirm({
@@ -176,41 +192,6 @@ watch(
           <Plus class="size-5" />
           录入发票
         </Button>
-      </template>
-      <template #operation="{ row }">
-        <div class="flex flex-wrap justify-center gap-0">
-          <Button v-if="hasAccessByCodes(['finance.invoices.read'])" size="small" type="link" @click="matchesApi.setData(row.id).open()">行匹配</Button>
-          <Button v-if="hasAccessByCodes(['finance.invoices.write'])" :disabled="!['DRAFT', 'REJECTED'].includes(row.status)" :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '只有草稿或驳回记录可以操作' : undefined" size="small" type="link" danger @click="openVoid(row)">作废</Button>
-          <Button
-            v-if="hasAccessByCodes(['finance.invoices.write'])" :disabled="!['DRAFT', 'REJECTED'].includes(row.status)" :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '只有草稿或驳回记录可以操作' : undefined"
-            size="small"
-            type="link"
-            @click="runSubmit(row)"
-          >
-            提交核验
-          </Button>
-          <Button
-            v-if="hasAccessByCodes(['finance.invoices.verify'])"
-            :disabled="row.status !== 'SUBMITTED' || String(row.submitted_by) === String(userStore.userInfo?.userId)"
-            :title="String(row.submitted_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'SUBMITTED' ? '当前状态不可审批或复核' : undefined"
-            size="small"
-            type="link"
-            @click="runVerify(row)"
-          >
-            核验
-          </Button>
-          <Button
-            v-if="hasAccessByCodes(['finance.invoices.verify'])"
-            :disabled="row.status !== 'SUBMITTED' || String(row.submitted_by) === String(userStore.userInfo?.userId)"
-            :title="String(row.submitted_by) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'SUBMITTED' ? '当前状态不可审批或复核' : undefined"
-            danger
-            size="small"
-            type="link"
-            @click="openReject(row)"
-          >
-            驳回
-          </Button>
-        </div>
       </template>
     </Grid>
 

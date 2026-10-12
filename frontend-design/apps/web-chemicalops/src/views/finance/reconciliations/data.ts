@@ -1,5 +1,5 @@
 import type { VbenFormSchema } from '#/adapter/form';
-import type { VxeTableGridColumns } from '#/adapter/vxe-table';
+import type { OnActionClickFn, VxeTableGridColumns } from '#/adapter/vxe-table';
 import type { FinanceApi } from '#/api';
 
 import { RECONCILIATION_STATUS_DICT } from '#/constants/dictionary';
@@ -24,6 +24,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
 /** 列表列定义 */
 export function useColumns(
   resolveSupplier: (id?: null | number) => string,
+  onActionClick: OnActionClickFn<FinanceApi.Reconciliation>,
 ): VxeTableGridColumns {
   return [
     { field: 'reconciliation_no', minWidth: 170, title: '对账单号' },
@@ -70,11 +71,21 @@ export function useColumns(
     },
     {
       align: 'center',
+      cellRender: {
+        attrs: { onClick: onActionClick },
+        name: 'CellOperation',
+        options: [
+          { code: 'items', text: (row: FinanceApi.Reconciliation) => row.items_version > 0 ? '对账明细' : '对账依据' },
+          { code: 'collaboration', text: '供应商协同', auth: 'finance.reconciliations.read' },
+          { code: 'confirm', text: '确认对账', auth: 'finance.reconciliations.write', show: (row: FinanceApi.Reconciliation) => ['DRAFT', 'DISPUTED'].includes(row.status) },
+          { code: 'dispute', text: '发起争议', auth: 'finance.reconciliations.write', danger: true, show: (row: FinanceApi.Reconciliation) => ['DRAFT', 'CONFIRMED'].includes(row.status) },
+        ],
+        props: { menuCodes: ['collaboration', 'confirm', 'dispute'], menuText: '更多', renderMode: 'menu' },
+      },
       field: 'operation',
       fixed: 'right',
-      slots: { default: 'operation' },
       title: '操作',
-      width: 260,
+      width: 130,
     },
   ];
 }

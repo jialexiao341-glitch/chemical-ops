@@ -11,6 +11,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { getTechnicalDocumentPreviewApi, getTechnicalDocumentSourceFileApi } from '#/api';
+import { formatDateTime } from '#/utils/format';
 
 const source = ref<TechnicalDocumentSource>();
 const document = ref<TechnicalDocumentPreview>();
@@ -139,7 +140,7 @@ function displayValue(value: unknown) {
             <div><dt class="text-muted-foreground">CAS 号</dt><dd class="mb-0 mt-1">{{ source.cas_no }}</dd></div>
             <div><dt class="text-muted-foreground">MinIO 对象</dt><dd class="mb-0 mt-1 break-all">{{ source.source_bucket }}/{{ source.object_key }}</dd></div>
             <div><dt class="text-muted-foreground">文件大小</dt><dd class="mb-0 mt-1">{{ (source.file_size / 1024).toFixed(1) }} KB</dd></div>
-            <div><dt class="text-muted-foreground">文件更新时间</dt><dd class="mb-0 mt-1">{{ source.updated_at || '—' }}</dd></div>
+            <div><dt class="text-muted-foreground">文件更新时间</dt><dd class="mb-0 mt-1">{{ formatDateTime(source.updated_at) }}</dd></div>
           </dl>
         </section>
 

@@ -12,6 +12,8 @@ import { Alert, Button, Empty, Input, Select, Spin, Tag, message } from 'antdv-n
 
 import { createBatchChecksApi, createBatchRecallReportApi, createFinanceChecksApi, decideExceptionActionApi, getBatchAssigneesApi, getBatchCheckEventsApi, getBatchChecksApi, getBatchRecallReportsApi, getBusinessInsightApi, getExceptionDecisionApi, getExceptionDecisionEventsApi, getFinanceAssigneesApi, getFinanceCheckEventsApi, getFinanceChecksApi, getInsightSnapshotsApi, getRecallReportOwnersApi, saveInsightSnapshotApi, updateBatchCheckApi, updateFinanceCheckApi, updateRecallReportWorkflowApi } from '#/api';
 
+import { formatDateTime } from '#/utils/format';
+
 const emit = defineEmits(['changed']);
 const router = useRouter();
 const { hasAccessByCodes } = useAccess();
@@ -330,8 +332,8 @@ function exportRecallReport() {
   const report = saved.result_json;
   downloadCsv(`批次-${report.batch_no}-召回演练-${saved.id}.csv`, [
     ['类别', '对象', '数量/状态', '来源或说明'],
-    ['报告', report.batch_no, report.status, `生成时间 ${saved.created_at}；可见流水 ${report.visible_transaction_count}`],
-    ['完成确认', recallWorkflowStatus(saved.workflow.status), saved.workflow.owner_name ?? '未指定负责人', `提交人 ${saved.workflow.submitted_by_name ?? '未提交'}；提交时间 ${saved.workflow.submitted_at ?? ''}；复核人 ${saved.workflow.reviewed_by_name ?? '未复核'}；完成时间 ${saved.workflow.completed_at ?? ''}`],
+    ['报告', report.batch_no, report.status, `生成时间 ${formatDateTime(saved.created_at)}；可见流水 ${report.visible_transaction_count}`],
+    ['完成确认', recallWorkflowStatus(saved.workflow.status), saved.workflow.owner_name ?? '未指定负责人', `提交人 ${saved.workflow.submitted_by_name ?? '未提交'}；提交时间 ${formatDateTime(saved.workflow.submitted_at)}；复核人 ${saved.workflow.reviewed_by_name ?? '未复核'}；完成时间 ${formatDateTime(saved.workflow.completed_at)}`],
     ['最终结论', saved.workflow.conclusion ?? '', '', saved.workflow.review_reason ?? ''],
     ...report.slots.map((row) => ['库位数量', `仓库 #${row.warehouse_id} / 库位 #${row.location_id} / 单位 #${row.unit_id}`, `余额 ${row.quantity ?? '缺失'}；流水净额 ${row.movement_net}；差额 ${row.difference ?? '无法判定'}`, `${row.status}；核查 ${row.check_status}`]),
     ...report.outflows.map((row) => ['出库去向', row.transaction_no, `${row.quantity} / 单位 #${row.unit_id}；${recallCheckStatus(row.check_status)}`, `${sourceTypeLabel(row.source_type)} #${row.source_id ?? '缺失'}；${row.source_reason ?? (row.source_found ? '来源单据已找到' : '来源缺失')}；${row.finding ?? ''}`]),
@@ -340,7 +342,7 @@ function exportRecallReport() {
     ...report.transfer_differences.map((row) => ['调拨差异', `申请 #${row.request_id}`, `净额 ${row.net} / 单位 #${row.unit_id}`, '需核对调拨两端']),
     ...report.limitations.map((item) => ['范围与结论', item, '', '']),
     ...(report.checks ?? []).map((item) => ['生成时核查记录', `核查项 #${item.id}`, recallCheckStatus(item.status), `负责人 #${item.assignee_id ?? '未指定'}；核查人 #${item.checked_by ?? '未核查'}；复核人 #${item.reviewed_by ?? '未复核'}；${item.finding ?? ''}`]),
-    ...saved.workflow.events.map((event) => ['报告确认记录', event.created_at, `${recallWorkflowAction(event.action)} · ${event.actor_name}`, `${event.conclusion ?? ''}；${event.review_reason ?? ''}`]),
+    ...saved.workflow.events.map((event) => ['报告确认记录', formatDateTime(event.created_at), `${recallWorkflowAction(event.action)} · ${event.actor_name}`, `${event.conclusion ?? ''}；${event.review_reason ?? ''}`]),
   ]);
 }
 
@@ -389,9 +391,9 @@ defineExpose({ open });
       <Empty v-else-if="!result && !loading" description="没有可展示的分析结果" />
       <div v-else-if="result" class="space-y-4 pb-6">
         <Alert show-icon type="info" :message="result.summary" :description="`适用人员：${result.audience}；分析证据供人工核查，正式业务处理仍在原单据完成。`" />
-        <div class="flex justify-end">
-          <Button class="mr-2" :loading="busy" @click="saveSnapshot">保存本次分析</Button>
-          <Button size="small" @click="exportChecklist">导出核查清单</Button>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <Button :loading="busy" @click="saveSnapshot">保存本次分析</Button>
+          <Button @click="exportChecklist">导出核查清单</Button>
         </div>
 
         <section v-if="snapshots.length">
@@ -399,7 +401,7 @@ defineExpose({ open });
           <div class="flex flex-wrap gap-2">
             <Button size="small" :type="selectedSnapshotId === null ? 'primary' : 'default'" @click="showSnapshot()">查看当前</Button>
             <Button v-for="snapshot in snapshots" :key="snapshot.id" size="small" :type="selectedSnapshotId === snapshot.id ? 'primary' : 'default'" @click="showSnapshot(snapshot)">
-              {{ new Date(snapshot.created_at).toLocaleString() }}
+              {{ formatDateTime(snapshot.created_at) }}
             </Button>
           </div>
           <div v-if="selectedSnapshotId !== null" class="mt-2 text-xs text-muted-foreground">正在查看保存时的分析证据；下方核查清单展示当前处理状态。</div>
@@ -434,10 +436,10 @@ defineExpose({ open });
               <Button v-if="item.status === 'CHECKED'" size="small" type="primary" :disabled="busy" @click="changeCheck(item, { status: 'VERIFIED', finding: findings[item.id] })">复核通过</Button>
               <Button v-if="item.status !== 'OPEN'" size="small" :disabled="busy" @click="changeCheck(item, { status: 'OPEN', finding: findings[item.id] })">重新核查</Button>
             </div>
-            <div v-if="item.checked_at" class="text-xs text-muted-foreground">核查人 #{{ item.checked_by }} · {{ item.checked_at }}<span v-if="item.reviewed_at">；复核人 #{{ item.reviewed_by }} · {{ item.reviewed_at }}</span></div>
+            <div v-if="item.checked_at" class="text-xs text-muted-foreground">核查人 #{{ item.checked_by }} · {{ formatDateTime(item.checked_at) }}<span v-if="item.reviewed_at">；复核人 #{{ item.reviewed_by }} · {{ formatDateTime(item.reviewed_at) }}</span></div>
             <Button size="small" type="link" @click="showEvents(item)">查看处理记录</Button>
             <div v-for="event in events[item.id] ?? []" :key="event.id" class="border-t pt-2 text-xs text-muted-foreground">
-              {{ event.created_at }} · 操作人 #{{ event.actor_id }} · {{ event.status }} · {{ event.finding || '无说明' }}
+              {{ formatDateTime(event.created_at) }} · 操作人 #{{ event.actor_id }} · {{ event.status }} · {{ event.finding || '无说明' }}
             </div>
           </div>
           <div class="space-y-3 border-t pt-4">
@@ -447,7 +449,7 @@ defineExpose({ open });
             </div>
             <div v-if="recallReports.length" class="flex flex-wrap gap-2">
               <Button v-for="report in recallReports" :key="report.id" size="small" :disabled="busy" :type="selectedRecallReport?.id === report.id ? 'primary' : 'default'" @click="selectRecallReport(report)">
-                {{ new Date(report.created_at).toLocaleString() }}
+                {{ formatDateTime(report.created_at) }}
               </Button>
             </div>
             <div v-if="selectedRecallReport" class="space-y-3 rounded-lg border p-3 text-sm">
@@ -467,18 +469,18 @@ defineExpose({ open });
                   <Button type="primary" :loading="busy" :disabled="selectedRecallReport.result_json.version !== 2 || selectedRecallReport.result_json.status !== 'READY_FOR_REVIEW'" @click="changeRecallWorkflow('SUBMIT')">提交给另一人复核</Button>
                 </template>
                 <div v-else-if="selectedRecallReport.workflow.conclusion" class="whitespace-pre-wrap break-words">最终结论：{{ selectedRecallReport.workflow.conclusion }}</div>
-                <div v-if="selectedRecallReport.workflow.submitted_at" class="text-xs text-muted-foreground">提交人：{{ selectedRecallReport.workflow.submitted_by_name }} · {{ selectedRecallReport.workflow.submitted_at }}</div>
+                <div v-if="selectedRecallReport.workflow.submitted_at" class="text-xs text-muted-foreground">提交人：{{ selectedRecallReport.workflow.submitted_by_name }} · {{ formatDateTime(selectedRecallReport.workflow.submitted_at) }}</div>
                 <template v-if="canReviewRecall(selectedRecallReport)">
                   <label class="block text-sm" for="recall-review-reason">最终复核意见</label>
                   <Input.TextArea id="recall-review-reason" v-model:value="recallReviewReason" :rows="2" :maxlength="2000" :disabled="busy" placeholder="记录复核依据；退回时说明需要补充的内容" />
                   <div class="flex flex-wrap gap-2"><Button type="primary" :loading="busy" @click="changeRecallWorkflow('COMPLETE')">复核并确认演练完成</Button><Button :disabled="busy" @click="changeRecallWorkflow('RETURN')">退回负责人</Button></div>
                 </template>
                 <div v-if="selectedRecallReport.workflow.review_reason" class="whitespace-pre-wrap break-words">复核意见：{{ selectedRecallReport.workflow.review_reason }}</div>
-                <div v-if="selectedRecallReport.workflow.reviewed_at" class="text-xs text-muted-foreground">复核人：{{ selectedRecallReport.workflow.reviewed_by_name }} · {{ selectedRecallReport.workflow.reviewed_at }}</div>
-                <div v-if="selectedRecallReport.workflow.completed_at" class="text-sm">演练完成时间：{{ selectedRecallReport.workflow.completed_at }}</div>
+                <div v-if="selectedRecallReport.workflow.reviewed_at" class="text-xs text-muted-foreground">复核人：{{ selectedRecallReport.workflow.reviewed_by_name }} · {{ formatDateTime(selectedRecallReport.workflow.reviewed_at) }}</div>
+                <div v-if="selectedRecallReport.workflow.completed_at" class="text-sm">演练完成时间：{{ formatDateTime(selectedRecallReport.workflow.completed_at) }}</div>
                 <details v-if="selectedRecallReport.workflow.events.length" class="text-xs text-muted-foreground">
                   <summary class="cursor-pointer py-1">查看确认记录（{{ selectedRecallReport.workflow.events.length }}）</summary>
-                  <div v-for="event in selectedRecallReport.workflow.events" :key="event.id" class="mt-2 border-t pt-2">{{ event.created_at }} · {{ event.actor_name }} · {{ recallWorkflowAction(event.action) }}<div class="mt-1 whitespace-pre-wrap break-words">{{ event.conclusion }} {{ event.review_reason }}</div></div>
+                  <div v-for="event in selectedRecallReport.workflow.events" :key="event.id" class="mt-2 border-t pt-2">{{ formatDateTime(event.created_at) }} · {{ event.actor_name }} · {{ recallWorkflowAction(event.action) }}<div class="mt-1 whitespace-pre-wrap break-words">{{ event.conclusion }} {{ event.review_reason }}</div></div>
                 </details>
               </div>
               <div class="text-muted-foreground">可见流水 {{ selectedRecallReport.result_json.visible_transaction_count }} 条 · 来源缺失 {{ selectedRecallReport.result_json.missing_source_count }} 条 · 明细冲突 {{ selectedRecallReport.result_json.conflict_source_count === undefined ? '未评估' : `${selectedRecallReport.result_json.conflict_source_count} 条` }} · 未复核 {{ selectedRecallReport.result_json.open_check_count }} 项 · 未建核查 {{ selectedRecallReport.result_json.missing_check_count }} 项</div>
@@ -543,10 +545,10 @@ defineExpose({ open });
               <Button v-if="item.status === 'CHECKED'" size="small" type="primary" :disabled="busy" @click="changeFinanceCheck(item, { status: 'VERIFIED', finding: findings[item.id] })">复核通过</Button>
               <Button v-if="item.status !== 'OPEN'" size="small" :disabled="busy" @click="changeFinanceCheck(item, { status: 'OPEN', finding: findings[item.id] })">重新核查</Button>
             </div>
-            <div v-if="item.checked_at" class="text-xs text-muted-foreground">核查人 #{{ item.checked_by }} · {{ item.checked_at }}<span v-if="item.reviewed_at">；复核人 #{{ item.reviewed_by }} · {{ item.reviewed_at }}</span></div>
+            <div v-if="item.checked_at" class="text-xs text-muted-foreground">核查人 #{{ item.checked_by }} · {{ formatDateTime(item.checked_at) }}<span v-if="item.reviewed_at">；复核人 #{{ item.reviewed_by }} · {{ formatDateTime(item.reviewed_at) }}</span></div>
             <Button size="small" type="link" @click="showFinanceEvents(item)">查看处理记录</Button>
             <div v-for="event in events[item.id] ?? []" :key="event.id" class="border-t pt-2 text-xs text-muted-foreground">
-              {{ event.created_at }} · 操作人 #{{ event.actor_id }} · {{ event.status }} · {{ event.finding || '无说明' }}
+              {{ formatDateTime(event.created_at) }} · 操作人 #{{ event.actor_id }} · {{ event.status }} · {{ event.finding || '无说明' }}
             </div>
           </div>
         </section>
@@ -588,7 +590,7 @@ defineExpose({ open });
             </div>
           </div>
           <div v-if="exceptionEvents.length" class="space-y-1 border-t pt-2 text-xs text-muted-foreground">
-            <div v-for="event in exceptionEvents" :key="event.id">{{ event.created_at }} · 操作人 #{{ event.actor_id }} · {{ event.decision === 'ADOPTED' ? '采纳' : '驳回' }} · {{ event.reason }}</div>
+            <div v-for="event in exceptionEvents" :key="event.id">{{ formatDateTime(event.created_at) }} · 操作人 #{{ event.actor_id }} · {{ event.decision === 'ADOPTED' ? '采纳' : '驳回' }} · {{ event.reason }}</div>
           </div>
         </section>
 

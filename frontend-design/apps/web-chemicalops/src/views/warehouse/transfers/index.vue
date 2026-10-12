@@ -29,7 +29,6 @@ defineOptions({ name: 'TransferRequestList' });
 const { hasAccessByCodes } = useAccess();
 const userStore = useUserStore();
 const canWriteTransfers = hasAccessByCodes(['warehouse.inventory.transfer.write']);
-const canApproveTransfers = hasAccessByCodes(['warehouse.inventory.transfer.approve']);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -46,7 +45,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns(),
+    columns: useColumns(onActionClick, userStore.userInfo?.userId),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -114,6 +113,16 @@ function run(
     title: confirm.title,
   });
 }
+
+function onActionClick({ code, row }: { code: string; row: TransferRequestApi.TransferRequest }) {
+  if (code === 'detail') detailApi.setData(row).open();
+  else if (code === 'edit') formDrawerApi.setData(row).open();
+  else if (code === 'submit') run(() => submitTransferApi(row.id), { content: `提交后进入审批流程：${row.transfer_no}`, okText: '提交', title: '提交调拨申请' });
+  else if (code === 'approve') run(() => approveTransferApi(row.id), { content: `确认审批通过 ${row.transfer_no}？`, okText: '审批通过', title: '审批调拨申请' });
+  else if (code === 'reject') openReject(row);
+  else if (code === 'execute') run(() => executeTransferApi(row.id), { content: `确认执行调拨？源库存将减少、目标库存将增加：${row.transfer_no}`, okText: '执行调拨', title: '执行库存调拨' });
+  else if (code === 'cancel') run(() => cancelTransferApi(row.id), { content: `确认取消 ${row.transfer_no}？取消后不可恢复。`, okText: '取消', title: '取消调拨申请' });
+}
 </script>
 
 <template>
@@ -127,99 +136,7 @@ function run(
           新建调拨申请
         </Button>
       </template>
-      <template #operation="{ row }">
-        <div class="flex flex-wrap justify-center gap-0">
-          <Button
-            v-if="canWriteTransfers"
-            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
-            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
-            size="small"
-            type="link"
-            @click="formDrawerApi.setData(row).open()"
-          >
-            编辑
-          </Button>
-          <Button size="small" type="link" @click="detailApi.setData(row).open()">
-            详情
-          </Button>
-          <Button
-            v-if="canWriteTransfers"
-            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
-            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
-            size="small"
-            type="link"
-            @click="
-              run(() => submitTransferApi(row.id), {
-                content: `提交后进入审批流程：${row.transfer_no}`,
-                okText: '提交',
-                title: '提交调拨申请',
-              })
-            "
-          >
-            提交
-          </Button>
-          <Button
-            v-if="canApproveTransfers"
-            :disabled="row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)"
-            :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批' : row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
-            size="small"
-            type="link"
-            @click="
-              run(() => approveTransferApi(row.id), {
-                content: `确认审批通过 ${row.transfer_no}？`,
-                okText: '审批通过',
-                title: '审批调拨申请',
-              })
-            "
-          >
-            审批通过
-          </Button>
-          <Button
-            v-if="canApproveTransfers"
-            :disabled="row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)"
-            :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批' : row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined"
-            danger
-            size="small"
-            type="link"
-            @click="openReject(row)"
-          >
-            驳回
-          </Button>
-          <Button
-            v-if="canWriteTransfers"
-            :disabled="row.status !== 'APPROVED'"
-            :title="row.status !== 'APPROVED' ? '仅已审批申请可执行调拨' : undefined"
-            size="small"
-            type="link"
-            @click="
-              run(() => executeTransferApi(row.id), {
-                content: `确认执行调拨？源库存将减少、目标库存将增加：${row.transfer_no}`,
-                okText: '执行调拨',
-                title: '执行库存调拨',
-              })
-            "
-          >
-            执行调拨
-          </Button>
-          <Button
-            v-if="canWriteTransfers"
-            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
-            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
-            danger
-            size="small"
-            type="link"
-            @click="
-              run(() => cancelTransferApi(row.id), {
-                content: `确认取消 ${row.transfer_no}？取消后不可恢复。`,
-                okText: '取消',
-                title: '取消调拨申请',
-              })
-            "
-          >
-            取消
-          </Button>
-        </div>
-      </template>
+
     </Grid>
 
     <Modal

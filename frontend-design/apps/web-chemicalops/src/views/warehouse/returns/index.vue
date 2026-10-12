@@ -3,10 +3,9 @@ import type { InventoryReturn } from '#/api';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
 import { ref } from 'vue';
-import { useAccess } from '@vben/access';
 import { useUserStore } from '@vben/stores';
 import { Page } from '@vben/common-ui';
-import { Alert, Button, Input, message, Modal } from 'antdv-next';
+import { Alert, Input, message, Modal } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { actInventoryReturnApi, getInventoryReturnsApi } from '#/api';
@@ -14,7 +13,6 @@ import { APPROVAL_FLOW_STATUS_DICT } from '#/constants/dictionary';
 import { formatQuantity } from '#/utils/format';
 
 defineOptions({ name: 'InventoryReturns' });
-const { hasAccessByCodes } = useAccess();
 const userStore = useUserStore();
 const busy = ref(false);
 const rejectRow = ref<InventoryReturn>();
@@ -43,7 +41,67 @@ const [Grid, gridApi] = useVbenVxeGrid({
         field: 'status', title: '状态', width: 110,
         cellRender: { name: 'CellTag', options: APPROVAL_FLOW_STATUS_DICT.items },
       },
-      { title: '操作', width: 220, fixed: 'right', slots: { default: 'actions' } },
+      {
+        align: 'center',
+        cellRender: {
+          attrs: { onClick: onActionClick },
+          name: 'CellOperation',
+          options: [
+            {
+              code: 'submit',
+              text: '提交审批',
+              auth: 'warehouse.inventory.return.write',
+              disabled: () => busy.value,
+              show: (row: InventoryReturn) =>
+                ['DRAFT', 'REJECTED'].includes(row.status),
+            },
+            {
+              code: 'cancel',
+              text: '取消',
+              auth: 'warehouse.inventory.return.write',
+              danger: true,
+              disabled: () => busy.value,
+              show: (row: InventoryReturn) =>
+                ['DRAFT', 'REJECTED'].includes(row.status),
+            },
+            {
+              code: 'approve',
+              text: '审批通过',
+              auth: 'warehouse.inventory.return.approve',
+              disabled: () => busy.value,
+              show: (row: InventoryReturn) =>
+                row.status === 'SUBMITTED' &&
+                String(row.applicant_id) !== String(userStore.userInfo?.userId),
+            },
+            {
+              code: 'reject',
+              text: '驳回',
+              auth: 'warehouse.inventory.return.approve',
+              danger: true,
+              disabled: () => busy.value,
+              show: (row: InventoryReturn) =>
+                row.status === 'SUBMITTED' &&
+                String(row.applicant_id) !== String(userStore.userInfo?.userId),
+            },
+            {
+              code: 'execute',
+              text: '执行出库',
+              auth: 'warehouse.inventory.return.write',
+              disabled: () => busy.value,
+              show: (row: InventoryReturn) => row.status === 'APPROVED',
+            },
+          ],
+          props: {
+            menuCodes: ['cancel', 'reject'],
+            menuText: '更多',
+            renderMode: 'menu',
+          },
+        },
+        field: 'operation',
+        fixed: 'right',
+        title: '操作',
+        width: 150,
+      },
     ],
     height: 'auto',
     keepSource: true,
@@ -83,24 +141,17 @@ function submitReject() {
   if (!reason.value.trim()) { message.warning('请填写驳回原因'); return; }
   if (rejectRow.value) void act(rejectRow.value, 'reject', reason.value.trim());
 }
+function onActionClick({ code, row }: { code: string; row: InventoryReturn }) {
+  if (code === 'reject') reject(row);
+  else if (code === 'submit' || code === 'cancel' || code === 'approve' || code === 'execute') {
+    confirmAction(row, code);
+  }
+}
 </script>
 
 <template>
   <Page auto-content-height>
     <Grid table-title="供应商退货" table-title-help="从库存台账的“申请退货”创建草稿。展开退货单可查看产品、数量及原始到货和采购订单。">
-      <template #actions="{ row }">
-        <div class="flex items-center justify-center gap-1">
-          <template v-if="hasAccessByCodes(['warehouse.inventory.return.write'])">
-            <Button v-if="['DRAFT', 'REJECTED'].includes(row.status)" size="small" type="link" :disabled="busy" @click="confirmAction(row, 'submit')">提交审批</Button>
-            <Button v-if="['DRAFT', 'REJECTED'].includes(row.status)" size="small" type="link" :disabled="busy" @click="confirmAction(row, 'cancel')">取消</Button>
-            <Button v-if="row.status === 'APPROVED'" size="small" type="link" :disabled="busy" @click="confirmAction(row, 'execute')">执行出库</Button>
-          </template>
-          <template v-if="hasAccessByCodes(['warehouse.inventory.return.approve'])">
-            <Button size="small" type="link" :disabled="busy || row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)" :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的退货申请' : row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined" @click="confirmAction(row, 'approve')">审批通过</Button>
-            <Button size="small" danger type="link" :disabled="busy || row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)" :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '不能审批本人经办的退货申请' : row.status !== 'SUBMITTED' ? '仅待审批申请可审批或驳回' : undefined" @click="reject(row)">驳回</Button>
-          </template>
-        </div>
-      </template>
       <template #return-items="{ row }">
         <div class="space-y-2 p-4 text-sm">
           <Alert v-if="row.reject_reason" type="warning" :message="`驳回原因：${row.reject_reason}`" />

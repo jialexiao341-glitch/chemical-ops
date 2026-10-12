@@ -94,7 +94,7 @@ PERMISSIONS = (
     ("system.files.download", "下载文件", "API", "system.files", "download"),
     ("system.files.write", "上传文件", "API", "system.files", "write"),
     ("system.files.attach", "关联业务附件", "API", "system.files", "attach"),
-    ("warehouse.inventory.cost.write", "执行 FIFO 成本出库", "API", "warehouse.inventory.cost", "write"),
+    ("warehouse.inventory.cost.write", "执行先进先出成本出库", "API", "warehouse.inventory.cost", "write"),
     ("warehouse.inventory.cost.read", "查看库存成本", "API", "warehouse.inventory.cost", "read"),
     ("master.chemicals.delete", "删除化学品", "API", "master.chemicals", "delete"),
     ("master.products.delete", "删除产品", "API", "master.products", "delete"),
@@ -102,8 +102,8 @@ PERMISSIONS = (
     ("master.chemicals.import", "导入化学品", "API", "master.chemicals", "import"),
     ("master.products.import", "导入产品", "API", "master.products", "import"),
     ("master.suppliers.import", "导入供应商", "API", "master.suppliers", "import"),
-    ("dashboard.read", "查看运营 Dashboard", "API", "dashboard", "read"),
-    ("ai.workspace.read", "访问 AI 工作台", "API", "ai.workspace", "read"),
+    ("dashboard.read", "查看运营仪表盘", "API", "dashboard", "read"),
+    ("ai.workspace.read", "访问智能工作台", "API", "ai.workspace", "read"),
 )
 
 # Batch export permissions are deliberately separate from list access. The
@@ -121,8 +121,38 @@ _SUPPLIER_EXPORT_RESOURCES = (
     "supplier.portal", "supplier.portal.rfq", "supplier.portal.delivery",
     "supplier.portal.shipment", "supplier.portal.quality", "supplier.portal.reconciliation",
 )
+_EXPORT_PERMISSION_NAMES = {
+    "master.chemicals": "化学品数据",
+    "master.products": "产品数据",
+    "master.suppliers": "供应商数据",
+    "system.users": "用户数据",
+    "system.departments": "部门数据",
+    "system.roles": "角色数据",
+    "system.permissions": "权限数据",
+    "procurement.requests": "采购申请数据",
+    "procurement.rfqs": "采购询价数据",
+    "procurement.orders": "采购订单数据",
+    "warehouse.deliveries": "到货单数据",
+    "warehouse.inventory.balances": "库存余额数据",
+    "warehouse.inventory.transactions": "库存流水数据",
+    "warehouse.inventory.issues": "库存领用记录",
+    "warehouse.inventory.transfers": "库存调拨记录",
+    "warehouse.inventory.stocktakes": "库存盘点记录",
+    "quality.acceptances": "质量验收记录",
+    "finance.reconciliations": "财务对账单",
+    "finance.invoices": "供应商发票",
+    "finance.payments": "付款记录",
+    "finance.settlements": "采购结算单",
+    "operations.exceptions": "运营异常记录",
+    "supplier.portal": "供应商门户数据",
+    "supplier.portal.rfq": "供应商询价数据",
+    "supplier.portal.delivery": "供应商交期更新数据",
+    "supplier.portal.shipment": "供应商发货通知",
+    "supplier.portal.quality": "供应商质量资料",
+    "supplier.portal.reconciliation": "供应商对账记录",
+}
 PERMISSIONS += tuple(
-    (f"{resource}.export", f"导出{resource}", "API", resource, "export")
+    (f"{resource}.export", f"导出{_EXPORT_PERMISSION_NAMES[resource]}", "API", resource, "export")
     for resource in (*_BATCH_RESOURCES, *_SUPPLIER_EXPORT_RESOURCES)
 )
 

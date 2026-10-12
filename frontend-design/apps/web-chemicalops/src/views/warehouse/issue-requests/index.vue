@@ -29,8 +29,6 @@ defineOptions({ name: 'IssueRequestList' });
 const { hasAccessByCodes } = useAccess();
 const userStore = useUserStore();
 const canWriteIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.write']);
-const canApproveIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.approve']);
-const canExecuteIssueRequests = hasAccessByCodes(['warehouse.inventory.issue.execute']);
 const isTechnicalRole = useUserStore().userInfo?.roles?.includes('TECHNICAL') ?? false;
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
@@ -48,7 +46,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns(),
+    columns: useColumns(onActionClick, userStore.userInfo?.userId),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -117,6 +115,16 @@ function run(
     title: confirm.title,
   });
 }
+
+function onActionClick({ code, row }: { code: string; row: IssueRequestApi.IssueRequest }) {
+  if (code === 'detail') detailApi.setData(row).open();
+  else if (code === 'edit') formDrawerApi.setData(row).open();
+  else if (code === 'submit') run(() => submitIssueApi(row.id), { content: `提交后进入审批流程：${row.issue_no}`, okText: '提交', title: '提交领用申请' });
+  else if (code === 'approve') run(() => approveIssueApi(row.id), { content: `确认审批通过 ${row.issue_no}？`, okText: '审批通过', title: '审批领用申请' });
+  else if (code === 'reject') openReject(row);
+  else if (code === 'execute') run(() => executeIssueApi(row.id), { content: `确认按明细执行出库？执行后库存将减少：${row.issue_no}`, okText: '执行出库', title: '执行领用出库' });
+  else if (code === 'cancel') run(() => cancelIssueApi(row.id), { content: `确认取消 ${row.issue_no}？取消后不可恢复。`, okText: '取消', title: '取消领用申请' });
+}
 </script>
 
 <template>
@@ -130,111 +138,7 @@ function run(
           新建领用申请
         </Button>
       </template>
-      <template #operation="{ row }">
-        <div class="flex flex-wrap justify-center gap-0">
-          <Button
-            v-if="canWriteIssueRequests"
-            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
-            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
-            size="small"
-            type="link"
-            @click="formDrawerApi.setData(row).open()"
-          >
-            编辑
-          </Button>
-          <Button size="small" type="link" @click="detailApi.setData(row).open()">
-            详情
-          </Button>
-          <Button
-            v-if="canWriteIssueRequests"
-            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
-            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
-            size="small"
-            type="link"
-            @click="
-              run(
-                () => submitIssueApi(row.id),
-                {
-                  content: `提交后进入审批流程：${row.issue_no}`,
-                  okText: '提交',
-                  title: '提交领用申请',
-                },
-              )
-            "
-          >
-            提交
-          </Button>
-          <Button
-            v-if="canApproveIssueRequests"
-            :disabled="row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)"
-            :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'SUBMITTED' ? '当前状态不可审批或复核' : undefined"
-            size="small"
-            type="link"
-            @click="
-              run(
-                () => approveIssueApi(row.id),
-                {
-                  content: `确认审批通过 ${row.issue_no}？`,
-                  okText: '审批通过',
-                  title: '审批领用申请',
-                },
-              )
-            "
-          >
-            审批通过
-          </Button>
-          <Button
-            v-if="canApproveIssueRequests"
-            :disabled="row.status !== 'SUBMITTED' || String(row.applicant_id) === String(userStore.userInfo?.userId)"
-            :title="String(row.applicant_id) === String(userStore.userInfo?.userId) ? '本人经办记录须由他人审批或复核' : row.status !== 'SUBMITTED' ? '当前状态不可审批或复核' : undefined"
-            danger
-            size="small"
-            type="link"
-            @click="openReject(row)"
-          >
-            驳回
-          </Button>
-          <Button
-            v-if="canExecuteIssueRequests"
-            :disabled="row.status !== 'APPROVED'"
-            :title="row.status !== 'APPROVED' ? '仅已审批申请可执行出库' : undefined"
-            size="small"
-            type="link"
-            @click="
-              run(
-                () => executeIssueApi(row.id),
-                {
-                  content: `确认按明细执行出库？执行后库存将减少：${row.issue_no}`,
-                  okText: '执行出库',
-                  title: '执行领用出库',
-                },
-              )
-            "
-          >
-            执行出库
-          </Button>
-          <Button
-            v-if="canWriteIssueRequests"
-            :disabled="!['DRAFT', 'REJECTED'].includes(row.status)"
-            :title="!['DRAFT', 'REJECTED'].includes(row.status) ? '仅草稿或已驳回申请可操作' : undefined"
-            danger
-            size="small"
-            type="link"
-            @click="
-              run(
-                () => cancelIssueApi(row.id),
-                {
-                  content: `确认取消 ${row.issue_no}？取消后不可恢复。`,
-                  okText: '取消',
-                  title: '取消领用申请',
-                },
-              )
-            "
-          >
-            取消
-          </Button>
-        </div>
-      </template>
+
     </Grid>
 
     <!-- 驳回弹窗 -->

@@ -6,7 +6,7 @@ import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 import { Alert, Button, Empty, Input, message, Select, Spin, Table } from 'antdv-next';
 import { getInvoiceApi, getInvoiceMatchesApi, saveInvoiceMatchesApi } from '#/api';
-import { formatAmount } from '#/utils/format';
+import { formatAmount, formatDateTime } from '#/utils/format';
 
 const emit = defineEmits(['success']);
 const { hasAccessByCodes } = useAccess();
@@ -95,7 +95,7 @@ const [Drawer, drawerApi] = useVbenDrawer<number>({ onOpenChange(open) { if (ope
         </Empty>
         <div v-if="!result.legacy" class="flex flex-wrap items-center gap-3">
           <span>对账版本 {{ selected?.reconciliation_version ?? result.reconciliation_version }}</span>
-          <Select v-if="result.versions.length" v-model:value="selectedVersion" aria-label="匹配历史版本" class="w-60" :options="result.versions.map(row => ({ value: row.version_no, label: `匹配版本 ${row.version_no} · ${row.created_at}` }))" @change="chooseVersion" />
+          <Select v-if="result.versions.length" v-model:value="selectedVersion" aria-label="匹配历史版本" class="w-60" :options="result.versions.map(row => ({ value: row.version_no, label: `匹配版本 ${row.version_no} · ${formatDateTime(row.created_at)}` }))" @change="chooseVersion" />
           <Button v-if="editable" type="primary" :loading="saving" @click="save">保存匹配新版本</Button>
         </div>
         <Table v-if="!result.legacy" :data-source="allocations" :columns="columns" :pagination="false" :scroll="{ x: 930 }" row-key="reconciliation_item_id">
@@ -107,8 +107,8 @@ const [Drawer, drawerApi] = useVbenDrawer<number>({ onOpenChange(open) { if (ope
             <template v-else-if="column.key === 'difference_note'"><Input.TextArea v-model:value="record.difference_note" :disabled="!editable" :rows="2" :maxlength="1000" :aria-label="`第 ${record.line_no} 行差异处理说明`" /></template>
           </template>
         </Table>
-        <div v-if="selected" class="text-muted-foreground">匹配人 #{{ selected.created_by }} · {{ selected.created_at }} · {{ selected.note || '未填写整单备注' }}</div>
-        <div v-if="invoice.verified_by" class="text-muted-foreground">复核人 #{{ invoice.verified_by }} · {{ invoice.verified_at }}</div>
+        <div v-if="selected" class="text-muted-foreground">匹配人 #{{ selected.created_by }} · {{ formatDateTime(selected.created_at) }} · {{ selected.note || '未填写整单备注' }}</div>
+        <div v-if="invoice.verified_by" class="text-muted-foreground">复核人 #{{ invoice.verified_by }} · {{ formatDateTime(invoice.verified_at) }}</div>
       </div>
     </Spin>
   </Drawer>

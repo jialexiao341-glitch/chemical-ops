@@ -1,5 +1,6 @@
 import type { VbenFormSchema } from '#/adapter/form';
-import type { VxeTableGridColumns } from '#/adapter/vxe-table';
+import type { OnActionClickFn, VxeTableGridColumns } from '#/adapter/vxe-table';
+import type { FinanceApi } from '#/api';
 
 import { SETTLEMENT_STATUS_DICT } from '#/constants/dictionary';
 import { formatAmount, formatDateTime } from '#/utils/format';
@@ -23,6 +24,8 @@ export function useGridFormSchema(): VbenFormSchema[] {
 /** 列表列定义 */
 export function useColumns(
   resolveSupplier: (id?: null | number) => string,
+  onActionClick: OnActionClickFn<FinanceApi.Settlement>,
+  currentUserId?: string | number,
 ): VxeTableGridColumns {
   return [
     { field: 'settlement_no', minWidth: 170, title: '结算单号' },
@@ -63,11 +66,36 @@ export function useColumns(
     },
     {
       align: 'center',
+      cellRender: {
+        attrs: { onClick: onActionClick },
+        name: 'CellOperation',
+        options: [
+          {
+            code: 'confirm',
+            text: '确认结算',
+            auth: 'finance.settlements.approve',
+            show: (row: FinanceApi.Settlement) =>
+              row.status === 'DRAFT' &&
+              String(row.created_by) !== String(currentUserId),
+          },
+          {
+            code: 'cancel',
+            text: '取消',
+            auth: 'finance.settlements.write',
+            danger: true,
+            show: (row: FinanceApi.Settlement) => row.status === 'DRAFT',
+          },
+        ],
+        props: {
+          menuCodes: ['cancel'],
+          menuText: '更多',
+          renderMode: 'menu',
+        },
+      },
       field: 'operation',
       fixed: 'right',
-      slots: { default: 'operation' },
       title: '操作',
-      width: 170,
+      width: 130,
     },
   ];
 }

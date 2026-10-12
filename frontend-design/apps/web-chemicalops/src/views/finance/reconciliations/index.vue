@@ -58,7 +58,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns((id) => resolveSupplier.value(id)),
+    columns: useColumns((id) => resolveSupplier.value(id), onActionClick),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -82,6 +82,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
     },
   } as VxeTableGridOptions<FinanceApi.Reconciliation>,
 });
+
+function onActionClick({ code, row }: { code: string; row: FinanceApi.Reconciliation }) {
+  if (code === 'items') itemsApi.setData(row.id).open();
+  else if (code === 'collaboration') void openSupplierCollaboration(row);
+  else if (code === 'confirm') runConfirm(row);
+  else if (code === 'dispute') openDispute(row);
+}
 
 function runConfirm(row: FinanceApi.Reconciliation) {
   Modal.confirm({
@@ -208,29 +215,6 @@ watch(
           <Plus class="size-5" />
           创建对账单
         </Button>
-      </template>
-      <template #operation="{ row }">
-        <div class="flex flex-wrap justify-center gap-0">
-          <Button size="small" type="link" @click="itemsApi.setData(row.id).open()">{{ row.items_version > 0 ? '对账明细' : '对账依据' }}</Button>
-          <Button v-if="hasAccessByCodes(['finance.reconciliations.read'])" size="small" type="link" @click="openSupplierCollaboration(row)">供应商协同</Button>
-          <Button
-            v-if="hasAccessByCodes(['finance.reconciliations.write']) && ['DRAFT', 'DISPUTED'].includes(row.status)"
-            size="small"
-            type="link"
-            @click="runConfirm(row)"
-          >
-            确认对账
-          </Button>
-          <Button
-            v-if="hasAccessByCodes(['finance.reconciliations.write']) && ['DRAFT', 'CONFIRMED'].includes(row.status)"
-            danger
-            size="small"
-            type="link"
-            @click="openDispute(row)"
-          >
-            发起争议
-          </Button>
-        </div>
       </template>
     </Grid>
 
