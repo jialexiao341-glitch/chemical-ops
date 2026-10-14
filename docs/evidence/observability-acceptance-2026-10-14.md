@@ -15,4 +15,4 @@
 - 新增任务隔离状态指标 `chemicalops_task_queue_isolation_required`。Grafana/告警对 MySQL 共享队列快照按 queue 取 max 去重；Counter/Histogram 仍按实例保留后聚合，数据库连接池面板保留 instance。多实例目标仍需逐个加入 Prometheus 配置。
 - 真实 MySQL + Redis 产品详情冷/热各 100 请求均成功，缓存 miss/hit 均为 100，数据库 SELECT 304/204；P50/P95/P99、QPS 和事件覆盖率见[冷/热报告](product-detail-cache-cold-hot-2026-10-14.json)。结果是本机单并发短样本。
 - 产品详情 API 并发 10、200 请求的一次样本为 200/200 成功；独立复跑 198/200 成功，另有 2 次连接中断，两个样本 P99 都约 7 秒。报告分别保存在 [成功样本](api-load-test-2026-10-14.json) 和 [复跑样本](api-load-test-repeat-2026-10-14.json)，不能据此宣称稳定容量或延迟改善。
-- 新增规则尚未接入 Alertmanager 收件器，Prometheus 可以展示 firing/resolved 状态但未验证外部通知送达。告警处置说明见[可观测性告警处置说明](../可观测性告警处置说明.md)。真实模型证据仍为小样本 smoke，不是并发负载；需要另行明确可接受的 Token/费用上限后再压测。
+- 后续续验已接入 Alertmanager 与用户指定的本地专用 webhook，完成真实 Prometheus 触发、恢复、重复抑制和接收器落盘确认；完成管理员/普通用户监控页浏览器及真实 HTTP 权限验收。用户确认并发 2、8 请求、8,000 Token 上限后，真实模型样本 8/8 成功、实际 732 Token。详见[ENG-05 续验记录](eng05-completion-2026-10-14.md)。这是本地通知与受控小样本并发结果，不代表生产外部通知或容量评估；前端全量类型检查仍有既有 Vue 类型依赖错误。

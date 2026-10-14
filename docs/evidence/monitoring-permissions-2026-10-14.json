@@ -1,0 +1,93 @@
+[
+  {
+    "user": "anonymous",
+    "status": 401
+  },
+  {
+    "user": "system_admin",
+    "login_status": 200,
+    "monitoring_status": 200,
+    "overview": {
+      "checked_at": "2026-10-14T07:44:32.360644Z",
+      "firing_alerts": 1,
+      "pending_alerts": 0,
+      "healthy_targets": 1,
+      "target_count": 1,
+      "rule_count": 6,
+      "alerts": [
+        {
+          "id": "e234c83e03cfc1b4",
+          "name": "ChemicalOpsQueueHasFailedTasks",
+          "severity": "warning",
+          "state": "firing",
+          "summary": "ChemicalOps 存在待处置失败任务",
+          "description": "失败状态为持久化快照；按队列和 error_code 查看任务，遵循幂等及 fencing 恢复说明。",
+          "active_at": "2026-10-14T05:58:43.280587986Z"
+        }
+      ],
+      "targets": [
+        {
+          "job": "chemicalops-api",
+          "instance": "host.docker.internal:8888",
+          "health": "up",
+          "last_scrape": "2026-10-14T07:44:20.530794559Z",
+          "last_error": ""
+        }
+      ],
+      "rules": [
+        {
+          "id": "chemicalops-api:ChemicalOpsQueueHasFailedTasks",
+          "name": "ChemicalOpsQueueHasFailedTasks",
+          "state": "firing",
+          "health": "ok",
+          "last_evaluation": "2026-10-14T07:44:30.461047716Z"
+        },
+        {
+          "id": "chemicalops-api:ChemicalOpsAPITargetDown",
+          "name": "ChemicalOpsAPITargetDown",
+          "state": "inactive",
+          "health": "ok",
+          "last_evaluation": "2026-10-14T07:44:30.460307737Z"
+        },
+        {
+          "id": "chemicalops-api:ChemicalOpsAPITargetMissing",
+          "name": "ChemicalOpsAPITargetMissing",
+          "state": "inactive",
+          "health": "ok",
+          "last_evaluation": "2026-10-14T07:44:30.460885238Z"
+        },
+        {
+          "id": "chemicalops-api:ChemicalOpsDatabaseMetricsUnavailable",
+          "name": "ChemicalOpsDatabaseMetricsUnavailable",
+          "state": "inactive",
+          "health": "ok",
+          "last_evaluation": "2026-10-14T07:44:30.460957131Z"
+        },
+        {
+          "id": "chemicalops-api:ChemicalOpsQueueOldestReadyTaskDelayed",
+          "name": "ChemicalOpsQueueOldestReadyTaskDelayed",
+          "state": "inactive",
+          "health": "ok",
+          "last_evaluation": "2026-10-14T07:44:30.461707724Z"
+        },
+        {
+          "id": "chemicalops-api:ChemicalOpsQueueRecoveryIsolationRequired",
+          "name": "ChemicalOpsQueueRecoveryIsolationRequired",
+          "state": "inactive",
+          "health": "ok",
+          "last_evaluation": "2026-10-14T07:44:30.461542788Z"
+        }
+      ]
+    }
+  },
+  {
+    "user": "buyer",
+    "login_status": 200,
+    "monitoring_status": 403
+  },
+  {
+    "user": "warehouse_receiver",
+    "login_status": 200,
+    "monitoring_status": 403
+  }
+]

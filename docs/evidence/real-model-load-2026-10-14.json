@@ -1,0 +1,112 @@
+{
+  "scope": "真实模型 Gateway 小样本并发；固定无业务数据提示，不代表业务质量或容量上限",
+  "model": "deepseek-flash",
+  "provider": "openai_compatible",
+  "revision": "b7dcbbbfadac8ee177c442c58e238f60950f830f",
+  "python": "3.11.0",
+  "requests": 8,
+  "concurrency": 2,
+  "token_budget": 8000,
+  "reserved_tokens": 6400,
+  "max_output_tokens_per_request": 512,
+  "retries": 0,
+  "fallback": false,
+  "elapsed_seconds": 5.791,
+  "observed_total_tokens": 732,
+  "usage_complete": true,
+  "latency_ms": {
+    "p50": 1133.43,
+    "p95": 1774.31,
+    "p99": 1774.31
+  },
+  "results": [
+    {
+      "request": 1,
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 38,
+        "completion_tokens": 25,
+        "total_tokens": 63
+      },
+      "nonempty_response": true,
+      "duration_ms": 1679.98
+    },
+    {
+      "request": 2,
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 38,
+        "completion_tokens": 26,
+        "total_tokens": 64
+      },
+      "nonempty_response": true,
+      "duration_ms": 1214.42
+    },
+    {
+      "request": 3,
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 38,
+        "completion_tokens": 27,
+        "total_tokens": 65
+      },
+      "nonempty_response": true,
+      "duration_ms": 1032.89
+    },
+    {
+      "request": 4,
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 38,
+        "completion_tokens": 193,
+        "total_tokens": 231
+      },
+      "nonempty_response": true,
+      "duration_ms": 1774.31
+    },
+    {
+      "request": 5,
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 38,
+        "completion_tokens": 14,
+        "total_tokens": 52
+      },
+      "nonempty_response": true,
+      "duration_ms": 982.54
+    },
+    {
+      "request": 6,
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 38,
+        "completion_tokens": 27,
+        "total_tokens": 65
+      },
+      "nonempty_response": true,
+      "duration_ms": 962.87
+    },
+    {
+      "request": 7,
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 38,
+        "completion_tokens": 88,
+        "total_tokens": 126
+      },
+      "nonempty_response": true,
+      "duration_ms": 1293.36
+    },
+    {
+      "request": 8,
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 38,
+        "completion_tokens": 28,
+        "total_tokens": 66
+      },
+      "nonempty_response": true,
+      "duration_ms": 1133.43
+    }
+  ]
+}

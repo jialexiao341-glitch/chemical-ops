@@ -49,3 +49,33 @@ def test_monitoring_overview_rejects_non_admin(monkeypatch):
     monkeypatch.setattr(controller.crud, "get_user_role_codes", lambda db, user_id: ["PROCUREMENT"])
     with pytest.raises(AuthorizationError):
         controller._require_admin(object(), _admin())
+
+
+@pytest.mark.parametrize("username,expected", [("system_admin", 200), ("buyer", 403), ("warehouse_receiver", 403)])
+def test_monitoring_authenticated_http_boundary(client, demo_password, monkeypatch, username, expected):
+    """真实登录和数据库 RBAC，仅 Prometheus 网络响应使用替身。"""
+    from tests.conftest import login
+
+    calls = []
+
+    async def data(http, base_url, path):
+        calls.append(path)
+        return {"alerts": [], "activeTargets": [], "groups": []}
+
+    monkeypatch.setattr(controller, "_prometheus_data", data)
+    headers = login(client, username, demo_password)
+    response = client.get("/api/v1/system/monitoring/overview", headers=headers)
+    assert response.status_code == expected
+    if expected == 200:
+        assert sorted(calls) == ["alerts", "rules", "targets"]
+        assert response.json()["rule_count"] == 0
+    else:
+        assert calls == []  # 普通用户被拒绝后不得访问监控服务。
+
+
+def test_monitoring_anonymous_http_boundary(client, monkeypatch):
+    async def unexpected(*args):
+        pytest.fail("未登录请求不得访问 Prometheus")
+
+    monkeypatch.setattr(controller, "_prometheus_data", unexpected)
+    assert client.get("/api/v1/system/monitoring/overview").status_code == 401

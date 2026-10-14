@@ -1,6 +1,30 @@
 name: chemicalops-observability
 
 services:
+  alertmanager:
+    image: quay.io/prometheus/alertmanager:v0.28.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - chemicalops_alertmanager_data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=
+
+  # Local acceptance receiver, not a production notification destination.
+  alert-webhook:
+    image: python:3.11-slim
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ALERT_WEBHOOK_PORT:-19093}:8080"
+    volumes:
+      - ./observability/local_webhook.py:/app/local_webhook.py:ro
+      - chemicalops_alert_webhook_data:/data
+    command: ["python", "-u", "/app/local_webhook.py"]
+
   prometheus:
     image: mirror.gcr.io/prom/prometheus:v3.5.0
     restart: unless-stopped
@@ -41,5 +65,7 @@ services:
       - "127.0.0.1:4318:4318"
 
 volumes:
+  chemicalops_alertmanager_data:
+  chemicalops_alert_webhook_data:
   chemicalops_prometheus_data:
   chemicalops_grafana_data:

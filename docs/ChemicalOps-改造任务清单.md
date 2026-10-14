@@ -60,15 +60,15 @@
 ### ENG-05 告警闭环、多实例观测与分层压测
 
 - [x] 保留现有 Prometheus、Grafana、OTel、Jaeger 与已验收 trace；补充关键队列失败/隔离、数据库不可用和恢复状态的告警规则及处置记录。
-- [ ] 配置真实告警接收器并验证触发、恢复、去重和送达；需用户指定 webhook/邮件等受控目标及凭据来源。
+- [x] 配置真实告警接收器并验证触发、恢复、去重和送达；本轮按用户指定使用本地专用 webhook，生产外部目标须另行验收。
 - [x] 明确 API/LLM/Agent 进程内指标在多实例部署时逐实例抓取或聚合的策略；区分数据库快照 gauge 与 Prometheus histogram。
 - [x] 将运行告警、规则及采集目标状态接入系统管理员功能区；前端通过后端受限接口读取，不直连 Prometheus。
 - [x] 分开运行普通业务 API、缓存冷/热、队列积压与恢复、LLM Mock、Agent Mock 和受控真实模型 smoke；真实模型 smoke 与 Mock 行为测试分别标识。
-- [ ] 扩大真实模型并发负载前，明确可接受的 Token/费用上限和请求并发；当前只有小样本 smoke。
+- [x] 扩大真实模型并发负载前，明确可接受的 Token/费用上限和请求并发；用户确认并发 2、8 请求、8,000 Token 上限，完成受控小样本并发验证。
 - [x] 为已执行的 HTTP 压测报告记录测试数据、环境、服务版本、并发、数据库/Redis 状态、模型与网络条件，并分别呈现 P50/P95/P99、错误、SQL 和缓存事件；队列/Mock 可靠性测试不伪装成 QPS 压测。
 - **主要代码/配置/测试**：`backend/app/core/{observability,telemetry,task_metrics}.py`、`backend/app/main.py`、`backend/app/modules/task_queue/`、`backend/app/modules/ai/`、`deploy/observability/`、`scripts/run_load_test.py`；`tests/test_observability.py`、`tests/test_failure_injection.py`。
 - **依赖/对应条目**：承接 P3-01；本地追踪验收不等于生产告警或容量验收。
-- **验收记录**：任务队列指标新增 `task_queue_isolation_required` 持久化快照；新增 6 条 Prometheus API down/missing、MySQL 指标采集失败、失败任务、隔离、积压等待规则，`promtool check config` 与 `promtool check rules` 均通过，Prometheus 已加载规则且 API target 恢复 `up`；Grafana dashboard JSON 有 13 个面板，任务共享快照按 queue 去重、连接池保留 instance。新增系统管理员专属 `/system/monitoring` 页面和服务端汇总接口，可查看当前告警、告警规则及采集目标；未新增数据库迁移，Prometheus 地址由 `PROMETHEUS_URL` 配置。监控数据裁剪和管理员边界单测 2 passed；接口端到端与浏览器验收受当前沙箱本地端口限制及前端缺失 `sass-embedded`/异常 Vue 类型依赖影响，尚未完成。处置与分层证据说明见 `docs/可观测性告警处置说明.md`。API 并发样本分别保留 200/200 成功与 198/200 成功两份报告，重跑中的 2 次连接中断和 P99 长尾没有被覆盖；缓存冷/热各 100 次均成功。真实模型并发负载与 Alertmanager 通知接收器尚未配置，故 ENG-05 保持未完成。
+- **验收记录**：任务队列指标新增 `task_queue_isolation_required` 持久化快照；6 条 Prometheus API down/missing、MySQL 指标采集失败、失败任务、隔离、积压等待规则通过配置/规则校验，API target 为 `up`；Grafana dashboard 有 13 个面板，共享队列快照按 queue 去重、连接池保留 instance。系统管理员专属 `/system/monitoring` 页面及服务端汇总接口完成真实 HTTP 与浏览器续验：管理员 200、采购员/仓库用户 403、匿名 401；采购员无监控菜单且直达 URL 显示 404；修复告警名、任务、实例及规则名的字段绑定，权限专项 6 passed。Alertmanager v0.28.1 与用户指定本地 webhook 完成真实 Prometheus 触发、恢复、3 次重复提交抑制和接收端落盘确认，临时规则已清除。deepseek-flash 并发 2、8 请求全部成功，总计 732 Token，P50/P95/P99 为 1133.43/1774.31/1774.31 ms。详见 [ENG-05 续验记录](evidence/eng05-completion-2026-10-14.md) 与 [处置说明](可观测性告警处置说明.md)。本地范围已完成；不代表生产外部通知或模型容量验收。前端全量类型检查仍受既有 Vue 类型依赖错误影响，不宣称类型检查/构建通过。API 并发的 200/200 与 198/200 两份历史报告继续保留，后者 2 次连接中断及约 7 秒 P99 未被覆盖；缓存冷/热各 100 次成功仍按原范围记录。
 
 ## P0：业务正确性
 
