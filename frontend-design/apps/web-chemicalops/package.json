@@ -47,5 +47,8 @@
     "vue": "catalog:",
     "vue-router": "catalog:"
   },
+  "devDependencies": {
+    "sass-embedded": "catalog:"
+  },
   "description": "ChemicalOps 化工运营管理平台前端"
 }
