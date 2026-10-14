@@ -302,15 +302,18 @@ async def chat(
                 metrics.increment("llm_circuit_rejections", labels={"provider": profile.provider, "model": profile.model})
                 raise SafeFailoverError("AI 服务暂时熔断，请稍后重试") from exc
             try:
-                result = await _chat_impl(
-                    data,
-                    _effective_settings(runtime, profile),
-                    attachment_context,
-                    response_format,
-                    image_parts,
-                    system_prompt,
-                    interpret_only,
-                )
+                from app.core.telemetry import trace_span
+                with trace_span("llm.chat", {"gen_ai.request.model": profile.model,
+                                              "gen_ai.system": profile.provider}):
+                    result = await _chat_impl(
+                        data,
+                        _effective_settings(runtime, profile),
+                        attachment_context,
+                        response_format,
+                        image_parts,
+                        system_prompt,
+                        interpret_only,
+                    )
             except BusinessValidationError as exc:
                 settled = True
                 if isinstance(exc, SafeFailoverError) or "暂时不可用" in str(exc) or "超时" in str(exc):
@@ -454,14 +457,17 @@ async def stream_chat(
                 metrics.increment("llm_circuit_rejections", labels={"provider": profile.provider, "model": profile.model})
                 raise SafeFailoverError("AI 服务暂时熔断，请稍后重试") from exc
             try:
-                async for delta in _stream_chat_impl(
-                    data,
-                    _effective_settings(runtime, profile),
-                    attachment_context=attachment_context,
-                    image_parts=image_parts,
-                ):
-                    yielded_content = True
-                    yield delta
+                from app.core.telemetry import trace_span
+                with trace_span("llm.stream", {"gen_ai.request.model": profile.model,
+                                                "gen_ai.system": profile.provider}):
+                    async for delta in _stream_chat_impl(
+                        data,
+                        _effective_settings(runtime, profile),
+                        attachment_context=attachment_context,
+                        image_parts=image_parts,
+                    ):
+                        yielded_content = True
+                        yield delta
             except BusinessValidationError as exc:
                 settled = True
                 if isinstance(exc, SafeFailoverError) or "暂时不可用" in str(exc) or "超时" in str(exc):

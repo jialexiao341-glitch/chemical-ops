@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
+from app.core.observability import metrics
 
 
 settings = get_settings()
@@ -29,6 +30,8 @@ def _before_cursor_execute(connection, cursor, statement, parameters, context, e
     """记录超过阈值的 SQL 摘要，不记录参数，避免敏感数据进入日志。"""
 
     context._chemicalops_query_started = perf_counter()
+    sql_kind = statement.lstrip().split(None, 1)[0].upper() if statement.strip() else "UNKNOWN"
+    metrics.increment("database_queries", labels={"operation": sql_kind})
 
 
 @event.listens_for(engine, "after_cursor_execute")
@@ -46,6 +49,15 @@ def _after_cursor_execute(connection, cursor, statement, parameters, context, ex
         extra={"event": "db_slow_query", "duration_ms": round(duration_ms, 2), "component": sql_kind, "sql_hash": hashlib.sha256(compact_sql.encode("utf-8")).hexdigest()[:16]},
     )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+
+
+def refresh_database_pool_metrics() -> None:
+    """暴露当前进程 SQLAlchemy 连接池状态。"""
+
+    pool = engine.pool
+    for state, value in (("configured", pool.size()), ("idle", pool.checkedin()),
+                         ("in_use", pool.checkedout()), ("overflow", max(0, pool.overflow()))):
+        metrics.set_gauge("database_pool_connections", value, labels={"state": state})
 
 
 def get_db() -> Generator[Session, None, None]:

@@ -55,6 +55,46 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
       "targets": [{ "expr": "sum by (space, result) (rate(chemicalops_redis_cache_count[5m]))", "legendFormat": "{{space}} / {{result}}" }]
+    },
+    {
+      "id": 7,
+      "title": "LLM 首 Token P95 延迟（秒）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, mode, provider) (rate(chemicalops_ai_first_token_seconds_histogram_bucket[5m])))", "legendFormat": "{{provider}} / {{mode}}" }]
+    },
+    {
+      "id": 8,
+      "title": "数据库连接池状态",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "chemicalops_database_pool_connections", "legendFormat": "{{state}}" }]
+    },
+    {
+      "id": 9,
+      "title": "Agent 工具调用成功率",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "sum by (tool) (rate(chemicalops_agent_tool_calls_count{result=\"succeeded\"}[5m])) / clamp_min(sum by (tool) (rate(chemicalops_agent_tool_calls_count[5m])), 1e-9)", "legendFormat": "{{tool}}" }]
+    },
+    {
+      "id": 10,
+      "title": "数据库查询速率",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "sum by (operation) (rate(chemicalops_database_queries_count[5m]))", "legendFormat": "{{operation}}" }]
+    },
+    {
+      "id": 11,
+      "title": "Worker 任务执行耗时均值（15 分钟）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "chemicalops_task_execution_duration_seconds", "legendFormat": "{{queue}} / {{status}}" }]
     }
   ]
 }

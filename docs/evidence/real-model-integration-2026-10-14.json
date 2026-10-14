@@ -1,0 +1,39 @@
+{
+  "model_list_http_status": 200,
+  "profile_configuration": "临时双模型 Settings 配置；未改写当前单模型 .env",
+  "model_profiles": {
+    "deepseek-flash": {
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 236,
+        "completion_tokens": 52,
+        "total_tokens": 288
+      }
+    },
+    "deepseek-v4-pro": {
+      "status": "ok",
+      "usage": {
+        "prompt_tokens": 289,
+        "completion_tokens": 21,
+        "total_tokens": 310
+      }
+    }
+  },
+  "structured_output": {
+    "status": "ok",
+    "is_object": true,
+    "usage": {
+      "prompt_tokens": 315,
+      "completion_tokens": 45,
+      "total_tokens": 360
+    }
+  },
+  "cancel": {
+    "status": "cancelled_after_first_delta"
+  },
+  "stream_after_cancel": {
+    "status": "ok",
+    "chunks": 1
+  },
+  "ttft_recorded": true
+}

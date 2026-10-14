@@ -32,6 +32,8 @@ class TaskExecution(Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
     error_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)

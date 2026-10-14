@@ -524,13 +524,18 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
 
     token = bind_user(user.id)
     try:
-        return await _drive_impl(db, user, state, settings)
+        from app.core.telemetry import trace_span
+        with trace_span("agent.execute", {"chemicalops.agent.task_id": state.task_id}):
+            return await _drive_impl(db, user, state, settings)
     finally:
         reset_user(token)
 
 
 async def _drive_impl(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
     """运行 LangGraph 条件循环并逐步留档；超限/异常安全停止，不执行业务写入。"""
+    from app.core.observability import metrics
+
+    execution_started = perf_counter()
     deadline = perf_counter() + settings.agent_task_timeout_seconds
 
     async def plan(graph_state: GraphState) -> GraphState:
@@ -581,6 +586,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                 current.workflow.rfq_no = decision.slots.rfq_no
             current.memory_state["understanding_applied_turn"] = len(current.messages)
         current.decisions += 1
+        metrics.increment("agent_steps", labels={"step": "plan"})
         current.action = _resume_action(current) or _constrain_action(current, await _decide(current, catalog, settings))
         _assert_running(db, user, current)
         if isinstance(current.action, AskAction):
@@ -620,6 +626,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         current = graph_state["data"]
         _assert_running(db, user, current)
         action = current.action
+        metrics.increment("agent_steps", labels={"step": "tool"})
+        tool_started = perf_counter()
         signature = json.dumps(action.model_dump(), sort_keys=True, ensure_ascii=False)
         if signature in current.seen_calls:
             raise BusinessValidationError("REPEATED_TOOL")
@@ -647,7 +655,9 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                 current.verified_rfq_item is None or action.arguments.get("rfq_item_id") != current.verified_rfq_item
             ):
                 raise BusinessValidationError("询价明细 ID 必须来自本轮定位或用户选择")
-            result = tools.execute_tool(db, user, ToolCall(tool=action.tool, arguments=action.arguments))
+            from app.core.telemetry import trace_span
+            with trace_span("agent.tool", {"chemicalops.agent.tool": action.tool}):
+                result = tools.execute_tool(db, user, ToolCall(tool=action.tool, arguments=action.arguments))
             if perf_counter() > deadline:
                 raise TimeoutError()
             entry.update(status="SUCCEEDED", result=result.model_dump(mode="json"))
@@ -663,6 +673,11 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             current.failures += 1
             if current.failures >= 2:
                 raise BusinessValidationError("TOOL_ERRORS") from None
+        finally:
+            metrics.increment("agent_tool_calls", labels={"tool": action.tool,
+                                                             "result": entry["status"].lower()})
+            metrics.observe("agent_tool_duration_seconds", perf_counter() - tool_started,
+                            labels={"tool": action.tool})
         _persist(db, user, current)
         return {"data": current}
 
@@ -703,7 +718,10 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             _persist(db, user, state)
         except TaskInterrupted:
             pass
-    return get_task(db, user, state.task_id)
+    result = get_task(db, user, state.task_id)
+    metrics.observe("agent_execution_duration_seconds", perf_counter() - execution_started,
+                    labels={"status": result.status.lower()})
+    return result
 
 
 def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = True) -> RunState:

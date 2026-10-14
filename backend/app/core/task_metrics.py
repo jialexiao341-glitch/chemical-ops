@@ -1,5 +1,7 @@
 """从持久化任务状态采集跨 API/Worker 进程可见的 Prometheus 快照。"""
 
+from datetime import timedelta
+
 from sqlalchemy import func, or_, select
 
 from app.core.observability import MetricsRegistry
@@ -48,4 +50,21 @@ def refresh_task_queue_metrics(db, registry: MetricsRegistry) -> None:
         registry.set_gauge("task_queue_attempts", attempts[queue], labels={"queue": queue})
         for status in STATUSES:
             registry.set_gauge("task_queue_executions", counts[(queue, status)],
+                labels={"queue": queue, "status": status.lower()})
+
+    duration_samples: dict[tuple[str, str], list[float]] = {}
+    completed = db.execute(select(TaskExecution.task_type, TaskExecution.status,
+        TaskExecution.started_at, TaskExecution.finished_at).where(
+        TaskExecution.finished_at >= timestamp - timedelta(minutes=15),
+        TaskExecution.started_at.is_not(None))).all()
+    for task_type, status, started_at, finished_at in completed:
+        queue = TASK_ROUTES.get(task_type)
+        if queue and started_at and finished_at:
+            duration_samples.setdefault((queue, status.lower()), []).append(
+                max(0.0, (finished_at - started_at).total_seconds()))
+    for queue in QUEUES:
+        for status in STATUSES:
+            samples = duration_samples.get((queue, status.lower()), [])
+            registry.set_gauge("task_execution_duration_seconds",
+                sum(samples) / len(samples) if samples else 0.0,
                 labels={"queue": queue, "status": status.lower()})

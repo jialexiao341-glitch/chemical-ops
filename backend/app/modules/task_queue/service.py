@@ -6,6 +6,7 @@ from uuid import uuid4
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
+from app.core.telemetry import inject_trace_context
 from app.modules.task_queue.model import TaskExecution, TaskResourceLock
 
 TASK_ROUTES = {"documents.fetch": "documents", "documents.ingest": "documents", "agent.run": "agent"}
@@ -25,6 +26,7 @@ def enqueue(db: Session, *, task_type: str, business_id: str, actor_id: int,
     if task_type not in TASK_ROUTES:
         raise ValueError("Unknown task type")
     timestamp = now()
+    payload = inject_trace_context(payload)
     execution = TaskExecution(id=uuid4().hex, task_type=task_type, business_id=business_id,
         actor_id=actor_id, run_generation=generation, business_revision=revision,
         payload=payload, checkpoint={}, status="QUEUED", attempt_count=0,
@@ -66,7 +68,8 @@ def claim_execution(db: Session, execution_id: str, delivery_generation: int,
         fencing_token=TaskExecution.fencing_token + 1,
         attempt_count=TaskExecution.attempt_count + 1,
         lease_until=timestamp + timedelta(seconds=lease_seconds),
-        heartbeat_at=timestamp, updated_at=timestamp).execution_options(synchronize_session=False)).rowcount
+        heartbeat_at=timestamp, started_at=timestamp, finished_at=None,
+        updated_at=timestamp).execution_options(synchronize_session=False)).rowcount
     db.commit()
     if count != 1:
         return None
@@ -111,6 +114,7 @@ def finish(db: Session, execution_id: str, token: int, *, status: str,
         db.execute(delete(TaskResourceLock).where(TaskResourceLock.execution_id == execution_id))
     execution.lease_owner = None
     execution.lease_until = None
-    execution.updated_at = now()
+    execution.finished_at = now()
+    execution.updated_at = execution.finished_at
     # Caller commits the business outcome and execution result together.
     return execution

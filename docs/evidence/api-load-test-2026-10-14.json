@@ -1,0 +1,27 @@
+{
+  "environment": {
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.0",
+    "api_instances": 1,
+    "database_state": "MySQL ready at 127.0.0.1:3306",
+    "redis_state": "Redis 7 ready at 127.0.0.1:6380",
+    "model_used": false
+  },
+  "url": "http://127.0.0.1:8888/api/v1/products/391",
+  "metrics_url": "http://127.0.0.1:8888/metrics",
+  "requests": 200,
+  "concurrency": 10,
+  "failures": 0,
+  "elapsed_seconds": 1.0266,
+  "requests_per_second": 194.82,
+  "p50_ms": 46.72,
+  "p95_ms": 70.24,
+  "database_queries": 402,
+  "redis_cache_events": {
+    "hit": 200
+  },
+  "redis_cache_hit_rate": 1.0,
+  "status_codes": {
+    "200": 200
+  }
+}

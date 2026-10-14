@@ -185,7 +185,8 @@ class RequestContextMiddleware:
             return
         headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope.get("headers", [])}
         request_id = _incoming_id(headers.get("x-request-id"))
-        trace_id = _incoming_id(headers.get("x-trace-id") or request_id)
+        from app.core.telemetry import current_trace_id
+        trace_id = _incoming_id(current_trace_id() or headers.get("x-trace-id") or request_id)
         request_token = request_id_context.set(request_id)
         trace_token = trace_id_context.set(trace_id)
         scope.setdefault("state", {})

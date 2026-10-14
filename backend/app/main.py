@@ -16,10 +16,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
-from app.core.db import SessionLocal, engine
+from app.core.db import SessionLocal, engine, refresh_database_pool_metrics
 from app.core.idempotency import IdempotencyMiddleware
 from app.core.observability import JsonFormatter, RequestContextMiddleware, metrics
 from app.core.task_metrics import refresh_task_queue_metrics
+from app.core.telemetry import configure_tracing, shutdown_tracing
 from app.core.production import production_config_errors
 from app.core.errors import (
     API_ERROR_RESPONSES,
@@ -246,6 +247,7 @@ async def lifespan(_: FastAPI):
             scheduler_task.cancel()
             with suppress(asyncio.CancelledError):
                 await scheduler_task
+        shutdown_tracing()
         LOGGER.info("ChemicalOps 正在关闭")
 
 
@@ -427,6 +429,7 @@ def readiness(response: Response) -> dict[str, object]:
 def metrics_endpoint() -> PlainTextResponse:
     """输出 Prometheus 指标及来自持久化队列表的跨进程任务快照。"""
 
+    refresh_database_pool_metrics()
     try:
         with SessionLocal() as db:
             refresh_task_queue_metrics(db, metrics)
@@ -462,3 +465,6 @@ app.include_router(ai_router, prefix=settings.api_prefix)
 app.include_router(insights_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(system_router, prefix=settings.api_prefix)
+
+if settings.otel_enabled:
+    configure_tracing(app=app, engine=engine, service_name=settings.otel_service_name)

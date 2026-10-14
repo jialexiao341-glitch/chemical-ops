@@ -1,6 +1,7 @@
 """Independent consumers with bounded execution and supervised process trees."""
 
 import asyncio
+import json
 import logging
 import os
 import socket
@@ -32,7 +33,8 @@ async def execute(factory, settings, execution):
             environment[key.upper()] = str(value).lower() if isinstance(value, bool) else str(value)
     environment.update(CHEMICALOPS_EXECUTION_ID=execution.id,
                        CHEMICALOPS_EXECUTION_TOKEN=str(execution.fencing_token),
-                       CHEMICALOPS_WORKER_PID=str(os.getpid()))
+                       CHEMICALOPS_WORKER_PID=str(os.getpid()),
+                       CHEMICALOPS_TRACE_CONTEXT=json.dumps(execution.payload.get("_otel_context", {})))
     process = await asyncio.create_subprocess_exec(sys.executable, str(ROOT / "scripts/run_task_execution.py"),
         env=environment, cwd=ROOT, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
@@ -85,6 +87,7 @@ def recover(factory, settings):
             row.lease_owner = None
             row.lease_until = None
             row.updated_at = service.now()
+            row.finished_at = row.updated_at if stopped else None
             if stopped and row.attempt_count < settings.task_max_attempts:
                 row.status = "RETRYING"
                 row.delivery_generation += 1

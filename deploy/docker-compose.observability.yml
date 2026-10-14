@@ -2,7 +2,7 @@ name: chemicalops-observability
 
 services:
   prometheus:
-    image: prom/prometheus:v3.5.0
+    image: mirror.gcr.io/prom/prometheus:v3.5.0
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -17,7 +17,7 @@ services:
       - --storage.tsdb.retention.time=7d
 
   grafana:
-    image: grafana/grafana:12.1.1
+    image: mirror.gcr.io/grafana/grafana:12.1.1
     restart: unless-stopped
     depends_on:
       - prometheus
@@ -31,6 +31,13 @@ services:
       - chemicalops_grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  jaeger:
+    image: mirror.gcr.io/jaegertracing/all-in-one:1.76.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
 
 volumes:
   chemicalops_prometheus_data:

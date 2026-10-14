@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
     db_pool_recycle: int = 1800
     db_echo: bool = False
+    otel_enabled: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "chemicalops-api"
     file_storage_root: str = "storage"
     file_storage_backend: str = "local"
     minio_endpoint: str = "127.0.0.1:9000"
