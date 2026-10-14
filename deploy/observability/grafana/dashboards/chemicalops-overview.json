@@ -1,0 +1,60 @@
+{
+  "uid": "chemicalops-overview",
+  "title": "ChemicalOps 后端运行概览",
+  "tags": ["chemicalops", "backend"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "API 请求速率",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "sum by (method, path) (rate(chemicalops_api_requests_count[5m]))", "legendFormat": "{{method}} {{path}}" }]
+    },
+    {
+      "id": 2,
+      "title": "API P95 延迟（秒）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(chemicalops_api_request_duration_seconds_histogram_bucket[5m])))", "legendFormat": "P95" }]
+    },
+    {
+      "id": 3,
+      "title": "任务队列积压",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "chemicalops_task_queue_backlog", "legendFormat": "{{queue}}" }]
+    },
+    {
+      "id": 4,
+      "title": "最老可执行任务等待（秒）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "chemicalops_task_queue_oldest_ready_seconds", "legendFormat": "{{queue}}" }]
+    },
+    {
+      "id": 5,
+      "title": "LLM Gateway P95 延迟（秒）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, mode) (rate(chemicalops_llm_gateway_duration_seconds_histogram_bucket[5m])))", "legendFormat": "{{mode}}" }]
+    },
+    {
+      "id": 6,
+      "title": "Redis 缓存请求结果",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "sum by (space, result) (rate(chemicalops_redis_cache_count[5m]))", "legendFormat": "{{space}} / {{result}}" }]
+    }
+  ]
+}

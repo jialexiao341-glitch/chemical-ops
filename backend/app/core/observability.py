@@ -66,6 +66,7 @@ class _Metric:
     total: float = 0.0
     maximum: float = 0.0
     buckets: dict[float, int] | None = None
+    gauge: float | None = None
 
 
 class MetricsRegistry:
@@ -106,6 +107,11 @@ class MetricsRegistry:
                 if value <= bound:
                     metric.buckets[bound] += 1
 
+    def set_gauge(self, name: str, value: float, *, labels: dict[str, object] | None = None) -> None:
+        key = self._key(name, labels)
+        with self._lock:
+            self._values[key].gauge = value
+
     def render_prometheus(self) -> str:
         """渲染低基数指标和固定桶直方图，不暴露请求参数或文件内容。"""
 
@@ -113,12 +119,19 @@ class MetricsRegistry:
         with self._lock:
             values = list(self._values.items())
         rendered_histograms: set[str] = set()
+        rendered_gauges: set[str] = set()
         for (name, labels), metric in sorted(values):
             safe_name = "chemicalops_" + "".join(char if char.isalnum() or char == "_" else "_" for char in name)
             label_text = ""
             if labels:
                 encoded = [f'{key}="{self._escape_label(value)}"' for key, value in labels]
                 label_text = "{" + ",".join(encoded) + "}"
+            if metric.gauge is not None:
+                if safe_name not in rendered_gauges:
+                    lines.append(f"# TYPE {safe_name} gauge")
+                    rendered_gauges.add(safe_name)
+                lines.append(f"{safe_name}{label_text} {metric.gauge:.6f}")
+                continue
             lines.append(f"{safe_name}_count{label_text} {metric.count}")
             lines.append(f"{safe_name}_total{label_text} {metric.total:.6f}")
             if metric.maximum:

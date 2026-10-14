@@ -15,3 +15,14 @@ def test_observed_duration_renders_cumulative_histogram_buckets() -> None:
     assert 'chemicalops_api_request_duration_seconds_histogram_bucket{le="+Inf",method="GET"} 1' in rendered
     assert "chemicalops_api_request_duration_seconds_histogram_sum{method=\"GET\"} 0.020000" in rendered
     assert "chemicalops_api_request_duration_seconds_histogram_count{method=\"GET\"} 1" in rendered
+
+
+def test_gauge_renders_as_a_prometheus_gauge() -> None:
+    registry = MetricsRegistry()
+    registry.set_gauge("task_queue_backlog", 3, labels={"queue": "agent"})
+
+    rendered = registry.render_prometheus()
+
+    assert "# TYPE chemicalops_task_queue_backlog gauge" in rendered
+    assert 'chemicalops_task_queue_backlog{queue="agent"} 3.000000' in rendered
+    assert "chemicalops_task_queue_backlog_count" not in rendered

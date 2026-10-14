@@ -16,9 +16,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
-from app.core.db import engine
+from app.core.db import SessionLocal, engine
 from app.core.idempotency import IdempotencyMiddleware
 from app.core.observability import JsonFormatter, RequestContextMiddleware, metrics
+from app.core.task_metrics import refresh_task_queue_metrics
 from app.core.production import production_config_errors
 from app.core.errors import (
     API_ERROR_RESPONSES,
@@ -424,8 +425,14 @@ def readiness(response: Response) -> dict[str, object]:
 
 @app.get("/metrics", include_in_schema=False)
 def metrics_endpoint() -> PlainTextResponse:
-    """输出 Prometheus 兼容的进程内指标。"""
+    """输出 Prometheus 指标及来自持久化队列表的跨进程任务快照。"""
 
+    try:
+        with SessionLocal() as db:
+            refresh_task_queue_metrics(db, metrics)
+    except Exception:
+        metrics.increment("task_queue_metrics_collection", labels={"result": "database_error"})
+        LOGGER.warning("task_queue_metrics_collection_failed")
     return PlainTextResponse(metrics.render_prometheus(), media_type="text/plain; version=0.0.4")
 
 

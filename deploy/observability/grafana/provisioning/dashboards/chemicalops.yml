@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: ChemicalOps
+    orgId: 1
+    folder: ChemicalOps
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards
