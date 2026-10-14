@@ -27,6 +27,7 @@ export interface ReturnItem {
 export interface InventoryReturn {
   id: number;
   return_no: string;
+  applicant_id: number;
   reason: string;
   status: string;
   reject_reason: null | string;
