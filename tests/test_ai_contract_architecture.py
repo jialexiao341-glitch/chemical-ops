@@ -32,7 +32,12 @@ def test_pydantic_contracts_are_declared_only_in_schema():
 
 def test_schema_and_llm_do_not_depend_on_business_execution():
     """基础契约与模型客户端不能反向依赖会话或 Agent 业务执行。"""
-    allowed = {"app.modules.ai.catalog", "app.modules.ai.agent_prompt", "app.modules.ai.schema"}
+    allowed = {
+        "app.modules.ai.catalog",
+        "app.modules.ai.agent_prompt",
+        "app.modules.ai.gateway",
+        "app.modules.ai.schema",
+    }
     for name in ("schema.py", "llm.py"):
         tree = ast.parse((AI_ROOT / name).read_text(encoding="utf-8"))
         for node in ast.walk(tree):

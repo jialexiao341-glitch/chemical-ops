@@ -32,6 +32,7 @@ from app.modules.ai.agent_prompt import (
     result_rewrite_prompt,
 )
 from app.modules.ai.llm import chat, stream_chat
+from app.modules.ai.gateway import bind_user, reset_user
 from app.modules.files import service as file_service
 from app.modules.files import mineru
 from app.modules.files.parser import parse_file_content
@@ -480,6 +481,16 @@ async def _run_text2sql_for_chat(
 
 
 async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatResponse:
+    """绑定用户并运行同步 AI 用例，使嵌套 Gateway 请求共享并发配额。"""
+
+    token = bind_user(user.id)
+    try:
+        return await _chat_for_user_impl(db, user, data)
+    finally:
+        reset_user(token)
+
+
+async def _chat_for_user_impl(db: Session, user: User, data: AIChatRequest) -> AIChatResponse:
     """持久化用户消息并调用模型，再持久化助手回复。"""
 
 
@@ -575,6 +586,21 @@ async def chat_for_user(db: Session, user: User, data: AIChatRequest) -> AIChatR
 
 
 async def stream_chat_for_user(db: Session, user: User, data: AIChatRequest) -> AsyncIterator[str]:
+    """绑定用户并转发 SSE；取消生成器时恢复调用方上下文。"""
+
+    token = bind_user(user.id)
+    stream = _stream_chat_for_user_impl(db, user, data)
+    try:
+        async for event in stream:
+            yield event
+    finally:
+        try:
+            await stream.aclose()
+        finally:
+            reset_user(token)
+
+
+async def _stream_chat_for_user_impl(db: Session, user: User, data: AIChatRequest) -> AsyncIterator[str]:
     """通过 SSE 转发 OpenAI 兼容接口的增量内容，并在结束时持久化。"""
 
 

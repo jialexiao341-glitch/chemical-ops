@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.modules.ai import llm
+from app.modules.ai.gateway import bind_user, reset_user
 from app.modules.ai import conversation_store
 from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
@@ -519,6 +520,16 @@ def _constrain_action(state: RunState, action):
 
 
 async def _drive(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
+    """绑定任务所有者，确保后台 Agent 的模型请求遵循用户并发配额。"""
+
+    token = bind_user(user.id)
+    try:
+        return await _drive_impl(db, user, state, settings)
+    finally:
+        reset_user(token)
+
+
+async def _drive_impl(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
     """运行 LangGraph 条件循环并逐步留档；超限/异常安全停止，不执行业务写入。"""
     deadline = perf_counter() + settings.agent_task_timeout_seconds
 

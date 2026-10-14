@@ -1,6 +1,7 @@
 """从项目 .env 文件加载应用配置。"""
 
 from functools import lru_cache
+import json
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus
@@ -95,6 +96,25 @@ class Settings(BaseSettings):
             raise ValueError("REDIS_KEY_PREFIX 不能为空")
         return self
 
+    @model_validator(mode="after")
+    def validate_llm_model_profiles(self):
+        raw = self.llm_model_profiles_json.strip()
+        if not raw:
+            if self.llm_default_profile:
+                raise ValueError("设置 LLM_DEFAULT_PROFILE 时必须配置 LLM_MODEL_PROFILES_JSON")
+            return self
+        try:
+            profiles = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("LLM_MODEL_PROFILES_JSON 必须是合法 JSON") from exc
+        if not isinstance(profiles, dict) or not profiles:
+            raise ValueError("LLM_MODEL_PROFILES_JSON 必须是非空 JSON 对象")
+        if any(not isinstance(name, str) or not name.strip() or not isinstance(value, dict) for name, value in profiles.items()):
+            raise ValueError("LLM_MODEL_PROFILES_JSON 必须使用非空名称映射到模型对象")
+        if self.llm_default_profile and self.llm_default_profile not in profiles:
+            raise ValueError("LLM_DEFAULT_PROFILE 必须引用 LLM_MODEL_PROFILES_JSON 中的名称")
+        return self
+
     technical_document_execution_mode: Literal["in_process", "database"] = "database"
     agent_execution_mode: Literal["in_process", "database"] = "database"
     task_poll_interval_seconds: float = Field(default=1.0, ge=0.1, le=60)
@@ -132,6 +152,14 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 65536
     llm_timeout_seconds: int = 60
     llm_max_retries: int = 2
+    llm_stream_usage: bool = False
+    # 可选 JSON 模型目录；不配置时继续使用以上单模型兼容配置。
+    llm_model_profiles_json: str = ""
+    llm_default_profile: str = ""
+    llm_max_concurrency: int = Field(default=8, ge=1, le=256)
+    llm_user_max_concurrency: int = Field(default=2, ge=1, le=32)
+    llm_circuit_failure_threshold: int = Field(default=5, ge=1, le=50)
+    llm_circuit_reset_seconds: int = Field(default=30, ge=1, le=600)
     agent_enabled: bool = True
     agent_max_steps: int = Field(default=12, ge=1, le=24)
     agent_task_timeout_seconds: int = Field(default=120, ge=1, le=300)

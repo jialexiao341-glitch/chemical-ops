@@ -71,7 +71,7 @@ def test_ai_service_retries_transient_network_failure(monkeypatch: pytest.Monkey
         async def post(self, _url: str, *, headers: dict[str, str], json: dict) -> FakeResponse:
             type(self).attempts += 1
             if type(self).attempts == 1:
-                raise llm.httpx.RequestError("temporary", request=None)
+                raise llm.httpx.ConnectError("temporary", request=None)
             return await super().post(_url, headers=headers, json=json)
 
     monkeypatch.setattr(llm.httpx, "AsyncClient", FlakyClient)
@@ -83,6 +83,27 @@ def test_ai_service_retries_transient_network_failure(monkeypatch: pytest.Monkey
 
     assert response.message.content.startswith("已收到")
     assert FlakyClient.attempts == 2
+
+
+def test_ai_service_does_not_retry_ambiguous_response_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.modules.ai import llm
+
+    class TimedOutClient(FakeClient):
+        attempts = 0
+
+        async def post(self, _url: str, *, headers: dict[str, str], json: dict) -> FakeResponse:
+            type(self).attempts += 1
+            raise llm.httpx.ReadTimeout("response timed out", request=None)
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient", TimedOutClient)
+    monkeypatch.setattr(llm, "_retry_wait", lambda _attempt: asyncio.sleep(0))
+    settings = Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=3)
+    request = AIChatRequest(messages=[{"role": "user", "content": "查询库存"}])
+
+    with pytest.raises(BusinessValidationError, match="响应超时"):
+        asyncio.run(chat(request, settings))
+
+    assert TimedOutClient.attempts == 1
 
 
 def test_ai_attachment_is_rescanned_before_ai_use(monkeypatch: pytest.MonkeyPatch) -> None:
