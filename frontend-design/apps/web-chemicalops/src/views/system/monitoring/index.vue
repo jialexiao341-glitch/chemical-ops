@@ -1,44 +1,70 @@
 <script lang="ts" setup>
+import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { SystemMonitoringApi } from '#/api';
 
-import { onMounted, onUnmounted, ref } from 'vue';
-
+import { computed, onUnmounted, ref } from 'vue';
 import { Page } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
+import { Alert, Button, Card, Empty, Spin, Tag } from 'antdv-next';
 
-import { Button, Card, Empty, Spin, Table, Tag } from 'antdv-next';
-
+import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getSystemMonitoringOverviewApi } from '#/api';
 import { formatDateTime } from '#/utils/format';
+import StatCard from '#/views/dashboard/overview/components/stat-card.vue';
 
 defineOptions({ name: 'SystemMonitoring' });
 
 const overview = ref<SystemMonitoringApi.Overview>();
 const loading = ref(false);
 const unavailable = ref(false);
-let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
-const alertColumns = [
-  { key: 'name', title: '告警', width: 210 },
-  { key: 'severity', title: '级别', width: 110 },
-  { key: 'state', title: '状态', width: 110 },
-  { key: 'summary', title: '摘要', minWidth: 260 },
-  { key: 'active_at', title: '开始时间', width: 190 },
-];
+const ruleNames: Record<string, string> = {
+  ChemicalOpsAPITargetDown: 'API 服务不可达',
+  ChemicalOpsAPITargetMissing: 'API 采集目标缺失',
+  ChemicalOpsDatabaseMetricsUnavailable: '数据库指标采集失败',
+  ChemicalOpsQueueHasFailedTasks: '队列存在失败任务',
+  ChemicalOpsQueueRecoveryIsolationRequired: '队列任务需要隔离',
+  ChemicalOpsQueueOldestReadyTaskDelayed: '队列任务等待超时',
+};
+const statusLabels: Record<string, string> = {
+  critical: '严重', warning: '警告', info: '提示',
+  firing: '触发中', pending: '待确认', inactive: '未触发',
+  up: '正常', down: '异常', ok: '正常', error: '异常',
+  bad: '异常', unknown: '未知',
+};
+const abnormalTargets = computed(() => overview.value
+  ? overview.value.target_count - overview.value.healthy_targets
+  : undefined);
+const unhealthyRules = computed(() => overview.value?.rules.filter((rule) => rule.health !== 'ok').length ?? 0);
+const attentionRequired = computed(() => Boolean(
+  overview.value?.firing_alerts || overview.value?.pending_alerts || abnormalTargets.value || unhealthyRules.value,
+));
 
-const targetColumns = [
-  { key: 'job', title: '采集任务', width: 190 },
-  { key: 'instance', title: '目标实例', minWidth: 220 },
-  { key: 'health', title: '状态', width: 100 },
-  { key: 'last_scrape', title: '最近采集', width: 190 },
-  { key: 'last_error', title: '错误', minWidth: 220 },
-];
-
-const ruleColumns = [
-  { key: 'name', title: '规则', minWidth: 240 },
-  { key: 'state', title: '触发状态', width: 120 },
-  { key: 'health', title: '规则健康度', width: 140 },
-  { key: 'last_evaluation', title: '最近评估', width: 190 },
-];
+const [Grid, gridApi] = useVbenVxeGrid({
+  gridOptions: {
+    columns: [
+      { field: 'name', title: '监控项', minWidth: 220, align: 'left', slots: { default: 'rule-name' } },
+      { field: 'state', title: '告警状态', minWidth: 100, slots: { default: 'status' } },
+      { field: 'health', title: '规则运行', minWidth: 100, slots: { default: 'status' } },
+      { field: 'last_evaluation', title: '最近检查', minWidth: 170, formatter: ({ cellValue }) => cellValue ? formatDateTime(cellValue) : '-' },
+    ],
+    height: 292,
+    fit: true,
+    keepSource: true,
+    pagerConfig: { enabled: false },
+    rowConfig: { keyField: 'id' },
+    toolbarConfig: { custom: false, export: false, refresh: false, zoom: true },
+    proxyConfig: {
+      ajax: {
+        query: async () => {
+          await load();
+          const items = overview.value?.rules ?? [];
+          return { items, total: items.length };
+        },
+      },
+    },
+  } as VxeTableGridOptions<SystemMonitoringApi.Rule>,
+});
 
 async function load() {
   if (loading.value) return;
@@ -54,165 +80,98 @@ async function load() {
 }
 
 function stateColor(state: string) {
-  if (state === 'critical' || state === 'error' || state === 'high') return 'error';
-  if (state === 'warning' || state === 'medium') return 'warning';
-  if (state === 'firing' || state === 'down' || state === 'bad') return 'error';
-  if (state === 'pending') return 'warning';
-  if (state === 'up' || state === 'ok' || state === 'inactive') return 'success';
+  if (['critical', 'error', 'firing', 'down', 'bad'].includes(state)) return 'error';
+  if (['warning', 'pending'].includes(state)) return 'warning';
+  if (['up', 'ok'].includes(state)) return 'success';
   return 'default';
 }
 
-onMounted(() => {
-  load();
-  refreshTimer = setInterval(load, 30_000);
-});
-
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer);
-});
+const refreshTimer = setInterval(() => { void gridApi.query(); }, 30_000);
+onUnmounted(() => clearInterval(refreshTimer));
 </script>
 
 <template>
   <Page auto-content-height>
-    <Spin :spinning="loading && !overview">
-      <div class="space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 class="m-0 text-xl font-semibold tracking-normal">运行监控</h1>
-            <p class="mb-0 mt-1 text-sm text-muted-foreground">
-              管理员可查看 Prometheus 告警、规则评估与采集目标状态
-              <span v-if="overview">· 更新于 {{ formatDateTime(overview.checked_at) }}</span>
-            </p>
-          </div>
-          <Button :loading="loading" @click="load">刷新</Button>
+    <div class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <h1 class="m-0 text-xl font-semibold tracking-normal">运行监控</h1>
+          <Tag v-if="overview" class="m-0" :color="unavailable ? 'default' : attentionRequired ? 'warning' : 'success'">
+            {{ unavailable ? '数据未更新' : attentionRequired ? '需要关注' : '运行正常' }}
+          </Tag>
         </div>
-
-        <Card v-if="unavailable" class="border-amber-200 bg-amber-50">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div class="font-medium text-amber-900">暂时无法读取监控数据</div>
-              <div class="mt-1 text-sm text-amber-800">
-                请检查 Prometheus 服务和后端 PROMETHEUS_URL 配置，然后重试。
-              </div>
-            </div>
-            <Button @click="load">重新连接</Button>
-          </div>
-        </Card>
-
-        <template v-if="overview">
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Card>
-              <div class="text-sm text-muted-foreground">触发中告警</div>
-              <div class="mt-2 text-2xl font-semibold" :class="overview.firing_alerts ? 'text-red-600' : 'text-emerald-600'">
-                {{ overview.firing_alerts }}
-              </div>
-            </Card>
-            <Card>
-              <div class="text-sm text-muted-foreground">等待确认</div>
-              <div class="mt-2 text-2xl font-semibold" :class="overview.pending_alerts ? 'text-amber-600' : ''">
-                {{ overview.pending_alerts }}
-              </div>
-            </Card>
-            <Card>
-              <div class="text-sm text-muted-foreground">正常采集目标</div>
-              <div class="mt-2 text-2xl font-semibold">
-                {{ overview.healthy_targets }} <span class="text-base font-normal text-muted-foreground">/ {{ overview.target_count }}</span>
-              </div>
-            </Card>
-            <Card>
-              <div class="text-sm text-muted-foreground">告警规则</div>
-              <div class="mt-2 text-2xl font-semibold">{{ overview.rule_count }}</div>
-            </Card>
-          </div>
-
-          <Card>
-            <div class="mb-4 flex items-center gap-3">
-              <h2 class="m-0 text-base font-semibold">当前告警</h2>
-              <Tag :color="overview.firing_alerts ? 'error' : overview.pending_alerts ? 'warning' : 'success'">
-                {{ overview.firing_alerts ? `${overview.firing_alerts} 条触发中` : overview.pending_alerts ? `${overview.pending_alerts} 条待确认` : '当前正常' }}
-              </Tag>
-            </div>
-            <Empty v-if="overview.alerts.length === 0" description="当前没有待处理告警" />
-            <Table
-              v-else
-              :columns="alertColumns"
-              :data-source="overview.alerts"
-              :pagination="false"
-              :scroll="{ x: 900 }"
-              row-key="id"
-              size="small"
-            >
-              <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'severity'">
-                  <Tag :color="stateColor(record.severity)">{{ record.severity }}</Tag>
-                </template>
-                <template v-else-if="column.key === 'state'">
-                  <Tag :color="stateColor(record.state)">{{ record.state === 'firing' ? '触发中' : '待触发' }}</Tag>
-                </template>
-                <template v-else-if="column.key === 'summary'">
-                  <span :title="record.description">{{ record.summary }}</span>
-                </template>
-                <template v-else-if="column.key === 'active_at'">
-                  {{ record.active_at ? formatDateTime(record.active_at) : '-' }}
-                </template>
-              </template>
-            </Table>
-          </Card>
-
-          <Card>
-            <h2 class="mb-4 mt-0 text-base font-semibold">监控采集目标</h2>
-            <Empty v-if="overview.targets.length === 0" description="Prometheus 当前没有采集目标" />
-            <Table
-              v-else
-              :columns="targetColumns"
-              :data-source="overview.targets"
-              :pagination="false"
-              :scroll="{ x: 900 }"
-              row-key="instance"
-              size="small"
-            >
-              <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'health'">
-                  <Tag :color="stateColor(record.health)">{{ record.health === 'up' ? '正常' : record.health }}</Tag>
-                </template>
-                <template v-else-if="column.key === 'last_scrape'">
-                  {{ record.last_scrape ? formatDateTime(record.last_scrape) : '-' }}
-                </template>
-                <template v-else-if="column.key === 'last_error'">
-                  <span :class="record.last_error ? 'text-red-600' : 'text-muted-foreground'">
-                    {{ record.last_error || '-' }}
-                  </span>
-                </template>
-              </template>
-            </Table>
-          </Card>
-
-          <Card>
-            <h2 class="mb-4 mt-0 text-base font-semibold">告警规则状态</h2>
-            <Empty v-if="overview.rules.length === 0" description="没有已加载的告警规则" />
-            <Table
-              v-else
-              :columns="ruleColumns"
-              :data-source="overview.rules"
-              :pagination="false"
-              :scroll="{ x: 760 }"
-              row-key="id"
-              size="small"
-            >
-              <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'state' || column.key === 'health'">
-                  <Tag :color="stateColor(record[column.key])">
-                    {{ record[column.key] === 'inactive' ? '正常' : record[column.key] }}
-                  </Tag>
-                </template>
-                <template v-else-if="column.key === 'last_evaluation'">
-                  {{ record.last_evaluation ? formatDateTime(record.last_evaluation) : '-' }}
-                </template>
-              </template>
-            </Table>
-          </Card>
-        </template>
+        <Button :loading="loading" :title="overview ? `更新于 ${formatDateTime(overview.checked_at)} · 每 30 秒自动刷新` : '刷新监控数据'" @click="gridApi.query()">
+          <IconifyIcon icon="lucide:refresh-cw" class="mr-1 size-4" />
+          刷新
+        </Button>
       </div>
-    </Spin>
+
+      <Alert
+        v-if="unavailable"
+        type="warning"
+        show-icon
+        :message="overview ? '监控暂不可用，当前保留上次数据' : '监控暂不可用，请稍后重试'"
+      />
+
+      <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <StatCard title="触发告警" icon="lucide:bell-ring" :tone="!unavailable && overview?.firing_alerts ? 'danger' : 'default'" :value="overview?.firing_alerts ?? '-'" />
+        <StatCard title="待确认" icon="lucide:clock-3" :tone="!unavailable && overview?.pending_alerts ? 'warning' : 'default'" :value="overview?.pending_alerts ?? '-'" />
+        <StatCard title="正常目标" icon="lucide:server" :tone="unavailable || !overview?.target_count ? 'default' : abnormalTargets ? 'warning' : 'success'" :value="overview ? `${overview.healthy_targets} / ${overview.target_count}` : '-'" />
+        <StatCard title="监控规则" icon="lucide:shield-check" :value="overview?.rule_count ?? '-'" />
+      </div>
+
+      <Spin :spinning="loading && !overview">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <Card class="dashboard-panel xl:col-span-2" title="当前告警">
+            <Empty v-if="!overview?.alerts.length" :description="overview ? '当前没有告警' : '暂无监控数据'" />
+            <ul v-else class="m-0 max-h-64 list-none space-y-3 overflow-auto p-0">
+              <li v-for="alert in overview.alerts" :key="alert.id" class="border-b border-dashed pb-3 last:border-0 last:pb-0">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-medium" :title="alert.name">{{ ruleNames[alert.name] || alert.name }}</span>
+                  <div class="flex items-center gap-2">
+                    <Tag class="m-0" :color="stateColor(alert.severity)">{{ statusLabels[alert.severity] || alert.severity }}</Tag>
+                    <Tag class="m-0" :color="stateColor(alert.state)">{{ statusLabels[alert.state] || alert.state }}</Tag>
+                  </div>
+                </div>
+                <p class="mb-3 mt-2" :title="alert.description">{{ alert.summary.replace(/^ChemicalOps\s+/, '') }}</p>
+                <div class="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+                  <span>触发时间</span>
+                  <span>{{ alert.active_at ? formatDateTime(alert.active_at) : '-' }}</span>
+                </div>
+              </li>
+            </ul>
+          </Card>
+
+          <Card class="dashboard-panel" title="采集状态">
+            <Empty v-if="!overview?.targets.length" :description="overview ? '暂无采集目标' : '暂无监控数据'" />
+            <ul v-else class="m-0 max-h-64 list-none space-y-3 overflow-auto p-0">
+              <li v-for="target in overview.targets" :key="`${target.job}:${target.instance}`" class="border-b border-dashed pb-3 last:border-0 last:pb-0">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-medium">{{ target.job }}</span>
+                  <Tag class="m-0" :color="stateColor(target.health)">{{ statusLabels[target.health] || target.health }}</Tag>
+                </div>
+                <p class="mb-3 mt-2 break-all">{{ target.instance }}</p>
+                <div class="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+                  <span>最近采集</span>
+                  <span>{{ target.last_scrape ? formatDateTime(target.last_scrape) : '-' }}</span>
+                </div>
+                <p v-if="target.last_error" class="mb-0 mt-2 break-words text-red-600">{{ target.last_error }}</p>
+              </li>
+            </ul>
+          </Card>
+        </div>
+      </Spin>
+
+      <Grid table-title="告警规则">
+        <template #rule-name="{ row }">
+          <span :title="row.name">{{ ruleNames[row.name] || row.name }}</span>
+        </template>
+        <template #status="{ column, row }">
+          <Tag :color="stateColor(row[column.field])">
+            {{ statusLabels[row[column.field]] || row[column.field] }}
+          </Tag>
+        </template>
+      </Grid>
+    </div>
   </Page>
 </template>
