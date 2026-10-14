@@ -460,14 +460,18 @@ async def stream_chat(
                 from app.core.telemetry import trace_span
                 with trace_span("llm.stream", {"gen_ai.request.model": profile.model,
                                                 "gen_ai.system": profile.provider}):
-                    async for delta in _stream_chat_impl(
+                    stream = _stream_chat_impl(
                         data,
                         _effective_settings(runtime, profile),
                         attachment_context=attachment_context,
                         image_parts=image_parts,
-                    ):
-                        yielded_content = True
-                        yield delta
+                    )
+                    try:
+                        async for delta in stream:
+                            yielded_content = True
+                            yield delta
+                    finally:
+                        await stream.aclose()
             except BusinessValidationError as exc:
                 settled = True
                 if isinstance(exc, SafeFailoverError) or "暂时不可用" in str(exc) or "超时" in str(exc):

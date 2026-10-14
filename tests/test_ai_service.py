@@ -1,9 +1,12 @@
 """AI 服务配置与 OpenAI 兼容调用测试。"""
 
 import asyncio
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
@@ -106,6 +109,22 @@ def test_ai_service_does_not_retry_ambiguous_response_timeout(monkeypatch: pytes
     assert TimedOutClient.attempts == 1
 
 
+def test_ai_service_treats_missing_usage_as_unavailable_not_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    from httpx import AsyncClient, MockTransport, Response
+    from app.modules.ai import llm
+
+    def respond(_request):
+        return Response(200, json={"choices": [{"message": {"content": "回答"}}]})
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient",
+                        lambda **kwargs: AsyncClient(transport=MockTransport(respond), **kwargs))
+    result = asyncio.run(chat(
+        AIChatRequest(messages=[{"role": "user", "content": "只读 usage 口径测试"}]),
+        Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=0), interpret_only=True))
+    assert result.message.content == "回答"
+    assert result.usage is None
+
+
 def test_ai_attachment_is_rescanned_before_ai_use(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
@@ -136,6 +155,55 @@ def test_ai_service_rejects_missing_api_key() -> None:
 
     with pytest.raises(BusinessValidationError, match="API key"):
         asyncio.run(chat(request, settings))
+
+
+def test_cancelled_chat_releases_database_connection_during_model_wait(db_engine, monkeypatch) -> None:
+    """A stalled route/model call must not retain a pooled SQL connection."""
+    from app.modules.ai import conversation_store, routing, service
+    from app.modules.ai.schema import AIChatMessage
+    from app.modules.system.model import User
+
+    question = f"事务边界取消验收 {uuid4().hex}"
+    db = Session(bind=db_engine, autoflush=False, expire_on_commit=False)
+    conversation_id = None
+
+    async def run() -> None:
+        nonlocal conversation_id
+        user = db.scalar(select(User).where(User.username == "buyer"))
+        assert user is not None
+        initial = AIChatRequest(messages=[AIChatMessage(role="user", content=question)])
+        conversation = conversation_store.ensure_conversation(db, user, initial)
+        conversation_id = conversation.id
+        db.commit()
+        baseline = db_engine.pool.checkedout()
+        entered = asyncio.Event()
+
+        async def stalled(*_args, **_kwargs):
+            assert db_engine.pool.checkedout() == baseline
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(routing, "understand", stalled)
+        task = asyncio.create_task(service._chat_for_user_impl(
+            db, user, AIChatRequest(conversation_id=conversation_id,
+                messages=[AIChatMessage(role="user", content=question)])))
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        assert db_engine.pool.checkedout() == baseline
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert db_engine.pool.checkedout() == baseline
+        assert not db.in_transaction()
+
+    try:
+        asyncio.run(run())
+    finally:
+        db.rollback()
+        if conversation_id is not None:
+            user = db.scalar(select(User).where(User.username == "buyer"))
+            if user is not None:
+                conversation_store.delete_conversation(db, user, conversation_id)
+        db.close()
 
 
 def test_ai_message_context_marks_only_verified_attachment_content() -> None:

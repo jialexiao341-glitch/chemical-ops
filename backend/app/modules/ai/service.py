@@ -80,8 +80,14 @@ async def _classify_chat_intent(db: Session, question: str, *, user: User, data:
         from app.modules.ai.multi_intent import retry_decision
         decision = retry_decision(db, user, data.conversation_id)
         return IntentResult(Intent.MULTI, "retry_failed", decision.model_dump(mode="json"))
-    decision = (routing.read_ticket(data.route_token, user.id, question, data.conversation_id) if data.route_token else
-                await routing.understand(question, routing.conversation_context(db, user, data.conversation_id)))
+    if data.route_token:
+        decision = routing.read_ticket(data.route_token, user.id, question, data.conversation_id)
+    else:
+        context = routing.conversation_context(db, user, data.conversation_id)
+        # Context and authorization checks are complete; release the read transaction
+        # before waiting for the routing model.
+        db.commit()
+        decision = await routing.understand(question, context)
     route = decision.route
     if route == "batch":
         return IntentResult(Intent.MULTI, "semantic_route", decision.model_dump(mode="json"))
@@ -165,6 +171,7 @@ async def _prepare_attachments(
                 value.parse_status = "PROCESSING"
                 value.parse_error = None
                 db.flush()
+                db.commit()
                 try:
                     parsed = await asyncio.to_thread(mineru.parse_bytes, value.file_name, content, runtime)
                 except mineru.MinerUParseError as exc:
@@ -447,6 +454,7 @@ async def _run_text2sql_for_chat(
     )
     answer = _format_text2sql_result(result)
     # 先模板后重写：模型输出自然中文结论，失败时模板兜底，查询链路永不因重写而中断
+    db.commit()
     rewritten = await _rewrite_text2sql_answer(result, dataset_spec.label, settings)
     if rewritten:
         answer = rewritten
@@ -495,6 +503,8 @@ async def _chat_for_user_impl(db: Session, user: User, data: AIChatRequest) -> A
 
 
     conversation = conversation_store.ensure_conversation(db, user, data)
+    # Persist conversation metadata before any model, vector, or document-service wait.
+    db.commit()
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
     if user_message is None:
         raise BusinessValidationError("至少需要一条用户消息")
@@ -524,6 +534,7 @@ async def _chat_for_user_impl(db: Session, user: User, data: AIChatRequest) -> A
             )
         context, citations = build_doc_context(hits)
         runtime = get_settings()
+        db.commit()
         result = await chat(data, runtime, attachment_context=[context])
         conversation_store.save_chat_turn(db, conversation, user_message.content, result.message.content, citations=citations)
         result.conversation_id = conversation.id
@@ -605,6 +616,7 @@ async def _stream_chat_for_user_impl(db: Session, user: User, data: AIChatReques
 
 
     conversation = conversation_store.ensure_conversation(db, user, data)
+    db.commit()
     user_message = next((message for message in reversed(data.messages) if message.role == "user"), None)
     if user_message is None:
         yield f"event: error\ndata: {json.dumps({'message': '至少需要一条用户消息'}, ensure_ascii=False)}\n\n"
@@ -666,6 +678,7 @@ async def _stream_chat_for_user_impl(db: Session, user: User, data: AIChatReques
             context, doc_citations = build_doc_context(hits)
             runtime = get_settings()
             try:
+                db.commit()
                 result = await chat(data, runtime, attachment_context=[context])
             except BusinessValidationError as exc:
                 LOGGER.warning("AI 流式文档问答失败 user_id=%s error_type=%s", user.id, exc.__class__.__name__)

@@ -71,6 +71,39 @@ def test_stream_retries_only_before_output(monkeypatch, failure):
         assert attempts == 1
 
 
+def test_cancelled_stream_closes_upstream_response_and_http_client(monkeypatch):
+    stream_closed = asyncio.Event()
+    client_closed = asyncio.Event()
+
+    class HangingStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            stream_closed.set()
+
+    original_client = httpx.AsyncClient
+
+    class TrackingClient(original_client):
+        async def __aexit__(self, *args):
+            client_closed.set()
+            await super().__aexit__(*args)
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: TrackingClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, stream=HangingStream())), **kwargs))
+    settings = Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=0)
+
+    async def cancel_after_first_token():
+        response = llm.stream_chat(REQUEST, settings)
+        assert await anext(response) == "partial"
+        await response.aclose()
+        assert stream_closed.is_set()
+        assert client_closed.is_set()
+
+    asyncio.run(cancel_after_first_token())
+
+
 def test_stream_usage_is_opt_in_and_counted_when_provider_returns_it(monkeypatch):
     payloads = []
     usages = []

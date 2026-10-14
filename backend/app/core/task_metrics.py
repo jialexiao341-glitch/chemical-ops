@@ -28,6 +28,16 @@ def refresh_task_queue_metrics(db, registry: MetricsRegistry) -> None:
         counts[(queue, status)] = int(count)
         attempts[queue] += int(attempt_sum)
 
+    isolated_rows = db.execute(select(TaskExecution.task_type, func.count(TaskExecution.id))
+        .where(TaskExecution.status == "FAILED",
+            TaskExecution.error_code == "RECOVERY_ISOLATION_REQUIRED")
+        .group_by(TaskExecution.task_type)).all()
+    isolated = {queue: 0 for queue in QUEUES}
+    for task_type, count in isolated_rows:
+        queue = TASK_ROUTES.get(task_type)
+        if queue is not None:
+            isolated[queue] += int(count)
+
     timestamp = now()
     oldest = {queue: None for queue in QUEUES}
     ready_created = db.execute(select(TaskExecution.task_type, func.min(TaskExecution.created_at))
@@ -48,6 +58,7 @@ def refresh_task_queue_metrics(db, registry: MetricsRegistry) -> None:
             max(0.0, (timestamp - oldest[queue]).total_seconds()) if oldest[queue] else 0.0,
             labels={"queue": queue})
         registry.set_gauge("task_queue_attempts", attempts[queue], labels={"queue": queue})
+        registry.set_gauge("task_queue_isolation_required", isolated[queue], labels={"queue": queue})
         for status in STATUSES:
             registry.set_gauge("task_queue_executions", counts[(queue, status)],
                 labels={"queue": queue, "status": status.lower()})

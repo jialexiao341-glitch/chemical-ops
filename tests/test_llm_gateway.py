@@ -7,6 +7,7 @@ import pytest
 import httpx
 
 from app.core.config import Settings
+from app.core.errors import BusinessValidationError
 from app.modules.ai import gateway
 from app.modules.ai import llm
 from app.modules.ai.schema import AIChatRequest
@@ -171,3 +172,44 @@ def test_chat_uses_explicit_fallback_only_after_connect_failure(monkeypatch) -> 
     assert response.message.content == "备用模型回答"
     assert response.model == "backup-model"
     assert requests == ["primary.example", "backup.example"]
+
+
+def test_chat_retries_only_explicit_rate_limit_rejection_with_bounded_attempts(monkeypatch):
+    attempts = []
+
+    def respond(_request):
+        attempts.append(1)
+        if len(attempts) < 2:
+            return httpx.Response(429, json={"error": {"message": "rate limited"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "回答"}}]})
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: client_type(
+        transport=httpx.MockTransport(respond), **kwargs))
+    waits = []
+
+    async def record_wait(attempt):
+        waits.append(attempt)
+
+    monkeypatch.setattr(llm, "_retry_wait", record_wait)
+    result = asyncio.run(llm.chat(
+        AIChatRequest(messages=[{"role": "user", "content": "只读重试口径测试"}]),
+        Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=1), interpret_only=True))
+    assert result.message.content == "回答"
+    assert len(attempts) == 2 and waits == [0]
+
+
+def test_business_write_intent_is_rejected_before_any_model_request(monkeypatch):
+    calls = []
+
+    class NeverCalledClient:
+        def __init__(self, **_kwargs):
+            calls.append("created")
+            raise AssertionError("write intent must be rejected before opening HTTP client")
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient", NeverCalledClient)
+    with pytest.raises(BusinessValidationError, match="仅支持查询和分析"):
+        asyncio.run(llm.chat(
+            AIChatRequest(messages=[{"role": "user", "content": "请帮我创建采购订单"}]),
+            Settings(_env_file=None, openai_api_key="test-key")))
+    assert calls == []

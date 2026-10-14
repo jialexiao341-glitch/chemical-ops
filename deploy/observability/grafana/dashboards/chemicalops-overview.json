@@ -30,7 +30,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
-      "targets": [{ "expr": "chemicalops_task_queue_backlog", "legendFormat": "{{queue}}" }]
+      "targets": [{ "expr": "max by (queue) (chemicalops_task_queue_backlog)", "legendFormat": "{{queue}}" }]
     },
     {
       "id": 4,
@@ -38,7 +38,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
-      "targets": [{ "expr": "chemicalops_task_queue_oldest_ready_seconds", "legendFormat": "{{queue}}" }]
+      "targets": [{ "expr": "max by (queue) (chemicalops_task_queue_oldest_ready_seconds)", "legendFormat": "{{queue}}" }]
     },
     {
       "id": 5,
@@ -70,7 +70,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
-      "targets": [{ "expr": "chemicalops_database_pool_connections", "legendFormat": "{{state}}" }]
+      "targets": [{ "expr": "chemicalops_database_pool_connections", "legendFormat": "{{instance}} / {{state}}" }]
     },
     {
       "id": 9,
@@ -94,7 +94,23 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
       "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
-      "targets": [{ "expr": "chemicalops_task_execution_duration_seconds", "legendFormat": "{{queue}} / {{status}}" }]
+      "targets": [{ "expr": "max by (queue, status) (chemicalops_task_execution_duration_seconds)", "legendFormat": "{{queue}} / {{status}}" }]
+    },
+    {
+      "id": 12,
+      "title": "失败任务（待处置）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "max by (queue) (chemicalops_task_queue_executions{status=\"failed\"})", "legendFormat": "{{queue}}" }]
+    },
+    {
+      "id": 13,
+      "title": "需隔离核验任务",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "datasource": { "type": "prometheus", "uid": "chemicalops-prometheus" },
+      "targets": [{ "expr": "max by (queue) (chemicalops_task_queue_isolation_required)", "legendFormat": "{{queue}}" }]
     }
   ]
 }

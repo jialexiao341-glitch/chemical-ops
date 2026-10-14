@@ -256,6 +256,9 @@ async def retrieve_sections(
 
     vector_hits: list[dict] = []
     try:
+        # Target resolution is database-only; release its read transaction before
+        # embedding and vector-store network calls.
+        db.commit()
         query_vector = (await embed_texts([question], settings))[0]
         client = vector_store.get_client()
         vector_hits = vector_store.search_sections(

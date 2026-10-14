@@ -2,12 +2,13 @@
 
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from dotenv import dotenv_values
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -37,6 +38,14 @@ def queue_engine():
                 for statement in (ROOT / "database/migrations" / filename).read_text().split(";"):
                     if statement.strip():
                         connection.exec_driver_sql(statement)
+        execution_columns = set(connection.execute(text(
+            "SELECT COLUMN_NAME FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = 'async_task_executions'"
+        )).scalars())
+        if "started_at" not in execution_columns:
+            for statement in (ROOT / "database/migrations/050_task_execution_timing.sql").read_text().split(";"):
+                if statement.strip():
+                    connection.exec_driver_sql(statement)
     SchedulerJobRun.__table__.create(engine, checkfirst=True)
     AiDocument.__table__.create(engine, checkfirst=True)
     AiDocumentSection.__table__.create(engine, checkfirst=True)
@@ -56,6 +65,17 @@ def db(queue_engine):
 def enqueue(db, **extra):
     return service.enqueue(db, task_type="agent.run", business_id=uuid4().hex,
                            actor_id=1, generation=0, payload={}, **extra)
+
+
+def _claim_from_worker_process(database_url, owner, barrier, results):
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        barrier.wait(timeout=10)
+        with sessionmaker(engine, expire_on_commit=False)() as session:
+            execution = service.claim_next(session, "agent", owner, 60)
+            results.put(execution.id if execution else None)
+    finally:
+        engine.dispose()
 
 
 def test_acceptance_rolls_back_all_intent(db):
@@ -198,14 +218,16 @@ def test_document_acceptance_serializes_same_cas_requests(queue_engine, monkeypa
 
 
 @pytest.mark.parametrize("old_process_stopped", [True, False])
-def test_recovery_requires_proof_old_process_stopped(db, monkeypatch, old_process_stopped):
+@pytest.mark.parametrize("old_process_host", ["local", "remote"])
+def test_recovery_requires_proof_old_process_stopped(db, monkeypatch, old_process_stopped, old_process_host):
     execution = service.enqueue(db, task_type="documents.ingest", business_id=uuid4().hex,
         actor_id=1, generation=0, payload={}, resource_key="cas:" + uuid4().hex)
     db.commit()
     claimed = service.claim_execution(db, execution.id, 0, "worker", 60)
     old_token = claimed.fencing_token
     claimed.lease_until = service.now() - timedelta(seconds=1)
-    claimed.checkpoint = {"process_pid": 123456, "host": worker.socket.gethostname()}
+    claimed.checkpoint = {"process_pid": 123456, "host": (
+        worker.socket.gethostname() if old_process_host == "local" else "unreachable-worker")}
     db.commit()
     monkeypatch.setattr(worker.processes, "process_alive", lambda _pid: not old_process_stopped)
     factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False, join_transaction_mode="create_savepoint")
@@ -217,10 +239,11 @@ def test_recovery_requires_proof_old_process_stopped(db, monkeypatch, old_proces
         service.finish(db, execution.id, old_token, status="SUCCEEDED")
     db.rollback()
     recovered = db.get(TaskExecution, execution.id)
-    assert recovered.status == ("RETRYING" if old_process_stopped else "FAILED")
+    proven_stopped = old_process_stopped and old_process_host == "local"
+    assert recovered.status == ("RETRYING" if proven_stopped else "FAILED")
     lock = db.scalar(select(TaskResourceLock).where(TaskResourceLock.execution_id == execution.id))
     assert lock is not None  # Retain it for retry or until manual isolation is proved.
-    if not old_process_stopped:
+    if not proven_stopped:
         assert recovered.error_code == "RECOVERY_ISOLATION_REQUIRED"
         assert db.scalar(select(TaskOutbox).where(TaskOutbox.execution_id == execution.id,
             TaskOutbox.routing_key == "documents.failed")) is None
@@ -258,6 +281,36 @@ def test_concurrent_workers_claim_once(queue_engine):
         assert results.count(execution_id) == 1
         assert results.count(None) == 1
     finally:
+        with factory() as db:
+            db.execute(delete(TaskExecution).where(TaskExecution.id == execution_id))
+            db.commit()
+
+
+def test_independent_worker_processes_claim_once(queue_engine):
+    factory = sessionmaker(queue_engine, expire_on_commit=False)
+    with factory() as db:
+        execution = enqueue(db)
+        execution_id = execution.id
+        db.commit()
+    context = multiprocessing.get_context("spawn")
+    barrier, results = context.Barrier(2), context.Queue()
+    database_url = queue_engine.url.render_as_string(hide_password=False)
+    workers = [context.Process(target=_claim_from_worker_process,
+        args=(database_url, f"worker-{index}", barrier, results)) for index in range(2)]
+    try:
+        for process in workers:
+            process.start()
+        for process in workers:
+            process.join(timeout=20)
+        assert all(process.exitcode == 0 for process in workers)
+        claimed = [results.get(timeout=2) for _ in workers]
+        assert claimed.count(execution_id) == 1
+        assert claimed.count(None) == 1
+    finally:
+        for process in workers:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
         with factory() as db:
             db.execute(delete(TaskExecution).where(TaskExecution.id == execution_id))
             db.commit()

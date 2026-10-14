@@ -34,6 +34,24 @@ def test_generated_schema_closes_every_object_and_requires_explicit_fields(model
     check(format["json_schema"]["schema"])
 
 
+def test_json_object_uses_chat_completions_response_format(monkeypatch):
+    payloads = []
+
+    def respond(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok":true}'}}]})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: original(
+        transport=httpx.MockTransport(respond), **kwargs))
+    result = asyncio.run(service.chat(
+        AIChatRequest(messages=[AIChatMessage(role="user", content="JSON object mock")]),
+        Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=0),
+        response_format={"type": "json_object"}, interpret_only=True))
+    assert result.message.content == '{"ok":true}'
+    assert payloads[0]["response_format"] == {"type": "json_object"}
+
+
 def test_plan_schema_contains_slot_semantics_and_dataset_whitelists():
     schema = schema_response_format(text2sql.QueryPlan, "query_plan")["json_schema"]["schema"]
     assert all(field.get("description") for field in schema["properties"].values())

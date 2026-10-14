@@ -337,15 +337,20 @@ def read_file(db: Session, user: User, file_id: int) -> tuple[SysFile, bytes]:
     """读取文件对象内容，并同时校验文件元数据。"""
     value = _require_file(db, file_id)
     _check_file_access(db, user, value)
-    if _storage_backend() == "local":
+    object_key = value.object_key
+    backend = _storage_backend()
+    # File authorization is complete; release SQL resources before local or object
+    # storage I/O. Callers may start a fresh short transaction for later metadata updates.
+    db.commit()
+    if backend == "local":
         root = storage_root().resolve()
-        target = (root / value.object_key).resolve()
+        target = (root / object_key).resolve()
         if root not in target.parents or not target.is_file():
             raise ResourceNotFoundError("文件对象不存在或已失效")
         return value, target.read_bytes()
     response = None
     try:
-        response = _minio_client().get_object(_minio_bucket_for_key(value.object_key), value.object_key)
+        response = _minio_client().get_object(_minio_bucket_for_key(object_key), object_key)
         return value, response.read()
     except BusinessValidationError:
         raise

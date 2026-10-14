@@ -1106,6 +1106,9 @@ async def _understand_question(question: str, settings: Settings, db: Session, u
         return fallback
     prompt = text2sql_plan_prompt("")
     payload = json.dumps({"question": question, "today": date.today().isoformat(), "previous_plan": previous_plan.model_dump(mode="json") if previous_plan else None}, ensure_ascii=False)
+    # Planning performs only reads before this point; do not hold its SQL connection
+    # while an external model generates the structured query plan.
+    db.commit()
     result = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
                         response_format=schema_response_format(QueryPlan, "query_plan"), system_prompt=prompt, interpret_only=True)
     raw = result.message.content

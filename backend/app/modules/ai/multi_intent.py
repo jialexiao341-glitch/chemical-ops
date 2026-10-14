@@ -198,8 +198,8 @@ async def execute_batch(db: Session, user: User, decision: Understanding, settin
             try:
                 old = previous.get(task.id, {})
                 prior = QueryPlan.model_validate(old["query_plan"]) if old.get("query_plan") and decision.dialogue_action in {"modify", "continue"} else None
-                with db.begin_nested():
-                    plan = await plan_analytics(db, user, task, settings, previous_plan=prior)
+                db.commit()
+                plan = await plan_analytics(db, user, task, settings, previous_plan=prior)
                 result.query_plan, result.status = plan.model_dump(mode="json"), TaskStatus.PLANNED
                 result.execution_plan = {"type": "query_plan", "plan": result.query_plan}
             except (BusinessValidationError, AuthorizationError, ValueError):
@@ -218,37 +218,41 @@ async def execute_batch(db: Session, user: User, decision: Understanding, settin
             result.status = TaskStatus.RUNNING
             await notify()
             try:
-                with db.begin_nested():
-                    if task.kind == "analytics":
-                        if task.depends_on:
-                            dependencies = [{"id": key, "evidence": results[key].evidence} for key in task.depends_on]
-                            plan = await plan_analytics(db, user, task, settings, dependencies=dependencies)
-                            result.query_plan = plan.model_dump(mode="json")
-                            result.execution_plan = {"type": "query_plan", "plan": result.query_plan}
-                        plan = QueryPlan.model_validate(result.query_plan)
-                        answer, citation, trace = await service._run_text2sql_for_chat(db, user, task.question, settings, planned_query=plan)
-                        result.answer, result.citations = answer, [citation]
-                        result.evidence = [{"rows": trace.rows, "unit": trace.unit, "truncated": trace.truncated}]
-                        result.status = TaskStatus.SUCCEEDED
-                    elif task.kind == "document":
-                        from app.modules.doc_kb.retrieve import retrieve_sections, build_doc_context, no_doc_hits_reply
-                        hits = await retrieve_sections(db, task.question)
-                        if not hits:
-                            result.status, result.answer = TaskStatus.WAITING_INPUT, no_doc_hits_reply(task.question)
-                        else:
-                            context, citations = build_doc_context(hits)
-                            response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=task.question)]),
-                                settings, attachment_context=[context], interpret_only=True)
-                            result.answer, result.citations = response.message.content, citations
-                            result.status = TaskStatus.SUCCEEDED
+                if task.kind == "analytics":
+                    if task.depends_on:
+                        dependencies = [{"id": key, "evidence": results[key].evidence} for key in task.depends_on]
+                        db.commit()
+                        plan = await plan_analytics(db, user, task, settings, dependencies=dependencies)
+                        result.query_plan = plan.model_dump(mode="json")
+                        result.execution_plan = {"type": "query_plan", "plan": result.query_plan}
+                    plan = QueryPlan.model_validate(result.query_plan)
+                    answer, citation, trace = await service._run_text2sql_for_chat(db, user, task.question, settings, planned_query=plan)
+                    result.answer, result.citations = answer, [citation]
+                    result.evidence = [{"rows": trace.rows, "unit": trace.unit, "truncated": trace.truncated}]
+                    result.status = TaskStatus.SUCCEEDED
+                elif task.kind == "document":
+                    from app.modules.doc_kb.retrieve import retrieve_sections, build_doc_context, no_doc_hits_reply
+                    hits = await retrieve_sections(db, task.question)
+                    if not hits:
+                        result.status, result.answer = TaskStatus.WAITING_INPUT, no_doc_hits_reply(task.question)
                     else:
-                        execute_product_task(db, user, task, result, products)
+                        context, citations = build_doc_context(hits)
+                        db.commit()
+                        response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=task.question)]),
+                            settings, attachment_context=[context], interpret_only=True)
+                        result.answer, result.citations = response.message.content, citations
+                        result.status = TaskStatus.SUCCEEDED
+                else:
+                    execute_product_task(db, user, task, result, products)
             except (AuthorizationError, ResourceNotFoundError, BusinessValidationError, ValueError):
+                db.rollback()
                 result.status, result.error_code, result.answer = TaskStatus.FAILED, "QUERY_REJECTED", "该项查询未通过权限或参数校验，请核对条件。"
                 result.evidence, result.citations = [], []
             except Exception:
+                db.rollback()
                 result.status, result.error_code, result.answer = TaskStatus.FAILED, "QUERY_UNAVAILABLE", "该项查询暂时失败，请稍后重试。"
                 result.evidence, result.citations = [], []
+            db.commit()
             await notify()
 
     def stop(status, code, answer):

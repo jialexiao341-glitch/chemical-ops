@@ -88,7 +88,7 @@ def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):
     monkeypatch.setattr(text2sql, "_fallback_query_plan", lambda *_args: None)
     with pytest.raises(BusinessValidationError, match="查询计划格式不正确"):
         asyncio.run(text2sql._understand_question(
-            "查询供应商采购金额排名", SimpleNamespace(), SimpleNamespace(), SimpleNamespace(id=1)))
+            "查询供应商采购金额排名", SimpleNamespace(), SimpleNamespace(commit=lambda: None), SimpleNamespace(id=1)))
 
 
 def test_text2sql_uses_safe_supplier_amount_fallback_when_model_plan_is_invalid(monkeypatch):
@@ -102,7 +102,7 @@ def test_text2sql_uses_safe_supplier_amount_fallback_when_model_plan_is_invalid(
         text2sql._understand_question(
             "查询本月各供应商的采购订单总金额，按金额从高到低，最多显示10家",
             SimpleNamespace(),
-            SimpleNamespace(),
+            SimpleNamespace(commit=lambda: None),
             SimpleNamespace(id=1),
         )
     )

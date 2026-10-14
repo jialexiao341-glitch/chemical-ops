@@ -1,0 +1,69 @@
+groups:
+  - name: chemicalops-api
+    rules:
+      - alert: ChemicalOpsAPITargetDown
+        expr: up{job="chemicalops-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: ChemicalOps API 指标目标不可达
+          description: Prometheus 连续 1 分钟无法抓取该 API 实例。检查进程、主机、端口和 /metrics。
+          runbook: docs/可观测性告警处置说明.md#api-target-down
+
+      - alert: ChemicalOpsAPITargetMissing
+        expr: absent(up{job="chemicalops-api"})
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: Prometheus 未发现 ChemicalOps API 指标目标
+          description: 检查 scrape_configs、静态目标和 Prometheus 配置加载状态。
+          runbook: docs/可观测性告警处置说明.md#api-target-down
+
+      - alert: ChemicalOpsDatabaseMetricsUnavailable
+        expr: increase(chemicalops_task_queue_metrics_collection_count{result="database_error"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: API 无法从 MySQL 刷新持久化任务指标
+          description: 指标采集连续观察到数据库错误；确认 MySQL 可达、连接池状态和迁移版本。
+          runbook: docs/可观测性告警处置说明.md#database-metrics-unavailable
+
+      - alert: ChemicalOpsQueueHasFailedTasks
+        expr: max by (queue) (chemicalops_task_queue_executions{status="failed"}) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: task-queue
+        annotations:
+          summary: ChemicalOps 存在待处置失败任务
+          description: 失败状态为持久化快照；按队列和 error_code 查看任务，遵循幂等及 fencing 恢复说明。
+          runbook: docs/可观测性告警处置说明.md#queue-failed
+
+      - alert: ChemicalOpsQueueRecoveryIsolationRequired
+        expr: max by (queue) (chemicalops_task_queue_isolation_required) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: task-queue
+        annotations:
+          summary: 旧 Worker 无法证明已停止，任务保持隔离
+          description: 保留资源锁，不得直接删除锁或重跑；先取得旧主机及子进程停止证据。
+          runbook: docs/可观测性告警处置说明.md#queue-isolation
+
+      - alert: ChemicalOpsQueueOldestReadyTaskDelayed
+        expr: max by (queue) (chemicalops_task_queue_backlog) > 0
+          and max by (queue) (chemicalops_task_queue_oldest_ready_seconds) > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: task-queue
+        annotations:
+          summary: 有可执行任务等待超过 5 分钟
+          description: 检查对应 Worker 是否存活、队列积压、数据库连接和任务类型路由。
+          runbook: docs/可观测性告警处置说明.md#queue-backlog

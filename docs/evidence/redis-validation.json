@@ -17,14 +17,14 @@
     "without_cache": {
       "requests": 100,
       "sql_select_count": 300,
-      "mean_ms": 2.2009,
-      "p95_ms": 3.0252
+      "mean_ms": 2.741,
+      "p95_ms": 3.9594
     },
     "cache_aside": {
       "requests": 100,
       "sql_select_count": 3,
-      "mean_ms": 1.3628,
-      "p95_ms": 2.0391
+      "mean_ms": 1.4511,
+      "p95_ms": 2.0785
     }
   }
 }

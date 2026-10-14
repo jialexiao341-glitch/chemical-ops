@@ -1,7 +1,9 @@
 """对指定 HTTP 接口执行轻量并发压测。"""
 
 import argparse
+import http.client
 import json
+import math
 import os
 import platform
 import re
@@ -22,7 +24,7 @@ def _request(url: str, headers: dict[str, str], timeout: float) -> tuple[int, fl
             status = response.status
     except HTTPError as exc:
         status = exc.code
-    except URLError:
+    except (URLError, TimeoutError, OSError, http.client.HTTPException):
         status = 0
     return status, time.perf_counter() - started
 
@@ -50,6 +52,12 @@ def _metrics_snapshot(url: str, timeout: float) -> tuple[int | None, dict[str, i
             if result:
                 cache[result.group(1)] = cache.get(result.group(1), 0) + int(float(cache_match.group(2)))
     return (queries if query_series_found else None), cache
+
+
+def _percentile_ms(sorted_durations: list[float], quantile: float) -> float:
+    """按 nearest-rank 口径计算延迟分位数。"""
+    index = max(0, math.ceil(quantile * len(sorted_durations)) - 1)
+    return round(sorted_durations[index] * 1000, 2)
 
 
 def main() -> None:
@@ -96,11 +104,14 @@ def main() -> None:
         "failures": failures,
         "elapsed_seconds": round(elapsed, 4),
         "requests_per_second": round(args.requests / elapsed, 2) if elapsed else 0,
-        "p50_ms": round(latencies[len(latencies) // 2] * 1000, 2),
-        "p95_ms": round(latencies[max(0, int(len(latencies) * 0.95) - 1)] * 1000, 2),
+        "p50_ms": _percentile_ms(latencies, 0.50),
+        "p95_ms": _percentile_ms(latencies, 0.95),
+        "p99_ms": _percentile_ms(latencies, 0.99),
         "database_queries": (queries_after - queries_before
                              if queries_before is not None and queries_after is not None else None),
         "redis_cache_events": cache_delta,
+        "redis_cache_lookup_events": cache_lookups if cache_delta is not None else None,
+        "redis_cache_event_coverage": round(cache_lookups / args.requests, 4) if cache_delta is not None else None,
         "redis_cache_hit_rate": round(cache_hits / cache_lookups, 4) if cache_lookups else None,
         "status_codes": {str(status): sum(item[0] == status for item in results) for status in sorted({item[0] for item in results})},
     }
