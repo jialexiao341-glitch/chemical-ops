@@ -35,6 +35,8 @@ from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.operation_exceptions.model import OperationException, OperationTask
 from app.modules.system.model import Department
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
+from app.modules.system.schema import RoleUpdate, UserUpdate
+from app.modules.system import service as system_service
 from app.modules.suppliers.model import Supplier
 from tests.conftest import login
 from scripts.seed_demo_accounts import ROLE_SCOPES
@@ -1250,3 +1252,46 @@ def test_role_revocation_and_account_disable_apply_to_existing_token(
     user.status = "INACTIVE"
     db_session.flush()
     assert client.get("/api/v1/products", headers=token_headers).status_code == 401
+
+
+def test_user_role_membership_change_increments_token_version(db_session: Session) -> None:
+    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    supplier_role = db_session.scalar(select(Role).where(Role.role_code == "SUPPLIER_PORTAL"))
+    assert user is not None and supplier_role is not None
+    previous_version = user.token_version
+
+    system_service.update_user(db_session, user.id, UserUpdate(role_ids=[supplier_role.id]))
+
+    assert user.token_version == previous_version + 1
+
+
+def test_role_permission_change_increments_member_token_versions(db_session: Session) -> None:
+    role = db_session.scalar(
+        select(Role)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .where(Role.role_code != "SYS_ADMIN")
+        .order_by(Role.id)
+    )
+    assert role is not None
+    member_ids = list(db_session.scalars(select(UserRole.user_id).where(UserRole.role_id == role.id)).all())
+    assert member_ids
+    previous_versions = {
+        user.id: user.token_version
+        for user in db_session.scalars(select(User).where(User.id.in_(member_ids))).all()
+    }
+    permission_ids = list(
+        db_session.scalars(select(RolePermission.permission_id).where(RolePermission.role_id == role.id)).all()
+    )
+    assert permission_ids
+
+    system_service.update_role(
+        db_session,
+        role.id,
+        RoleUpdate(permission_ids=permission_ids[:-1]),
+    )
+
+    db_session.expire_all()
+    for user_id, previous_version in previous_versions.items():
+        user = db_session.get(User, user_id)
+        assert user is not None
+        assert user.token_version == previous_version + 1

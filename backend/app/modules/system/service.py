@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import hashlib
 
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -54,6 +54,18 @@ def _require_roles(db: Session, role_ids: list[int]) -> None:
     missing = sorted(set(role_ids) - actual)
     if missing:
         raise ResourceNotFoundError(f"角色不存在：{missing}")
+
+
+def _invalidate_role_members(db: Session, role_id: int) -> None:
+    """使持有指定角色的旧访问令牌失效，覆盖幂等响应重放路径。"""
+
+    member_ids = select(UserRole.user_id).where(UserRole.role_id == role_id)
+    db.execute(
+        update(User)
+        .where(User.id.in_(member_ids))
+        .values(token_version=User.token_version + 1)
+        .execution_options(synchronize_session=False)
+    )
 
 
 def _require_department(db: Session, department_id: int | None) -> None:
@@ -246,8 +258,11 @@ def update_user(
     if actor_id == user_id and values.get("status", user.status) != "ACTIVE":
         raise BusinessValidationError("不能停用当前登录账号")
     next_role_codes = current_role_codes
+    current_role_ids = set(crud.get_user_role_ids(db, user_id))
+    role_membership_changed = False
     if data.role_ids is not None:
         _require_roles(db, data.role_ids)
+        role_membership_changed = current_role_ids != set(data.role_ids)
         next_role_codes = set(
             db.scalars(select(Role.role_code).where(Role.id.in_(set(data.role_ids)))).all()
         )
@@ -260,8 +275,11 @@ def update_user(
         raise BusinessValidationError("不能移除当前登录账号的系统管理员角色")
     if data.password is not None:
         values["password_hash"] = hash_password(data.password)
-        values["token_version"] = user.token_version + 1
-    if "status" in values and values["status"] != user.status:
+    if (
+        data.password is not None
+        or role_membership_changed
+        or ("status" in values and values["status"] != user.status)
+    ):
         values["token_version"] = user.token_version + 1
     _require_department(db, data.department_id)
     if data.role_ids is not None:
@@ -359,8 +377,13 @@ def update_role(db: Session, role_id: int, data: RoleUpdate) -> Role:
     values = data.model_dump(exclude_unset=True, exclude={"permission_ids"})
     if role.role_code == "SYS_ADMIN" and values.get("status") == "INACTIVE":
         raise BusinessValidationError("系统管理员角色不能停用")
+    authorization_changed = values.get("status", role.status) != role.status
     if data.permission_ids is not None:
         _require_permissions(db, data.permission_ids)
+        current_permission_ids = set(
+            db.scalars(select(RolePermission.permission_id).where(RolePermission.role_id == role_id)).all()
+        )
+        authorization_changed = authorization_changed or current_permission_ids != set(data.permission_ids)
         if role.role_code == "SYS_ADMIN":
             all_permission_ids = set(db.scalars(select(Permission.id)).all())
             if set(data.permission_ids) != all_permission_ids:
@@ -368,6 +391,8 @@ def update_role(db: Session, role_id: int, data: RoleUpdate) -> Role:
         db.query(RolePermission).filter_by(role_id=role_id).delete()
         for permission_id in sorted(set(data.permission_ids)):
             db.add(RolePermission(role_id=role_id, permission_id=permission_id))
+    if authorization_changed:
+        _invalidate_role_members(db, role_id)
     return crud.update_entity(db, role, values)
 
 
@@ -390,6 +415,8 @@ def delete_role(db: Session, role_id: int) -> Role:
         raise ResourceNotFoundError(f"角色 {role_id} 不存在")
     if role.role_code == "SYS_ADMIN":
         raise BusinessValidationError("系统管理员角色不能停用")
+    if role.status != "INACTIVE":
+        _invalidate_role_members(db, role_id)
     return crud.disable_entity(db, role)
 
 

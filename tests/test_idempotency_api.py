@@ -9,6 +9,10 @@ from fastapi.testclient import TestClient
 
 from app.core.db import SessionLocal
 from app.modules.system.idempotency_model import IdempotencyRecord
+from app.modules.system.model import Role, User
+from app.modules.system.schema import UserUpdate
+from app.modules.system import service as system_service
+from sqlalchemy import select
 
 from .conftest import login
 
@@ -25,6 +29,39 @@ def test_idempotency_key_replays_first_response(client: TestClient, demo_passwor
     repeated = client.post("/api/v1/notifications/read-all", headers=headers)
     assert repeated.status_code == first.status_code
     assert repeated.json() == first.json()
+
+
+def test_role_revocation_prevents_replaying_completed_idempotency_response(
+    client: TestClient, db_session, demo_password: str, monkeypatch
+) -> None:
+    """角色变更后复用旧令牌与幂等键应重新认证，而非回放旧成功响应。"""
+
+    class SharedSession:
+        """让幂等中间件与请求测试会话共享事务，且不关闭夹具会话。"""
+
+        def __init__(self, session):
+            self._session = session
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("app.core.idempotency.SessionLocal", lambda: SharedSession(db_session))
+    user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    supplier_role = db_session.scalar(select(Role).where(Role.role_code == "SUPPLIER_PORTAL"))
+    assert user is not None and supplier_role is not None
+
+    headers = login(client, "warehouse_receiver", demo_password)
+    headers["Idempotency-Key"] = f"TEST-IDEMPOTENCY-REVOKED-{uuid4().hex}"
+    first = client.post("/api/v1/notifications/read-all", headers=headers)
+    assert first.status_code == 200, first.text
+
+    system_service.update_user(db_session, user.id, UserUpdate(role_ids=[supplier_role.id]))
+
+    replay = client.post("/api/v1/notifications/read-all", headers=headers)
+    assert replay.status_code == 401, replay.text
 
 
 def test_idempotency_key_cannot_be_reused_for_a_different_request(client: TestClient, demo_password: str) -> None:
