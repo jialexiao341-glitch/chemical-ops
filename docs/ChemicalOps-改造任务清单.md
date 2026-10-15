@@ -1,6 +1,6 @@
 # ChemicalOps 改造任务清单
 
-> 基线：2026-10-08。清单记录后续验收事项及完成证据；勾选框只在实现及所列验收完成后更新。现有代码和历史测试用于复用及识别差距，不将已有能力重新登记为“从零建设”。
+> 本清单只保留尚未完成的建设任务。当前运行方式及验证边界以各模块运行说明和原始证据为准；已完成的工程化收尾不再重复列为待办。
 > 配套：[企业级改造方案](ChemicalOps-企业级改造方案.md) · [项目介绍与成果（STAR）](项目介绍与成果（STAR）.md)
 
 ## 执行约定与依赖
@@ -10,65 +10,6 @@
 每项交付应包含变更文件、迁移/兼容方案、适合风险的测试、验收日期/环境/样本/结果和限制。测试失败或跳过单列；受影响集合与复跑不能相加。文档更新以本清单和直接相关操作说明为主，README 与 STAR 仅按项目规范的触发条件编辑。提交和推送需用户明确授权。
 
 前端全部复用现有列表、业务弹窗、产品编辑抽屉与来源悬浮窗，通过字段、配置、属性和插槽扩展；保留字体、尺寸、间距和交互。新增能力优先扩展原组件，不另造视觉模板。未浏览器验收时必须说明。
-
-## 后端工程化升级收尾待办
-
-按以下顺序推进。本清单只追踪仍需验证或补齐的工作；已有代码、指标和本地验收结果作为基线复用，不把它们重新算作待开发。每项需在相关测试、故障场景和证据完成后再勾选。
-
-### ENG-01 任务恢复与 fencing 故障验证
-
-- [x] 使用两个独立 Worker 验证并发领取同一队列时任务不会被重复领取执行。
-- [x] 注入 Worker 崩溃、心跳中断、取消和租约到期，核对重试上限、30/120 秒退避及最终状态。
-- [x] 验证租约转移后旧 Worker 的 fencing token 不能覆盖新执行状态或 checkpoint。
-- [x] 无法确认远程旧进程已停止时，验证任务进入隔离状态、资源锁保留，并确认人工核验/恢复流程明确。
-- [x] 为文档解析、Agent/模型调用等任务标注安全重跑边界、可能重复计费或外部副作用；不承诺 exactly-once。
-- **主要代码/测试**：`backend/app/modules/task_queue/`、`scripts/run_task_worker.py`；`tests/test_task_queue_supervision.py`、`test_task_queue_processes.py`、`test_task_queue_delivery.py`、`test_database_task_worker.py`、`test_agent_queue_runtime.py`。
-- **依赖/对应条目**：承接 P1-01、P1-02；不替换现有 MySQL 队列。
-- **验收记录**：隔离 MySQL 队列套件 40 passed，覆盖独立 OS Worker 进程、心跳/子进程监督、取消、重试退避、fencing 及本地/远程旧 Worker 处置；仅 1 条第三方 Starlette deprecation warning。隔离库 fixture 已补齐迁移 050。复用测试入口：`tests/test_task_queue_delivery.py`、`test_task_queue_supervision.py`、`test_task_queue_processes.py`、`test_database_task_worker.py`、`test_agent_queue_runtime.py`。
-
-### ENG-02 缩短 AI 请求数据库事务
-
-- [x] 梳理聊天与 Agent 路径在模型、Embedding、Qdrant、MinIO 等外部等待期间持有的 Session、事务和连接。
-- [x] 调整为外部 await 前完成必要的短事务并释放连接；保持会话/消息状态和错误回滚语义。
-- [x] 用慢模型 Mock 验证等待期间连接池连接可复用；注入请求取消并验证 DB Session、HTTP 流和上游响应均释放。
-- **主要代码/测试**：`backend/app/modules/ai/service.py`、`conversation_store.py`、`backend/app/core/db.py`；新增/扩展 AI Session 生命周期与取消测试。
-- **依赖/对应条目**：承接 P0-02；避免把数据库事务重构扩展到无关模块。
-- **实施范围**：聊天会话先短事务提交；路由上下文和 Text2SQL 计划读取后在模型等待前提交；批量查询取消跨 await 的 savepoint，改为每项短事务、异常回滚与成功项提交；Embedding/Qdrant 与 MinerU/MinIO 前释放数据库连接。Agent 执行入口原有 `_assert_running` 短事务保留。没有数据库迁移，API 请求结束仍由 `get_db` 关闭 Session。
-- **验收记录**：隔离 MySQL 环境执行相关 AI、Agent、LLM 流、文件读取套件：141 passed、1 skipped、1 条第三方 Starlette/AnyIO 弃用警告；慢模型阻塞并取消期间连接池 checked-out 数保持基线，Session 无活动事务；取消流式响应时 Mock 上游流与 HTTP 客户端上下文均已关闭。未进行吞吐或延迟优化压测，不报告性能提升数值。
-
-### ENG-03 Redis 缓存与限流边界、冷/热基准
-
-- [x] 盘点高频只读接口及缓存命中路径，验证权限过滤与缓存隔离顺序，覆盖跨用户/角色/资源范围回归。
-- [x] 在隔离环境开启 Redis 限流，验证按用户配额、Lua 原子并发边界及 Redis 不可用时的 503 降级行为；生产/共享环境仍由配置决定是否启用。
-- [x] 对同一业务接口分别测冷缓存和热缓存，记录命中率、P50/P95、数据库查询数、错误数与测试环境；与已有 Redis/SQLite 微基准和商品详情 API 报告区分呈现。
-- [x] 只有在证据显示接口读频率和收益时才扩展缓存；不缓存未证明安全的库存、报价或用户权限敏感结果。
-- **主要代码/测试**：`backend/app/core/{cache,rate_limit,redis_client}.py`、商品与 Agent 查询调用点；`tests/test_redis_features.py`、`scripts/run_load_test.py`。
-- **依赖/对应条目**：复用现有 Cache Aside、TTL、版本失效和限流实现；不重复造缓存框架。
-- **实施范围**：未扩大缓存对象。读路径为产品详情权限校验后访问产品目录缓存、Agent 工具授权后缓存产品定位、会话归属校验后缓存本人历史并重新核验消息证据。Key 由 app/env/version/space/identity 摘要组成；限流 Lua 用 user/category 固定窗口计数，Redis 错误时 fail closed 返回 503。代码默认限流关闭；本机 development `.env` 当前显式开启，未修改共享环境配置。
-- **验收记录**：真实 Redis 7.4.11 集成套件 11 passed，覆盖 24 线程下两个用户各自精确 17 次配额、分类隔离、缓存提交失效/回滚/并发旧回填、会话越权与证据重核、Redis 故障回源及限流 503。新增可复跑脚本 `scripts/benchmark_cache_endpoint.py`；同一 MySQL 产品详情 API 连续请求冷/热各 100 次、单并发、均 100 个 HTTP 200：冷缓存 100 miss、0% 命中、304 条进程 SELECT、40.20 QPS、P50/P95/P99 29.01/33.44/36.85 ms；热缓存 100 hit、100% 命中、204 条进程 SELECT、50.05 QPS、P50/P95/P99 20.76/33.79/37.63 ms。SELECT 含鉴权/权限查询；本样本显示热缓存少 100 次 SELECT，但尾延迟相近，不据此宣称稳定提速。环境为 Windows、Python 3.11.0、单 API development、MySQL 127.0.0.1:3306、Redis 7.4.11；未调用模型。证据：`docs/evidence/product-detail-cache-cold-hot-2026-10-14.json` 与 `docs/evidence/redis-validation.json`。
-
-### ENG-04 LLM Gateway 兼容矩阵与用量口径
-
-- [x] 为现有模型 profile 建立能力矩阵，分别记录结构化输出、流式、Tool Calling、SSE usage 支持及限制。
-- [x] 用 Mock 覆盖超时、可重试/不可重试错误、有限重试、熔断/恢复、fallback、并发上限、流取消和首 token 后断流；验证非幂等操作不因自动重试重复执行。
-- [x] 明确 usage 缺失时的处理；如需按用户/请求核算成本，再设计持久化账本和单价来源，不从进程内指标推算账单。
-- [x] 仅在确有多 API 实例需求时再设计跨实例熔断和并发配额；当前实现状态按单实例边界说明。
-- **主要代码/测试**：`backend/app/modules/ai/{gateway,llm}.py`、`backend/app/core/config.py`；`tests/test_ai_llm_stream.py`、`test_ai_structured_output.py`、`test_ai_routing.py` 及 Gateway Mock 测试。
-- **依赖/对应条目**：承接 P2-01；保持现有 Agent 调用接口兼容，不为当前单一 OpenAI-compatible 适配器引入不必要 SDK。
-- **验收记录**：新增 `docs/LLM-Gateway兼容矩阵.md`，记录当前 legacy profile、JSON object/schema 两条协议、DeepSeek Responses 特殊分支、非原生 Tool Calling、SSE usage opt-in、缺失 usage 为未知、重试/熔断/fallback 和进程内配额限制。Mock 套件 78 passed，覆盖连接/429 有限重试、读超时不重放、fallback、熔断恢复、并发取消、首 token 后断流、HTTP 上游取消清理、json_object/schema 及 usage 缺失；写操作意图在 HTTP 客户端创建前拒绝。未接入持久化成本账本，也未进行真实模型兼容/定价验收；当前开发配置为单实例 legacy 模式。
-
-### ENG-05 告警闭环、多实例观测与分层压测
-
-- [x] 保留现有 Prometheus、Grafana、OTel、Jaeger 与已验收 trace；补充关键队列失败/隔离、数据库不可用和恢复状态的告警规则及处置记录。
-- [x] 配置真实告警接收器并验证触发、恢复、去重和送达；本轮按用户指定使用本地专用 webhook，生产外部目标须另行验收。
-- [x] 明确 API/LLM/Agent 进程内指标在多实例部署时逐实例抓取或聚合的策略；区分数据库快照 gauge 与 Prometheus histogram。
-- [x] 将运行告警、规则及采集目标状态接入系统管理员功能区；前端通过后端受限接口读取，不直连 Prometheus。
-- [x] 分开运行普通业务 API、缓存冷/热、队列积压与恢复、LLM Mock、Agent Mock 和受控真实模型 smoke；真实模型 smoke 与 Mock 行为测试分别标识。
-- [x] 扩大真实模型并发负载前，明确可接受的 Token/费用上限和请求并发；用户确认并发 2、8 请求、8,000 Token 上限，完成受控小样本并发验证。
-- [x] 为已执行的 HTTP 压测报告记录测试数据、环境、服务版本、并发、数据库/Redis 状态、模型与网络条件，并分别呈现 P50/P95/P99、错误、SQL 和缓存事件；队列/Mock 可靠性测试不伪装成 QPS 压测。
-- **主要代码/配置/测试**：`backend/app/core/{observability,telemetry,task_metrics}.py`、`backend/app/main.py`、`backend/app/modules/task_queue/`、`backend/app/modules/ai/`、`deploy/observability/`、`scripts/run_load_test.py`；`tests/test_observability.py`、`tests/test_failure_injection.py`。
-- **依赖/对应条目**：承接 P3-01；本地追踪验收不等于生产告警或容量验收。
-- **验收记录**：任务队列指标新增 `task_queue_isolation_required` 持久化快照；6 条 Prometheus API down/missing、MySQL 指标采集失败、失败任务、隔离、积压等待规则通过配置/规则校验，API target 为 `up`；Grafana dashboard 有 13 个面板，共享队列快照按 queue 去重、连接池保留 instance。系统管理员专属 `/system/monitoring` 页面及服务端汇总接口完成真实 HTTP 与浏览器续验：管理员 200、采购员/仓库用户 403、匿名 401；采购员无监控菜单且直达 URL 显示 404；修复告警名、任务、实例及规则名的字段绑定，权限专项 6 passed。Alertmanager v0.28.1 与用户指定本地 webhook 完成真实 Prometheus 触发、恢复、3 次重复提交抑制和接收端落盘确认，临时规则已清除。deepseek-flash 并发 2、8 请求全部成功，总计 732 Token，P50/P95/P99 为 1133.43/1774.31/1774.31 ms。详见 [ENG-05 续验记录](evidence/eng05-completion-2026-10-14.md) 与 [处置说明](可观测性告警处置说明.md)。本地范围已完成；不代表生产外部通知或模型容量验收。前端全量类型检查仍受既有 Vue 类型依赖错误影响，不宣称类型检查/构建通过。API 并发的 200/200 与 198/200 两份历史报告继续保留，后者 2 次连接中断及约 7 秒 P99 未被覆盖；缓存冷/热各 100 次成功仍按原范围记录。
 
 ## P0：业务正确性
 
@@ -144,7 +85,7 @@
 
 ### P1-01 队列长期运行与故障矩阵
 
-- [ ] 将现有可选能力纳入隔离 Compose 集成验收。
+- [ ] 将现有持久队列能力纳入隔离 Compose 集成验收。
 - **模块/优先级**：task_queue、jobs/technical_documents、ai/agent_runtime、三个任务 CLI；P1。
 - **实施步骤**：复用迁移 041/042、数据库 Worker/监督机制；在隔离 MySQL/Qdrant 验证同事务持久化、并发领取、延迟重试与执行进程崩溃恢复；扩大至完整 Linux Worker；补失败执行查询、处置和重试权限。
 - **依赖/风险**：P0-02、P0-07、P0-08；模型/embedding 替身与真实调用分层，不在已有知识集合写验收点。
@@ -230,13 +171,13 @@
 
 当前问题：未证明真实生产容量、可用性、全角色体验和灾备恢复。门禁：以下报告、阻塞问题复验和真实角色签收完成后，才可表述试点交付；上线不自动成为生产收益证据。
 
-### P3-01 告警闭环、多实例观测与分层压测
+### P3-01 生产告警与多实例联合验收
 
-- [ ] 在现有 Prometheus/Grafana、OpenTelemetry/Jaeger 和跨进程 trace 基础上，完成告警闭环及多实例指标策略。
+- [ ] 在已完成的本地通知闭环与指标策略上，补齐生产外部渠道、补充规则及真实多实例联合验收。
 - **模块/优先级**：core/observability、main、task_queue/logging、部署；P3。
-- **实施步骤**：复用现有指标、JSON 日志、OTel span 与跨进程 Trace ID；补充慢查询/锁等待、最老任务、失败隔离、模型错误和索引延迟告警；配置责任人、去重、处置与恢复通知；明确多 API 实例指标抓取/聚合口径；运行普通 API、缓存、队列和模型分层负载。
+- **实施步骤**：复用现有指标、JSON 日志、OTel span、跨进程 Trace ID 及本地 Alertmanager/webhook；补齐慢查询/锁等待、模型错误和索引延迟等生产所需规则；配置正式责任人和受控外部通知目标；实际运行多 API 实例核验逐实例抓取与共享快照去重，并在批准预算下扩展业务 API、队列和模型负载。
 - **依赖/风险**：P1-03、P2-01；任务 ID 不做指标标签，usage 缺失不能伪造 Token。
-- **验收**：注入数据库断连、Worker 崩溃和过期任务，告警及恢复通知到达约定渠道；同 trace 可查跨进程证据；多实例指标口径可复核且无敏感标签；分层负载报告含环境和样本信息；就绪与存活符合启用依赖。
+- **验收**：注入数据库断连、Worker 崩溃和过期任务，告警及恢复通知到达正式外部渠道；同 trace 可查跨进程证据；实际多实例抓取/聚合无重复快照和敏感标签；分层负载报告含环境、样本及预算；就绪与存活符合启用依赖。此前的本地 webhook 送达、小样本模型并发和已通过故障回归不替代本项生产联合验收。
 
 ### P3-02 容量、安全与全角色端到端验收
 

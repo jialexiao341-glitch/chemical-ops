@@ -1,6 +1,45 @@
-# LLM Gateway 兼容矩阵
+# LLM Gateway 配置与兼容矩阵
 
 本文描述当前客户端代码和 Mock 契约，不代表每个模型服务商的线上能力声明。配置了 OpenAI-compatible URL 只说明请求协议入口，不证明该模型支持所有可选字段。真实服务兼容性需按模型 profile 单独验收。
+
+## 调用边界
+
+业务服务与 Agent 继续调用 `ai.llm.chat()` / `ai.llm.stream_chat()`。Gateway 负责解析模型目录、统一 OpenAI-compatible HTTP 调用、并发配额、熔断、有限重试和用量指标；业务代码不直接依赖供应商 SDK。旧的 `LLM_PROVIDER`、`OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `LLM_MODEL` 配置继续作为默认模型。
+
+可选模型目录通过 `LLM_MODEL_PROFILES_JSON` 配置，模型由内部用例用 `model_name` 选择，不从用户请求体直接接受模型名：
+
+```json
+{
+  "default": {
+    "provider": "openai_compatible",
+    "model": "deepseek-chat",
+    "fallback_profile": "local-eval",
+    "base_url": "https://api.deepseek.com",
+    "api_key": "${MODEL_KEY_FROM_DEPLOYMENT_SECRET}",
+    "timeout_seconds": 60,
+    "max_retries": 2,
+    "max_concurrency": 8,
+    "temperature": 0.2,
+    "max_tokens": 8192,
+    "stream_usage": false
+  },
+  "local-eval": {
+    "provider": "openai_compatible",
+    "model": "qwen2.5-14b-instruct",
+    "base_url": "http://127.0.0.1:1234/v1",
+    "api_key": "lm-studio",
+    "timeout_seconds": 90,
+    "max_retries": 1,
+    "max_concurrency": 2,
+    "temperature": 0,
+    "max_tokens": 4096,
+    "stream_usage": true
+  }
+}
+```
+
+部署环境需要在 JSON 中展开实际密钥；示例中的 `${...}` 只是说明密钥来源，不会被应用自动插值。不要把真实密钥提交到仓库。
+
 
 ## 当前运行边界
 

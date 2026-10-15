@@ -1,6 +1,6 @@
 # ChemicalOps 企业级改造方案
 
-> 审查基线：2026-10-08，当前工作区源码及有日期的验收记录。性质：架构规划，不代表改造已实施或生产上线。本次未重跑业务测试、真实模型、浏览器或压测。
+> 本文仅保留后续建设目标与放行标准，不将目标视为已经实现。当前能力及操作入口以模块运行说明为准，具体未完成事项见改造任务清单。
 > 配套：[项目介绍与成果（STAR）](项目介绍与成果（STAR）.md) · [改造任务清单](ChemicalOps-改造任务清单.md)
 
 ## 1. 定位与决策原则
@@ -9,37 +9,11 @@ ChemicalOps 面向中小型化工企业，建设采购履约与运营协同平�
 
 采用模块化单体 + 独立异步 Worker，复用 FastAPI、SQLAlchemy、MySQL、Vue 3、LangGraph、MinIO 和 Qdrant。先解决业务正确性，再推进任务长期运行、AI 产品化与生产试点。Redis 仅在缓存、限流等问题有测量依据时评估；不默认引入微服务、Kubernetes、Service Mesh 或多租户 SaaS。
 
-## 2. 能力现状矩阵
+## 2. 当前能力与后续边界
 
-状态定义：**已实现且验证**表示存在代码和对应专项测试或验收证据，仅对该证据范围有效；**已实现但未充分验证**表示有代码基础但缺少完整环境/场景证明；**部分实现**表示只覆盖部分角色、场景或执行路径；**尚未实现**表示本轮未找到完整实现及交付证据，按目标能力规划。表中目标均未在本次实施。
+当前默认使用 MySQL 持久任务队列、独立 Worker、Redis 可选缓存/限流、进程内 LLM Gateway，以及 Prometheus/Grafana/Alertmanager 与可选 OTel/Jaeger。当前运行方式分别见 [任务队列](数据库任务队列运行说明.md)、[Redis](Redis接入与验证.md)、[模型网关](LLM-Gateway兼容矩阵.md)、[可观测性](后端可观测性运行说明.md) 和 [告警处置](可观测性告警处置说明.md)。
 
-| 能力 | 当前状态 | 代码与验证依据 | 主要缺口 / 目标 |
-| --- | --- | --- | --- |
-| 按模块组织的 FastAPI 后端 | 已实现但未充分验证 | `backend/app/main.py`；`modules/*/controller.py/service.py/crud.py/model.py` | 已有模块组织，跨域 ORM 访问仍存在；明确服务依赖、事务所有权和受控查询接口。 |
-| 采购申请、询价、订单、供应商协同 | 已实现且验证（专项） | `purchase_requests`、`rfqs`、`purchase_orders`、`supplier_portal`；[供应商验收](evaluation/供应商门户验收-20261004.md) | 六页模拟流程有证据；全角色、异常和重试组合需扩大验收；37 项历史回归与未完成复跑分开。 |
-| 收货、短交与订单数量更新 | 已实现且验证（专项） | `deliveries/service.py`；`test_procurement_state_machines.py`、`test_row_lock_guards.py`；[财务全量历史记录](evaluation/发票行匹配第二阶段回归-20260930.md) | 已有实收/短交、累计数量及行锁；订单 COMPLETED 仅反映收货完成。 |
-| 质量结果与报告复核 | 部分实现 | `quality_acceptances/service.py` 支持分明细检测内容，整单 PASSED/PARTIAL/FAILED/REINSPECTION；`test_quality_report_standards.py` | 检测内容分行不等于行级合格数量放行；PARTIAL 当前到货仍进入 EXCEPTION，需补独立放行与入库额度。 |
-| 批次、库存流水、锁定量及领用/调拨/盘点 | 已实现且验证（专项） | `inventory/model.py/service.py`；余额唯一键、quantity/locked_quantity、行锁；`test_inventory_api.py`、`test_concurrency.py` | 已有可用量计算；预留归属、失效释放、复检冻结与并发组合尚需统一。 |
-| 供应商退货与补货 | 部分实现 | `inventory_returns`、`replenishments`；`test_returns_replenishments_api.py` | 有流程基础；拒收、部分放行、退货、补货与结算的联合数量口径需补齐。 |
-| 发票行匹配、对账与审计 | 已实现且验证（专项） | `finance/invoice_matches.py`、`reconciliation_items.py`；[财务验收](evaluation/发票行匹配第二阶段回归-20260930.md) | 不支持一票跨对账单、已核验票红字冲销、付款行分配、部分质量放行结算。 |
-| RBAC、归属、供应商绑定 | 已实现且验证（专项） | `core/auth.py`、`purchase_orders/scope.py`、门户服务；[权限回归](evaluation/AI基础口径与权限回归-20260930.md)、[供应商验收](evaluation/供应商门户验收-20261004.md) | 11 类非管理员 1,740 次拒绝探测有记录；完整三级页面/按钮矩阵未覆盖，不能推导全部授权路径正确。 |
-| 四工具只读 Agent | 已实现且验证（专项） | `ai/agent_runtime.py`、`agent_tools.py`；[运行验收](Agent只读任务运行与验收.md)、[聊天集成模型评估](evaluation/Agent只读任务真实模型评估-聊天集成后-20261003.md) | 只读白名单和候选续跑已有；统一网关、风险级别、上下文预算需增量建设。 |
-| HITL | 部分实现 | `ai/drafts.py`、`test_ai_drafts.py`；候选选择和 WAITING_INPUT | 专用采购草稿预览确认已有，通用 Agent 写操作确认/执行状态未实现。 |
-| 持久执行与恢复 | 已实现且验证（可选路径） | `task_queue/*`、`jobs/technical_documents.py`、迁移 041/042；[数据库队列说明](数据库任务队列运行说明.md) | 默认仍为 in_process；Linux 仅进程监督验证；外部模型调用费用不保证零重复。 |
-| 名称解析、章节检索与来源 | 已实现且验证（专项） | `doc_kb/retrieve.py`、`service.py`、`vector_store.py`；[RAG 报告](evaluation/RAG混合评估报告-200条.md) | 结构化属性、单位和测试条件、学习式重排与真实样本质量需要单独验证。 |
-| MinerU / VL 与文件处理 | 部分实现 | `files/mineru.py`、`parser.py`，`scripts/parse_tds_msds.py`；`test_mineru_client.py`、资料链路测试 | 通用文件解析与技术资料链路入口不同；需统一触发、回退、质量门禁，不能把存在适配器视为全链路验收。 |
-| 文档生命周期、版本与主体隔离 | 部分实现 | 已有文件访问控制、原件/章节、hash 和索引代次；`doc_kb/model.py` | 索引代次不等于发布版本；业务复核、发布/停用、知识主体 ACL 与撤权索引联动尚需建设。 |
-| 幂等、安全门禁、健康与指标 | 已实现但未充分验证 | `core/idempotency.py`、`security.py`、`production.py`、`observability.py`、`files/scanner.py`；对应专项测试 | 需真实部署扫描、密钥轮换、业务副作用幂等、告警响应及跨进程链路演练。 |
-| 数据库迁移、备份/恢复、CI | 已实现但未充分验证 | `database/migrations`、`scripts/migrate_database.py`、`backup_mysql.py`、`restore_mysql.py`、`.github/workflows/ci.yml` | 当前是 SQL 迁移台账，未发现 Alembic 接管；CI 文件不等于最近运行成功，备份生成不等于已验证可恢复。 |
-| 全栈 Compose、CD、Grafana / OTel、生产试点 | 尚未实现（完整交付） | 已有 `docker-compose.minio.yml` 和前端镜像基础 | 本轮未发现完整部署、自动发布、仪表盘与 OTel 交付证据，P1/P3 新建集成及验收。 |
-
-### 可核对指标及口径
-
-保留原 STAR 的全部数值：历史定向回归 37 项；2026-09-30 后端全量 279 项；财务 6 组模拟场景/8 张发票、金额精度 0～6 位；2026-10-03 Agent 来源/数值矩阵 30/30，聊天集成真实模型固定合成题严格 outcome 15/16，T14 单例复核通过但有状态波动；2026-10-08 队列相关集合 222 项通过，复跑 22、1、7 项均有覆盖，不能相加。
-
-2026-09-28 RAG 固定 200 条合成题：149 可回答、39 应拒答、12 需追问。平均 Recall@6=86.24%、MRR@6=0.6842、nDCG@6=0.7290；全部证据召回与预期事实命中各为 127/149（85.23%），文本来源标识代理指标 128/149（85.91%），拒答 39/39、追问 12/12、生成错误 0。规则检查不等于逐句忠实度人工盲测，检索计时排除预计算 embedding。2026-09-30 名称回归修复 17 道定位失败题，149/149 是 CAS 目标识别，不更新上述召回或答案指标。
-
-环境与失败均以原报告为准：旧队列验收是本机 Windows、真实单节点 RabbitMQ/MySQL、临时 Qdrant 集合，模型/抓取/embedding 有替身；Agent 模型评估是隔离 SQLite + 真实模型 HTTP + 合成业务样本。供应商 2026-10-04 完整 pytest 复跑记录为 30 通过、1 失败、7 setup 错误，认证 401 使相关业务验证未完成；另有六页面、真实 MinIO 和本地模拟链路证据。测试文件存在不表示本次已运行。
+已完成的本地工程化收尾从待办中移除。生产外部通知、真实容量、安全与灾难恢复仍须按对应放行标准单独验收；业务异常闭环、通用 Agent 写入及知识发布生命周期仍按 [改造任务清单](ChemicalOps-改造任务清单.md) 建设。历史数字只保留在展示文档及其原始证据中，不重复维护多份验收汇总。
 
 ## 3. 目标业务边界与模块依赖
 
@@ -159,7 +133,7 @@ MySQL / Qdrant / MinIO 之间没有跨系统原子事务。文档使用源 hash�
 
 现有 CI 含初始化/升级、pytest、编译、安全扫描、健康接口 smoke load 和前端检查/构建；尚未读取最近流水线结果。增加真实依赖服务的集成门禁、关键 E2E 和产物版本，CD 按测试→预发布→人工批准试点推进。发布前备份、兼容旧 Worker/快照，回滚先结束或隔离在途执行；数据不可逆时用恢复或前向修复。
 
-复用 JSON 日志、Request/Trace ID、Prometheus 文本指标和 live/ready。增建 Prometheus/Grafana 与 OTel 采集，连通 HTTP、数据库任务、Worker、模型及工具调用。监控 API 错误/延迟、数据库慢查询和锁等待、队列深度/最老任务、领取失败/租约超时/失败隔离、Agent Token/节点耗时/错误率与文档索引延迟。ready 检查按功能启用的依赖，live 不因可恢复的任务执行故障反复重启。告警有责任人、阈值、去重、处置手册和恢复通知。
+复用 JSON 日志、Request/Trace ID、Prometheus 文本指标和 live/ready。在现有 Prometheus/Grafana、Alertmanager 和可选 OTel/Jaeger 上扩展生产观测，核验 HTTP、数据库任务、Worker、模型及工具调用的实际采集范围。监控 API 错误/延迟、数据库慢查询和锁等待、队列深度/最老任务、领取失败/租约超时/失败隔离、Agent Token/节点耗时/错误率与文档索引延迟。ready 检查按功能启用的依赖，live 不因可恢复的任务执行故障反复重启。告警有责任人、阈值、去重、处置手册和恢复通知。
 
 MySQL SQL 备份与开发 JSONL.gz 备份格式分别管理，现有 `restore_mysql.py` 只接受 .sql，不能宣称可直接恢复验收记录中的 JSONL.gz。完整恢复覆盖 MySQL、MinIO 对象及引用一致性，Qdrant 可由已发布章节重建；保存清单/hash/版本，在独立库和桶演练核对单据、金额、权限、对象及索引。
 
