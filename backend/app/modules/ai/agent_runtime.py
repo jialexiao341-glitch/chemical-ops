@@ -391,20 +391,25 @@ def _summary(entries: list[dict]) -> str:
                 key = (row['unit_id'], row['unit_name'])
                 totals[key] = totals.get(key, Decimal(0)) + Decimal(str(row['available_quantity']))
         amounts = '、'.join(f'{value.normalize():f} {unit}' for (_, unit), value in totals.items())
-        lines.append(f'已汇总 {len(inventory)} 个规格，当前授权仓库内账面可用量合计：{amounts or "无库存记录"}。不同单位分别合计，未按包装或纯物质含量换算。')
+        lines.append(f'查到这 {len(inventory)} 个规格的可用库存合计为 {amounts}。下面是各规格的库存明细。' if amounts else
+                     f'查询了这 {len(inventory)} 个规格，暂时没有找到库存记录。')
+        if len(totals) > 1:
+            lines.append('库存使用不同计量单位，以下分别列出，不直接相加。')
     for entry in entries:
         result = entry["result"]
         if entry["tool"] == "inventory.query_available":
             totals = "、".join(f"{Decimal(str(row['available_quantity'])).normalize():f} {row['unit_name']}" for row in result["totals"])
             label = f"{result['product_name']}（规格 #{result['product_id']}）" if len(inventory) > 1 else result['product_name']
-            lines.append(f"{label}：当前授权仓库内账面可用量 {totals or '无库存记录'}。")
+            lines.append(f"{label}：可用库存为 {totals}。" if totals else f"{label}：暂时没有找到库存记录。")
         elif entry["tool"] == "supplier_quotes.compare":
             lines.append(f"询价 {result['rfq_no']}：找到 {result['total_rows']} 条符合条件的最新报价。")
             lines.extend(f"{row['supplier_name']}：{row['unit_price']} {row['currency_code']}/{row['unit_name']}"
                          f"，可比组排名 {row['rank'] if row['rank'] is not None else '不排序'}。" for row in result["rows"])
         else:
-            lines.append("当前授权范围未找到匹配产品或可用询价明细。")
-        lines.extend(result.get("warnings", []))
+            lines.append("暂时没有找到匹配的产品或询价明细，请核对名称或单号。")
+        # 通用口径说明保留在工具证据中，不逐项重复到聊天正文。
+        if result.get("truncated"):
+            lines.append('下方明细仅展示部分记录，库存合计仍包含全部匹配记录。' if entry['tool'] == 'inventory.query_available' else '下方仅展示部分报价记录。')
     return "\n".join(dict.fromkeys(lines))
 
 

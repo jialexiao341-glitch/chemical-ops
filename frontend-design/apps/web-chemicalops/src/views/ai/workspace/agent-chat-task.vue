@@ -62,8 +62,7 @@ function visibleWarnings(result: AgentApi.Result) {
 
     <template v-if="showInventorySummary">
       <p class="agent-reply"><strong>{{ inventorySummary(task) }}</strong><AgentSourcePopover v-for="entry in results" :key="entry.step" :result="entry.result!" /></p>
-      <p class="agent-muted">查询范围：{{ inventoryContext.scopes.join('；') }}。不同单位分别合计，未按包装或纯物质含量换算。</p>
-      <p v-if="inventoryContext.warnings.length" class="agent-muted">{{ inventoryContext.warnings.join(' ') }}</p>
+      <p class="agent-muted">各规格的库存和来源已整理在下方，展开即可查看。</p>
       <details class="mt-3 border-t border-border/50 pt-2">
         <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">规格明细与数据来源（{{ results.length }} 个规格）</summary>
         <AgentChatTask :task="task" :busy="false" :show-actions="false" compact-details />
@@ -106,7 +105,7 @@ function visibleWarnings(result: AgentApi.Result) {
       <div class="agent-selection-footer"><p>也可以在输入框补充更精确的条件{{ candidates.truncated ? '；当前候选未完整返回' : '' }}。</p><Button html-type="submit" type="primary" :disabled="busy || selection === undefined">继续查询</Button></div>
     </form>
     <p v-else-if="task.status === 'WAITING_INPUT'" class="agent-muted">在下方输入框补充信息，即可继续。</p>
-    <p v-if="!compactDetails && task.status === 'SUCCEEDED' && results.length" class="agent-intro">根据本次查询结果，可以确认以下信息：</p>
+    <p v-if="!compactDetails && task.status === 'SUCCEEDED' && results.length > 1" class="agent-intro">查到以下结果：</p>
     <template v-if="compactDetails && inventoryContext.scopes.length">
       <p class="agent-muted">查询范围：{{ inventoryContext.scopes.join('；') }}。</p>
       <p v-if="inventoryContext.warnings.length" class="agent-muted">{{ inventoryContext.warnings.join(' ') }}</p>
@@ -116,12 +115,15 @@ function visibleWarnings(result: AgentApi.Result) {
     <section v-for="entry in results" :key="entry.step" class="agent-result">
       <template v-if="entry.result?.tool === 'inventory.query_available'">
         <ol class="agent-prose">
-          <li><strong>{{ inventoryProductLabel(task, entry.result.product_id, entry.result.product_name) }}，本规格账面可用库存<span v-if="entry.result.totals.length">为 <template v-for="(total, i) in entry.result.totals" :key="i">{{ i ? '、' : '' }}{{ agentDisplayNumber(total.available_quantity) }} {{ total.unit_name }}</template></span><span v-else>暂无合计数据</span>。</strong><span v-if="entry.result.total_rows === 0">当前授权范围内没有库存记录。</span><AgentSourcePopover :result="entry.result" /></li>
-          <li v-if="!compactDetails"><strong>查询范围与明细。</strong>{{ entry.result.scope }}。<span v-if="entry.result.truncated">合计覆盖全部授权范围，本次展示 <strong>{{ entry.result.rows.length }} / {{ entry.result.total_rows }} 条</strong>明细。</span><span v-else>本次返回 <strong>{{ entry.result.total_rows }} 条</strong>明细。</span></li>
-          <li v-if="!compactDetails && visibleWarnings(entry.result).length"><strong>使用这些数据时需要注意：</strong><span v-for="warning in visibleWarnings(entry.result)" :key="warning">{{ warning }} </span></li>
+          <li><strong>{{ inventoryProductLabel(task, entry.result.product_id, entry.result.product_name) }}<span v-if="entry.result.totals.length">，可用库存为 <template v-for="(total, i) in entry.result.totals" :key="i">{{ i ? '、' : '' }}{{ agentDisplayNumber(total.available_quantity) }} {{ total.unit_name }}</template>。</span><span v-else>：暂时没有找到库存记录。</span></strong><AgentSourcePopover :result="entry.result" /></li>
+          <li v-if="!compactDetails && entry.result.total_rows > 0">下方可查看仓库、批次及对应库存。<span v-if="entry.result.truncated">合计包含全部匹配记录，明细展示其中 <strong>{{ entry.result.rows.length }} / {{ entry.result.total_rows }} 条</strong>。</span></li>
         </ol>
         <details v-if="entry.result.total_rows > 0" class="agent-disclosure">
           <summary><span>库存明细</span><span class="agent-count">{{ entry.result.rows.length }}{{ entry.result.truncated ? ` / ${entry.result.total_rows}` : '' }} 条</span></summary>
+          <template v-if="!compactDetails">
+            <p class="agent-muted">查询范围：{{ entry.result.scope }}。</p>
+            <p v-for="warning in visibleWarnings(entry.result)" :key="warning" class="agent-muted">{{ warning }}</p>
+          </template>
           <div class="agent-table"><table><caption class="sr-only">库存明细与来源</caption><thead><tr><th>仓库 / 批次</th><th class="agent-numeric">可用量</th><th>状态 / 有效期</th><th>来源</th></tr></thead><tbody>
             <tr v-for="row in entry.result.rows" :key="row.balance_id"><td><span>{{ row.warehouse_name }}</span><small>{{ row.batch_no }}</small></td><td class="agent-numeric">{{ agentDisplayNumber(row.available_quantity) }} {{ row.unit_name }}</td><td><span>{{ row.status === 'AVAILABLE' ? '可用' : row.status === 'FROZEN' ? '冻结' : row.status }}</span><small>{{ row.expiry_date ? formatDate(row.expiry_date) : '未登记有效期' }}</small></td><td><RouterLink v-if="hasAccessByCodes(['warehouse.inventory.read'])" :to="inventorySource(entry.result.product_id, row.warehouse_id)">查看库存 ↗</RouterLink><small>余额 #{{ row.balance_id }}</small></td></tr>
           </tbody></table></div>
@@ -129,8 +131,8 @@ function visibleWarnings(result: AgentApi.Result) {
       </template>
       <template v-else-if="entry.result?.tool === 'supplier_quotes.compare'">
         <ol class="agent-prose">
-          <li><strong>询价 {{ entry.result.rfq_no }} 的供应商报价。</strong>本次返回 <strong>{{ entry.result.rows.length }} 条</strong>报价明细；规格为 {{ entry.result.specification || '未登记规格' }}，技术要求为 {{ entry.result.technical_requirements || '无技术要求' }}。<span v-if="entry.result.total_rows === 0">当前授权范围没有符合条件的最新报价。</span><AgentSourcePopover :result="entry.result" /></li>
-          <li><strong>比较口径。</strong>{{ entry.result.comparison_basis }}。<strong>不同可比组的排名不能相互比较。</strong>{{ entry.result.scope }}。</li>
+          <li><strong>询价 {{ entry.result.rfq_no }} 的供应商报价。</strong>查到 <strong>{{ entry.result.rows.length }} 条</strong>报价明细；规格为 {{ entry.result.specification || '未登记规格' }}，技术要求为 {{ entry.result.technical_requirements || '无技术要求' }}。<span v-if="entry.result.total_rows === 0">暂时没有找到符合条件的最新报价。</span><AgentSourcePopover :result="entry.result" /></li>
+          <li><strong>比较口径。</strong>{{ entry.result.comparison_basis }}。<strong>不同可比组的排名不能相互比较。</strong></li>
         </ol>
         <details v-if="entry.result.total_rows > 0" class="agent-disclosure">
           <summary><span>查看报价与可比组排名</span><span class="agent-count">{{ entry.result.rows.length }}{{ entry.result.truncated ? ` / ${entry.result.total_rows}` : '' }} 条</span></summary>

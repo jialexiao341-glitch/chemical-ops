@@ -107,6 +107,17 @@ def test_similar_names_require_real_chemical_identity(tool_db):
     assert batch.tasks[0].status == TaskStatus.SUCCEEDED
 
 
+def test_single_inventory_reply_keeps_evidence_and_requested_advice(tool_db):
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
+    answer = multi.summarize(batch, '查测试乙醇库存')
+    assert answer == batch.tasks[0].answer
+    assert '80 千克' in answer and '5 升' in answer
+    assert '当前授权' not in answer and '余额状态口径' not in answer
+    inventory = next(value for value in batch.tasks[0].evidence if value.get('tool') == 'inventory.query_available')
+    assert inventory['scope'] and inventory['warnings'] and inventory['sources']
+    assert '安全库存' in multi.summarize(batch, '查测试乙醇库存，有什么建议？')
+
+
 def test_inventory_comparison_and_advice_use_actual_totals_without_unit_conversion(tool_db):
     from sqlalchemy import text
     tool_db.execute(text("INSERT INTO md_products VALUES (3,'测试甲醇','ACTIVE','P-METH',NULL,NULL,1)"))

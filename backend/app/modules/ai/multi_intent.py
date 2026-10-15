@@ -110,7 +110,7 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
                  and _inventory_family(db, product["rows"], keyword))
     if (product["total_rows"] != 1 and not aggregate) or product["truncated"]:
         result.status = TaskStatus.WAITING_INPUT if product["total_rows"] else TaskStatus.SUCCEEDED
-        result.answer = "找到多个产品规格，请补充准确名称或编码。" if product["total_rows"] else "当前授权目录没有匹配产品。"
+        result.answer = f"找到多个与“{keyword}”匹配的规格，请补充需要查询的规格名称或产品编码。" if product["total_rows"] else f"暂时没有找到与“{keyword}”匹配的产品，请核对名称或产品编码。"
         return
     product_id = product["rows"][0]["product_id"]
     arguments = {"product_id": product_id, "limit": slots.limit or 20}
@@ -131,10 +131,11 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
                      for row in product["rows"]]
         totals = _inventory_totals(inventory)
         quantities = "、".join(f"{amount.normalize():f} {unit}" for (_, unit), amount in totals.items())
-        result.answer = f"{keyword}：当前授权仓库内账面可用量 {quantities or '无库存记录'}。"
+        result.answer = f"{keyword}的可用库存为 {quantities}。" if quantities else f"暂时没有找到{keyword}的库存记录。"
         if aggregate:
-            result.answer += f"\n已汇总同一产品的 {len(inventory)} 个规格，明细分别保留；此数量不是纯物质折算量。"
-        result.answer += "\n" + "\n".join(dict.fromkeys(warning for value in inventory for warning in value["warnings"]))
+            result.answer += f"\n这是本次查询的 {len(inventory)} 个规格的合计，各规格库存可在明细中查看。"
+        if len(totals) > 1:
+            result.answer += "\n库存使用不同计量单位，已分别合计，不直接相加。"
         result.status = TaskStatus.SUCCEEDED
         return
     else:
@@ -286,6 +287,9 @@ def batch_result(tasks: list[TaskResult]) -> BatchResult:
 
 def summarize(batch: BatchResult, question: str = "") -> str:
     """确定性汇总，保留每项原始数字/单位，不跨数据集求和，也不伪造成功。"""
+    if (len(batch.tasks) == 1 and batch.tasks[0].status == TaskStatus.SUCCEEDED
+            and not any(word in question for word in ("行动", "建议", "怎么处理", "怎么办", "做什么", "需要做"))):
+        return batch.tasks[0].answer
     completed = sum(task.status == TaskStatus.SUCCEEDED for task in batch.tasks)
     lines = [f"已完成 {completed}/{len(batch.tasks)} 项查询。"]
     for index, task in enumerate(batch.tasks, 1):

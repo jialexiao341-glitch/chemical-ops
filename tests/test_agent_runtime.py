@@ -121,7 +121,7 @@ def test_inventory_summary_queries_all_specs_and_keeps_units_separate(task_db, m
     inventory = [e['result'] for e in result.trace if e.get('tool') == 'inventory.query_available']
     assert {row['product_id'] for row in inventory} == {1, 3}
     assert '87.25 千克' in result.reply and '5 升' in result.reply
-    assert '已汇总 2 个规格' in result.reply
+    assert '查到这 2 个规格的可用库存合计为' in result.reply
 
 
 def test_select_all_rechecks_candidates_and_queries_each_spec(task_db, model_script):
@@ -469,7 +469,7 @@ def test_chat_turns_persist_and_background_updates_latest_reply(chat_task_db, mo
         question='它现在还有库存吗？', conversation_id=state.chat['conversation_id']))
     asyncio.run(runtime.run_prepared_task(next_turn.task_id, USER.id, next_turn.revision))
     assert contexts[4]['recent_task_memory']['focus']['product_name'] == '测试乙醇'
-    assert contexts[4]['recent_task_memory']['recent_context'][-2]['text'].startswith('测试乙醇：当前授权仓库内账面可用量')
+    assert contexts[4]['recent_task_memory']['recent_context'][-2]['text'].startswith('测试乙醇：可用库存为')
     assert contexts[4]['messages'] == ['它现在还有库存吗？']
 
 

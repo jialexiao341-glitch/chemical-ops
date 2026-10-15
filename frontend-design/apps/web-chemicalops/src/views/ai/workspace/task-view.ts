@@ -27,7 +27,9 @@ export function inventorySummary(task: AgentApi.Task) {
     const value = scale ? `${sign}${digits.slice(0, -scale)}.${digits.slice(-scale)}` : `${sign}${digits}`;
     return `${agentDisplayNumber(value)} ${unit}`;
   });
-  return `已汇总 ${inventory.length} 个规格，当前授权仓库内账面可用库存合计：${quantities.join('、') || '无库存记录'}。`;
+  return quantities.length
+    ? `查到这 ${inventory.length} 个规格的可用库存合计为 ${quantities.join('、')}。`
+    : `查询了这 ${inventory.length} 个规格，暂时没有找到库存记录。`;
 }
 
 /** 完成态只展示模型引用的实际证据，所有中间定位步骤留在折叠轨迹中。 */

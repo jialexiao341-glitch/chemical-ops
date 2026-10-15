@@ -12,7 +12,14 @@ describe('采购任务状态与来源', () => {
       { step: 1, status: 'SUCCEEDED', result: { tool: 'inventory.query_available', product_id: 1, totals: [{ unit_id: 1, unit_name: '升', available_quantity: '1954.000000' }, { unit_id: 2, unit_name: '千克', available_quantity: '0.1' }] } },
       { step: 2, status: 'SUCCEEDED', result: { tool: 'inventory.query_available', product_id: 2, totals: [{ unit_id: 1, unit_name: '升', available_quantity: '216.250000' }, { unit_id: 2, unit_name: '千克', available_quantity: '0.2' }] } },
     ] } as AgentApi.Task;
-    expect(inventorySummary(task)).toBe('已汇总 2 个规格，当前授权仓库内账面可用库存合计：2,170.25 升、0.3 千克。');
+    expect(inventorySummary(task)).toBe('查到这 2 个规格的可用库存合计为 2,170.25 升、0.3 千克。');
+  });
+  it('没有库存记录时不把缺少数据表述成零库存', () => {
+    const task: AgentApi.Task = { ...waiting, trace: [{ step: 1, action: 'call_tool', status: 'SUCCEEDED', result: {
+      tool: 'inventory.query_available', product_id: 1, product_name: '乙醇', totals: [], rows: [], sources: [],
+      total_rows: 0, truncated: false, observed_at: '', scope: '', warnings: [],
+    } }] };
+    expect(inventorySummary(task)).toBe('查询了这 1 个规格，暂时没有找到库存记录。');
   });
   it('五种任务终态和过程态都提供明确的界面文案', () => {
     expect(TASK_LABELS).toEqual({

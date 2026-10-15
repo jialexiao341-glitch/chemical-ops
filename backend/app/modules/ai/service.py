@@ -25,6 +25,7 @@ from app.modules.ai.schema import (
     Understanding,
 )
 from app.modules.ai.agent_prompt import (
+    REPLY_STYLE,
     UNSUPPORTED_REPLY,
     build_project_reply,
     fallback_guidance_prompt,
@@ -310,7 +311,8 @@ async def _compose_non_query_reply(
 # 约束
 不编造产品现有按钮、实际状态、单据、库存或价格。不确定系统是否支持时明确说明，必要时询问具体页面。
 # 输出
-简洁中文说明操作原则和所需信息；不得声称已经执行任何操作。""", interpret_only=True)
+用自然中文说明操作原则和所需信息；不得声称已经执行任何操作。
+""" + REPLY_STYLE, interpret_only=True)
         return response.message.content, "guidance"
     if intent is Intent.PROJECT:
         return build_project_reply(question), "rule-based"
