@@ -91,6 +91,8 @@ interface UiMessage {
   role: 'assistant' | 'user';
   /** 流式回复是否仍在输出 */
   streaming?: boolean;
+  /** 识别请求失败的本地提示不作为下一轮模型历史。 */
+  localOnly?: boolean;
 }
 
 const conversations = ref<AiApi.Conversation[]>([]);
@@ -208,7 +210,7 @@ let chatEpoch = 0;
 const agentReads = new Map<string, number>();
 let agentTimer: ReturnType<typeof setTimeout> | undefined;
 let streamAbort: AbortController | undefined;
-const currentAgent = computed(() => messages.value.at(-1)?.agentTask);
+const currentAgent = computed(() => messages.value.filter((item) => !item.localOnly).at(-1)?.agentTask);
 function stopAgentPolling() { if (agentTimer) clearTimeout(agentTimer); }
 function resetChatWork() { chatEpoch += 1; streamAbort?.abort(); stopAgentPolling(); agentMode.value = false; }
 function applyAgent(task: AgentApi.Task, id: string, epoch: number) {
@@ -251,7 +253,6 @@ async function sendAgent(text: string, continuation?: AgentApi.Continue, routeTo
   messages.value.push({ content: text, id: nextId(), role: 'user', agentTaskId: previous?.id },
     { content: '', id: assistantId, role: 'assistant', streaming: true });
   sending.value = true;
-  inputText.value = '';
   agentMode.value = false;
   scrollToBottom();
   try {
@@ -439,13 +440,23 @@ async function onSend(retryFailed = false) {
   }
   let routeToken: string | undefined;
   const epoch = chatEpoch;
+  const history = [...messages.value];
+  const pendingAssistantId = nextId();
+  inputText.value = '';
+  messages.value = [
+    ...history,
+    { content: text, id: nextId(), role: 'user', localOnly: true },
+    { content: '', id: pendingAssistantId, role: 'assistant', streaming: true, localOnly: true },
+  ];
   sending.value = true;
+  scrollToBottom();
   try {
     const decision = retryFailed ? { route: 'batch', route_token: undefined }
       : await routeAiRequestApi(text, activeConversationId.value);
     if (epoch !== chatEpoch) return;
     routeToken = decision.route_token;
     if (decision.route === 'agent') {
+      messages.value = history;
       sending.value = false;
       const continuation = currentAgent.value?.status === 'WAITING_INPUT'
         ? { question: text, revision: currentAgent.value.revision }
@@ -454,12 +465,16 @@ async function onSend(retryFailed = false) {
       return;
     }
   } catch {
-    return; // 请求层展示错误；保留输入，不能退回前端关键词分流。
+    if (epoch === chatEpoch) {
+      if (!inputText.value) inputText.value = text;
+      messages.value = messages.value.map((item) => item.id === pendingAssistantId
+        ? { ...item, content: '这次请求未能完成，尚未开始查询。请稍后重试。', streaming: false } : item);
+      scrollToBottom();
+    }
+    return; // 保留输入，不能退回前端关键词分流。
   } finally {
-    sending.value = false;
+    if (epoch === chatEpoch) sending.value = false;
   }
-  inputText.value = '';
-  const history = [...messages.value];
   messages.value = [
     ...history,
     { content: text, id: nextId(), role: 'user' },
@@ -473,7 +488,7 @@ async function onSend(retryFailed = false) {
 
   // 后端要求 OpenAI 兼容格式：只传 user/assistant 文本历史
   const payload = history
-    .filter((item) => !item.streaming && !item.draftInteraction && !item.agentTaskId)
+    .filter((item) => !item.streaming && !item.draftInteraction && !item.agentTaskId && !item.localOnly)
     .map((item) => ({
       content: item.content,
       role: item.role as 'assistant' | 'user',
@@ -1116,16 +1131,16 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
               >
                 <div v-if="item.content && !item.agentTask && !item.streaming" class="mt-2 flex flex-wrap items-center gap-2">
                   <AgentSourcePopover v-for="group in sourceGroups(item)" :key="group.label" :entries="group.entries" :source-label="group.label" @open-record="openSourceRecord" @open-dataset="openDataset" />
-                  <span v-if="!sourceGroups(item).length" class="text-muted-foreground text-xs">来源依据：本条回复未提供可核验的资料或数据来源，请勿将其中事实性内容视为已核实结论。</span>
-                  <span v-else-if="sourceGroups(item).some((group) => group.entries.some((source) => source.status))" class="text-muted-foreground text-xs">部分来源已失效或尚未核验，请查看来源状态并重新查询。</span>
+                  <span v-if="sourceGroups(item).some((group) => group.entries.some((source) => source.status))" class="text-muted-foreground text-xs">部分来源已失效或尚未核验，请查看来源状态并重新查询。</span>
                 </div>
                 <div
                   v-if="item.content && !item.agentTask"
                   class="chat-md [&_a]:text-blue-500 [&_a]:underline [&_code]:bg-black/20 [&_code]:rounded [&_code]:px-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:my-1"
                   v-html="renderMarkdown(item.content)"
                 ></div>
-                <span v-else-if="item.streaming && !item.batchProgress" class="animate-pulse">
-                  正在思考…
+                <span v-else-if="item.streaming && !item.batchProgress && !item.agentTask" class="inline-flex items-center gap-2" role="status" aria-live="polite">
+                  <Spin size="small" aria-hidden="true" />
+                  <span>正在思考…</span>
                 </span>
                 <AgentChatTask v-if="item.agentTask" :task="item.agentTask" :busy="sending" @continue="continueAgent(item, $event)" />
                 <AgentChatTask v-if="item.batchProgress" :task="progressTask(item)" :progress="item.batchProgress" :busy="false" :show-actions="!item.cancelPending" />

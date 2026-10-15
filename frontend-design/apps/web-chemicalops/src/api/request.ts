@@ -102,6 +102,9 @@ function resolveErrorMessage(error: any): string {
     return '没有权限执行该操作';
   }
   if (!error?.response) {
+    if (error?.code === 'ECONNABORTED' || error?.code === 'ETIMEDOUT') {
+      return '请求超时，服务响应较慢，请稍后重试';
+    }
     return '网络异常，请检查后端服务是否已启动';
   }
   return '请求处理失败';
