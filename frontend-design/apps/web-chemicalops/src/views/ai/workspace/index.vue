@@ -12,7 +12,7 @@ import { Button, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
 import {
   deleteConversationApi,
   createAgentChatApi, continueAgentChatApi, continueAgentTaskApi, getAgentTaskApi,
-  createPurchaseRequestApi,
+  confirmPurchaseRequestDraftApi,
   generateBriefingApi,
   getAIMessagesApi,
   getConversationListApi,
@@ -121,6 +121,7 @@ const filterKeyword = ref('');
 const filterRange = ref<AiApi.NLFilterResult['time_range']>();
 const filterParsing = ref(false);
 const draftMode = ref(false);
+const draftFollowups = ref<string[]>([]);
 const creatingDraftMessageId = ref<string>();
 const filterFieldNames = computed(() => Object.keys(filterDraft.value));
 const visibleConversations = computed(() =>
@@ -330,6 +331,7 @@ async function openConversation(conversation: AiApi.Conversation) {
   menuConversationId.value = undefined;
   sidebarExpanded.value = false;
   draftMode.value = false;
+  draftFollowups.value = [];
   historyLoading.value = true;
   try {
     const res = await getAIMessagesApi(conversation.id);
@@ -360,6 +362,7 @@ function newConversation() {
   menuConversationId.value = undefined;
   sidebarExpanded.value = false;
   draftMode.value = false;
+  draftFollowups.value = [];
   slashMenuOpen.value = false;
   messages.value = [];
   inputText.value = '';
@@ -455,6 +458,19 @@ async function onSend(retryFailed = false) {
       : await routeAiRequestApi(text, activeConversationId.value);
     if (epoch !== chatEpoch) return;
     routeToken = decision.route_token;
+    if (decision.route === 'purchase_draft') {
+      messages.value = history;
+      sending.value = false;
+      if (!canCreatePurchaseDraft) {
+        inputText.value = text;
+        message.error('你没有创建采购申请草稿的权限。');
+        return;
+      }
+      draftFollowups.value = [];
+      draftMode.value = true;
+      await previewPurchaseRequestDraft(text);
+      return;
+    }
     if (decision.route === 'agent') {
       messages.value = history;
       sending.value = false;
@@ -601,8 +617,8 @@ async function reloadActiveConversation() {
 }
 
 async function previewPurchaseRequestDraft(text: string) {
+  const fullQuestion = [...draftFollowups.value, text].join('\n');
   inputText.value = '';
-  draftMode.value = false;
   const history = [...messages.value];
   const userId = nextId();
   const assistantId = nextId();
@@ -614,7 +630,9 @@ async function previewPurchaseRequestDraft(text: string) {
   sending.value = true;
   scrollToBottom();
   try {
-    const result = await proposePurchaseRequestDraftApi(text);
+    const result = await proposePurchaseRequestDraftApi(fullQuestion);
+    draftMode.value = result.missing_fields.length > 0;
+    draftFollowups.value = result.missing_fields.length > 0 ? [...draftFollowups.value, text] : [];
     messages.value = messages.value.map((item) =>
       item.id === assistantId
         ? {
@@ -626,6 +644,8 @@ async function previewPurchaseRequestDraft(text: string) {
         : item,
     );
   } catch (error: any) {
+    if (!inputText.value) inputText.value = text;
+    draftMode.value = true;
     messages.value = messages.value.map((item) =>
       item.id === assistantId
         ? { ...item, content: `⚠ ${error?.message || '草稿建议生成失败'}`, streaming: false }
@@ -640,7 +660,9 @@ async function previewPurchaseRequestDraft(text: string) {
 function confirmCreatePurchaseDraft(item: UiMessage) {
   if (!canCreatePurchaseDraft) { message.error('你没有创建采购申请草稿的权限。'); return; }
   const proposal = item.draftProposal;
-  if (!proposal || item.draftCreatedRequestNo) return;
+  if (!proposal || !proposal.confirmation_id || !proposal.preview_version || item.draftCreatedRequestNo) return;
+  const confirmationId = proposal.confirmation_id;
+  const previewVersion = proposal.preview_version;
   const itemSummary = proposal.display_items
     .map((line) => `${line.requested_name} ${line.quantity} ${line.unit_name}`)
     .join('；');
@@ -650,14 +672,13 @@ function confirmCreatePurchaseDraft(item: UiMessage) {
     onOk: async () => {
       creatingDraftMessageId.value = item.id;
       try {
-        const created = await createPurchaseRequestApi(proposal.draft);
+        const created = await confirmPurchaseRequestDraftApi(confirmationId, previewVersion);
         const requestNo = created.request_no || String(created.id);
         messages.value = messages.value.map((messageItem) =>
           messageItem.id === item.id
             ? {
                 ...messageItem,
                 content: `${messageItem.content}\n\n已创建草稿 ${requestNo}，当前状态：草稿。你可以在采购申请列表中继续检查和编辑。`,
-                draftProposal: undefined,
                 draftCreatedRequestNo: requestNo,
                 sourceRecords: [
                   {
@@ -936,6 +957,7 @@ async function selectSlashCommand(command?: SlashCommand) {
     return;
   }
   if (command === 'purchase-draft') {
+    draftFollowups.value = [];
     draftMode.value = true;
     await nextTick();
     document.querySelector<HTMLTextAreaElement>('.ai-composer-input textarea')?.focus();
@@ -956,6 +978,7 @@ watch(
     if (typeof rawContext !== 'string' || !rawContext.trim()) return;
     newConversation();
     draftMode.value = true;
+    draftFollowups.value = [rawContext.trim().slice(0, 1500)];
     inputText.value = rawContext.trim().slice(0, 1500);
     message.info('已带入提醒背景。请补充真实采购物料、数量、单位和用途，再生成草稿预览。');
     const query = { ...route.query };
@@ -1149,6 +1172,7 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                 <div v-if="item.agentError" role="alert"><p>{{ item.agentError }}</p><Button size="small" @click="refreshAgent(item)">重试读取</Button></div>
                 <div v-if="item.draftProposal && canCreatePurchaseDraft" class="mt-3 space-y-2 rounded-md border border-border/70 bg-background/70 p-3 text-xs">
                   <div class="font-medium">采购申请草稿预览 · 尚未保存</div>
+                  <div v-if="item.draftProposal.clarification_question" role="status" class="text-amber-700">{{ item.draftProposal.clarification_question }}</div>
                   <div>用途：{{ item.draftProposal.draft.purpose }}</div>
                   <div>优先级：{{ item.draftProposal.draft.priority || 'NORMAL' }} · 币种：{{ item.draftProposal.draft.currency_code || 'CNY' }}</div>
                   <div v-if="item.draftProposal.draft.budget_amount">预算：{{ item.draftProposal.draft.budget_amount }}</div>
@@ -1162,10 +1186,27 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                   <ul v-if="item.draftProposal.warnings.length" class="list-disc pl-5 text-amber-700">
                     <li v-for="warning in item.draftProposal.warnings" :key="warning">{{ warning }}</li>
                   </ul>
+                  <details v-if="item.draftProposal.evidence.length" class="border-t border-border/50 pt-2">
+                    <summary class="cursor-pointer text-muted-foreground">产品、库存与报价查询依据（{{ item.draftProposal.evidence.length }} 项）</summary>
+                    <ul class="list-disc space-y-1 pl-5">
+                      <li v-for="(entry, index) in item.draftProposal.evidence" :key="`${entry.tool}-${index}`">
+                        {{ entry.label }}：{{ entry.rows?.length ? `${entry.rows.length} 条记录` : entry.totals?.length ? entry.totals.map((total: any) => `${total.available_quantity} ${total.unit_name}`).join('、') : '无匹配记录' }}
+                        <span v-if="entry.sources?.length" class="text-muted-foreground"> · 来源 {{ entry.sources.map((source: any) => `${source.resource}#${source.record_id}`).join('、') }}</span>
+                        <span v-if="entry.scope" class="text-muted-foreground"> · {{ entry.scope }}</span>
+                        <ul v-if="entry.rows?.length" class="list-disc pl-5 text-muted-foreground">
+                          <li v-for="(row, rowIndex) in entry.rows" :key="rowIndex">
+                            <template v-if="entry.tool === 'catalog.search_products'">{{ row.product_name }} · {{ row.product_code }} · {{ row.model || '未登记型号' }} / {{ row.packaging_spec || '未登记包装' }}</template>
+                            <template v-else-if="entry.tool === 'supplier_quotes.compare'">{{ row.supplier_name }}：{{ row.unit_price }} {{ row.currency_code }}/{{ row.unit_name }} · {{ row.rank ? `可比组排名 ${row.rank}` : '不可比，不排序' }}<span v-if="row.valid_until"> · 有效至 {{ row.valid_until }}</span></template>
+                            <template v-else>{{ row.rfq_no }} · 询价明细 #{{ row.rfq_item_id }} · {{ row.specification || '未登记规格' }}</template>
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </details>
                   <div class="text-muted-foreground">确认后仅创建状态为“草稿”的采购申请；仍需你在业务模块中检查并自行提交审批。</div>
                   <div class="flex justify-end">
                     <Button
-                      :disabled="Boolean(item.draftCreatedRequestNo) || Boolean(creatingDraftMessageId)"
+                      :disabled="!item.draftProposal.confirmation_id || Boolean(item.draftCreatedRequestNo) || Boolean(creatingDraftMessageId)"
                       :loading="creatingDraftMessageId === item.id"
                       type="primary"
                       @click="confirmCreatePurchaseDraft(item)"
@@ -1232,7 +1273,7 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
             />
             <div class="ai-composer-actions">
               <div class="flex min-w-0 items-center gap-3">
-                <span class="ai-composer-hint">{{ currentAgent?.status === 'WAITING_INPUT' ? '补充信息后继续当前查询' : agentMode ? '采购只读查询' : draftMode ? '采购申请草稿模式' : 'Enter 发送 · Shift+Enter 换行' }}</span>
+                <span class="ai-composer-hint">{{ currentAgent?.status === 'WAITING_INPUT' ? '补充信息后继续当前查询' : agentMode ? '采购只读查询' : draftMode ? '补充采购申请缺少的信息' : 'Enter 发送 · Shift+Enter 换行' }}</span>
                 <button v-if="agentMode" class="ai-mode-exit" type="button" @click="agentMode = false">退出只读查询</button>
                 <button v-if="draftMode" class="ai-mode-exit" type="button" @click="draftMode = false">退出草稿模式</button>
               </div>

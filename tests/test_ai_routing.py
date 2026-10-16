@@ -13,6 +13,12 @@ from app.core.errors import BusinessValidationError
 from app.modules.ai import llm, routing, service
 
 
+def test_purchase_draft_intent_is_a_dedicated_preview_route():
+    decision = routing.Understanding(purpose="purchase_draft")
+    assert decision.route == "purchase_draft"
+    assert not decision.tasks and not decision.sub_tasks
+
+
 @pytest.mark.parametrize("question,route", [("/help", "capability"), ("你好", "greeting"), ("取消查询", "cancel")])
 def test_explicit_commands_skip_model(monkeypatch, question, route):
     async def forbidden(*args, **kwargs):
@@ -22,6 +28,7 @@ def test_explicit_commands_skip_model(monkeypatch, question, route):
 
 
 @pytest.mark.parametrize("question,payload,route", [
+    ("我需要采购乙醇 12 升用于实验", {"purpose": "purchase_draft"}, "purchase_draft"),
     ("你好，查乙醇库存", {"purpose": "query", "tasks": ["inventory"], "slots": {"product_keyword": "乙醇"}}, "agent"),
     ("查 64-17-5 的库存", {"purpose": "query", "tasks": ["inventory"], "slots": {"product_keyword": "64-17-5"}}, "agent"),
     ("库存查询支持哪些筛选条件？", {"purpose": "capability"}, "capability"),

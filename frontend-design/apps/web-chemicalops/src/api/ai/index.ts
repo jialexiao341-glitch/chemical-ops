@@ -89,6 +89,12 @@ export namespace AiApi {
   }
 
   export interface PurchaseDraftPreview {
+    confirmation_id?: null | string;
+    preview_version?: null | number;
+    expires_at?: null | string;
+    clarification_question?: null | string;
+    missing_fields: string[];
+    evidence: Array<{ label: string; tool: string; rows?: any[]; totals?: any[]; scope?: string; comparison_basis?: string; sources?: Array<{ resource: string; record_id: number; parent_id?: null | number }>; observed_at?: string }>;
     display_items: Array<{
       budget_price?: null | string;
       product_name?: null | string;
@@ -124,6 +130,14 @@ export async function proposePurchaseRequestDraftApi(question: string) {
   return requestClient.post<AiApi.PurchaseDraftPreview>(
     '/ai/purchase-request-draft/preview',
     { question },
+  );
+}
+
+/** 确认指定预览快照；请求不接受客户端修改后的业务字段。 */
+export async function confirmPurchaseRequestDraftApi(confirmationId: string, previewVersion: number) {
+  return requestClient.post<import('../procurement/purchase-requests').PurchaseRequestApi.PurchaseRequest>(
+    '/ai/purchase-request-draft/confirm',
+    { confirmation_id: confirmationId, preview_version: previewVersion, confirm: true },
   );
 }
 

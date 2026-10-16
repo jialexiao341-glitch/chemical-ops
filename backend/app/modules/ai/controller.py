@@ -23,6 +23,7 @@ from app.modules.ai.schema import (
     AIMessageRead,
     AIPurchaseDraftPreview,
     AIPurchaseDraftRequest,
+    AIPurchaseDraftConfirm,
     BriefingRequest,
     BriefingResponse,
     ChatTaskCreate,
@@ -46,8 +47,10 @@ from app.modules.ai import nl_filters as nl_filters_service
 from app.modules.ai import service, routing
 from app.modules.ai import agent_tools
 from app.modules.ai import agent_runtime
+from app.modules.ai import purchase_draft_confirmations
 from app.modules.ai import text2sql as text2sql_service
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection
+from app.modules.purchase_requests.schema import PurchaseRequestRead
 from app.modules.system.model import User
 
 
@@ -157,6 +160,16 @@ async def purchase_request_draft_preview(
     """只返回候选字段；不写入申请、不提交审批。"""
 
     return await drafts_service.propose_purchase_request_draft(db, user, data.question)
+
+
+@router.post("/purchase-request-draft/confirm", response_model=PurchaseRequestRead, summary="确认指定预览并创建采购申请草稿")
+def purchase_request_draft_confirm(
+    data: AIPurchaseDraftConfirm,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """仅消费当前用户明确确认的预览版本；写入仅创建 DRAFT。"""
+    return purchase_draft_confirmations.confirm_purchase_draft(db, user, data)
 
 
 @router.post("/parse-filters", response_model=NLFilterResult, summary="自然语言解析列表筛选条件")

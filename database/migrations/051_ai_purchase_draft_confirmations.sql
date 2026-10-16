@@ -1,0 +1,21 @@
+CREATE TABLE ai_purchase_draft_confirmations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    confirmation_id CHAR(32) NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    preview_version INT UNSIGNED NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    draft_payload JSON NOT NULL,
+    object_versions JSON NOT NULL,
+    evidence JSON NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING、EXECUTED、EXPIRED',
+    expires_at DATETIME(3) NOT NULL,
+    purchase_request_id BIGINT UNSIGNED NULL,
+    result JSON NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    executed_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ai_purchase_draft_confirmation_id (confirmation_id),
+    KEY ix_ai_purchase_draft_user_status (user_id, status),
+    CONSTRAINT fk_ai_purchase_draft_user FOREIGN KEY (user_id) REFERENCES sys_users (id),
+    CONSTRAINT fk_ai_purchase_draft_request FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='采购申请草稿确认快照及副作用账本';

@@ -1,6 +1,5 @@
 """AI 采购草稿建议必须先校验，且本服务只生成预览。"""
 
-import asyncio
 import json
 from types import SimpleNamespace
 
@@ -9,6 +8,15 @@ from fastapi.testclient import TestClient
 
 from app.core.errors import BusinessValidationError
 from app.modules.ai import drafts
+
+
+def _run_immediate(coroutine):
+    """运行不含实际 I/O 的异步服务，避免测试依赖 Windows 事件循环初始化。"""
+    try:
+        coroutine.send(None)
+    except StopIteration as completed:
+        return completed.value
+    raise AssertionError("测试替身不应挂起等待")
 
 
 def test_preview_endpoint_is_available_to_authorized_user_without_creating_a_request(
@@ -52,7 +60,6 @@ class _Rows:
 class _Database:
     def __init__(self):
         self.results = [
-            _Rows([SimpleNamespace(id=9, product_name="乙醇", status="ACTIVE")]),
             _Rows([SimpleNamespace(id=3, unit_name="升", dimension="VOLUME", status="ACTIVE")]),
         ]
 
@@ -60,11 +67,11 @@ class _Database:
         return self.results.pop(0)
 
 
-def test_proposal_uses_only_valid_active_catalog_ids_and_does_not_write(monkeypatch) -> None:
+def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monkeypatch) -> None:
     async def fake_chat(request, _settings, *, attachment_context, response_format):
         assert "请按提供的规则整理字段" in request.messages[0].content
         assert "采购乙醇 12 升，用于实验" in attachment_context[0]
-        assert response_format == {"type": "json_object"}
+        assert response_format["type"] == "json_schema"
         return SimpleNamespace(
             answer=json.dumps(
                 {
@@ -77,14 +84,30 @@ def test_proposal_uses_only_valid_active_catalog_ids_and_does_not_write(monkeypa
             )
         )
 
-    monkeypatch.setattr(drafts, "get_user_permission_codes", lambda *_args: ["procurement.requests.write"])
+    monkeypatch.setattr(drafts, "get_user_permission_codes", lambda *_args: ["procurement.requests.write", "master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"])
     monkeypatch.setattr(drafts, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(drafts, "chat", fake_chat)
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    database = _Database()
+    product = SimpleNamespace(id=9, product_name="乙醇", status="ACTIVE", version_no=3)
+    database.get = lambda _model, _id: product
+    database.added = []
+    database.add = database.added.append
+    database.commit = lambda: None
+    database.execute = lambda _query: SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+    def fake_tool(_db, _user, call):
+        if call.tool == "catalog.search_products":
+            return SimpleNamespace(tool=call.tool, rows=[SimpleNamespace(product_id=9, model_dump=lambda **_kwargs: {"product_id": 9})], total_rows=1, truncated=False, sources=[])
+        if call.tool == "inventory.query_available":
+            return SimpleNamespace(tool=call.tool, scope="授权仓库", observed_at=datetime.now(timezone.utc), totals=[], sources=[])
+        return SimpleNamespace(tool=call.tool, rows=[], total_rows=0, truncated=False, sources=[])
+    monkeypatch.setattr(drafts.agent_tools, "execute_tool", fake_tool)
 
-    preview = asyncio.run(
+    preview = _run_immediate(
         drafts.propose_purchase_request_draft(
-            _Database(),
-            SimpleNamespace(id=5, department_id=2),
+            database,
+            SimpleNamespace(id=5, department_id=2, status="ACTIVE"),
             "采购乙醇 12 升，用于实验",
         )
     )
@@ -95,9 +118,12 @@ def test_proposal_uses_only_valid_active_catalog_ids_and_does_not_write(monkeypa
     assert preview.draft["items"][0]["product_id"] == 9
     assert preview.display_items[0].quantity == "12"
     assert preview.display_items[0].unit_name == "升"
+    assert preview.confirmation_id and preview.preview_version == 1
+    assert database.added[0].object_versions["products"]["9"]["version_no"] == 3
+    assert database.added[0].evidence == preview.evidence
 
 
-def test_proposal_rejects_missing_fields_and_invalid_catalog_ids(monkeypatch) -> None:
+def test_proposal_returns_clarification_without_issuing_confirmation(monkeypatch) -> None:
     monkeypatch.setattr(drafts, "get_user_permission_codes", lambda *_args: ["procurement.requests.write"])
     monkeypatch.setattr(drafts, "get_user_role_codes", lambda *_args: [])
 
@@ -105,20 +131,9 @@ def test_proposal_rejects_missing_fields_and_invalid_catalog_ids(monkeypatch) ->
         return SimpleNamespace(answer=json.dumps({"purpose": "", "items": [{"requested_name": "乙醇"}], "missing_fields": ["数量", "单位"]}))
 
     monkeypatch.setattr(drafts, "chat", missing_chat)
-    with pytest.raises(BusinessValidationError, match="数量、单位"):
-        asyncio.run(
-            drafts.propose_purchase_request_draft(
-                _Database(), SimpleNamespace(id=5, department_id=2), "帮我整理一份采购申请"
-            )
-        )
-
-    async def invalid_catalog_chat(*_args, **_kwargs):
-        return SimpleNamespace(answer=json.dumps({"purpose": "实验", "items": [{"requested_name": "乙醇", "quantity": "12", "unit_id": 999}]}))
-
-    monkeypatch.setattr(drafts, "chat", invalid_catalog_chat)
-    with pytest.raises(BusinessValidationError, match="计量单位"):
-        asyncio.run(
-            drafts.propose_purchase_request_draft(
-                _Database(), SimpleNamespace(id=5, department_id=2), "采购乙醇 12 升"
-            )
-        )
+    preview = _run_immediate(drafts.propose_purchase_request_draft(
+        _Database(), SimpleNamespace(id=5, department_id=2, status="ACTIVE"), "帮我整理一份采购申请"
+    ))
+    assert "采购用途" in preview.missing_fields
+    assert "数量" in preview.missing_fields
+    assert not preview.confirmation_id

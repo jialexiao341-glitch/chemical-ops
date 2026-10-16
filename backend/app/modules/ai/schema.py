@@ -204,18 +204,34 @@ class AIPurchaseDraftPreviewItem(BaseModel):
 
 
 class AIPurchaseDraftPreview(BaseModel):
-    """AI 提出的采购草稿候选值；用户确认后才会调用采购申请接口。"""
+    """服务端保存的草稿预览；确认令牌只允许消费该版本的快照。"""
 
     draft: dict[str, Any]
     display_items: list[AIPurchaseDraftPreviewItem]
     warnings: list[str] = Field(default_factory=list)
+    missing_fields: list[str] = Field(default_factory=list)
+    clarification_question: str | None = None
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    confirmation_id: str | None = None
+    preview_version: int | None = None
+    expires_at: datetime | None = None
     requires_user_confirmation: bool = True
+
+
+class AIPurchaseDraftConfirm(BaseModel):
+    """显式确认用户看到的某个预览版本。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation_id: str = Field(min_length=32, max_length=32, pattern="^[a-f0-9]{32}$")
+    preview_version: int = Field(strict=True, ge=1)
+    confirm: Literal[True]
 
 
 class AIPurchaseDraftRequest(BaseModel):
     """待整理成采购申请表单候选值的自然语言需求。"""
 
-    question: str = Field(min_length=1, max_length=2000)
+    question: str = Field(min_length=1, max_length=10_000)
 
 
 # 共享意图与状态
@@ -307,7 +323,7 @@ class SubTask(BaseModel):
 class Understanding(BaseModel):
     """语义模型的严格输出契约，由程序校验后才能用于路由或拆分。"""
     model_config = ConfigDict(extra="forbid")
-    purpose: Literal["capability", "guidance", "query", "greeting", "unsupported", "clarify"]
+    purpose: Literal["capability", "guidance", "query", "purchase_draft", "greeting", "unsupported", "clarify"]
     dialogue_action: Literal["new", "continue", "modify", "switch", "cancel"] = "new"
     tasks: list[Task] = Field(default_factory=list, max_length=4)
     excluded_tasks: list[Task] = Field(default_factory=list, max_length=4)
@@ -697,15 +713,15 @@ class _DraftItem(BaseModel):
     unit_id: int | None = Field(default=None, gt=0)
     technical_requirements: str | None = None
     budget_price: Decimal | None = Field(default=None, ge=0)
-    expected_date: str | None = None
+    expected_date: date | None = None
 
 
 class _DraftProposal(BaseModel):
     purpose: str = Field(default="", max_length=1000)
-    priority: str = "NORMAL"
+    priority: Literal["LOW", "NORMAL", "HIGH", "URGENT"] = "NORMAL"
     budget_amount: Decimal | None = Field(default=None, ge=0)
-    currency_code: str = "CNY"
-    expected_date: str | None = None
+    currency_code: str = Field(default="CNY", min_length=3, max_length=3, pattern="^[A-Z]{3}$")
+    expected_date: date | None = None
     items: list[_DraftItem] = Field(min_length=1, max_length=100)
     missing_fields: list[str] = Field(default_factory=list)
 

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +23,28 @@ class AIAgentTask(Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class AIPurchaseDraftConfirmation(Base):
+    """一次性采购草稿确认快照；快照消费与申请写入处于同一事务。"""
+
+    __tablename__ = "ai_purchase_draft_confirmations"
+    __table_args__ = (UniqueConstraint("confirmation_id", name="uq_ai_purchase_draft_confirmation_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    confirmation_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False, index=True)
+    preview_version: Mapped[int] = mapped_column(nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    draft_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    object_versions: Mapped[dict] = mapped_column(JSON, nullable=False)
+    evidence: Mapped[list] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
+    expires_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False)
+    purchase_request_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_requests.id"), nullable=True)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+    executed_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)
 
 
 class AIConversation(Base):

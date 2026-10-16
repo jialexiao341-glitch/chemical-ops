@@ -16,6 +16,39 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.core.config import get_settings
 
 
+def _find_mysqldump(*, windows: bool | None = None) -> str | None:
+    configured_dump = os.environ.get("MYSQLDUMP_PATH", "").strip()
+    if configured_dump:
+        return str(Path(configured_dump).expanduser())
+
+    path_dump = shutil.which("mysqldump")
+    if path_dump:
+        return path_dump
+
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        return None
+
+    executable = "mysqldump.exe"
+    candidates: list[Path] = []
+    mysql_home = os.environ.get("MYSQL_HOME", "").strip()
+    if mysql_home:
+        candidates.append(Path(mysql_home).expanduser() / "bin" / executable)
+
+    for program_files_key in ("ProgramFiles", "ProgramFiles(x86)"):
+        program_files = os.environ.get(program_files_key, "").strip()
+        if program_files:
+            candidates.extend(Path(program_files).glob(f"MySQL/MySQL Server */bin/{executable}"))
+
+    installed_dumps = sorted(
+        (candidate for candidate in candidates if candidate.is_file()),
+        key=lambda candidate: str(candidate).casefold(),
+        reverse=True,
+    )
+    return str(installed_dumps[0]) if installed_dumps else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="ChemicalOps MySQL 备份")
     parser.add_argument("--output-dir", default="backups/mysql", help="备份目录")
@@ -23,10 +56,9 @@ def main() -> int:
     args = parser.parse_args()
     if args.keep < 1:
         parser.error("--keep 必须大于 0")
-    configured_dump = os.environ.get("MYSQLDUMP_PATH", "").strip()
-    dump = str(Path(configured_dump).expanduser()) if configured_dump else shutil.which("mysqldump")
+    dump = _find_mysqldump()
     if dump and not Path(dump).is_file():
-        print("MYSQLDUMP_PATH 指定的文件不存在", file=sys.stderr)
+        print("配置或自动发现的 mysqldump 文件不存在", file=sys.stderr)
         return 2
     if not dump:
         print("mysqldump 未安装或不在 PATH 中；可通过 MYSQLDUMP_PATH 指定 mysqldump.exe", file=sys.stderr)

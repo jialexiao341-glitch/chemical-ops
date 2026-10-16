@@ -93,7 +93,7 @@ def _audit(db: Session, user_id: int, action: str, request: PurchaseRequest, sum
     )
 
 
-def create_request(db: Session, user: User, data: PurchaseRequestCreate) -> PurchaseRequest:
+def create_request(db: Session, user: User, data: PurchaseRequestCreate, *, commit: bool = True) -> PurchaseRequest:
     """创建采购申请草稿和明细。"""
 
     department_id = data.department_id if data.department_id is not None else user.department_id
@@ -120,9 +120,11 @@ def create_request(db: Session, user: User, data: PurchaseRequestCreate) -> Purc
     ]
     db.flush()
     _audit(db, user.id, "CREATE", request, "创建采购申请草稿")
-    db.commit()
-    db.refresh(request)
-    return _require_request(db, request.id)
+    if commit:
+        db.commit()
+        db.refresh(request)
+        return _require_request(db, request.id)
+    return request
 
 
 def list_requests(
