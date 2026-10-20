@@ -44,7 +44,7 @@ def inject_trace_context(payload: dict) -> dict:
 
     carrier: dict[str, str] = {}
     propagate.inject(carrier)
-    return {**payload, "_otel_context": carrier}
+    return {**payload, "_otel_context": carrier} if carrier else payload
 
 
 def configure_tracing(*, app=None, engine=None, service_name: str | None = None) -> None:
