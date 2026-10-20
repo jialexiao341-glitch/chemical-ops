@@ -132,7 +132,7 @@ def test_combined_resume_refreshes_inventory_and_preserves_limit(task_db, model_
     task_db.commit()
     continued = asyncio.run(runtime.continue_task(task_db, USER, result.id,
         runtime.TaskContinue(question='选择', revision=result.revision, rfq_item_id=11)))
-    assert continued.status == 'SUCCEEDED' and '130.000000 千克' in continued.reply
+    assert continued.status == 'SUCCEEDED' and '130 千克' in continued.reply
     inventory = next(e for e in continued.trace if e.get('tool') == 'inventory.query_available')
     assert inventory['arguments']['limit'] == 1 and inventory['result']['truncated']
     assert len(continued.trace[-1]['evidence_steps']) == 2

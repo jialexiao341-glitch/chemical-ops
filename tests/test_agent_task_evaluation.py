@@ -1,10 +1,67 @@
 """评估器必须识别不完整完成和权限角色差异，不能通过误评分得到质量指标。"""
 import asyncio
+import json
 from types import SimpleNamespace
 
 from scripts import evaluate_agent_tasks as evaluation
 from scripts.agent_evaluation_data import evaluation_db
 from app.modules.ai import agent_runtime as runtime, agent_tools as tools
+
+
+def _task_with_trace(trace):
+    return runtime.TaskRead(id='evaluation', status='SUCCEEDED', revision=1,
+        reply='answer', error_code=None, messages=[], trace=trace)
+
+
+def test_object_resolution_requires_previously_returned_candidate_ids():
+    catalog = {'step': 1, 'action': 'call_tool', 'status': 'SUCCEEDED',
+        'tool': 'catalog.search_products', 'arguments': {'keyword': 'ethanol'},
+        'result': {'rows': [{'product_id': 1}], 'sources': []}}
+    inventory = {'step': 2, 'action': 'call_tool', 'status': 'SUCCEEDED',
+        'tool': 'inventory.query_available', 'arguments': {'product_id': 1},
+        'result': {'rows': [], 'totals': [], 'sources': []}}
+    assert evaluation.check_object_resolution(_task_with_trace([catalog, inventory]))
+    inventory['arguments'] = {'product_id': 99}
+    assert not evaluation.check_object_resolution(_task_with_trace([catalog, inventory]))
+
+
+def test_quote_comparison_requires_returned_rfqs_item_candidate():
+    catalog = {'step': 1, 'action': 'call_tool', 'status': 'SUCCEEDED',
+        'tool': 'catalog.search_products', 'arguments': {'keyword': 'ethanol'},
+        'result': {'rows': [{'product_id': 1}]}}
+    rfqs = {'step': 2, 'action': 'call_tool', 'status': 'SUCCEEDED',
+        'tool': 'supplier_quotes.find_rfq_items', 'arguments': {'product_id': 1},
+        'result': {'rows': [{'rfq_item_id': 11}]}}
+    compare = {'step': 3, 'action': 'call_tool', 'status': 'SUCCEEDED',
+        'tool': 'supplier_quotes.compare',
+        'arguments': {'product_id': 1, 'rfq_item_id': 11}, 'result': {'rows': []}}
+    assert evaluation.check_object_resolution(_task_with_trace([catalog, rfqs, compare]))
+    compare['arguments']['rfq_item_id'] = 12
+    assert not evaluation.check_object_resolution(_task_with_trace([catalog, rfqs, compare]))
+
+
+def test_report_marks_answer_quality_as_unmeasured_for_synthetic_samples(tmp_path):
+    report = {
+        'started_at': 'test', 'model': 'test-model', 'dataset_version': 'synthetic-test',
+        'planned_count': 1, 'code_revision': 'test', 'working_tree_dirty': True,
+        'dataset_sha256': 'test-hash', 'cases': [{
+            'id': 'T01', 'covers': ('C01',), 'status': 'SUCCEEDED', 'passed': True,
+            'safety': False,
+            'checks': {
+                'outcome': True, 'tool_selection': True, 'object_resolution': True,
+                'parameters': True, 'clarification': None, 'source_and_numbers': True,
+                'answer_correctness': None, 'refusal_safety': None,
+                'permission_safety': True, 'authorized_tools': True,
+                'no_business_writes': True,
+            },
+        }],
+    }
+    path = tmp_path / 'evaluation.json'
+    evaluation.save_report(path, report)
+    saved = json.loads(path.read_text(encoding='utf-8'))
+    assert saved['metrics']['answer_correctness'] == {'passed': 0, 'evaluated': 0}
+    assert saved['evaluation_limits']['answer_correctness'] == 'HUMAN_REVIEW_REQUIRED'
+    assert saved['evaluation_limits']['sample_scope'].startswith('fixed synthetic')
 
 
 def test_samples_use_real_rbac_and_actor_specific_inventory():
