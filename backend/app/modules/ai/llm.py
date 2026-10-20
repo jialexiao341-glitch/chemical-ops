@@ -22,6 +22,8 @@ from app.modules.ai.gateway import (
     circuit_breakers,
     request_slots,
     resolve_model_profile,
+    TaskTokenBudgetExceeded,
+    current_task_token_budget,
 )
 from app.modules.ai.schema import (
     AIChatMessage,
@@ -285,6 +287,18 @@ async def chat(
         profile = resolve_model_profile(runtime, model_name)
     except ValueError as exc:
         raise BusinessValidationError(str(exc)) from exc
+    task_budget = current_task_token_budget()
+    reservation = None
+    if task_budget is not None:
+        budget_input = json.dumps({
+            "messages": _build_messages(data, attachment_context, image_parts, system_prompt),
+            "response_format": response_format,
+        }, ensure_ascii=False, default=str)
+        try:
+            reservation = task_budget.reserve(budget_input, min(profile.max_tokens, runtime.llm_max_tokens))
+        except TaskTokenBudgetExceeded as exc:
+            raise BusinessValidationError(str(exc)) from exc
+    result = None
     try:
         settled = False
         probe_claimed = False
@@ -305,9 +319,14 @@ async def chat(
                 from app.core.telemetry import trace_span
                 with trace_span("llm.chat", {"gen_ai.request.model": profile.model,
                                               "gen_ai.system": profile.provider}):
+                    effective = _effective_settings(runtime, profile)
+                    if task_budget is not None:
+                        effective = effective.model_copy(update={
+                            "llm_max_tokens": min(profile.max_tokens, runtime.llm_max_tokens),
+                        })
                     result = await _chat_impl(
                         data,
-                        _effective_settings(runtime, profile),
+                        effective,
                         attachment_context,
                         response_format,
                         image_parts,
@@ -349,6 +368,13 @@ async def chat(
         metrics.increment("llm_requests_cancelled", labels={"provider": profile.provider, "model": profile.model, "mode": "sync"})
         raise
     finally:
+        if task_budget is not None and reservation is not None:
+            try:
+                task_budget.settle(reservation, result.usage if result is not None else None)
+            except Exception as exc:
+                if isinstance(exc, TaskTokenBudgetExceeded):
+                    raise BusinessValidationError(str(exc)) from exc
+                raise
         metrics.observe("llm_gateway_duration_seconds", perf_counter() - started, labels={"provider": profile.provider, "model": profile.model, "mode": "sync"})
         if probe_claimed and not settled:
             circuit_breakers.abandon_probe(profile.key)

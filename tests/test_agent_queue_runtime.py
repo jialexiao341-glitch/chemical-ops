@@ -245,6 +245,32 @@ def test_transport_error_preserves_checkpoint_for_queue_retry(queued_db, monkeyp
     assert len(queued_db.scalars(select(AIMessage)).all()) == 2
 
 
+def test_token_budget_is_persisted_to_task_and_queue_checkpoint(queued_db, monkeypatch):
+    from app.modules.ai import gateway
+
+    task, execution = accept(queued_db)
+    current = claim(queued_db, execution, monkeypatch)
+    async def understand(*args, **kwargs):
+        return runtime.routing.Understanding(purpose="query", tasks=["inventory"])
+    async def ask_user(*args, **kwargs):
+        budget = gateway.current_task_token_budget()
+        reservation = budget.reserve("planner prompt", 8)
+        budget.settle(reservation, {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6})
+        return SimpleNamespace(message=SimpleNamespace(content='{"action":"ask_user","question":"请补充信息"}'))
+    monkeypatch.setattr(runtime.routing, "understand", understand)
+    monkeypatch.setattr(runtime.llm, "chat", ask_user)
+
+    asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
+    queued_db.expire_all()
+    saved_task = queued_db.get(AIAgentTask, task.id)
+    saved_execution = queued_db.get(TaskExecution, execution.id)
+    assert saved_task.status == "WAITING_INPUT"
+    assert saved_task.payload["token_budget"]["calls"] == 1
+    assert saved_task.payload["token_budget"]["used_tokens"] >= 6
+    assert saved_task.payload["messages"] and saved_task.payload["trace"][-1]["action"] == "ask_user"
+    assert saved_execution.checkpoint["token_budget"] == saved_task.payload["token_budget"]
+
+
 def test_model_wait_cancel_rejects_late_reply(queued_db, monkeypatch):
     import json
     task, execution = accept(queued_db)

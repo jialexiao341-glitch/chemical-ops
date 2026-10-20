@@ -17,7 +17,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.modules.ai import llm
-from app.modules.ai.gateway import bind_user, reset_user
+from app.modules.ai.gateway import (
+    TaskTokenBudget,
+    bind_task_token_budget,
+    bind_user,
+    reset_task_token_budget,
+    reset_user,
+)
 from app.modules.ai import conversation_store
 from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
@@ -130,6 +136,10 @@ class RunState:
     chat: dict | None = None
     memory_state: dict = field(default_factory=dict)
     workflow: Workflow = field(default_factory=Workflow)
+    llm_token_limit: int = 0
+    llm_tokens_used: int = 0
+    llm_tokens_estimated: int = 0
+    llm_calls: int = 0
 
 
 class GraphState(TypedDict):
@@ -306,6 +316,10 @@ def _persist(db: Session, user: User, state: RunState) -> None:
                  "memory_state": memory,
                  "workflow": state.workflow.model_dump(mode="json"),
                  "turn_start": state.turn_start,
+                  "token_budget": {"limit": state.llm_token_limit or get_settings().agent_max_total_tokens,
+                                   "used_tokens": state.llm_tokens_used,
+                                   "estimated_tokens": state.llm_tokens_estimated,
+                                   "calls": state.llm_calls},
                  "selected_product": state.selected_product or state.verified_product,
                  "selected_rfq_item": state.selected_rfq_item or state.verified_rfq_item}, status=state.status,
         reply=state.reply, error_code=state.error_code, revision=state.revision + 1,
@@ -323,7 +337,11 @@ def _persist(db: Session, user: User, state: RunState) -> None:
         execution.checkpoint = {**execution.checkpoint, "decisions": state.decisions,
                                 "failures": state.failures, "seen_calls": sorted(state.seen_calls),
                                 "verified_product": state.verified_product,
-                                "verified_rfq_item": state.verified_rfq_item}
+                                "verified_rfq_item": state.verified_rfq_item,
+                                "token_budget": {"limit": state.llm_token_limit or get_settings().agent_max_total_tokens,
+                                                 "used_tokens": state.llm_tokens_used,
+                                                 "estimated_tokens": state.llm_tokens_estimated,
+                                                 "calls": state.llm_calls}}
         if state.status != "RUNNING":
             from app.modules.task_queue import service as queue_service
             db.flush()  # Preserve the terminal checkpoint before the fresh locking read.
@@ -527,13 +545,41 @@ def _constrain_action(state: RunState, action):
 async def _drive(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
     """绑定任务所有者，确保后台 Agent 的模型请求遵循用户并发配额。"""
 
-    token = bind_user(user.id)
+    def persist_budget(snapshot: dict[str, int]) -> None:
+        state.llm_tokens_used = snapshot["used_tokens"]
+        state.llm_tokens_estimated = snapshot["estimated_tokens"]
+        state.llm_calls = snapshot["calls"]
+        try:
+            execution = execution_context.guard(db)
+            task = db.scalar(select(AIAgentTask).where(
+                AIAgentTask.id == state.task_id,
+                AIAgentTask.user_id == user.id,
+            ).with_for_update().execution_options(populate_existing=True))
+            if task is None or task.status != "RUNNING" or task.revision != state.revision:
+                raise TaskInterrupted()
+            task.payload = {**task.payload, "token_budget": snapshot}
+            if execution:
+                execution.checkpoint = {**execution.checkpoint, "token_budget": snapshot}
+            db.commit()
+        except TaskInterrupted:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            raise
+
+    budget = TaskTokenBudget(state.llm_token_limit or settings.agent_max_total_tokens,
+        used_tokens=state.llm_tokens_used, estimated_tokens=state.llm_tokens_estimated,
+        calls=state.llm_calls, on_settle=persist_budget)
+    user_token = bind_user(user.id)
+    budget_token = bind_task_token_budget(budget)
     try:
         from app.core.telemetry import trace_span
         with trace_span("agent.execute", {"chemicalops.agent.task_id": state.task_id}):
             return await _drive_impl(db, user, state, settings)
     finally:
-        reset_user(token)
+        reset_task_token_budget(budget_token)
+        reset_user(user_token)
 
 
 async def _drive_impl(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
@@ -708,7 +754,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             db.rollback()
             raise  # Queue adapter persists a bounded retry from the last checkpoint.
         state.status = "FAILED"
-        codes = {"STEP_LIMIT", "CONTEXT_LIMIT", "INVALID_EVIDENCE", "INCOMPLETE_TASK", "REPEATED_TOOL", "TOOL_ERRORS", "INTENT_MISMATCH"}
+        codes = {"STEP_LIMIT", "CONTEXT_LIMIT", "INVALID_EVIDENCE", "INCOMPLETE_TASK", "REPEATED_TOOL", "TOOL_ERRORS", "INTENT_MISMATCH", "TOKEN_BUDGET_EXCEEDED"}
         state.error_code = ("TASK_TIMEOUT" if isinstance(exc, TimeoutError) else
             "PERMISSION_DENIED" if isinstance(exc, AuthorizationError) else
             "MODEL_FORMAT_ERROR" if isinstance(exc, ValidationError) else
@@ -738,6 +784,7 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
         raise AuthorizationError("采购 Agent 需要产品读取权限及库存或询价读取权限")
     task_id = uuid4().hex
     state = RunState(task_id, 0, [data.question], [], 0, memory_state=_new_memory_state(data.question),
+                     llm_token_limit=get_settings().agent_max_total_tokens,
                      workflow=Workflow(rfq_no=_rfq_condition(data.question)))
     if data.route_token:
         decision = routing.read_ticket(data.route_token, user.id, data.question, getattr(data, "conversation_id", None))
@@ -748,7 +795,9 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
         state.memory_state["goal"]["intent"] = decision.agent_goal
     db.add(AIAgentTask(id=task_id, user_id=user.id, status="RUNNING", revision=0,
         payload={"messages": state.messages, "trace": [], "turn_start": 0,
-                 "memory_state": state.memory_state, "workflow": state.workflow.model_dump(mode="json")},
+                 "memory_state": state.memory_state, "workflow": state.workflow.model_dump(mode="json"),
+                 "token_budget": {"limit": state.llm_token_limit,
+                                  "used_tokens": 0, "estimated_tokens": 0, "calls": 0}},
         reply="", created_at=_now(), updated_at=_now()))
     db.flush()
     if commit:
@@ -843,7 +892,11 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
         raise DuplicateResourceError("任务已被其他请求继续或取消")
     state = RunState(task.id, data.revision + 1, messages,
         list(task.payload["trace"]), len(task.payload["trace"]), product, rfq_item,
-        chat=task.payload.get("chat"), memory_state=memory, workflow=workflow)
+        chat=task.payload.get("chat"), memory_state=memory, workflow=workflow,
+        llm_token_limit=(task.payload.get("token_budget") or {}).get("limit", get_settings().agent_max_total_tokens),
+        llm_tokens_used=(task.payload.get("token_budget") or {}).get("used_tokens", 0),
+        llm_tokens_estimated=(task.payload.get("token_budget") or {}).get("estimated_tokens", 0),
+        llm_calls=(task.payload.get("token_budget") or {}).get("calls", 0))
     if commit:
         db.commit()
     return state
@@ -948,7 +1001,11 @@ async def run_prepared_task(task_id: str, user_id: int, revision: int) -> None:
         state = RunState(task_id, revision, task.payload["messages"], list(task.payload["trace"]),
             task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"),
             chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {},
-            workflow=Workflow.model_validate(task.payload.get("workflow") or {}))
+            workflow=Workflow.model_validate(task.payload.get("workflow") or {}),
+            llm_token_limit=(task.payload.get("token_budget") or {}).get("limit", get_settings().agent_max_total_tokens),
+            llm_tokens_used=(task.payload.get("token_budget") or {}).get("used_tokens", 0),
+            llm_tokens_estimated=(task.payload.get("token_budget") or {}).get("estimated_tokens", 0),
+            llm_calls=(task.payload.get("token_budget") or {}).get("calls", 0))
         execution = execution_context.guard(db)
         if execution:
             state.decisions = execution.checkpoint.get("decisions", 0)
@@ -956,6 +1013,10 @@ async def run_prepared_task(task_id: str, user_id: int, revision: int) -> None:
             state.seen_calls = set(execution.checkpoint.get("seen_calls", []))
             state.verified_product = execution.checkpoint.get("verified_product")
             state.verified_rfq_item = execution.checkpoint.get("verified_rfq_item")
+            budget_checkpoint = execution.checkpoint.get("token_budget") or {}
+            state.llm_tokens_used = max(state.llm_tokens_used, budget_checkpoint.get("used_tokens", 0))
+            state.llm_tokens_estimated = max(state.llm_tokens_estimated, budget_checkpoint.get("estimated_tokens", 0))
+            state.llm_calls = max(state.llm_calls, budget_checkpoint.get("calls", 0))
             db.commit()
         if db.scalar(select(User.status).where(User.id == user_id)) != "ACTIVE":
             state.status, state.error_code, state.reply = "FAILED", "PERMISSION_DENIED", "用户状态已变化，任务停止。"

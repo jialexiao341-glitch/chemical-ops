@@ -82,6 +82,59 @@ def test_circuit_breaker_opens_rejects_parallel_probe_and_recovers(monkeypatch) 
     assert breaker.snapshot("model") == (0, None, False)
 
 
+def test_task_token_budget_settles_actual_and_estimated_usage_and_persists_each_call():
+    persisted = []
+    budget = gateway.TaskTokenBudget(100, on_settle=persisted.append)
+    reservation = budget.reserve("hello 世界", 10)
+    budget.settle(reservation, {"prompt_tokens": 4, "completion_tokens": 3, "total_tokens": 7})
+    assert budget.snapshot() == {"limit": 100, "used_tokens": 7, "estimated_tokens": 0, "calls": 1}
+    assert persisted == [budget.snapshot()]
+
+    reservation = budget.reserve("hello", 10)
+    budget.settle(reservation)
+    assert budget.snapshot()["estimated_tokens"] > 2
+    assert budget.snapshot()["calls"] == 2
+
+
+def test_task_token_budget_rejects_call_before_it_can_exceed_limit():
+    budget = gateway.TaskTokenBudget(25, used_tokens=10)
+    with pytest.raises(gateway.TaskTokenBudgetExceeded, match="TOKEN_BUDGET_EXCEEDED"):
+        budget.reserve("hello world", 20)
+    assert budget.snapshot()["used_tokens"] == 10
+
+
+def test_chat_charges_bound_task_budget_and_blocks_later_calls(monkeypatch):
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": "answer"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+        })
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: client_type(
+        transport=httpx.MockTransport(respond), **kwargs))
+    budget = gateway.TaskTokenBudget(100_000)
+    token = gateway.bind_task_token_budget(budget)
+    settings = Settings(_env_file=None, openai_api_key="test-key", llm_max_tokens=16, llm_max_retries=0)
+    request = AIChatRequest(messages=[{"role": "user", "content": "answer briefly"}])
+    try:
+        response = asyncio.run(llm.chat(request, settings, interpret_only=True))
+        assert response.message.content == "answer"
+        assert json.loads(requests[0].content)["max_tokens"] == 16
+        assert budget.snapshot()["calls"] == 1
+        assert budget.snapshot()["used_tokens"] >= 12
+
+        budget.limit = budget.snapshot()["used_tokens"]
+        with pytest.raises(BusinessValidationError, match="TOKEN_BUDGET_EXCEEDED"):
+            asyncio.run(llm.chat(request, settings, interpret_only=True))
+        assert len(requests) == 1
+    finally:
+        gateway.reset_task_token_budget(token)
+
+
 def test_request_slots_enforce_user_and_model_concurrency_and_release_on_cancel() -> None:
     settings = Settings(_env_file=None, llm_max_concurrency=2, llm_user_max_concurrency=1)
     profile = gateway.resolve_model_profile(settings)

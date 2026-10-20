@@ -9,7 +9,7 @@ import json
 import math
 from threading import Lock
 from time import monotonic
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from weakref import WeakKeyDictionary
 
@@ -17,6 +17,101 @@ from app.core.config import Settings
 
 
 _user_id_context: ContextVar[int | None] = ContextVar("llm_user_id", default=None)
+_task_token_budget_context: ContextVar["TaskTokenBudget | None"] = ContextVar("llm_task_token_budget", default=None)
+
+
+class TaskTokenBudgetExceeded(RuntimeError):
+    """The current Agent task cannot reserve enough tokens for another model call."""
+
+
+@dataclass(frozen=True)
+class TokenReservation:
+    input_estimate: int
+    output_limit: int
+
+    @property
+    def amount(self) -> int:
+        return self.input_estimate + self.output_limit
+
+
+class TaskTokenBudget:
+    """Cumulative token ledger shared by all LLM calls in one Agent task."""
+
+    def __init__(self, limit: int, *, used_tokens: int = 0, estimated_tokens: int = 0,
+                 calls: int = 0, on_settle: Callable[[dict[str, int]], None] | None = None) -> None:
+        self.limit = limit
+        self.used_tokens = max(0, used_tokens)
+        self.estimated_tokens = max(0, estimated_tokens)
+        self.calls = max(0, calls)
+        self._reserved_tokens = 0
+        self._lock = Lock()
+        self._on_settle = on_settle
+
+    @staticmethod
+    def estimate_input_tokens(text: str) -> int:
+        # CJK characters are commonly one token; use a conservative 3:1 estimate for other text.
+        cjk = sum(1 for char in text if ord(char) >= 0x2E80)
+        other = len(text) - cjk
+        return cjk + (other + 2) // 3
+
+    def reserve(self, input_text: str, output_limit: int) -> TokenReservation:
+        reservation = TokenReservation(self.estimate_input_tokens(input_text), max(1, output_limit))
+        with self._lock:
+            if self.used_tokens + self._reserved_tokens + reservation.amount > self.limit:
+                raise TaskTokenBudgetExceeded("TOKEN_BUDGET_EXCEEDED")
+            self._reserved_tokens += reservation.amount
+        return reservation
+
+    def settle(self, reservation: TokenReservation, usage: object = None) -> None:
+        actual_input = actual_output = actual_total = None
+        if isinstance(usage, dict):
+            def valid(*names: str) -> int | None:
+                for name in names:
+                    value = usage.get(name)
+                    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                        return value
+                return None
+            actual_input = valid("prompt_tokens", "input_tokens")
+            actual_output = valid("completion_tokens", "output_tokens")
+            actual_total = valid("total_tokens")
+        if actual_input is not None and actual_output is not None:
+            charge = max(reservation.input_estimate, actual_input) + actual_output
+            estimated = max(0, reservation.input_estimate - actual_input)
+        elif actual_total is not None:
+            charge = max(reservation.input_estimate, actual_total)
+            estimated = max(0, reservation.input_estimate - (actual_input or 0))
+        else:
+            charge = reservation.amount
+            estimated = charge
+        with self._lock:
+            self._reserved_tokens = max(0, self._reserved_tokens - reservation.amount)
+            self.used_tokens += charge
+            self.estimated_tokens += estimated
+            self.calls += 1
+            snapshot = {"limit": self.limit, "used_tokens": self.used_tokens,
+                        "estimated_tokens": self.estimated_tokens, "calls": self.calls}
+            over_budget = self.used_tokens + self._reserved_tokens > self.limit
+        if self._on_settle:
+            self._on_settle(snapshot)
+        if over_budget:
+            raise TaskTokenBudgetExceeded("TOKEN_BUDGET_EXCEEDED")
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return {"limit": self.limit, "used_tokens": self.used_tokens,
+                    "estimated_tokens": self.estimated_tokens, "calls": self.calls}
+
+
+def bind_task_token_budget(budget: TaskTokenBudget) -> Token[TaskTokenBudget | None]:
+    return _task_token_budget_context.set(budget)
+
+
+def reset_task_token_budget(token: Token[TaskTokenBudget | None]) -> None:
+    _task_token_budget_context.reset(token)
+
+
+def current_task_token_budget() -> TaskTokenBudget | None:
+    return _task_token_budget_context.get()
 
 
 @dataclass(frozen=True)

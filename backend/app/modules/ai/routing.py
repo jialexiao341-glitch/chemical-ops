@@ -145,6 +145,8 @@ async def understand(question: str, context: dict | None = None, settings=None) 
             LOGGER.warning("AI 意图结构校验失败 attempt=%s errors=%s", attempt + 1, errors)
             repair = "\n上次输出未通过结构校验，请从原问题重新理解并修正，不改变用户范围。错误位置：" + json.dumps(errors)
         except Exception as exc:
+            if str(exc) == "TOKEN_BUDGET_EXCEEDED":
+                raise
             LOGGER.warning("AI 意图理解服务失败 error_type=%s", type(exc).__name__)
             # 截断/空响应允许重新生成一次；网络错误已有通信层重试。
             if attempt == 0 and isinstance(exc, BusinessValidationError) and str(exc) in {"AI 服务返回了无法识别的结果", "AI 服务返回了空答案"}:
