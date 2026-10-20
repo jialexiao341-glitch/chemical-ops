@@ -67,3 +67,10 @@ chore: 清理临时检查脚本与运行缓存
 - 业务弹窗：`frontend-design/apps/web-chemicalops/src/views/supplier-portal/delivery-updates/index.vue`。
 - 编辑抽屉：`frontend-design/apps/web-chemicalops/src/views/master/products/modules/form.vue`。
 - 来源预览悬浮窗：`frontend-design/apps/web-chemicalops/src/views/ai/workspace/agent-source-popover.vue`。
+
+## LLM / Agent 修改原则
+
+- 修改 LLM 或 Agent 行为时，先检查并优先调整现有系统提示词、阶段提示词和结构化输出 Schema，让模型按明确任务、步骤及输出契约工作。
+- 服务端规则作为可靠性和安全兜底：权限、资源范围、业务状态、参数合法性、幂等、确认及写入边界必须由代码强制校验，不能只依赖提示词。
+- 避免为单个问法、样例或模型偶发输出增加关键词分支、硬编码特例及分散补丁。优先修正通用提示词、Schema、工具契约或统一校验逻辑；确有必要增加代码规则时，应说明覆盖的通用边界并集中维护。
+- 调整前先定位现有 Prompt、Agent Runtime、工具定义和相关评测样本；修改后使用代表性样本检查行为变化，并保留权限、安全和业务规则回归。
