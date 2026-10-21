@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import { fetchAllPages } from '#/utils/pagination';
 import type { OnActionClickParams, VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { TechnicalDocumentSource } from '#/api';
 
@@ -154,14 +155,8 @@ async function startIngest() {
 async function loadChemicalOptions() {
   chemicalsLoading.value = true;
   try {
-    const firstPage = await getChemicalListApi({ page: 1, page_size: 100, status: 'ACTIVE' });
-    const pageCount = Math.ceil(firstPage.total / firstPage.page_size);
-    const rest = await Promise.all(
-      Array.from({ length: Math.max(0, pageCount - 1) }, (_, index) =>
-        getChemicalListApi({ page: index + 2, page_size: 100, status: 'ACTIVE' }),
-      ),
-    );
-    chemicals.value = [...firstPage.items, ...rest.flatMap((page) => page.items)];
+    const firstPage = await fetchAllPages((page) => getChemicalListApi({ page, page_size: 100, status: 'ACTIVE' }));
+    chemicals.value = firstPage.items;
   } catch {
     chemicals.value = [];
   } finally {

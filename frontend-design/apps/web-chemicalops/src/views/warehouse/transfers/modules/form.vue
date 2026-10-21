@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import { fetchAllPages } from '#/utils/pagination';
 import type { TransferRequestApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
@@ -229,7 +230,7 @@ const [Drawer, drawerApi] = useVbenDrawer<
     if (balanceOptions.value.length === 0) {
       const [balances, products, warehouses, units] = await Promise.all([
         getBalanceListApi({ page: 1, page_size: 100 }),
-        getProductListApi({ page: 1, page_size: 100 }),
+        fetchAllPages((page) => getProductListApi({ page, page_size: 100 })),
         getWarehouseListApi(),
         getUnitListApi(),
       ]);

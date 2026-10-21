@@ -23,6 +23,7 @@ import { useAccessStore } from '@vben/stores';
 import { message } from 'antdv-next';
 
 import { useAuthStore } from '#/store';
+import { clearLookupCache } from '#/utils/lookup-state';
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 
@@ -140,6 +141,7 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       const method = String(config.method ?? 'get').toUpperCase();
       if (
         ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
+        !(config.data instanceof FormData) &&
         !config.headers['Idempotency-Key']
       ) {
         config.headers['Idempotency-Key'] = createIdempotencyKey();
@@ -151,6 +153,15 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       }
       config.headers['Accept-Language'] = preferences.app.locale;
       return config;
+    },
+  });
+
+  client.addResponseInterceptor({
+    fulfilled: (response) => {
+      const method = String(response.config.method ?? 'get').toUpperCase();
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
+          /^\/(products|chemicals|suppliers|inventory\/warehouses|units)(\/|$)/.test(response.config.url ?? '')) clearLookupCache();
+      return response;
     },
   });
 
@@ -181,9 +192,10 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       const isLoginRequest = String(error?.config?.url ?? '').includes(
         '/auth/login',
       );
-      if (!isLoginRequest) {
+      if (!isLoginRequest && !error?.config?.silent) {
         message.error(resolveErrorMessage(error));
       }
+      if (error instanceof Error) error.message = resolveErrorMessage(error);
       return Promise.reject(error);
     },
   });

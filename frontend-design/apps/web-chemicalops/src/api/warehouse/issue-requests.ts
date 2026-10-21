@@ -80,10 +80,10 @@ export async function getIssueOptionsApi() {
 }
 
 /** 分页查询库存领用申请 */
-export async function getIssueListApi(params?: IssueRequestApi.ListParams) {
+export async function getIssueListApi(params?: IssueRequestApi.ListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<IssueRequestApi.IssueRequest>>(
     '/inventory/issue-requests',
-    { params },
+    { ...options, params },
   );
 }
 

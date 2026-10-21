@@ -45,8 +45,8 @@ export function createInventoryReturnApi(data: {
     source_po_item_id: number; requested_quantity: string;
   }[];
 }) { return requestClient.post<InventoryReturn>('/inventory/returns', data); }
-export function getInventoryReturnsApi(params: PageQuery & { status?: string }) {
-  return requestClient.get<PageResult<InventoryReturn>>('/inventory/returns', { params });
+export function getInventoryReturnsApi(params: PageQuery & { status?: string }, options?: { silent?: boolean }) {
+  return requestClient.get<PageResult<InventoryReturn>>('/inventory/returns', { ...options, params });
 }
 export function actInventoryReturnApi(id: number, action: 'approve' | 'cancel' | 'execute' | 'reject' | 'submit', reason?: string) {
   return requestClient.post<InventoryReturn>(`/inventory/returns/${id}/${action}`, reason ? { reason } : undefined);

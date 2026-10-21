@@ -61,12 +61,10 @@ export namespace TransferRequestApi {
 }
 
 /** 分页查询库存调拨申请 */
-export async function getTransferListApi(
-  params?: TransferRequestApi.ListParams,
-) {
+export async function getTransferListApi(params?: TransferRequestApi.ListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<TransferRequestApi.TransferRequest>>(
     '/inventory/transfer-requests',
-    { params },
+    { ...options, params },
   );
 }
 

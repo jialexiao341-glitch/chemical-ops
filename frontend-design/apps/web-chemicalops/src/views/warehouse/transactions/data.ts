@@ -1,3 +1,4 @@
+import { fetchAllPages } from '#/utils/pagination';
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import type { InventoryApi } from '#/api';
@@ -17,7 +18,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
       componentProps: {
         allowClear: true,
         api: async () => {
-          const res = await getProductListApi({ page: 1, page_size: 100 });
+          const res = await fetchAllPages((page) => getProductListApi({ page, page_size: 100 }));
           return res.items.map((item) => ({
             label: item.product_name,
             value: item.id,

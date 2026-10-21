@@ -75,8 +75,9 @@ export namespace ProductApi {
 }
 
 /** 分页查询产品规格 */
-export async function getProductListApi(params?: ProductApi.ListParams) {
+export async function getProductListApi(params?: ProductApi.ListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<ProductApi.Product>>('/products', {
+    ...options,
     params,
   });
 }
@@ -97,8 +98,8 @@ export async function createProductQualityStandardApi(id: number, data: Pick<Pro
 }
 
 /** 查询全部计量单位（任意登录用户可读，用于表单下拉） */
-export async function getUnitListApi() {
-  return requestClient.get<ProductApi.Unit[]>('/products/units');
+export async function getUnitListApi(options?: { silent?: boolean }) {
+  return requestClient.get<ProductApi.Unit[]>('/products/units', options);
 }
 
 /** 新增产品 */

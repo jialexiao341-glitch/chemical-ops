@@ -61,10 +61,10 @@ export namespace StocktakeApi {
 }
 
 /** 分页查询库存盘点申请 */
-export async function getStocktakeListApi(params?: StocktakeApi.ListParams) {
+export async function getStocktakeListApi(params?: StocktakeApi.ListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<StocktakeApi.StocktakeRequest>>(
     '/inventory/stocktakes',
-    { params },
+    { ...options, params },
   );
 }
 

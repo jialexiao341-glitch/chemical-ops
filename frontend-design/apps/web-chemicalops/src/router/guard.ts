@@ -95,7 +95,12 @@ function setupAccessGuard(router: Router) {
     }
 
     // 生成路由表
-    const userInfo = userStore.userInfo || (await authStore.fetchUserInfo());
+    let userInfo = userStore.userInfo;
+    try {
+      userInfo ||= await authStore.fetchUserInfo();
+    } catch {
+      return { path: LOGIN_PATH, replace: true };
+    }
     const userRoles = userInfo.roles ?? [];
 
     // ChemicalOps 的路由 meta.authority 使用后端权限码（如 procurement.orders.read），

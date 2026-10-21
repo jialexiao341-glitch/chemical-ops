@@ -1,3 +1,4 @@
+import { fetchAllPages } from '#/utils/pagination';
 import type { VbenFormSchema } from '#/adapter/form';
 import type { OnActionClickFn, VxeTableGridColumns } from '#/adapter/vxe-table';
 import type { ProductApi } from '#/api';
@@ -28,7 +29,7 @@ export function useFormSchema(): VbenFormSchema[] {
       componentProps: {
         allowClear: true,
         api: async () => {
-          const res = await getChemicalListApi({ page: 1, page_size: 100 });
+          const res = await fetchAllPages((page) => getChemicalListApi({ page, page_size: 100 }));
           return res.items.map((item) => ({
             label: `${item.chemical_name}${item.cas_no ? ` (${item.cas_no})` : ''}`,
             value: item.id,
@@ -124,7 +125,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
       componentProps: {
         allowClear: true,
         api: async () => {
-          const res = await getChemicalListApi({ page: 1, page_size: 100 });
+          const res = await fetchAllPages((page) => getChemicalListApi({ page, page_size: 100 }));
           return res.items.map((item) => ({
             label: item.chemical_name,
             value: item.id,

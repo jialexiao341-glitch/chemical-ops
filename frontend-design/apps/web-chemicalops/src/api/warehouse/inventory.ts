@@ -135,9 +135,10 @@ export namespace InventoryApi {
 }
 
 /** 查询仓库列表（不分页） */
-export async function getWarehouseListApi() {
+export async function getWarehouseListApi(options?: { silent?: boolean }) {
   return requestClient.get<InventoryApi.Warehouse[]>(
     '/inventory/warehouses',
+    options,
   );
 }
 
@@ -191,12 +192,10 @@ export async function createInboundApi(data: {
 }
 
 /** 分页查询库存余额 */
-export async function getBalanceListApi(
-  params?: InventoryApi.BalanceListParams,
-) {
+export async function getBalanceListApi(params?: InventoryApi.BalanceListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<InventoryApi.InventoryBalance>>(
     '/inventory/balances',
-    { params },
+    { ...options, params },
   );
 }
 
@@ -228,12 +227,10 @@ export async function getBalanceStatusLogsApi(
 }
 
 /** 分页查询库存流水 */
-export async function getTransactionListApi(
-  params?: InventoryApi.TransactionListParams,
-) {
+export async function getTransactionListApi(params?: InventoryApi.TransactionListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<InventoryApi.InventoryTransaction>>(
     '/inventory/transactions',
-    { params },
+    { ...options, params },
   );
 }
 
@@ -257,9 +254,9 @@ export async function createFifoOutboundApi(data: {
 }
 
 /** 查询库存有效期预警 */
-export async function getExpiryAlertsApi(days: number = 30) {
+export async function getExpiryAlertsApi(days: number = 30, options?: { silent?: boolean }) {
   return requestClient.get<InventoryApi.ExpiryAlert[]>(
     '/inventory/expiry-alerts',
-    { params: { days } },
+    { ...options, params: { days } },
   );
 }

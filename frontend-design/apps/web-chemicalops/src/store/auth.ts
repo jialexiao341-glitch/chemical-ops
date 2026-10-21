@@ -12,6 +12,7 @@ import { defineStore } from 'pinia';
 
 import { getCurrentUserApi, loginApi, logoutApi } from '#/api';
 import { $t } from '#/locales';
+import { clearLookupCache } from '#/utils/lookup-state';
 
 /**
  * 把后端 CurrentUser 转换为 vben 的 BasicUserInfo。
@@ -64,14 +65,11 @@ export const useAuthStore = defineStore('auth', () => {
       });
 
       if (accessToken) {
+        clearLookupCache();
         accessStore.setAccessToken(accessToken);
 
         // 后端没有独立的权限码接口，角色与权限都来自 /auth/me
-        const currentUser = await getCurrentUserApi();
-        userInfo = toUserInfo(currentUser);
-
-        userStore.setUserInfo(userInfo);
-        accessStore.setAccessCodes(currentUser.permission_codes ?? []);
+        userInfo = await fetchUserInfo();
 
         if (accessStore.loginExpired) {
           accessStore.setLoginExpired(false);
@@ -108,6 +106,7 @@ export const useAuthStore = defineStore('auth', () => {
         // 服务端不可用或令牌已撤销时，仍需清理本地登录状态。
       }
     }
+    clearLookupCache();
     resetAllStores();
     accessStore.setLoginExpired(false);
 
@@ -125,11 +124,16 @@ export const useAuthStore = defineStore('auth', () => {
    * 刷新当前用户信息与权限码。用于刷新页面后恢复登录态。
    */
   async function fetchUserInfo() {
-    const currentUser = await getCurrentUserApi();
-    const userInfo = toUserInfo(currentUser);
-    userStore.setUserInfo(userInfo);
-    accessStore.setAccessCodes(currentUser.permission_codes ?? []);
-    return userInfo;
+    try {
+      const currentUser = await getCurrentUserApi();
+      const userInfo = toUserInfo(currentUser);
+      userStore.setUserInfo(userInfo);
+      accessStore.setAccessCodes(currentUser.permission_codes ?? []);
+      return userInfo;
+    } catch (error) {
+      await logout(false, false);
+      throw error;
+    }
   }
 
   function $reset() {

@@ -40,8 +40,9 @@ export namespace ChemicalApi {
 }
 
 /** 分页查询化学品 */
-export async function getChemicalListApi(params?: ChemicalApi.ListParams) {
+export async function getChemicalListApi(params?: ChemicalApi.ListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<ChemicalApi.Chemical>>('/chemicals', {
+    ...options,
     params,
   });
 }

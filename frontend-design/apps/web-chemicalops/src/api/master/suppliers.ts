@@ -45,8 +45,9 @@ export namespace SupplierApi {
 }
 
 /** 分页查询供应商 */
-export async function getSupplierListApi(params?: SupplierApi.ListParams) {
+export async function getSupplierListApi(params?: SupplierApi.ListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<SupplierApi.Supplier>>('/suppliers', {
+    ...options,
     params,
   });
 }

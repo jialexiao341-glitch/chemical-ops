@@ -24,55 +24,55 @@ const warehouseFeatureProbes: ScopedFeatureProbe[] = [
     read: 'warehouse.inventory.return.read',
     writes: ['warehouse.inventory.return.write', 'warehouse.inventory.return.approve'],
     hasVisibleData: async () =>
-      (await getInventoryReturnsApi({ page: 1, page_size: 1 })).total > 0,
+      (await getInventoryReturnsApi({ page: 1, page_size: 1 }, { silent: true })).total > 0,
   },
   {
     path: '/warehouse/deliveries',
     read: 'warehouse.deliveries.read',
     writes: ['warehouse.deliveries.write'],
     hasVisibleData: async () =>
-      (await getDeliveryListApi({ page: 1, page_size: 1 })).total > 0,
+      (await getDeliveryListApi({ page: 1, page_size: 1 }, { silent: true })).total > 0,
   },
   {
     path: '/warehouse/inventory',
     read: 'warehouse.inventory.read',
     writes: ['warehouse.inventory.write'],
     hasVisibleData: async () =>
-      (await getBalanceListApi({ page: 1, page_size: 1 })).total > 0,
+      (await getBalanceListApi({ page: 1, page_size: 1 }, { silent: true })).total > 0,
   },
   {
     path: '/warehouse/transactions',
     read: 'warehouse.inventory.read',
     writes: ['warehouse.inventory.write'],
     hasVisibleData: async () =>
-      (await getTransactionListApi({ page: 1, page_size: 1 })).total > 0,
+      (await getTransactionListApi({ page: 1, page_size: 1 }, { silent: true })).total > 0,
   },
   {
     path: '/warehouse/expiry-alerts',
     read: 'warehouse.inventory.expiry.read',
     writes: [],
-    hasVisibleData: async () => (await getExpiryAlertsApi()).length > 0,
+    hasVisibleData: async () => (await getExpiryAlertsApi(30, { silent: true })).length > 0,
   },
   {
     path: '/warehouse/issue-requests',
     read: 'warehouse.inventory.issue.read',
     writes: ['warehouse.inventory.issue.write', 'warehouse.inventory.issue.approve'],
     hasVisibleData: async () =>
-      (await getIssueListApi({ page: 1, page_size: 1 })).total > 0,
+      (await getIssueListApi({ page: 1, page_size: 1 }, { silent: true })).total > 0,
   },
   {
     path: '/warehouse/transfers',
     read: 'warehouse.inventory.transfer.read',
     writes: ['warehouse.inventory.transfer.write', 'warehouse.inventory.transfer.approve'],
     hasVisibleData: async () =>
-      (await getTransferListApi({ page: 1, page_size: 1 })).total > 0,
+      (await getTransferListApi({ page: 1, page_size: 1 }, { silent: true })).total > 0,
   },
   {
     path: '/warehouse/stocktakes',
     read: 'warehouse.inventory.stocktake.read',
     writes: ['warehouse.inventory.stocktake.write', 'warehouse.inventory.stocktake.approve'],
     hasVisibleData: async () =>
-      (await getStocktakeListApi({ page: 1, page_size: 1 })).total > 0,
+      (await getStocktakeListApi({ page: 1, page_size: 1 }, { silent: true })).total > 0,
   },
 ];
 

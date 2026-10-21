@@ -75,8 +75,9 @@ export namespace DeliveryApi {
 }
 
 /** 分页查询到货单 */
-export async function getDeliveryListApi(params?: DeliveryApi.ListParams) {
+export async function getDeliveryListApi(params?: DeliveryApi.ListParams, options?: { silent?: boolean }) {
   return requestClient.get<PageResult<DeliveryApi.Delivery>>('/deliveries', {
+    ...options,
     params,
   });
 }

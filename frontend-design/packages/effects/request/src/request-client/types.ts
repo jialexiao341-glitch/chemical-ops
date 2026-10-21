@@ -6,6 +6,8 @@ import type {
 } from 'axios';
 
 type ExtendOptions<T = any> = {
+  /** 调用方自行展示错误时，禁止全局 toast。401 认证处理仍执行。 */
+  silent?: boolean;
   /**
    * 参数序列化方式。预置的有
    * - brackets: ids[]=1&ids[]=2&ids[]=3

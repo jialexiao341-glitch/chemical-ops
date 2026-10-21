@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import { fetchAllPages } from '#/utils/pagination';
 import type { PurchaseRequestApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
@@ -119,11 +120,11 @@ const itemColumns = [
     field: 'product_id',
     label: '关联产品',
     options: async () => {
-      const res = await getProductListApi({
-        page: 1,
+      const res = await fetchAllPages((page) => getProductListApi({
+        page,
         page_size: 100,
         status: 'ACTIVE',
-      });
+      }));
       return res.items.map((item) => ({
         label: item.product_name,
         value: item.id,
