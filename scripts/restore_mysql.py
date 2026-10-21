@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import mmap
 import os
 import re
 from pathlib import Path
@@ -34,12 +35,15 @@ def main() -> int:
         parser.error("目标数据库名称只允许字母、数字和下划线")
     if args.database == settings.mysql_database and not args.allow_configured_target:
         parser.error("隔离恢复不能使用当前配置库；正式恢复须显式 --allow-configured-target")
-    # Logical backups produced by backup_mysql omit CREATE DATABASE/USE. Reject
-    # redirects even inside MySQL executable comments before opening a client.
-    with args.backup.open(encoding="utf-8-sig", errors="replace") as source:
-        for line in source:
-            if re.search(r"\b(?:USE\s+|(?:CREATE|DROP|ALTER)\s+DATABASE\b)", line, re.I):
-                parser.error("备份包含数据库切换或数据库级 DDL；请使用单库备份")
+    # Logical backups produced by backup_mysql omit CREATE DATABASE/USE. Scan
+    # across line breaks (including executable comments) without loading a large
+    # dump into Python memory before opening a client.
+    redirect_pattern = re.compile(rb"\b(?:USE\s+|(?:CREATE|DROP|ALTER)\s+DATABASE\b)", re.I)
+    with args.backup.open("rb") as source:
+        if args.backup.stat().st_size:
+            with mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as dump:
+                if redirect_pattern.search(dump):
+                    parser.error("备份包含数据库切换或数据库级 DDL；请使用单库备份")
     mysql = os.environ.get("MYSQL_CLIENT_PATH") or shutil.which("mysql")
     if not mysql:
         print("mysql 客户端未安装或不在 PATH 中", file=sys.stderr)
