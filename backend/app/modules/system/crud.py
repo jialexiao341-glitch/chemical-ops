@@ -1,9 +1,42 @@
 """系统管理模块的数据持久化操作。"""
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
 
 from app.modules.system.model import Department, Permission, Role, RolePermission, User, UserRole
+from app.core.observability import request_scope_context
+
+
+def _invalidate_access_cache(db: Session, *args) -> None:
+    db.info.pop("request_access_cache", None)
+
+
+for _event in ("after_flush", "after_commit", "after_rollback", "after_soft_rollback"):
+    event.listen(Session, _event, _invalidate_access_cache)
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _invalidate_access_cache_on_write(state):
+    if state.is_insert or state.is_update or state.is_delete:
+        _invalidate_access_cache(state.session)
+
+
+def _request_codes(db: Session, user_id: int, kind: str, query) -> list[str]:
+    # 请求令牌由中间件生成，不能用客户端可复用的 X-Request-ID 作为缓存边界。
+    scope = request_scope_context.get()
+    if scope is None:
+        return list(db.scalars(query).all())
+    if any(isinstance(entity, (Role, Permission, UserRole, RolePermission))
+           for entity in (*db.new, *db.dirty, *db.deleted)):
+        db.flush()
+    cache_scope, cache = db.info.get("request_access_cache", (None, {}))
+    if cache_scope is not scope:
+        cache = {}
+        db.info["request_access_cache"] = (scope, cache)
+    key = (user_id, kind)
+    if key not in cache:
+        cache[key] = tuple(db.scalars(query).all())
+    return list(cache[key])
 
 
 def get_user(db: Session, user_id: int) -> User | None:
@@ -125,27 +158,23 @@ def get_user_role_ids(db: Session, user_id: int) -> list[int]:
 def get_user_role_codes(db: Session, user_id: int) -> list[str]:
     """查询用户当前绑定的角色编码。"""
 
-    return list(
-        db.scalars(
+    return _request_codes(db, user_id, "roles",
             select(Role.role_code)
             .join(UserRole, UserRole.role_id == Role.id)
             .where(UserRole.user_id == user_id, Role.status == "ACTIVE")
-        ).all()
     )
 
 
 def get_user_permission_codes(db: Session, user_id: int) -> list[str]:
     """查询用户通过角色获得的全部有效权限编码。"""
 
-    return list(
-        db.scalars(
+    return _request_codes(db, user_id, "permissions",
             select(Permission.permission_code)
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
             .join(Role, Role.id == RolePermission.role_id)
             .where(UserRole.user_id == user_id, Role.status == "ACTIVE")
             .distinct()
-        ).all()
     )
 
 

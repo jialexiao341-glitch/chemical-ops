@@ -7,6 +7,7 @@ from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.models.base import Base
+from app.core.observability import request_client_context
 
 
 class AuditLog(Base):
@@ -40,6 +41,7 @@ def add_audit_log(
 ) -> AuditLog:
     """向当前事务追加一条审计日志，不单独提交事务。"""
 
+    ip_address, user_agent = request_client_context.get()
     log = AuditLog(
         actor_id=actor_id,
         action_type=action_type,
@@ -47,6 +49,8 @@ def add_audit_log(
         resource_id=resource_id,
         request_summary=request_summary,
         result_status=result_status,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
     db.add(log)
     return log

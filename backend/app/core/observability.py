@@ -20,6 +20,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 request_id_context: ContextVar[str] = ContextVar("request_id", default="-")
 trace_id_context: ContextVar[str] = ContextVar("trace_id", default="-")
+request_client_context: ContextVar[tuple[str | None, str | None]] = ContextVar("request_client", default=(None, None))
+request_scope_context: ContextVar[object | None] = ContextVar("request_scope", default=None)
 
 
 def _incoming_id(value: str | None) -> str:
@@ -189,6 +191,10 @@ class RequestContextMiddleware:
         trace_id = _incoming_id(current_trace_id() or headers.get("x-trace-id") or request_id)
         request_token = request_id_context.set(request_id)
         trace_token = trace_id_context.set(trace_id)
+        client = scope.get("client")
+        client_token = request_client_context.set((str(client[0])[:45] if client else None,
+                                                   headers.get("user-agent", "")[:500] or None))
+        scope_token = request_scope_context.set(object())
         scope.setdefault("state", {})
         scope["state"]["request_id"] = request_id
         scope["state"]["trace_id"] = trace_id
@@ -218,6 +224,8 @@ class RequestContextMiddleware:
             logger.log(level, "HTTP request completed", extra={"event": "http_request", "duration_ms": round(duration * 1000, 2), "status_code": status_code, "method": scope.get("method", "UNKNOWN"), "path": route})
             request_id_context.reset(request_token)
             trace_id_context.reset(trace_token)
+            request_client_context.reset(client_token)
+            request_scope_context.reset(scope_token)
 
 
 def log_context() -> dict[str, str]:

@@ -20,6 +20,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, engine, refresh_database_pool_metrics
 from app.core.idempotency import IdempotencyMiddleware, cleanup_expired_records
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.request_limits import RequestBodyLimitMiddleware
 from app.core.observability import JsonFormatter, RequestContextMiddleware, metrics
 from app.core.task_metrics import refresh_task_queue_metrics
 from app.core.telemetry import configure_tracing, shutdown_tracing
@@ -283,6 +284,8 @@ app = FastAPI(
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 # Keep CORS outside idempotency so replay responses receive the current request's CORS headers.
 app.add_middleware(IdempotencyMiddleware)
+app.add_middleware(RequestBodyLimitMiddleware,
+                   multipart_limit_bytes=(settings.document_max_size_mb + 1) * 1024 * 1024)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
