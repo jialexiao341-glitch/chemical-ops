@@ -282,7 +282,7 @@ function movementCharts(rows: Row[]): QueryChartPlan[] {
   return charts;
 }
 
-function overdueOrderCharts(trace: QueryTrace, rows: Row[]): QueryChartPlan[] {
+function overdueOrderCharts(rows: Row[]): QueryChartPlan[] {
   const ordersBySupplier = new Map<string, Set<string>>();
   for (const row of rows) {
     const supplier = label(row.supplier);
@@ -333,7 +333,7 @@ export function buildQueryCharts(trace?: QueryTrace): QueryChartPlan[] {
     case 'accepted_orders_finance_gaps': return financeGapCharts(rows);
     case 'supplier_quote_delivery_profile': return supplierProfileCharts(rows);
     case 'inventory_movement_trace': return movementCharts(rows);
-    case 'overdue_unfulfilled_orders': return overdueOrderCharts(trace, rows);
+    case 'overdue_unfulfilled_orders': return overdueOrderCharts(rows);
     case 'purchase_order_trace': return orderTraceCharts(rows);
     default: return genericCharts(trace, rows);
   }
