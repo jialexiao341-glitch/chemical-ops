@@ -17,13 +17,42 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.core.config import get_settings
 
 
+def _followed_by_dot(source: mmap.mmap, index: int) -> bool:
+    while index < len(source):
+        if source[index] <= 32:
+            index += 1
+            continue
+        if source[index:index + 2] == b"/*":
+            if source[index:index + 3] == b"/*!" or source[index:index + 4].upper() == b"/*M!":
+                # Executable comments can supply the qualification dot.
+                return True
+            end = source.find(b"*/", index + 2)
+            if end < 0:
+                return False
+            index = end + 2
+            continue
+        if source[index:index + 1] == b"#" or (
+            source[index:index + 2] == b"--" and (index + 2 == len(source) or source[index + 2] <= 32)
+        ):
+            end = source.find(b"\n", index + 1)
+            if end < 0:
+                return False
+            index = end + 1
+            continue
+        return source[index:index + 1] == b"."
+    return False
+
+
 def _has_database_redirect(source: mmap.mmap) -> bool:
-    """Detect database redirects while treating executable comments as SQL."""
+    """Reject database redirects and qualified identifiers in SQL dumps."""
     index = 0
     length = len(source)
     executable_comment = False
     previous: bytes | None = None
+    previous_is_identifier = False
+    identifier_dot = False
     ddl = {b"CREATE", b"DROP", b"ALTER"}
+    database_objects = {b"DATABASE", b"SCHEMA"}
 
     while index < length:
         if executable_comment and source[index:index + 2] == b"*/":
@@ -54,6 +83,12 @@ def _has_database_redirect(source: mmap.mmap) -> bool:
             index += 1
             continue
         if current in (39, 34):  # quoted string literal
+            if previous == b"USE":
+                # Quoted names after USE are rejected in all modes; double quotes
+                # may be identifiers under ANSI_QUOTES.
+                return True
+            if current == 34 and identifier_dot:
+                return True
             quote = current
             index += 1
             while index < length:
@@ -67,7 +102,12 @@ def _has_database_redirect(source: mmap.mmap) -> bool:
                         break
                 else:
                     index += 1
+            if current == 34 and _followed_by_dot(source, index):
+                # With ANSI_QUOTES enabled, this can be a schema identifier.
+                return True
             previous = None
+            previous_is_identifier = False
+            identifier_dot = False
             continue
         if current == 96:  # quoted identifier
             index += 1
@@ -81,24 +121,33 @@ def _has_database_redirect(source: mmap.mmap) -> bool:
                 else:
                     index += 1
             token = b"<IDENT>"
-        elif (65 <= current <= 90) or (97 <= current <= 122) or current in (95, 36) or 48 <= current <= 57:
+            is_identifier = True
+        elif (65 <= current <= 90) or (97 <= current <= 122) or current in (95, 36) or 48 <= current <= 57 or current >= 128:
             start = index
             index += 1
             while index < length:
                 char = source[index]
-                if (65 <= char <= 90) or (97 <= char <= 122) or (48 <= char <= 57) or char in (95, 36):
+                if (65 <= char <= 90) or (97 <= char <= 122) or (48 <= char <= 57) or char in (95, 36) or char >= 128:
                     index += 1
                 else:
                     break
             token = source[start:index].upper()
+            starts_as_number = 48 <= current <= 57
+            is_identifier = not (starts_as_number and token.isdigit())
         else:
+            identifier_dot = current == 46 and previous_is_identifier
             previous = None
+            previous_is_identifier = False
             index += 1
             continue
 
-        if previous == b"USE" or (previous in ddl and token == b"DATABASE"):
+        if identifier_dot and is_identifier:
+            return True
+        identifier_dot = False
+        if previous == b"USE" or (previous in ddl and token in database_objects):
             return True
         previous = token
+        previous_is_identifier = is_identifier
     return False
 
 
@@ -127,7 +176,7 @@ def main() -> int:
         if args.backup.stat().st_size:
             with mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as dump:
                 if _has_database_redirect(dump):
-                    parser.error("备份包含数据库切换或数据库级 DDL；请使用单库备份")
+                    parser.error("备份包含数据库切换、数据库级 DDL 或点号限定标识符；请在隔离环境核查")
     mysql = os.environ.get("MYSQL_CLIENT_PATH") or shutil.which("mysql")
     if not mysql:
         print("mysql 客户端未安装或不在 PATH 中", file=sys.stderr)
