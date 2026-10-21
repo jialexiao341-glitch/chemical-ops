@@ -265,8 +265,23 @@ def _apply_migration(connection, migration: Migration) -> None:
         _apply_idempotency_response_headers(connection)
     elif migration.version == "034":
         _apply_return_reconciliation_items(connection, migration)
+    elif migration.version == "053":
+        _apply_purchase_order_source_guard(connection, migration)
     else:
         _execute_sql_file(connection, migration)
+
+
+def _apply_purchase_order_source_guard(connection, migration: Migration) -> None:
+    """恢复中断 DDL；唯一键已存在时不再扩大历史例外集合。"""
+    indexes = inspect(connection).get_indexes("purchase_orders")
+    if any(index["name"] == "uk_purchase_order_comparison" for index in indexes):
+        return
+    statements = [part.strip() for part in migration.path.read_text(encoding="utf-8").split(";") if part.strip()]
+    for sql in statements:
+        if "ADD COLUMN legacy_source_duplicate" in sql and _column_exists(connection, "purchase_orders", "legacy_source_duplicate"):
+            continue
+        connection.exec_driver_sql(sql)
+        connection.commit()
 
 
 def _run_backup() -> str:

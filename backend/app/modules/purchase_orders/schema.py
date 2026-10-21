@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class PurchaseOrderCreate(BaseModel):
     """根据已确认比价结果生成采购订单时提交的字段。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     comparison_id: int = Field(gt=0)
     quote_id: int = Field(gt=0)
     delivery_address: str | None = Field(default=None, max_length=500)
@@ -18,6 +20,8 @@ class PurchaseOrderCreate(BaseModel):
 
 class PurchaseOrderUpdate(BaseModel):
     """采购订单草稿允许更新的字段。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     delivery_address: str | None = Field(default=None, max_length=500)
     expected_arrival_date: date | None = None

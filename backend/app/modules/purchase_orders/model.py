@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Numeric, SmallInteger, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Computed, Date, ForeignKey, Numeric, SmallInteger, String, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,12 +14,17 @@ class PurchaseOrder(Base):
     """采购订单主单。"""
 
     __tablename__ = "purchase_orders"
-    __table_args__ = (UniqueConstraint("source_comparison_id", name="uk_purchase_order_comparison"),)
+    __table_args__ = (UniqueConstraint("source_comparison_guard", name="uk_purchase_order_comparison"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     po_no: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), nullable=False)
     source_comparison_id: Mapped[int | None] = mapped_column(ForeignKey("quote_comparisons.id"), nullable=True)
+    # 仅迁移为已履约历史重复单设置；不得加入任何 API 输入 schema。
+    legacy_source_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    source_comparison_guard: Mapped[int | None] = mapped_column(
+        Computed("CASE WHEN legacy_source_duplicate = 0 THEN source_comparison_id ELSE NULL END", persisted=True)
+    )
     source_quote_id: Mapped[int | None] = mapped_column(ForeignKey("supplier_quotes.id"), nullable=True)
     source_request_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_requests.id"), nullable=True)
     department_id: Mapped[int | None] = mapped_column(ForeignKey("sys_departments.id"), nullable=True)

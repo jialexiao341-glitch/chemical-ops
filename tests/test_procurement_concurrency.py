@@ -20,6 +20,69 @@ from app.modules.purchase_orders.schema import PurchaseOrderCreate
 from app.modules.purchase_orders.service import create_order
 
 
+def test_source_guard_rejects_duplicate_new_order(db_session):
+    """即使绕过业务服务直接写库，新订单也不能复用已有来源。"""
+    import pytest
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    source = db_session.execute(text(
+        "SELECT source_comparison_id, supplier_id, buyer_id FROM purchase_orders "
+        "WHERE source_comparison_id IS NOT NULL ORDER BY id LIMIT 1"
+    )).mappings().one()
+    with pytest.raises(IntegrityError) as error, db_session.begin_nested():
+        db_session.execute(text(
+            "INSERT INTO purchase_orders (po_no, source_comparison_id, supplier_id, buyer_id) "
+            "VALUES (:po_no, :source_comparison_id, :supplier_id, :buyer_id)"
+        ), {**source, "po_no": f"GUARD-{uuid4().hex[:12]}"})
+    assert error.value.orig.args[0] == 1062
+    assert 'uk_purchase_order_comparison' in str(error.value.orig)
+
+
+def test_legacy_source_exception_has_auditable_snapshot(db_session):
+    """历史豁免逐单记录原始来源，且仍由一张普通订单占用唯一键。"""
+    from sqlalchemy import text
+
+    rows = db_session.execute(text(
+        "SELECT p.id, p.source_comparison_id, a.source_comparison_id AS original_source "
+        "FROM purchase_orders p JOIN purchase_order_source_exceptions a ON a.po_id=p.id "
+        "WHERE p.legacy_source_duplicate=1"
+    )).mappings().all()
+    assert all(row['source_comparison_id'] == row['original_source'] for row in rows)
+    for row in rows:
+        assert db_session.scalar(text(
+            "SELECT COUNT(*) FROM purchase_orders WHERE source_comparison_guard=:source"
+        ), {"source": row['original_source']}) == 1
+
+
+def test_source_exception_cannot_be_supplied_by_client():
+    import pytest
+    from pydantic import ValidationError
+    from app.modules.purchase_orders.schema import PurchaseOrderUpdate
+
+    for schema, payload in ((PurchaseOrderCreate, {"comparison_id": 1, "quote_id": 1}),
+                            (PurchaseOrderUpdate, {})):
+        with pytest.raises(ValidationError):
+            schema(**payload, legacy_source_duplicate=True)
+
+
+def test_source_guard_migration_replay_does_not_expand_exceptions(db_session):
+    import importlib.util
+    import sys
+    from pathlib import Path
+    from sqlalchemy import text
+
+    path = Path(__file__).resolve().parents[1] / 'scripts/migrate_database.py'
+    spec = importlib.util.spec_from_file_location('source_guard_migration_test', path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    migration = next(m for m in module._migration_files() if m.version == '053')
+    before = db_session.execute(text('SELECT * FROM purchase_order_source_exceptions ORDER BY po_id')).all()
+    module._apply_purchase_order_source_guard(db_session.connection(), migration)
+    assert db_session.execute(text('SELECT * FROM purchase_order_source_exceptions ORDER BY po_id')).all() == before
+
+
 def test_mysql_concurrent_selection_and_order_creation(db_engine):
     suffix = uuid4().hex[:12]
     request_id = rfq_id = comparison_id = None
