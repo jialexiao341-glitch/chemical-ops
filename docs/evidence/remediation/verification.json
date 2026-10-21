@@ -1,0 +1,23 @@
+{
+  "backend": {
+    "passed": 973,
+    "skipped": 10,
+    "duration_seconds": 138.22,
+    "skip_reasons": {
+      "redis_explicit_url": 8,
+      "real_minio_explicit_flag": 1,
+      "live_worker_exercise": 1
+    }
+  },
+  "frontend": {
+    "files": 9,
+    "passed": 38,
+    "typecheck": "passed"
+  },
+  "mysql_concurrency": "two separate sessions: one selection and one PO succeed; other requests receive duplicate conflict",
+  "browser_acceptance": "not run",
+  "live_llm": "not run",
+  "remote_ci": "not run",
+  "bandit": "not installed",
+  "git_diff_check": "passed"
+}
