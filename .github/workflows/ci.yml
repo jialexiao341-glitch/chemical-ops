@@ -131,6 +131,9 @@ jobs:
       - name: Type check
         working-directory: frontend-design/apps/web-chemicalops
         run: pnpm exec vue-tsc --noEmit --skipLibCheck
+      - name: Frontend unit tests
+        working-directory: frontend-design
+        run: pnpm exec vitest run --dom apps/web-chemicalops/src
       - name: Build frontend
         working-directory: frontend-design
         run: pnpm build:chemicalops
