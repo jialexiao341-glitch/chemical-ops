@@ -14,6 +14,7 @@ from app.core.auth import get_current_user
 from app.core.db import get_db
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
 from app.modules.ai import agent_tools as tools
+from app.modules.ai import capabilities
 from app.modules.ai.controller import router
 from app.modules.inventory import service as inventory_service
 
@@ -34,6 +35,11 @@ def tool_db(monkeypatch):
     monkeypatch.setattr(tools, "get_user_role_codes", lambda _db, uid: roles.get(uid, []))
     monkeypatch.setattr(tools, "get_user_permission_codes", lambda _db, uid: permissions.get(uid, []))
     monkeypatch.setattr(inventory_service, "get_user_role_codes", lambda _db, uid: roles.get(uid, []))
+    # Agent runtime now builds a routing capability manifest from the same RBAC
+    # fixture; keep it isolated from production system tables.
+    monkeypatch.setattr(capabilities, "get_user_role_codes", lambda _db, uid: roles.get(uid, []))
+    monkeypatch.setattr(capabilities, "get_user_permission_codes", lambda _db, uid: permissions.get(uid, []))
+    monkeypatch.setattr(capabilities, "agent_enabled", lambda: True)
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     today = datetime.now(timezone(timedelta(hours=8))).date()
     with engine.begin() as conn:

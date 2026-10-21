@@ -280,7 +280,7 @@ def test_ai_chat_routes_business_query_to_text2sql(client: TestClient, demo_pass
     from app.modules.ai import routing
     async def understand(*args, **kwargs):
         return routing.Understanding(purpose='query', execution_mode='query', tasks=['analytics'], sub_tasks=[
-            routing.SubTask(id='t1', kind='analytics', question='统计采购订单数量')])
+            routing.SubTask(id='t1', kind='analytics', question='查询本月各供应商采购订单总金额')])
     monkeypatch.setattr(routing, 'understand', understand)
 
     calls: list[str] = []

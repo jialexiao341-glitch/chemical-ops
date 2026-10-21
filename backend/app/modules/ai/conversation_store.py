@@ -330,11 +330,10 @@ def save_pending_clarification(
     )
     memory["pending_clarification"] = pending.model_dump(mode="json")
     permission_state = permission_snapshot(db, user)
-    state.memory_state = memory
-    state.state_version = next_version
-    state.permission_snapshot = permission_state
-    state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    db.flush()
+    _write_state_values(
+        db, state, current_version=expected_version, next_version=next_version,
+        memory=memory, error="澄清状态版本冲突，请重新选择。",
+        permission_snapshot_value=permission_state)
     return pending
 
 
@@ -362,14 +361,42 @@ def load_pending_clarification(db: Session, user: User, conversation_id: int, *,
         message = "权限已变化，请重新发起原问题。"
     if message:
         clear_pending_clarification(db, user, conversation_id, state_id=pending.state_id,
-                                    expected_state_version=state.state_version)
+                                    expected_state_version=state.state_version, allow_stale_version=True)
         raise BusinessValidationError(message)
     return pending
 
 
+def _write_state_values(db: Session, state: AIConversationState, *, current_version: int,
+                        next_version: int, memory: dict, error: str,
+                        permission_snapshot_value: dict | None = None) -> int:
+    """以 state_version 为 CAS 写入状态；显式写时间避免不同方言的 onupdate 差异。"""
+    values = {
+        "memory_state": memory,
+        "state_version": next_version,
+        "updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
+    }
+    if permission_snapshot_value is not None:
+        values["permission_snapshot"] = permission_snapshot_value
+    count = db.execute(update(AIConversationState).where(
+        AIConversationState.id == state.id,
+        AIConversationState.state_version == current_version,
+    ).values(**values)).rowcount
+    if count != 1:
+        raise BusinessValidationError(error)
+    db.expire(state)
+    return next_version
+
+
+def _clear_pending_values(db: Session, state: AIConversationState, memory: dict, *, current_version: int,
+                          next_version: int, error: str) -> int:
+    return _write_state_values(
+        db, state, current_version=current_version, next_version=next_version,
+        memory=memory, error=error)
+
+
 def clear_pending_clarification(
     db: Session, user: User, conversation_id: int, *, state_id: str | None = None,
-    expected_state_version: int | None = None,
+    expected_state_version: int | None = None, allow_stale_version: bool = False,
 ) -> int:
     """以状态 ID 和版本 CAS 清除 pending，保留同一 JSON 中的其他业务状态。"""
     conversation = get_owned_conversation(db, user, conversation_id)
@@ -390,22 +417,18 @@ def clear_pending_clarification(
         if state_id is not None or expected_state_version is not None:
             raise BusinessValidationError("澄清状态无效或已变化，请重新发起原问题。") from None
         memory.pop("pending_clarification", None)
-        state.memory_state = memory
-        state.state_version = current_version + 1
-        state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        db.flush()
-        return current_version + 1
+        return _clear_pending_values(
+            db, state, memory, current_version=current_version, next_version=current_version + 1,
+            error="澄清状态版本冲突，请重新选择。")
     if ((state_id is not None and pending.state_id != state_id)
             or (expected_state_version is not None and current_version != expected_state_version)
-            or pending.state_version != current_version):
+            or (pending.state_version != current_version and not allow_stale_version)):
         raise BusinessValidationError("澄清状态版本冲突，请重新选择。")
     memory.pop("pending_clarification", None)
     next_version = current_version + 1
-    state.memory_state = memory
-    state.state_version = next_version
-    state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    db.flush()
-    return next_version
+    return _clear_pending_values(
+        db, state, memory, current_version=current_version, next_version=next_version,
+        error="澄清状态版本冲突，请重新选择。")
 
 
 def original_question_for_pending(db: Session, user: User, conversation_id: int, pending: PendingClarification) -> str | None:
@@ -427,10 +450,19 @@ def save_batch_state(db: Session, user: User, conversation: AIConversation, stat
     if state is None:
         state = AIConversationState(conversation_id=conversation.id, thread_id=f"ai:{user.id}:{conversation.id}")
         db.add(state)
-    state.memory_state = {**(state.memory_state or {}), "batch_tasks": tasks}
+    memory = {**(state.memory_state or {}), "batch_tasks": tasks}
+    next_version = (state.state_version or 0) + 1
+    if isinstance(memory.get("pending_clarification"), dict):
+        try:
+            pending = PendingClarification.model_validate(memory["pending_clarification"])
+            memory["pending_clarification"] = pending.model_copy(update={"state_version": next_version}).model_dump(mode="json")
+        except (TypeError, ValueError):
+            memory.pop("pending_clarification", None)
+    state.memory_state = memory
     state.query_plan = None  # 多计划不能伪装成最后一项单计划。
     state.permission_snapshot = permission_snapshot(db, user)
-    state.state_version = (state.state_version or 0) + 1
+    state.state_version = next_version
+    state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def save_order_trace_state(db: Session, user: User, thread_id: str | None, trace: AIQueryTrace) -> None:

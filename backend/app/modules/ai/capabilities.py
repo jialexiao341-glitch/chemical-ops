@@ -4,12 +4,12 @@ import hashlib
 import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.modules.ai.agent_tools import TOOLS
 from app.modules.ai.catalog import CATALOG, DatasetSpec
+from app.modules.ai.schema import CapabilityManifest
 from app.modules.inventory.service import accessible_warehouse_ids
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
@@ -32,19 +32,6 @@ _COMPOSITE_DATASET_PERMISSIONS: dict[str, frozenset[str]] = {
         "warehouse.deliveries.read", "operations.exceptions.read",
     }),
 }
-
-
-class CapabilityManifest(BaseModel):
-    """不含用户身份、授权主体详情、业务记录或数据库资源 ID。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    contract_version: str
-    digest: str
-    agent_tools: list[dict[str, Any]]
-    analytics_datasets: list[dict[str, Any]]
-    document_search: bool
-    resource_scopes: list[str]
 
 
 def agent_enabled() -> bool:

@@ -92,7 +92,7 @@ def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monk
     from types import SimpleNamespace
     from datetime import datetime, timezone
     database = _Database()
-    product = SimpleNamespace(id=9, product_name="乙醇", status="ACTIVE", version_no=3)
+    product = SimpleNamespace(id=9, product_name="乙醇", status="ACTIVE", version_no=3, unit_id=3)
     database.get = lambda _model, _id: product
     database.added = []
     database.add = database.added.append

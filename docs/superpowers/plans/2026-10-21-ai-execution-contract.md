@@ -50,27 +50,27 @@
   - 修改 `backend/app/modules/ai/routing.py` 和 `backend/app/modules/ai/controller.py`：将 manifest 作为受信路由上下文传入 `/ai/route` 和相应理解入口；不得让客户端提交 manifest。
   - 先运行新增测试并确认失败，再运行 `cd backend; pytest tests/test_ai_capability_manifest.py tests/test_ai_routing.py -q`。
 
-- [ ] **Task 3 — 统一聊天、路由凭据与 Agent 的分派语义**
+- [x] **Task 3 — 统一聊天、路由凭据与 Agent 的分派语义**
   - 修改 `backend/app/modules/ai/service.py::_classify_chat_intent` 及同步/流式聊天分派：只根据已经校验的 `Understanding.execution_mode` 选择 batch、Agent、Text2SQL、document 或非查询处理；移除按 `sub_tasks` 数量隐式推断的分派。
   - 修改 `backend/app/modules/ai/agent_runtime.py`：有效 route token 的 Agent 启动复用签发的理解结果；无 token 入口通过相同 manifest、Schema 和校验器重新理解；模式不是 `agent` 时不创建/启动 Agent 任务。
   - 修改 `backend/app/modules/ai/multi_intent.py`：批次入口只接受已验证的 batch 契约，不将不匹配输入裁剪成局部子集；保留成功项、候选版本、失败项重试和 `BatchChoice` 的现有行为。
   - 补充 `tests/test_ai_service.py`、`tests/test_agent_runtime.py`、`tests/test_ai_multi_intent.py`：同一理解结果经 route token、聊天及 Agent 入口时选择相同策略；模式不匹配、票据不匹配或过期时零工具调用；既有只读权限拒绝仍有效。
   - 每个新增用例先确认失败，再按最小修改使其通过；运行以上三组测试，并检查 Text2SQL 和 document 的单任务路径。
 
-- [ ] **Task 4 — 实现版本化待澄清状态**
+- [x] **Task 4 — 实现版本化待澄清状态**
   - 在 `backend/app/modules/ai/schema.py` 定义 `PendingClarification` 严格结构；字段包括随机 state ID、原问题摘要、待回答槽位、澄清文本、有限选项、创建/过期时间、权限摘要、状态版本与契约版本，不重复保存原问题明文。为避免从问题文本猜槽位，在路由输出契约增加可选 `clarification_slot` 和 `clarification_options`；只有带稳定槽位和 2–5 项有限选项的澄清才持久化。
   - 修改 `backend/app/modules/ai/conversation_store.py`：新增读取、创建/替换、消费和清除 pending 的集中方法；仅对所属会话操作，锁定状态行；以 `state_version` 条件更新检测并发冲突，不覆盖更高版本状态。复用 `AIConversationState.memory_state`，保留同一 JSON 中 `batch_tasks` 等其他键。
   - 修改 `backend/app/modules/ai/service.py` 及必要的 `backend/app/modules/ai/controller.py` 调用点：处理回答时先校验会话所有权、当前权限、state ID/version、契约版本和有效期；答案必须匹配保存选项，之后把原问题、待回答槽位和答案绑定后重新路由。非法答案继续澄清，无效/过期/切换/取消则不执行旧计划并清理状态。`/ai/route` 仅签发含待澄清状态 ID 的短期票据，不提前消费 pending；实际聊天或 Agent 任务接收时以状态版本原子消费。
   - 新增 `tests/test_ai_clarification_state.py`：跨请求续答、只绑定指定槽位、无效回答保持 pending、切换/取消/过期清理、错用户/错会话拒绝、并发迟到写入不覆盖、旧会话无 pending 可继续。
   - 先验证生命周期测试失败，再通过实现；运行新增测试及 `tests/test_batch_continuation.py`，确认澄清状态不合并或破坏批次和 Agent 候选状态。
 
-- [ ] **Task 5 — 清理错误恢复和旧凭据兼容路径**
+- [x] **Task 5 — 清理错误恢复和旧凭据兼容路径**
   - 在 `backend/app/modules/ai/routing.py` 为 route token 加入契约版本；旧版本 token、签名无效、绑定上下文不符统一要求重新识别，不尝试推断缺失 `execution_mode`。
   - 修改 `backend/app/modules/ai/controller.py`、`backend/app/modules/ai/agent_runtime.py`：错误模式、manifest 不包含目标能力、权限执行期被撤销时不启动工具，返回一致的拒绝/澄清结果；可操作错误避免暴露内部工具或授权主体详情。
   - 保持 `backend/app/modules/ai/conversation_store.py` 对会话删除的级联清理语义；pending 与消息同一会话生命周期，删除会话后无残留可续用状态。
   - 添加/更新兼容测试覆盖旧会话 JSON、旧任务 payload、旧 route token、过期 token、执行期间撤权、删除会话、草稿确认不被路由模式绕过；运行 `tests/test_ai_query_isolation.py`、`tests/test_ai_drafts.py`、`tests/test_ai_task_management.py`（若本地隔离数据库可用）。
 
-- [ ] **Task 6 — 冻结评测、前端澄清路径与全量验收**
+- [ ] **Task 6 — 冻结评测、前端澄清路径与全量验收** (in progress)
   - 更新现有离线路由评测题集及 `scripts/evaluate_ai.py`（若其契约断言确需调整），加入库存、报价、同品组合、多产品、analytics、document、澄清、unsupported、采购草稿和混合写读请求的代表样本；样本同时断言 `execution_mode`、任务结构和不可执行请求零工具调用。
   - 运行 `cd backend; pytest tests/test_ai_routing.py tests/test_ai_service.py tests/test_ai_multi_intent.py tests/test_agent_runtime.py tests/test_ai_clarification_state.py tests/test_ai_capability_manifest.py -q`、既有兼容测试，以及 `python scripts/evaluate_ai.py`。记录实际数据库配置；超时/跳过按未通过或未验证报告，不重标为通过。
   - 在浏览器沿用 `frontend-design/apps/web-chemicalops/src/views/ai/workspace/index.vue` 现有聊天模板走查澄清、回答、取消及 token 流程；只有发现前端请求契约确需改动时，才按现有模板最小修改该组件和对应测试。记录浏览器是否实际验收。

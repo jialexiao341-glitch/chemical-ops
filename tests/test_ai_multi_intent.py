@@ -9,7 +9,7 @@ from app.core.config import Settings
 from app.core.errors import BusinessValidationError
 from app.modules.ai import multi_intent as multi, routing, service, text2sql
 from app.modules.ai.model import AIConversationState
-from app.modules.ai.schema import BatchStatus, TaskStatus
+from app.modules.ai.schema import BatchStatus, SubTask, TaskStatus
 from app.modules.system.model import User
 from tests.test_agent_read_tools import tool_db
 from tests.test_agent_runtime import USER
@@ -18,9 +18,10 @@ from tests.test_rbac_separation import as_demo_role
 
 def decision(*tasks):
     """构造批次理解；单项执行测试直接调用低层执行器，因此单项样本不经过路由校验。"""
+    subtasks = [SubTask.model_validate(task) for task in tasks]
     values = {"purpose": "query", "execution_mode": "batch",
-              "tasks": list(dict.fromkeys(task["kind"] for task in tasks)), "sub_tasks": tasks}
-    if len(tasks) < 2:
+              "tasks": list(dict.fromkeys(task.kind for task in subtasks)), "sub_tasks": subtasks}
+    if len(subtasks) < 2:
         return routing.Understanding.model_construct(**values)
     return routing.Understanding(**values)
 

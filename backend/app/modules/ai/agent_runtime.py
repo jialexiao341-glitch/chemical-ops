@@ -415,11 +415,52 @@ def _decision_messages(messages: list[str], *, history_count: int = 6,
     return [*(message[:old_message_limit] for message in recent[:-1]), recent[-1]]
 
 
+PLANNER_RESULT_ROW_LIMIT = 10
+
+_AGENT_TASK_TOOL = {
+    "inventory": "inventory.query_available",
+    "quotes": "supplier_quotes.compare",
+}
+
+
+def _ensure_agent_capabilities(decision: Understanding, catalog: set[str]) -> None:
+    """在创建/启动任务前拒绝当前账号没有对应工具的 Agent 目标。"""
+    required = {_AGENT_TASK_TOOL[task] for task in decision.tasks if task in _AGENT_TASK_TOOL}
+    if required - catalog:
+        raise AuthorizationError("当前账号没有执行该库存或报价查询所需的读取权限")
+
+
+def _planner_view(entry: dict) -> dict:
+    """给规划器一个可解释的工具结果摘要；完整证据仍保留在任务轨迹中。"""
+    result = entry.get("result")
+    if entry.get("action") != "call_tool" or not isinstance(result, dict):
+        return entry
+    rows = result.get("rows")
+    if not isinstance(rows, list) or len(rows) <= PLANNER_RESULT_ROW_LIMIT:
+        return entry
+    compact = {
+        **entry,
+        "result": {
+            **result,
+            "rows": rows[:PLANNER_RESULT_ROW_LIMIT],
+            "planner_truncated": True,
+            "planner_note": (
+                f"仅向规划器展示前 {PLANNER_RESULT_ROW_LIMIT} 条明细；"
+                "完整结果已保存在任务证据中，不要为获取同一批数据重复调用工具。"
+            ),
+        },
+    }
+    sources = result.get("sources")
+    if isinstance(sources, list) and len(sources) > PLANNER_RESULT_ROW_LIMIT:
+        compact["result"]["sources"] = sources[:PLANNER_RESULT_ROW_LIMIT]
+    return compact
+
+
 async def _decide(state: RunState, catalog: list[dict], settings: Settings):
     """复用模型 HTTP 超时/错误处理，严格解析一种下一步动作，不解析自由文本指令。"""
     context = json.dumps({"messages": _decision_messages(state.messages),
         "tools": [{k: item[k] for k in ("name", "description", "input_schema")} for item in catalog],
-        "current_turn_steps": state.trace[state.turn_start:],
+        "current_turn_steps": [_planner_view(entry) for entry in state.trace[state.turn_start:]],
         "recent_task_memory": state.memory_state,
         "workflow": state.workflow.model_dump(mode="json"),
         "selected_product_id": state.selected_product, "selected_rfq_item_id": state.selected_rfq_item,
@@ -648,6 +689,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             current.memory_state["understanding"] = decision.model_dump(mode="json")
             current.memory_state["route_turn"] = len(current.messages)
             current.memory_state.pop("understanding_applied_turn", None)
+            if decision.route == "agent":
+                _ensure_agent_capabilities(decision, {item["name"] for item in catalog})
             if decision.route != "agent":
                 if decision.route == "cancel":
                     current.status, current.reply = "CANCELLED", "已取消本次查询。"
@@ -856,6 +899,7 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
         decision = routing.read_ticket(data.route_token, user.id, data.question, conversation_id)
         if decision.route != "agent":
             raise BusinessValidationError("该请求不是库存或报价任务，请重新识别请求")
+        _ensure_agent_capabilities(decision, catalog)
         if pending is not None:
             conversation_store.clear_pending_clarification(
                 db, user, conversation_id, state_id=pending.state_id,
@@ -944,6 +988,7 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
         decision = routing.read_ticket(data.route_token, user.id, data.question, cid)
         if decision.route != "agent":
             raise BusinessValidationError("该续答不是库存或报价任务，请重新识别请求")
+        _ensure_agent_capabilities(decision, {item["name"] for item in tools.list_tools(db, user)})
         memory["understanding"] = decision.model_dump(mode="json")
         memory["route_turn"] = len(task.payload["messages"]) + 1
     if product_choice or rfq_choice or data.all_products:

@@ -30,7 +30,7 @@ def test_batch_choice_survives_reload_and_preserves_successes(monkeypatch):
     waiting = TaskResult(id='t2', kind='inventory', question='试剂库存', status=TaskStatus.WAITING_INPUT,
                         execution_plan={'slots': {'product_keyword': '试剂'}}, pending=pending)
     previous = [completed.model_dump(mode='json'), waiting.model_dump(mode='json')]
-    decision = Understanding(purpose='query', dialogue_action='continue', tasks=['inventory'], sub_tasks=[
+    decision = Understanding(purpose='query', execution_mode='batch', dialogue_action='continue', tasks=['inventory'], sub_tasks=[
         SubTask(id=item.id, kind=item.kind, question=item.question, slots=item.execution_plan['slots'])
         for item in (completed, waiting)])
     monkeypatch.setattr(multi_intent, 'history_accessible', lambda *_: True)
@@ -50,7 +50,7 @@ def test_batch_choice_survives_reload_and_preserves_successes(monkeypatch):
 
 
 def test_sync_product_tool_stage_does_not_block_event_loop(monkeypatch):
-    decision = Understanding(purpose='query', tasks=['inventory'], sub_tasks=[
+    decision = Understanding.model_construct(purpose='query', execution_mode='batch', tasks=['inventory'], sub_tasks=[
         SubTask(id='t1', kind='inventory', question='查询乙醇库存', slots={'product_keyword': '乙醇'})])
     monkeypatch.setattr(multi_intent, 'history_accessible', lambda *_: True)
     def slow_sync_stage(*_args, **_kwargs):

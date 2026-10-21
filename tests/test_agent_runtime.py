@@ -71,6 +71,66 @@ def tool(name, **arguments):
     return {"action": "call_tool", "tool": name, "arguments": arguments}
 
 
+def _large_inventory_entry(count: int = 100) -> dict:
+    rows = [
+        {"balance_id": index, "warehouse_id": 1, "warehouse_name": "测试仓库",
+         "batch_id": 1, "batch_no": f"B-{index:03d}", "expiry_date": None,
+         "unit_id": 1, "unit_name": "千克", "status": "AVAILABLE",
+         "quantity": "10.000000", "locked_quantity": "0.000000",
+         "available_quantity": "10.000000"}
+        for index in range(1, count + 1)
+    ]
+    return {
+        "step": 1, "action": "call_tool", "tool": "inventory.query_available",
+        "arguments": {"product_id": 1, "limit": count}, "status": "SUCCEEDED",
+        "result": {
+            "tool": "inventory.query_available", "product_id": 1, "product_name": "测试乙醇",
+            "warehouse_id": None, "scope": "测试范围", "total_rows": count, "truncated": False,
+            "totals": [{"unit_id": 1, "unit_name": "千克", "available_quantity": f"{count * 10}.000000"}],
+            "rows": rows, "sources": [{"resource": "inventory_balances", "record_id": index}
+                                      for index in range(1, count + 1)], "warnings": [],
+        },
+    }
+
+
+def test_planner_view_compacts_large_results_without_mutating_evidence():
+    entry = _large_inventory_entry()
+    compact = runtime._planner_view(entry)
+
+    assert len(compact["result"]["rows"]) == runtime.PLANNER_RESULT_ROW_LIMIT
+    assert len(compact["result"]["sources"]) == runtime.PLANNER_RESULT_ROW_LIMIT
+    assert compact["result"]["total_rows"] == 100
+    assert compact["result"]["planner_truncated"] is True
+    assert "完整结果已保存在任务证据中" in compact["result"]["planner_note"]
+    # 规划视图只是拷贝；完成摘要/历史证据仍读取原始轨迹。
+    assert len(entry["result"]["rows"]) == 100
+    assert "planner_truncated" not in entry["result"]
+
+
+def test_planner_context_uses_compacted_tool_view(monkeypatch):
+    captured = []
+
+    async def fake_chat(request, settings, **kwargs):
+        captured.append(json.loads(request.messages[0].content))
+        return SimpleNamespace(message=SimpleNamespace(content='{"action":"finish","evidence_steps":[1]}'))
+
+    monkeypatch.setattr(runtime.llm, "chat", fake_chat)
+    state = runtime.RunState(
+        task_id="planner-view",
+        revision=0,
+        messages=["查询全部库存明细"],
+        trace=[_large_inventory_entry()],
+        turn_start=0,
+        memory_state={"goal": {"intent": "inventory_query"}},
+        workflow=runtime.Workflow(),
+    )
+    action = asyncio.run(runtime._decide(state, [], Settings(_env_file=None, openai_api_key="test")))
+    assert action.action == "finish"
+    context = captured[0]
+    assert len(context["current_turn_steps"][0]["result"]["rows"]) == runtime.PLANNER_RESULT_ROW_LIMIT
+    assert context["current_turn_steps"][0]["result"]["total_rows"] == 100
+
+
 def start(db, question="查询测试乙醇库存"):
     """通过公开服务入口启动任务，便于核验最终数据库记录。"""
     return asyncio.run(runtime.create_task(db, USER, runtime.TaskCreate(question=question)))
@@ -468,6 +528,19 @@ def test_agent_entry_rejects_non_agent_route_before_creating_task(task_db):
 
     with pytest.raises(BusinessValidationError, match="不是库存或报价任务"):
         runtime.prepare_task(task_db, USER, runtime.TaskCreate(question="统计采购订单数量", route_token=token))
+    assert task_db.scalar(select(AIAgentTask.id)) is None
+
+
+def test_agent_entry_rejects_missing_tool_permission(task_db, monkeypatch):
+    from app.modules.ai import routing
+
+    monkeypatch.setattr(tools, "get_user_permission_codes",
+                        lambda *_args: ["master.products.read", "warehouse.inventory.read"])
+    decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=["quotes"])
+    token = routing.issue_ticket(decision, USER.id, "查询测试乙醇报价", None)
+
+    with pytest.raises(AuthorizationError, match="读取权限"):
+        runtime.prepare_task(task_db, USER, runtime.TaskCreate(question="查询测试乙醇报价", route_token=token))
     assert task_db.scalar(select(AIAgentTask.id)) is None
 
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError
 from app.modules.ai import conversation_store, schema
-from app.modules.ai.model import AIConversation, AIConversationState, AIMessage
+from app.modules.ai.model import AIAgentTask, AIConversation, AIConversationState, AIMessage
 
 
 def test_chat_answer_is_bound_to_saved_option_and_invalid_answer_keeps_state(monkeypatch):
@@ -188,6 +188,35 @@ def test_pending_state_expiry_and_permission_change_fail_closed(clarification_db
         conversation_store.load_pending_clarification(clarification_db, user, 1, now=now + timedelta(seconds=1))
 
 
+def test_batch_memory_update_preserves_pending_state_version(clarification_db):
+    user = SimpleNamespace(id=7)
+    conversation = clarification_db.scalar(select(AIConversation).where(AIConversation.id == 1))
+    decision = schema.Understanding(purpose="clarify", question="按订单还是明细统计？",
+        clarification_slot="analytics_granularity", clarification_options=["按订单数", "按订单行数"])
+    pending = conversation_store.save_pending_clarification(
+        clarification_db, user, 1, "统计采购数量", decision)
+    state = clarification_db.scalar(select(AIConversationState).where(AIConversationState.conversation_id == 1))
+    conversation_store.save_batch_state(clarification_db, user, conversation, state, [{"id": "t2"}])
+    assert state.memory_state["pending_clarification"]["state_version"] == state.state_version
+    assert conversation_store.load_pending_clarification(clarification_db, user, 1) == pending.model_copy(
+        update={"state_version": state.state_version})
+
+
+def test_stale_pending_version_is_cleaned_without_overwriting_newer_state(clarification_db):
+    user = SimpleNamespace(id=7)
+    decision = schema.Understanding(purpose="clarify", question="按订单还是明细统计？",
+        clarification_slot="analytics_granularity", clarification_options=["按订单数", "按订单行数"])
+    conversation_store.save_pending_clarification(clarification_db, user, 1, "统计采购数量", decision)
+    state = clarification_db.scalar(select(AIConversationState).where(AIConversationState.conversation_id == 1))
+    state.state_version += 1
+    state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    clarification_db.flush()
+    with pytest.raises(BusinessValidationError, match="版本已变化"):
+        conversation_store.load_pending_clarification(clarification_db, user, 1)
+    clarification_db.refresh(state)
+    assert "pending_clarification" not in state.memory_state
+
+
 def test_pending_state_is_scoped_to_owner_and_old_conversations_remain_usable(clarification_db):
     owner = SimpleNamespace(id=7)
     stranger = SimpleNamespace(id=8)
@@ -207,3 +236,23 @@ def test_corrupt_pending_state_is_removed_instead_of_masking_original_error(clar
     clarification_db.refresh(state)
     assert "pending_clarification" not in state.memory_state
     assert state.memory_state["other"] == "preserve"
+
+
+def test_deleting_conversation_removes_pending_state(clarification_db, monkeypatch):
+    from app.modules.ai import conversation_store
+
+    engine = clarification_db.get_bind()
+    AIAgentTask.__table__.create(engine)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE ai_purchase_draft_confirmations (id INTEGER PRIMARY KEY, confirmation_id VARCHAR(32) NOT NULL, user_id INTEGER NOT NULL, preview_version INTEGER NOT NULL, request_hash VARCHAR(64) NOT NULL, draft_payload JSON NOT NULL, object_versions JSON NOT NULL, evidence JSON NOT NULL, status VARCHAR(20) NOT NULL, expires_at DATETIME NOT NULL, purchase_request_id INTEGER, result JSON, created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, executed_at DATETIME)"))
+    raw = engine.raw_connection()
+    raw.create_function("json_contains", 2, lambda _document, _candidate: 0)
+    raw.close()
+    monkeypatch.setattr(conversation_store, "query_log_enabled", lambda *_: False)
+    state = clarification_db.scalar(select(AIConversationState).where(AIConversationState.conversation_id == 1))
+    state.memory_state = {"pending_clarification": {"legacy": "state"}}
+    state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    clarification_db.commit()
+
+    conversation_store.delete_conversation(clarification_db, SimpleNamespace(id=7), 1)
+    assert clarification_db.scalar(select(AIConversationState).where(AIConversationState.conversation_id == 1)) is None

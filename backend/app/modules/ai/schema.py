@@ -435,6 +435,19 @@ class Understanding(BaseModel):
                 if len(self.tasks) == 1 else "inventory_and_quotes_query" if set(self.tasks) == {"inventory", "quotes"} else "unknown")
 
 
+class CapabilityManifest(BaseModel):
+    """按当前用户权限裁剪的路由能力清单；不含业务记录或数据库资源 ID。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: str
+    digest: str
+    agent_tools: list[dict[str, Any]]
+    analytics_datasets: list[dict[str, Any]]
+    document_search: bool
+    resource_scopes: list[str]
+
+
 class PendingClarification(BaseModel):
     """仅保存原问题摘要和一个受约束的待回答字段，不重复业务问题正文。"""
 
@@ -465,6 +478,59 @@ class RouteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=2000)
     conversation_id: int | None = Field(default=None, gt=0)
+
+
+ContextObjectType = Literal[
+    "purchase_order",
+    "purchase_request",
+    "rfq",
+    "delivery",
+    "quality_acceptance",
+    "inventory_balance",
+    "finance_reconciliation",
+    "supplier",
+]
+
+
+class AIContextRef(BaseModel):
+    """页面只提交对象引用；服务端必须重新读取对象并校验权限。"""
+
+    model_config = ConfigDict(extra="forbid")
+    object_type: ContextObjectType
+    object_id: int = Field(strict=True, gt=0)
+
+
+class AIContextAskRequest(BaseModel):
+    """页面 Copilot 的问题和当前对象；不接受业务字段快照。"""
+
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=2000)
+    context: AIContextRef
+
+
+class AIContextSnapshot(BaseModel):
+    """已按当前用户权限读取的最小业务上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+    object_type: ContextObjectType
+    object_id: int = Field(strict=True, gt=0)
+    title: str
+    reference_no: str | None = None
+    status: str | None = None
+    summary: list[str] = Field(default_factory=list)
+    source_records: list[dict[str, Any]] = Field(default_factory=list)
+    suggested_questions: list[str] = Field(default_factory=list)
+
+
+class AIContextAskResponse(BaseModel):
+    """页面 Copilot 的确定性回答及来源。"""
+
+    model_config = ConfigDict(extra="forbid")
+    answer: str
+    context: AIContextSnapshot
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+    model: str = "context"
+    provider: str = "chemicalops"
 
 
 # 工具输入与输出
