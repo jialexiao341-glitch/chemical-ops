@@ -14,6 +14,7 @@ import { useAccessStore } from '@vben/stores';
 
 import { requestClient } from '#/api/request';
 import type { AiTaskStatus } from './task-status';
+import { createSseParser } from './sse-parser';
 
 export * from './agent';
 export * from './task-status';
@@ -215,8 +216,12 @@ export async function streamChatApi(
         'Content-Type': 'application/json',
       },
       method: 'POST',
-      signal: options.signal,
+      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
     });
+    if (response.status === 401) {
+      const { useAuthStore } = await import('#/store');
+      await useAuthStore().logout(false, false);
+    }
     if (!response.ok || !response.body) {
       let message = `AI 请求失败（HTTP ${response.status}）`;
       try {
@@ -231,52 +236,23 @@ export async function streamChatApi(
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
-    // 完整事件按 "\n\n" 切分，字段行以 "event:" / "data:" 开头
-    let eventName = '';
     let terminal = false;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
+    const parse = createSseParser((eventName, dataText) => {
+      let payload;
+      try { payload = JSON.parse(dataText); } catch { return; }
+      if (terminal) return;
+      if (eventName === 'delta') handlers.onDelta?.(String(payload.content ?? ''));
+      else if (eventName === 'done') { terminal = true; handlers.onDone?.(payload); }
+      else if (eventName === 'error') { terminal = true; handlers.onError?.(String(payload.message ?? 'AI 服务错误')); }
+      else if (eventName === 'progress') handlers.onProgress?.(payload);
+    });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) { parse(decoder.decode(), true); break; }
+        parse(decoder.decode(value, { stream: true }));
       }
-      buffer += decoder.decode(value, { stream: true });
-      let sepIndex = buffer.indexOf('\n\n');
-      while (sepIndex !== -1) {
-        const rawEvent = buffer.slice(0, sepIndex);
-        buffer = buffer.slice(sepIndex + 2);
-        let dataText = '';
-        for (const line of rawEvent.split('\n')) {
-          if (line.startsWith('event:')) {
-            eventName = line.slice(6).trim();
-          } else if (line.startsWith('data:')) {
-            dataText = line.slice(5).trim();
-          }
-        }
-        if (!dataText) {
-          sepIndex = buffer.indexOf('\n\n');
-          continue;
-        }
-        try {
-          const payload = JSON.parse(dataText);
-          if (eventName === 'delta') {
-            handlers.onDelta?.(String(payload.content ?? ''));
-          } else if (eventName === 'done') {
-            terminal = true;
-            handlers.onDone?.(payload);
-          } else if (eventName === 'error') {
-            terminal = true;
-            handlers.onError?.(String(payload.message ?? 'AI 服务错误'));
-          } else if (eventName === 'progress') {
-            handlers.onProgress?.(payload);
-          }
-        } catch {
-          // 单帧解析失败不中断整个流
-        }
-        eventName = '';
-        sepIndex = buffer.indexOf('\n\n');
-      }
-    }
+    } finally { reader.releaseLock(); }
     if (!terminal && !options.signal?.aborted) handlers.onError?.('响应连接已中断，请刷新会话核对已完成项。');
   } catch (error: any) {
     if (options.signal?.aborted) {
@@ -284,7 +260,7 @@ export async function streamChatApi(
       return;
     }
     handlers.onError?.(
-      error?.message === 'Failed to fetch'
+      error?.name === 'TimeoutError' ? '响应超时，请刷新会话核对结果后重试' : error?.message === 'Failed to fetch'
         ? '网络异常，请检查后端服务是否已启动'
         : String(error?.message ?? error),
     );

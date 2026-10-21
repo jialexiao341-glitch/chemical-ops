@@ -262,15 +262,16 @@ def test_overdue_delivery_query_has_safe_plan_fallback() -> None:
 
 
 def test_stream_text_chunks_are_incremental() -> None:
-    from app.modules.ai.service import _stream_text_chunks
+    from app.modules.ai.service import _stream_text_chunks, STREAM_CHUNK_SIZE
+    content = "你好，我是化运助手。" * 20
 
     async def collect() -> list[str]:
-        return [chunk async for chunk in _stream_text_chunks("你好，我是化运助手。")]
+        return [chunk async for chunk in _stream_text_chunks(content)]
 
     chunks = asyncio.run(collect())
     assert len(chunks) > 1
-    assert "".join(chunks) == "你好，我是化运助手。"
-    assert all(0 < len(chunk) <= 4 for chunk in chunks)
+    assert "".join(chunks) == content
+    assert all(0 < len(chunk) <= STREAM_CHUNK_SIZE for chunk in chunks)
 
 
 def test_ai_chat_routes_business_query_to_text2sql(client: TestClient, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:

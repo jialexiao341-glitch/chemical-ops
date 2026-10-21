@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { AgentApi, AiApi } from '#/api';
 
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -10,6 +10,7 @@ import { useAccess } from '@vben/access';
 import { Button, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
 
 import {
+  cancelAgentTaskApi,
   deleteConversationApi,
   createAgentChatApi, continueAgentChatApi, continueAgentTaskApi, getAgentTaskApi,
   confirmPurchaseRequestDraftApi,
@@ -29,6 +30,7 @@ import QueryEvidence from './query-evidence.vue';
 import AgentChatTask from './agent-chat-task.vue';
 import AgentSourcePopover from './agent-source-popover.vue';
 import { answerSources } from './answer-sources';
+import { createAgentPoller } from './agent-polling';
 import { acceptTask, primaryTaskResults } from './task-view';
 import assistantLogo from './chemicalops-ai.svg';
 
@@ -108,6 +110,8 @@ const activeConversationId = ref<number>();
 const messages = ref<UiMessage[]>([]);
 const inputText = ref('');
 const sending = ref(false);
+const stopping = ref(false);
+const canStop = computed(() => Boolean(streamAbort.value || currentAgent.value?.status === 'RUNNING'));
 const slashMenuOpen = ref(false);
 const slashMenuActiveIndex = ref(0);
 const historyLoading = ref(false);
@@ -209,25 +213,40 @@ function batchToolViews(item: UiMessage): Array<{ question: string; task: AgentA
 const agentMode = ref(false);
 let chatEpoch = 0;
 const agentReads = new Map<string, number>();
-let agentTimer: ReturnType<typeof setTimeout> | undefined;
-let streamAbort: AbortController | undefined;
+const streamAbort = shallowRef<AbortController>();
 const currentAgent = computed(() => messages.value.filter((item) => !item.localOnly).at(-1)?.agentTask);
-function stopAgentPolling() { if (agentTimer) clearTimeout(agentTimer); }
-function resetChatWork() { chatEpoch += 1; streamAbort?.abort(); stopAgentPolling(); agentMode.value = false; }
+const agentPoller = createAgentPoller({
+  hidden: () => document.hidden,
+  pending: () => messages.value.some((item) => item.agentTask?.status === 'RUNNING'),
+  refresh: async () => { await Promise.all(messages.value.filter((item) => item.agentTask?.status === 'RUNNING').map(refreshAgent)); },
+  timeout: () => {
+    messages.value = messages.value.map((item) => item.agentTask?.status === 'RUNNING'
+      ? { ...item, agentError: '查询仍在后台运行，自动刷新已暂停，请重新打开会话查看或停止任务。' } : item);
+  },
+});
+function stopAgentPolling() { agentPoller.stop(); }
+function onVisibilityChange() { if (document.hidden) agentPoller.stop(); else agentPoller.schedule(); }
+async function stopCurrentWork() {
+  if (stopping.value) return;
+  stopping.value = true;
+  const epoch = chatEpoch;
+  try {
+    streamAbort.value?.abort();
+    const item = messages.value.findLast((entry) => entry.agentTask?.status === 'RUNNING');
+    if (item?.agentTaskId) {
+      const task = await cancelAgentTaskApi(item.agentTaskId);
+      applyAgent(task, item.id, epoch);
+      scheduleAgentPolling();
+    }
+  } finally { stopping.value = false; }
+}
+function resetChatWork() { agentPoller.reset(); chatEpoch += 1; streamAbort.value?.abort(); stopAgentPolling(); agentMode.value = false; }
 function applyAgent(task: AgentApi.Task, id: string, epoch: number) {
   if (epoch !== chatEpoch) return;
   messages.value = messages.value.map((item) => item.id === id && acceptTask(item.agentTask, task)
     ? { ...item, agentTask: task, agentTaskId: task.id, agentError: undefined, content: '', streaming: false } : item);
 }
-function scheduleAgentPolling() {
-  stopAgentPolling();
-  if (messages.value.some((item) => item.agentTask?.status === 'RUNNING')) {
-    agentTimer = setTimeout(async () => {
-      await Promise.all(messages.value.filter((item) => item.agentTask?.status === 'RUNNING').map((item) => refreshAgent(item)));
-      scheduleAgentPolling();
-    }, 2000);
-  }
-}
+function scheduleAgentPolling() { agentPoller.schedule(); }
 async function refreshAgent(item: UiMessage) {
   if (!item.agentTaskId) return;
   const epoch = chatEpoch;
@@ -239,14 +258,15 @@ async function refreshAgent(item: UiMessage) {
   }
   catch {
     if (epoch === chatEpoch && agentReads.get(item.agentTaskId) === generation) messages.value = messages.value.map((entry) => entry.role === 'assistant' && entry.agentTaskId === item.agentTaskId
-      ? { ...entry, agentTask: undefined, content: '', streaming: false, agentError: '任务无法读取，请核对登录、权限或服务状态后重试。' } : entry);
-  } finally { if (epoch === chatEpoch) scheduleAgentPolling(); }
+      ? { ...entry, streaming: false, agentError: '任务无法读取，请核对登录、权限或服务状态后重试。' } : entry);
+  }
 }
 async function sendAgent(text: string, continuation?: AgentApi.Continue, routeToken?: string) {
   if (sending.value) return;
   const previous = currentAgent.value;
   if (previous?.status === 'RUNNING') { message.info('正在查询，请等待结果自动更新。'); return; }
   const epoch = ++chatEpoch;
+  agentPoller.reset();
   stopAgentPolling();
   const assistantId = nextId();
   messages.value = messages.value.map((item) => item.agentTask
@@ -498,7 +518,7 @@ async function onSend(retryFailed = false) {
   ];
   sending.value = true;
   const abort = new AbortController();
-  streamAbort = abort;
+  streamAbort.value = abort;
   const assistantId = messages.value.at(-1)!.id;
   scrollToBottom();
 
@@ -518,14 +538,20 @@ async function onSend(retryFailed = false) {
     if (!last) {
       return;
     }
-    // 显式回填 content，避免 noUncheckedIndexedAccess 下 spread 空值导致类型丢失
-    messages.value = [
-      ...list.slice(0, -1),
-      { ...last, ...patch, content: patch.content ?? last.content },
-    ];
+    Object.assign(last, patch, { content: patch.content ?? last.content });
     scrollToBottom();
   };
 
+  let pendingText = '';
+  let deltaFrame: number | undefined;
+  const flushText = () => {
+    if (deltaFrame !== undefined) cancelAnimationFrame(deltaFrame);
+    deltaFrame = undefined;
+    if (pendingText) {
+      updateLast({ content: (messages.value.at(-1)?.content ?? '') + pendingText });
+      pendingText = '';
+    }
+  };
   try {
     await streamChatApi(payload, activeConversationId.value ?? null, {
       onProgress(progress) {
@@ -538,16 +564,17 @@ async function onSend(retryFailed = false) {
         }
       },
       onCancelled() {
-        updateLast({ streaming: false, cancelPending: true, content: '已取消后续查询，正在核对已完成项…' });
+        flushText();
+        const hasBatch = Boolean(messages.value.at(-1)?.batchProgress);
+        updateLast({ streaming: false, cancelPending: hasBatch, ...(hasBatch ? { content: '已取消后续查询，正在核对已完成项…' } : {}) });
       },
       onDelta(content) {
         if (abort.signal.aborted) return;
-        const list = messages.value;
-        updateLast({
-          content: (list[list.length - 1]?.content ?? '') + content,
-        });
+        pendingText += content;
+        deltaFrame ??= requestAnimationFrame(flushText);
       },
       onDone(payloadDone) {
+        flushText();
         if (abort.signal.aborted || epoch !== chatEpoch) return;
         updateLast({
           batchProgress: undefined, cancelPending: false,
@@ -562,6 +589,7 @@ async function onSend(retryFailed = false) {
         void loadConversations();
       },
       onError(errMessage) {
+        flushText();
         updateLast({
           content: `⚠ ${errMessage}`,
           cancelPending: Boolean(messages.value.at(-1)?.batchProgress),
@@ -571,7 +599,8 @@ async function onSend(retryFailed = false) {
       },
     }, routeToken, { signal: abort.signal, retryFailed });
   } finally {
-    if (streamAbort === abort) streamAbort = undefined;
+    flushText();
+    if (streamAbort.value === abort) streamAbort.value = undefined;
     if (epoch !== chatEpoch) return;
     if (abort.signal.aborted && activeConversationId.value && messages.value.at(-1)?.cancelPending) {
       // 断开后服务端先保存取消终态；短暂轮询只读取本人会话，不重新执行查询。
@@ -881,6 +910,7 @@ function applyListFilters() {
 }
 
 function onTextKeydown(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return;
   if (slashMenuOpen.value) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -1015,8 +1045,9 @@ onMounted(() => {
     }
   });
   document.addEventListener('click', closeHistoryMenu);
+  document.addEventListener('visibilitychange', onVisibilityChange);
 });
-onUnmounted(() => { resetChatWork(); document.removeEventListener('click', closeHistoryMenu); });
+onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilityChange); resetChatWork(); document.removeEventListener('click', closeHistoryMenu); });
 </script>
 
 <template>
@@ -1123,7 +1154,7 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
         </div>
 
         <div
-          ref="messagesRef"
+          ref="messagesRef" role="log" aria-live="polite" aria-label="对话记录"
           class="ai-messages min-h-0 flex-1 space-y-4 overflow-y-auto"
         >
           <Spin :spinning="historyLoading">
@@ -1277,7 +1308,8 @@ onUnmounted(() => { resetChatWork(); document.removeEventListener('click', close
                 <button v-if="agentMode" class="ai-mode-exit" type="button" @click="agentMode = false">退出只读查询</button>
                 <button v-if="draftMode" class="ai-mode-exit" type="button" @click="draftMode = false">退出草稿模式</button>
               </div>
-              <button class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend()">
+              <button v-if="canStop" class="ai-send" type="button" :disabled="stopping" aria-label="停止查询" title="停止查询" @click="stopCurrentWork"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg></button>
+              <button v-else class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend()">
                 <svg v-if="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
                 <span v-else class="ai-send-loading">···</span>
               </button>

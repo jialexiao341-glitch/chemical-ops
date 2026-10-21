@@ -43,7 +43,7 @@ from app.modules.system.model import User
 
 
 LOGGER = logging.getLogger("chemicalops.ai")
-STREAM_CHUNK_SIZE = 4
+STREAM_CHUNK_SIZE = 32
 STREAM_CHUNK_DELAY_SECONDS = 0.03
 MAX_ATTACHMENT_CONTEXT_CHARS = 48_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
