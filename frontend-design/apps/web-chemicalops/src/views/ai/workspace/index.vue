@@ -32,6 +32,8 @@ import AgentSourcePopover from './agent-source-popover.vue';
 import { answerSources } from './answer-sources';
 import { createAgentPoller } from './agent-polling';
 import { acceptTask, primaryTaskResults } from './task-view';
+import { useConversation } from './use-conversation';
+import { useChatStream } from './use-chat-stream';
 import assistantLogo from './chemicalops-ai.svg';
 
 defineOptions({ name: 'AiWorkspace' });
@@ -97,9 +99,7 @@ interface UiMessage {
   localOnly?: boolean;
 }
 
-const conversations = ref<AiApi.Conversation[]>([]);
-const conversationsLoading = ref(false);
-const conversationSearch = ref('');
+const { conversations, conversationsLoading, conversationSearch, visibleConversations, loadConversations } = useConversation<AiApi.Conversation>(() => getConversationListApi(100));
 const sidebarExpanded = ref(false);
 const sidebarCollapsed = ref(false);
 const menuConversationId = ref<number>();
@@ -116,6 +116,7 @@ const slashMenuOpen = ref(false);
 const slashMenuActiveIndex = ref(0);
 const historyLoading = ref(false);
 const messagesRef = ref<HTMLElement>();
+const { scrollToBottom, renderMessage } = useChatStream(messagesRef, renderMarkdown);
 const filterPanelOpen = ref(false);
 const filterDataset = ref('purchase_requests');
 const filterQuestion = ref('');
@@ -128,13 +129,6 @@ const draftMode = ref(false);
 const draftFollowups = ref<string[]>([]);
 const creatingDraftMessageId = ref<string>();
 const filterFieldNames = computed(() => Object.keys(filterDraft.value));
-const visibleConversations = computed(() =>
-  conversations.value.filter((item) =>
-    (item.title || `会话 #${item.id}`)
-      .toLocaleLowerCase()
-      .includes(conversationSearch.value.trim().toLocaleLowerCase()),
-  ),
-);
 const conversationGroups = computed(() => {
   const groups = new Map<string, AiApi.Conversation[]>();
   for (const item of [...visibleConversations.value].sort((a, b) => Number(b.pinned) - Number(a.pinned))) {
@@ -308,25 +302,6 @@ function nextId() {
   return `msg-${messageSeed}`;
 }
 
-async function loadConversations() {
-  conversationsLoading.value = true;
-  try {
-    const res = await getConversationListApi(100);
-    conversations.value = res.items;
-  } finally {
-    conversationsLoading.value = false;
-  }
-}
-
-function scrollToBottom() {
-  nextTick(() => {
-    const el = messagesRef.value;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  });
-}
-
 /** 打开会话历史 */
 function historyMessages(items: AiApi.Message[]): UiMessage[] {
   return items.map((item) => ({
@@ -386,6 +361,27 @@ function newConversation() {
   slashMenuOpen.value = false;
   messages.value = [];
   inputText.value = '';
+}
+
+let menuTrigger: HTMLElement | undefined;
+async function toggleConversationMenu(id: number, event: Event) {
+  menuTrigger = event.currentTarget as HTMLElement;
+  menuConversationId.value = menuConversationId.value === id ? undefined : id;
+  await nextTick();
+  menuTrigger.parentElement?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+}
+function onConversationMenuKeydown(event: KeyboardEvent) {
+  const menu = event.currentTarget as HTMLElement;
+  const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const index = items.indexOf(document.activeElement as HTMLElement);
+  if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault(); event.stopPropagation();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  } else if (event.key === 'Escape' || event.key === 'Tab') {
+    menuConversationId.value = undefined;
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); menuTrigger?.focus(); }
+  }
 }
 
 function beginRename(conversation: AiApi.Conversation) {
@@ -1093,10 +1089,10 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
                   <span v-else class="ai-history-title" :title="item.title || `会话 #${item.id}`">{{ item.title || `会话 #${item.id}` }}</span>
                   <span class="ai-history-date">{{ formatDateTime(item.last_message_at || item.created_at) }}</span>
                 </div>
-                <button class="ai-icon-button ai-history-more" type="button" :aria-label="`管理会话 ${item.title || item.id}`" :aria-expanded="menuConversationId === item.id" aria-haspopup="menu" title="管理会话" @click.stop="menuConversationId = menuConversationId === item.id ? undefined : item.id">
+                <button class="ai-icon-button ai-history-more" type="button" :aria-label="`管理会话 ${item.title || item.id}`" :aria-expanded="menuConversationId === item.id" aria-haspopup="menu" title="管理会话" @click.stop="toggleConversationMenu(item.id, $event)">
                   <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
                 </button>
-                <div v-if="menuConversationId === item.id" class="ai-history-menu" role="menu" @click.stop @keydown.esc.stop="menuConversationId = undefined">
+                <div v-if="menuConversationId === item.id" class="ai-history-menu" role="menu" @click.stop @keydown="onConversationMenuKeydown">
                   <button type="button" role="menuitem" @click.stop="beginRename(item)">重命名</button>
                   <button type="button" role="menuitem" @click.stop="togglePinned(item)">{{ item.pinned ? '取消置顶' : '置顶会话' }}</button>
                   <button class="is-danger" type="button" role="menuitem" @click.stop="menuConversationId = undefined; removeConversation(item)">删除会话</button>
@@ -1114,6 +1110,7 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
             <div>
               <span class="ai-toolbar-title">化运 AI 助手</span>
             </div>
+            <Button size="small" @click="router.push('/ai/tasks')">任务记录</Button>
           </div>
           <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
             <div class="mb-2 flex items-center justify-between">
@@ -1190,7 +1187,7 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
                 <div
                   v-if="item.content && !item.agentTask"
                   class="chat-md [&_a]:text-blue-500 [&_a]:underline [&_code]:bg-black/20 [&_code]:rounded [&_code]:px-1 [&_li]:ml-4 [&_ol]:list-decimal [&_p]:my-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:my-1"
-                  v-html="renderMarkdown(item.content)"
+                  v-html="renderMessage(item.id, item.content)"
                 ></div>
                 <span v-else-if="item.streaming && !item.batchProgress && !item.agentTask" class="inline-flex items-center gap-2" role="status" aria-live="polite">
                   <Spin size="small" aria-hidden="true" />

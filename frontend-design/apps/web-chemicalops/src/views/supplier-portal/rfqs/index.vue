@@ -64,7 +64,6 @@ function openDetail(rfq: SupplierPortalApi.RfqListItem) { void router.push({ nam
     :rows="rfqs"
     :status-options="statusOptions"
     :total="total"
-    :scroll-x="1120"
     subtitle="仅显示发送给当前供应商账号关联企业的询价，可按询价状态筛选。"
     title="我的询价"
   >

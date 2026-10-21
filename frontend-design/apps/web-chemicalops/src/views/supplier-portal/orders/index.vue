@@ -64,7 +64,6 @@ function openDetail(order: PurchaseOrderApi.PurchaseOrder) { void router.push({ 
     :rows="orders"
     :status-options="statusOptions"
     :total="total"
-    :scroll-x="1040"
     subtitle="仅显示当前供应商账号关联企业的正式订单，可按订单状态筛选。"
     title="我的订单"
   >

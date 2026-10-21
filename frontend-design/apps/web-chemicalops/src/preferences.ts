@@ -9,7 +9,9 @@ export const overridesPreferences = defineOverridesPreferences({
   /** 左上角与登录页展示的系统名称 */
   app: {
     name: import.meta.env.VITE_APP_TITLE,
+    locale: 'zh-CN',
   },
+  widget: { languageToggle: false, languageToggleButtonPosition: 'none' },
   /** 默认 logo 指向 vben 官方 CDN，这里换成项目自带的图标 */
   logo: {
     source: '/logo.svg',

@@ -117,7 +117,6 @@ async function submitDispute() {
     :rows="rows"
     :status-options="statusOptions"
     :total="total"
-    :scroll-x="1230"
     subtitle="查看本供应商订单的对账金额与状态，可确认、提出争议并和采购方留言协同。"
     title="对账协同"
   >

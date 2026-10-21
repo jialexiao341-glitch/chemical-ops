@@ -74,36 +74,30 @@ export function formatPercent(
   return `${parsed.toFixed(precision)}%`;
 }
 
-/** 格式化为 `YYYY-MM-DD`，兼容后端返回的 ISO 时间戳 */
+/** 只转换来源明确的时间戳；历史 naive 时间不能猜测为 UTC。 */
+function businessTimestamp(value: string): string | undefined {
+  if (!/[T ]\d{2}:\d{2}.*(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const part = (name: string) => parts.find((item) => item.type === name)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`;
+}
+
+/** 显式时区时间转换业务日期，date-only/naive 保持墙上日期。 */
 export function formatDate(value?: null | string): string {
-  if (!value) {
-    return '-';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value).slice(0, 10);
-  }
-  const pad = (part: number) => String(part).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  if (!value) return '-';
+  return (businessTimestamp(value) ?? value).slice(0, 10);
 }
 
-/** 格式化为 `YYYY-MM-DD HH:mm` */
+/** 格式化为 YYYY-MM-DD HH:mm；纯日期不添加午夜。 */
 export function formatDateTime(value?: null | string): string {
-  if (!value) {
-    return '-';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
-  const pad = (part: number) => String(part).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-/** 生成请求级幂等键，用于 FIFO 出库等需要 `request_no` 的接口 */
-export function buildRequestNo(prefix: string): string {
-  const now = new Date();
-  const pad = (part: number) => String(part).padStart(2, '0');
-  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  return `${prefix}-${stamp}-${Math.random().toString(36).slice(2, 8)}`;
+  if (!value) return '-';
+  const converted = businessTimestamp(value);
+  if (converted) return converted;
+  if (/^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?/.test(value)) return value.replace('T', ' ').slice(0, 16);
+  return value;
 }

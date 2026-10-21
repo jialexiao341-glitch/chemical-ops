@@ -9,7 +9,7 @@ import { Page, useVbenDrawer } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
 import { Plus } from '@vben/icons';
 
-import { Button, message } from 'antdv-next';
+import { Button, message, Modal } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { deleteProductApi, getProductListApi } from '#/api';
@@ -72,8 +72,13 @@ function onActionClick({
       standardDrawerApi.setData(row).open();
       break;
     }
-    case 'delete': {
-      onDelete(row);
+    case 'disable': {
+      Modal.confirm({
+        title: '停用产品规格',
+        content: `确认停用 ${row.product_name}？停用后将不能用于新建业务单据，历史记录保留。`,
+        okText: '确认停用', cancelText: '取消',
+        onOk: () => onDelete(row),
+      });
       break;
     }
     case 'edit': {
@@ -90,7 +95,7 @@ function onDelete(row: ProductApi.Product) {
     duration: 0,
     key: 'action_process_msg',
   });
-  deleteProductApi(row.id)
+  return deleteProductApi(row.id)
     .then(() => {
       message.success({
         content: `已停用 ${row.product_name}`,
@@ -98,8 +103,9 @@ function onDelete(row: ProductApi.Product) {
       });
       onRefresh();
     })
-    .catch(() => {
+    .catch((error) => {
       hideLoading();
+      throw error;
     });
 }
 

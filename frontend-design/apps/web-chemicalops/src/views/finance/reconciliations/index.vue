@@ -24,6 +24,8 @@ import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 import { RECONCILIATION_STATUS_DICT } from '#/constants/dictionary';
 import { formatAmount, formatDateTime } from '#/utils/format';
 
+import ReasonModal from '#/components/reason-modal/index.vue';
+
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
 import ItemsDrawer from './modules/items.vue';
@@ -44,7 +46,6 @@ const resolveSupplier = ref<(id?: null | number) => string>(() => '-');
 
 /** 争议弹窗（原因必填） */
 const disputeVisible = ref(false);
-const disputeReason = ref('');
 const disputeRow = ref<FinanceApi.Reconciliation>();
 const collaborationVisible = ref(false);
 const collaborationRow = ref<FinanceApi.Reconciliation>();
@@ -105,26 +106,13 @@ function runConfirm(row: FinanceApi.Reconciliation) {
 
 function openDispute(row: FinanceApi.Reconciliation) {
   disputeRow.value = row;
-  disputeReason.value = '';
   disputeVisible.value = true;
 }
 
-async function onDisputeConfirm() {
-  if (!disputeReason.value.trim()) {
-    message.warning('请填写争议原因');
-    return;
-  }
-  if (!disputeRow.value) {
-    return;
-  }
-  try {
-    await disputeReconciliationApi(disputeRow.value.id, disputeReason.value.trim());
-    message.success('已发起对账争议');
-    disputeVisible.value = false;
-    gridApi.query();
-  } catch {
-    // 请求层已弹出错误，保持弹窗打开
-  }
+async function onDisputeConfirm(reason: string) {
+  if (!disputeRow.value) throw new Error('未选择记录');
+  await disputeReconciliationApi(disputeRow.value.id, reason);
+  message.success('已发起对账争议');
 }
 
 async function openSupplierCollaboration(row: FinanceApi.Reconciliation) {
@@ -243,25 +231,6 @@ watch(
       </div>
     </Modal>
 
-    <!-- 争议弹窗（原因必填） -->
-    <Modal
-      v-model:open="disputeVisible"
-      cancel-text="取消"
-      ok-text="确认发起"
-      title="发起对账争议"
-      @ok="onDisputeConfirm"
-    >
-      <div class="py-2">
-        <div class="mb-2 text-sm">
-          争议原因 <span class="text-red-500">*</span>
-        </div>
-        <Input.TextArea
-          v-model:value="disputeReason"
-          :maxlength="1000"
-          :rows="3"
-          placeholder="请说明对账差异或争议内容（必填）"
-        />
-      </div>
-    </Modal>
+    <ReasonModal v-model:open="disputeVisible" title="发起对账争议" label="争议原因" ok-text="确认发起" :submit="onDisputeConfirm" @success="gridApi.query()" />
   </Page>
 </template>

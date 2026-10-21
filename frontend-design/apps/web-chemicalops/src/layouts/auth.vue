@@ -17,7 +17,7 @@ const logoDark = computed(() => preferences.logo.sourceDark);
     :app-name="appName"
     :logo="logo"
     :logo-dark="logoDark"
-    :toolbar-list="['language', 'theme']"
+    :toolbar-list="['theme']"
   >
     <template #hero>
       <div class="chemicalops-hero">
@@ -79,7 +79,7 @@ const logoDark = computed(() => preferences.logo.sourceDark);
   color: #fff;
   background:
     linear-gradient(180deg, rgb(6 24 44 / 18%) 26%, rgb(6 24 44 / 84%) 100%),
-    url('/chemical-plant-login.png') center / cover,
+    url('/chemical-plant-login.webp') center / cover,
     #0b2038;
 }
 

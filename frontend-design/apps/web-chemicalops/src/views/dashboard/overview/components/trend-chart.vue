@@ -87,5 +87,8 @@ watch(
 
 <template>
   <Empty v-if="!data || data.length === 0" description="所选区间没有采购数据" />
-  <EchartsUI v-else ref="chartRef" height="300px" />
+  <figure v-else>
+    <figcaption class="sr-only">采购趋势：<span v-for="row in data" :key="row.date">{{ row.date }}，采购金额 {{ formatAmount(row.order_amount) }}，订单数 {{ row.order_count }}；</span></figcaption>
+    <EchartsUI ref="chartRef" height="300px" />
+  </figure>
 </template>

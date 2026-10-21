@@ -1,5 +1,6 @@
 import type { PageQuery, PageResult } from '#/api/request';
 
+import { fetchAllListPages } from '#/utils/pagination';
 import { requestClient } from '#/api/request';
 
 export namespace IssueRequestApi {
@@ -74,9 +75,9 @@ export namespace IssueRequestApi {
 
 /** 获取创建领用申请所需的最小可用库存选项 */
 export async function getIssueOptionsApi() {
-  return requestClient.get<IssueRequestApi.StockOption[]>(
-    '/inventory/issue-request-options',
-  );
+  return fetchAllListPages((page) => requestClient.get<IssueRequestApi.StockOption[]>(
+    '/inventory/issue-request-options', { params: { page, page_size: 100 } },
+  ));
 }
 
 /** 分页查询库存领用申请 */

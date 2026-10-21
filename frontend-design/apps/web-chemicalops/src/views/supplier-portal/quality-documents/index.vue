@@ -117,7 +117,6 @@ onMounted(loadOrders);
     :rows="rows"
     :status-options="statusOptions"
     :total="total"
-    :scroll-x="1250"
     subtitle="提交并查看与本供应商订单关联的 COA、SDS、检验报告等质量资料。"
     title="质量资料"
   >

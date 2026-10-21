@@ -1,5 +1,4 @@
 <script lang="ts" setup>
-import { fetchAllPages } from '#/utils/pagination';
 import type { PurchaseRequestApi } from '#/api';
 
 import { computed, nextTick, ref } from 'vue';
@@ -13,6 +12,7 @@ import { useVbenForm } from '#/adapter/form';
 import {
   createPurchaseRequestApi,
   getDepartmentListApi,
+  getProductApi,
   getProductListApi,
   getUnitListApi,
   updatePurchaseRequestApi,
@@ -119,16 +119,13 @@ const itemColumns = [
     componentProps: { placeholder: '可关联已有产品' },
     field: 'product_id',
     label: '关联产品',
-    options: async () => {
-      const res = await fetchAllPages((page) => getProductListApi({
-        page,
-        page_size: 100,
-        status: 'ACTIVE',
-      }));
-      return res.items.map((item) => ({
-        label: item.product_name,
-        value: item.id,
-      }));
+    searchOptions: async (keyword: string) => {
+      const res = await getProductListApi({ keyword, page: 1, page_size: 100, status: 'ACTIVE' });
+      return res.items.map((item) => ({ label: item.product_name, value: item.id }));
+    },
+    optionById: async (id: number) => {
+      const item = await getProductApi(id);
+      return { label: item.product_name, value: item.id };
     },
     width: 180,
   },

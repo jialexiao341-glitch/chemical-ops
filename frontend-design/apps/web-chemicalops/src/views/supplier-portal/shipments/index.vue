@@ -125,7 +125,6 @@ onMounted(loadOrders);
     :rows="rows"
     :status-options="statusOptions"
     :total="total"
-    :scroll-x="1150"
     subtitle="提交后会进入仓库收货流程；发货数量不能超过订单剩余未收数量。"
     title="发货通知"
   >

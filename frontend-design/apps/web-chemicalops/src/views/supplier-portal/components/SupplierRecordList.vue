@@ -20,7 +20,6 @@ const props = defineProps<{
   keyword: string;
   status: string;
   statusOptions: { label: string; value: string }[];
-  scrollX?: number;
   fetchRecords: () => Promise<void>;
   exportPermission?: string;
 }>();
@@ -133,7 +132,7 @@ function getColumns(columns: typeof props.columns, allowSelection = canExportSel
 
 <template>
   <Page auto-content-height>
-    <Grid :table-title="title">
+    <Grid :table-title="title" :table-title-help="subtitle">
       <template #toolbar-tools>
         <Dropdown v-if="canExportSelection" :open="batchOpen" :trigger="['click']" placement="bottomRight" @open-change="batchOpen = $event">
           <Button class="inline-flex items-center gap-2">批量操作 <IconifyIcon class="size-4 text-slate-500" icon="lucide:chevron-down" /></Button>

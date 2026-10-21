@@ -87,7 +87,6 @@ async function save() {
     :rows="rows"
     :status-options="statusOptions"
     :total="total"
-    :scroll-x="850"
     subtitle="仅可更新已下单或部分到货订单的预计交期；每次变更都会记录到订单履历。"
     title="交期更新"
   >

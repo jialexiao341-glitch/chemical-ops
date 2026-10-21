@@ -9,7 +9,7 @@ import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 import { useUserStore } from '@vben/stores';
 
-import { Button, Input, message, Modal } from 'antdv-next';
+import { Button, message, Modal } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
@@ -21,6 +21,8 @@ import {
   rejectStocktakeApi,
   submitStocktakeApi,
 } from '#/api';
+
+import ReasonModal from '#/components/reason-modal/index.vue';
 
 import { useColumns, useGridFormSchema } from './data';
 import DetailDrawer from './modules/detail.vue';
@@ -74,31 +76,17 @@ const [Grid, gridApi] = useVbenVxeGrid({
 });
 
 const rejectVisible = ref(false);
-const rejectReason = ref('');
 const rejectRow = ref<StocktakeApi.StocktakeRequest>();
 
 function openReject(row: StocktakeApi.StocktakeRequest) {
   rejectRow.value = row;
-  rejectReason.value = '';
   rejectVisible.value = true;
 }
 
-async function onRejectConfirm() {
-  if (!rejectReason.value.trim()) {
-    message.warning('请填写驳回原因');
-    return;
-  }
-  if (!rejectRow.value) {
-    return;
-  }
-  try {
-    await rejectStocktakeApi(rejectRow.value.id, rejectReason.value.trim());
-    message.success('已驳回');
-    rejectVisible.value = false;
-    gridApi.query();
-  } catch {
-    // 请求层已弹出错误，保持弹窗打开
-  }
+async function onRejectConfirm(reason: string) {
+  if (!rejectRow.value) throw new Error('未选择记录');
+  await rejectStocktakeApi(rejectRow.value.id, reason);
+  message.success('已驳回');
 }
 
 function run(
@@ -173,24 +161,6 @@ onMounted(async () => {
       </template>
     </Grid>
 
-    <Modal
-      v-model:open="rejectVisible"
-      cancel-text="取消"
-      ok-text="确认驳回"
-      title="驳回盘点申请"
-      @ok="onRejectConfirm"
-    >
-      <div class="py-2">
-        <div class="mb-2 text-sm">
-          驳回原因 <span class="text-red-500">*</span>
-        </div>
-        <Input.TextArea
-          v-model:value="rejectReason"
-          :maxlength="1000"
-          :rows="3"
-          placeholder="请说明驳回原因（必填）"
-        />
-      </div>
-    </Modal>
+    <ReasonModal v-model:open="rejectVisible" title="驳回盘点申请" label="驳回原因" ok-text="确认驳回" :submit="onRejectConfirm" @success="gridApi.query()" />
   </Page>
 </template>

@@ -5,7 +5,7 @@
  * 采购申请、询价单等单据都包含「表头 + 若干明细行」的结构，
  * 这里把可编辑明细表抽成通用组件，各页面只描述列与新增行的默认值。
  */
-import { computed, ref, watch, watchEffect } from 'vue';
+import { computed, onUnmounted, ref, watch, watchEffect } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 import { Plus } from '@vben/icons';
@@ -21,6 +21,9 @@ import {
   Tooltip,
 } from 'antdv-next';
 
+import { createRemoteOptions } from './remote-options';
+import type { RemoteOption } from './remote-options';
+
 /** 明细列定义 */
 export interface ItemsEditorColumn {
   /** 列宽 */
@@ -35,6 +38,9 @@ export interface ItemsEditorColumn {
   label: string;
   /** 选项，传函数可异步加载 */
   options?: (() => Promise<any[]>) | Array<{ label: string; value: any }>;
+  /** 服务端按关键词搜索，详情读取用于编辑时名称回填。 */
+  searchOptions?: (keyword: string) => Promise<RemoteOption[]>;
+  optionById?: (id: number) => Promise<RemoteOption>;
   /** 是否必填，仅用于展示星号提示 */
   required?: boolean;
 }
@@ -70,6 +76,42 @@ const asyncOptions = ref<Record<string, Array<{ label: string; value: any }>>>(
   {},
 );
 const loadingOptions = ref(false);
+
+const remoteStates = new Map<string, ReturnType<typeof createRemoteOptions>>();
+const searchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const remoteLoading = ref<Record<string, boolean>>({});
+function remoteState(column: ItemsEditorColumn) {
+  let state = remoteStates.get(column.field);
+  if (!state && column.searchOptions && column.optionById) {
+    state = createRemoteOptions(column.searchOptions, column.optionById);
+    remoteStates.set(column.field, state);
+  }
+  return state;
+}
+async function searchOptions(column: ItemsEditorColumn, keyword: string) {
+  const state = remoteState(column);
+  if (!state) return;
+  remoteLoading.value[column.field] = true;
+  try {
+    await state.search(keyword);
+    asyncOptions.value[column.field] = state.options();
+  } finally { remoteLoading.value[column.field] = false; }
+}
+function queueSearch(column: ItemsEditorColumn, keyword: string) {
+  clearTimeout(searchTimers.get(column.field));
+  searchTimers.set(column.field, setTimeout(() => {
+    void searchOptions(column, keyword).catch(() => { /* 请求层显示错误，保留已有选项。 */ });
+  }, 250));
+}
+onUnmounted(() => { for (const timer of searchTimers.values()) clearTimeout(timer); });
+watchEffect(() => {
+  for (const column of props.columns) {
+    const state = remoteState(column);
+    if (!state) continue;
+    const ids = props.modelValue.map((row) => row[column.field]).filter((id): id is number => typeof id === 'number');
+    void state.hydrate(ids).then(() => { asyncOptions.value[column.field] = state.options(); }).catch(() => {});
+  }
+});
 
 /**
  * 表格数据源。
@@ -153,7 +195,7 @@ const tableColumns = computed(() => [
  */
 watchEffect(async () => {
   const asyncColumns = props.columns.filter(
-    (column) => typeof column.options === 'function',
+    (column) => typeof column.options === 'function' && !column.searchOptions,
   );
   if (asyncColumns.length === 0) {
     return;
@@ -168,7 +210,7 @@ watchEffect(async () => {
         return [column.field, options] as const;
       }),
     );
-    asyncOptions.value = Object.fromEntries(results);
+    asyncOptions.value = { ...asyncOptions.value, ...Object.fromEntries(results) };
   } finally {
     loadingOptions.value = false;
   }
@@ -224,6 +266,10 @@ watchEffect(async () => {
               v-else-if="editorColumn.component === 'select'"
               v-model:value="record[editorColumn.field]"
               :options="optionsOf(editorColumn)"
+              :filter-option="editorColumn.searchOptions ? false : undefined"
+              :loading="remoteLoading[editorColumn.field]"
+              @search="queueSearch(editorColumn, $event)"
+              @open-change="($event: boolean) => $event && editorColumn.searchOptions && searchOptions(editorColumn, '').catch(() => {})"
               v-bind="editorColumn.componentProps"
               class="w-full"
               show-search

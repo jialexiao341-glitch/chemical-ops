@@ -101,6 +101,12 @@ export namespace AgentApi {
     messages: string[];
     trace: Step[];
   }
+  export interface TaskPage {
+    items: Task[];
+    total: number;
+    page: number;
+    page_size: number;
+  }
   export interface Continue {
     all_products?: boolean;
     route_token?: string;
@@ -117,6 +123,14 @@ export function createAgentTaskApi(question: string) {
 }
 export function getAgentTaskApi(id: string) {
   return requestClient.get<AgentApi.Task>(`/ai/agent/tasks/${encodeURIComponent(id)}`);
+}
+export function getAgentTaskPageApi(page: number, pageSize: number, status?: AgentApi.Task['status']) {
+  return requestClient.get<AgentApi.TaskPage>('/ai/agent/tasks', {
+    params: { page, page_size: pageSize, status },
+  });
+}
+export function exportAgentTaskApi(id: string) {
+  return requestClient.get<Blob>(`/ai/agent/tasks/${encodeURIComponent(id)}/export`, { responseType: 'blob' });
 }
 export function continueAgentTaskApi(id: string, data: AgentApi.Continue) {
   return requestClient.post<AgentApi.Task>(`/ai/agent/tasks/${encodeURIComponent(id)}/continue/start`, data);

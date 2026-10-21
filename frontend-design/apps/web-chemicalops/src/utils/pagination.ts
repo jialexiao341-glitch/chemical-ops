@@ -10,3 +10,13 @@ export async function fetchAllPages<T>(load: (page: number) => Promise<{ items: 
   }
   return { ...first, items };
 }
+
+/** 没有 total 的兼容列表接口，短页表示读取结束。 */
+export async function fetchAllListPages<T>(load: (page: number) => Promise<T[]>, pageSize = 100) {
+  const items: T[] = [];
+  for (let page = 1; ; page++) {
+    const rows = await load(page);
+    items.push(...rows);
+    if (rows.length < pageSize) return items;
+  }
+}

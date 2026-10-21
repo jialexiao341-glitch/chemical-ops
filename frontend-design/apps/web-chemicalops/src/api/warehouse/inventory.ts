@@ -1,5 +1,6 @@
 import type { PageQuery, PageResult } from '#/api/request';
 
+import { fetchAllListPages } from '#/utils/pagination';
 import { requestClient } from '#/api/request';
 
 export namespace InventoryApi {
@@ -255,8 +256,8 @@ export async function createFifoOutboundApi(data: {
 
 /** 查询库存有效期预警 */
 export async function getExpiryAlertsApi(days: number = 30, options?: { silent?: boolean }) {
-  return requestClient.get<InventoryApi.ExpiryAlert[]>(
+  return fetchAllListPages((page) => requestClient.get<InventoryApi.ExpiryAlert[]>(
     '/inventory/expiry-alerts',
-    { ...options, params: { days } },
-  );
+    { ...options, params: { days, page, page_size: 100 } },
+  ));
 }
