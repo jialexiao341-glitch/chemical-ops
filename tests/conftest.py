@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 
 # 普通回归测试不共享本地应用的缓存和用户配额；真实 Redis 用例自行启用隔离前缀。
+os.environ["OTEL_ENABLED"] = "false"
 os.environ.setdefault("REDIS_ENABLED", "false")
 os.environ.setdefault("REDIS_RATE_LIMIT_ENABLED", "false")
 

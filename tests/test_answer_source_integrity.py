@@ -18,7 +18,7 @@ def test_vector_sources_are_revalidated_and_use_current_excerpt(monkeypatch, sta
     section = SimpleNamespace(id=1, cas_no='67-56-1', doc_type='msds', section_no=9,
                               section_key='SECTION 9', title='物理性质', content='数据库当前摘录：沸点64.7℃')
     rows = [(section, 7, '甲醇 MSDS', '甲醇', 'https://example.com/msds', status, None)] if exists else []
-    db = SimpleNamespace(execute=lambda *_args: SimpleNamespace(all=lambda: rows))
+    db = SimpleNamespace(execute=lambda *_args: SimpleNamespace(all=lambda: rows), commit=lambda: None)
     monkeypatch.setattr(retrieve, 'resolve_doc_targets', targets)
     monkeypatch.setattr(retrieve, 'embed_texts', embed)
     monkeypatch.setattr(retrieve.vector_store, 'get_client', lambda: object())
