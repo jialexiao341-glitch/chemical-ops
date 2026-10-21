@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -75,6 +76,86 @@ def test_follow_up_plan_inherits_safe_fields_and_updates_explicit_conditions():
     assert merged.limit == 5
     assert merged.order == "asc"
     assert merged.filters[-1].field == "region"
+
+
+def test_overdue_follow_up_with_warehouse_word_keeps_procurement_dataset():
+    plan = text2sql._overdue_unfulfilled_plan(
+        "接受，查询本月逾期未交采购订单。按预计到货日期筛选，日期早于查询日且状态为已下单或部分到货；库存仅统计当前可访问启用仓库的可用余额。",
+        today=date(2026, 10, 21),
+    )
+
+    assert plan is not None
+    assert plan.dataset == "overdue_unfulfilled_orders"
+    assert plan.date_from == date(2026, 10, 1)
+    assert plan.date_to == date(2026, 10, 21)
+
+
+def test_valid_overdue_model_plan_cannot_drop_current_month_bounds():
+    model_plan = QueryPlan(
+        dataset="overdue_unfulfilled_orders",
+        metric="records",
+        time_field="expected_arrival_date",
+    )
+
+    plan = text2sql._normalize_overdue_plan(
+        "查询本月逾期未交采购订单",
+        model_plan,
+        today=date(2026, 10, 21),
+    )
+
+    assert plan.date_from == date(2026, 10, 1)
+    assert plan.date_to == date(2026, 10, 21)
+
+
+def test_explicit_overdue_date_range_overrides_model_plan_dates():
+    model_plan = QueryPlan(
+        dataset="overdue_unfulfilled_orders",
+        metric="records",
+        time_field="created_at",
+        date_from=date(2026, 9, 1),
+        date_to=date(2026, 9, 30),
+    )
+
+    plan = text2sql._normalize_overdue_plan(
+        "查询本月逾期未交采购订单，预计到货日 2026-10-01 至 2026-10-31",
+        model_plan,
+        today=date(2026, 10, 21),
+    )
+
+    assert plan.time_field == "expected_arrival_date"
+    assert plan.date_from == date(2026, 10, 1)
+    assert plan.date_to == date(2026, 10, 31)
+
+
+def test_overdue_dataset_declares_server_derived_summary_outputs():
+    outputs = CATALOG["overdue_unfulfilled_orders"].derived_outputs
+
+    assert "supplier_order_count" in outputs
+    assert "supplier_unfulfilled_quantity_by_unit" in outputs
+    assert "per_order_overdue_days" in outputs
+
+
+def test_truncated_overdue_answer_has_one_concise_scope_warning():
+    from app.modules.ai.service import _format_overdue_unfulfilled_orders
+
+    result = SimpleNamespace(
+        rows=[{
+            "po_no": "PO-1",
+            "supplier": "甲供应商",
+            "order_unit": "升",
+            "unfulfilled_quantity": "3",
+            "stock_status": "未设置安全库存",
+        }],
+        plan=QueryPlan(dataset="overdue_unfulfilled_orders", metric="records", limit=100),
+        truncated=True,
+    )
+
+    answer = _format_overdue_unfulfilled_orders(result)
+
+    assert answer.count("结果已截断：") == 1
+    assert "供应商汇总和低库存判断仅基于这些明细" in answer
+    assert "本次展示 1 条（上限 100 条）" in answer
+    assert "不能视为全部符合条件记录" not in answer
 
 
 def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):

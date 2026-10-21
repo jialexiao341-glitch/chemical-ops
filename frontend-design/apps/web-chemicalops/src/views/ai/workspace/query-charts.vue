@@ -27,7 +27,7 @@ function cell(value: unknown): string {
     <p v-else-if="trace.dataset === 'inventory'" class="text-muted-foreground m-0 text-xs">
       这组库存汇总缺少逐行计量单位，无法安全比较数量；原始结果仍可查看。
     </p>
-    <p v-if="charts.length && trace.truncated" class="text-muted-foreground m-0 text-xs">
+    <p v-if="charts.length && trace.truncated && trace.dataset !== 'overdue_unfulfilled_orders'" class="text-muted-foreground m-0 text-xs">
       图表仅根据本次返回的 {{ rows.length }} 行绘制，更多记录未计入。
     </p>
     <details

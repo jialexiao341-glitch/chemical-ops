@@ -150,8 +150,9 @@ async def understand(question: str, context: dict | None = None, settings=None) 
     from app.modules.ai.catalog import catalog_prompt
     capability_context = (
         "\n# 标准统计可回答范围\n"
-        "以下白名单列出标准统计查询可提供的指标、分组和筛选范围。执行前必须确认用户要求的每项指标都能由这些范围回答；"
-        "不能完整覆盖时，按上方规则先澄清，不得用相近指标代替。\n"
+        "以下白名单列出标准统计查询可提供的指标、分组和筛选范围。derived_outputs 是服务端依据明细确定性计算并实际展示的派生结果，"
+        "可用于判断复合查询是否完整可答；不得要求底层 SQL 直接输出这些派生项，也不得因 metrics 未包含它们而误判为不支持。"
+        "执行前必须确认用户要求的每项指标都能由 metrics、outputs 或 derived_outputs 覆盖；不能完整覆盖时，按上方规则先澄清，不得用相近指标代替。\n"
         + catalog_prompt()
     )
     repair = ""

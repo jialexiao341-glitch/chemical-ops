@@ -73,6 +73,7 @@ async def plan_analytics(db: Session, user: User, task: SubTask, settings: Setti
         plan = QueryPlan.model_validate_json(response.message.content, strict=True)
     else:
         plan = await text2sql._understand_question(task.question, settings, db, user, previous_plan)
+    plan = text2sql._normalize_overdue_plan(task.question, plan)
     text2sql._reject_unsupported_metric(task.question)
     await asyncio.to_thread(text2sql._validate_plan, db, user, plan)
     return plan

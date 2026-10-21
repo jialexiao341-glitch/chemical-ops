@@ -1177,6 +1177,42 @@ def _fallback_query_plan(question: str) -> QueryPlan | None:
         limit=limit,
     )
 
+
+def _normalize_overdue_plan(question: str, plan: QueryPlan, *, today: date | None = None) -> QueryPlan:
+    """Enforce the fixed due-date semantics of overdue-order queries after model planning."""
+
+    if plan.dataset != "overdue_unfulfilled_orders":
+        return plan
+    today = today or date.today()
+    normalized = question.lower()
+    updates: dict[str, Any] = {"time_field": "expected_arrival_date"}
+    # Apply explicit ranges deterministically; relative month phrases remain a
+    # server-side contract even when the model returned an otherwise valid plan.
+    explicit_dates = re.findall(r"\d{4}-\d{2}-\d{2}", normalized)
+    try:
+        parsed_dates = [date.fromisoformat(value) for value in explicit_dates]
+    except ValueError:
+        parsed_dates = []
+    if len(parsed_dates) >= 2:
+        updates.update(date_from=parsed_dates[0], date_to=parsed_dates[1])
+    elif len(parsed_dates) == 1 and "本月" in normalized:
+        updates.update(date_from=today.replace(day=1), date_to=parsed_dates[0])
+    elif not parsed_dates and "本月" in normalized:
+        updates.update(date_from=today.replace(day=1), date_to=today)
+    elif not parsed_dates and ("上月" in normalized or "上个月" in normalized):
+        date_to = today.replace(day=1) - timedelta(days=1)
+        updates.update(date_from=date_to.replace(day=1), date_to=date_to)
+    return plan.model_copy(update=updates)
+
+
+def _overdue_unfulfilled_plan(question: str, *, today: date | None = None) -> QueryPlan | None:
+    """Recognize overdue-order continuation before broad inventory heuristics."""
+
+    fallback = _fallback_query_plan(question)
+    if fallback is None or fallback.dataset != "overdue_unfulfilled_orders":
+        return None
+    return _normalize_overdue_plan(question, fallback, today=today)
+
 def _merge_follow_up_plan(question: str, previous_plan: QueryPlan) -> QueryPlan:
     """模型不可用时只处理可证明安全的追问修改，其他字段继承上一轮。"""
 
@@ -1372,6 +1408,13 @@ async def run_text2sql(
         if planned_query is not None:
             return {"plan": planned_query, "slots": _build_slots(planned_query),
                     "template": _build_query_template(planned_query), "stages": ["query_understanding"]}
+        overdue_plan = _overdue_unfulfilled_plan(state["question"])
+        if overdue_plan is not None:
+            plan = overdue_plan
+            LOGGER.info("AI 查询计划使用逾期订单固定口径 question_hash=%s", _query_hash(state["question"]))
+            return {"plan": plan, "slots": _build_slots(plan),
+                    "template": _build_query_template(plan),
+                    "stages": [*state.get("stages", []), "query_understanding"]}
         movement_plan = _inventory_movement_trace_plan(db, user, state["question"], state.get("previous_plan"))
         if movement_plan is not None:
             LOGGER.info("AI 查询计划使用库存变动追溯固定查询 question_hash=%s", _query_hash(state["question"]))
@@ -1418,6 +1461,7 @@ async def run_text2sql(
         else:
             effective_limit = min(state["plan"].limit, state["request_limit"])
         plan = state["plan"].model_copy(update={"limit": effective_limit})
+        plan = _normalize_overdue_plan(state["question"], plan)
         _validate_plan(db, user, plan)
         return {"plan": plan, "stages": [*state.get("stages", []), "slot_filling"]}
 

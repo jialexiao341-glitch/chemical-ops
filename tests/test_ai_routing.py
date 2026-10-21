@@ -11,12 +11,24 @@ from pydantic import ValidationError
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
 from app.modules.ai import llm, routing, service
+from app.modules.ai.catalog import catalog_prompt
 
 
 def test_purchase_draft_intent_is_a_dedicated_preview_route():
     decision = routing.Understanding(purpose="purchase_draft")
     assert decision.route == "purchase_draft"
     assert not decision.tasks and not decision.sub_tasks
+
+
+def test_routing_catalog_exposes_deterministic_derived_outputs():
+    capabilities = json.loads(catalog_prompt())
+    overdue = capabilities["overdue_unfulfilled_orders"]
+
+    assert overdue["derived_outputs"] == [
+        "per_order_overdue_days",
+        "supplier_order_count",
+        "supplier_unfulfilled_quantity_by_unit",
+    ]
 
 
 @pytest.mark.parametrize("question,route", [("/help", "capability"), ("你好", "greeting"), ("取消查询", "cancel")])

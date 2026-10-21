@@ -283,7 +283,6 @@ function movementCharts(rows: Row[]): QueryChartPlan[] {
 }
 
 function overdueOrderCharts(trace: QueryTrace, rows: Row[]): QueryChartPlan[] {
-  const note = trace.truncated ? '图表仅根据本次展示的订单明细汇总，未包含被截断记录' : undefined;
   const ordersBySupplier = new Map<string, Set<string>>();
   for (const row of rows) {
     const supplier = label(row.supplier);
@@ -295,7 +294,7 @@ function overdueOrderCharts(trace: QueryTrace, rows: Row[]): QueryChartPlan[] {
   }
   const orderCounts = [...ordersBySupplier].map(([supplier, orders]) => ({ label: supplier, value: orders.size }));
   const charts: QueryChartPlan[] = [];
-  const orderChart = bar('各供应商逾期未交订单数（订单号去重）', orderCounts, '个订单', note);
+  const orderChart = bar('各供应商逾期未交订单数（订单号去重）', orderCounts, '个订单');
   if (orderChart) charts.push(orderChart);
 
   const units = [...new Set(rows.map((row) => label(row.order_unit, '')))].filter(Boolean);
@@ -305,7 +304,6 @@ function overdueOrderCharts(trace: QueryTrace, rows: Row[]): QueryChartPlan[] {
       `各供应商逾期未交数量 · ${unit}`,
       sumBy(scoped, (row) => label(row.supplier), (row) => number(row.unfulfilled_quantity)),
       unit,
-      note,
     );
     if (quantityChart) charts.push(quantityChart);
   }

@@ -306,7 +306,7 @@ def _format_overdue_unfulfilled_orders(result: object) -> str:
     if getattr(result, "truncated", False):
         display_limit = getattr(getattr(result, "plan", None), "limit", 100)
         lines.append(
-            f"结果已截断：最多展示 {display_limit} 条，本次展示 {len(rows)} 条。以上订单汇总和低库存产品清单仅基于已展示明细，不能视为全部符合条件记录的总数；请缩小日期或供应商范围后继续查询。"
+            f"结果已截断：本次展示 {len(rows)} 条（上限 {display_limit} 条）；供应商汇总和低库存判断仅基于这些明细，可缩小日期或供应商范围继续查询。"
         )
     return "\n".join(lines)
 

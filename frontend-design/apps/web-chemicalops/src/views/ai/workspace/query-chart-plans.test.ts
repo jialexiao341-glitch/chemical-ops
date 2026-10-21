@@ -57,6 +57,20 @@ describe('AI 查询图表规划', () => {
     expect(charts[0]?.series[0]?.values).toEqual([1, 1, 0]);
   });
 
+  it('逾期采购订单截断时不在每张图表重复提示', () => {
+    const charts = buildQueryCharts({
+      dataset: 'overdue_unfulfilled_orders',
+      truncated: true,
+      rows: [
+        { po_no: 'PO-1', supplier: '甲供应商', order_unit: '升', unfulfilled_quantity: '3' },
+        { po_no: 'PO-2', supplier: '乙供应商', order_unit: '升', unfulfilled_quantity: '5' },
+      ],
+    });
+
+    expect(charts.length).toBeGreaterThan(1);
+    expect(charts.every((chart) => !chart.note)).toBe(true);
+  });
+
   it('库存流水用真实日期绘制净变动折线，并保留冻结事件统计', () => {
     const charts = buildQueryCharts({
       dataset: 'inventory_movement_trace',
