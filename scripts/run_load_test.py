@@ -29,10 +29,10 @@ def _request(url: str, headers: dict[str, str], timeout: float) -> tuple[int, fl
     return status, time.perf_counter() - started
 
 
-def _metrics_snapshot(url: str, timeout: float) -> tuple[int | None, dict[str, int] | None]:
+def _metrics_snapshot(url: str, timeout: float, token: str = "") -> tuple[int | None, dict[str, int] | None]:
     """读取 API 内部累计 SQL 与 Redis 缓存事件，连接失败时返回不可用。"""
     try:
-        with urlopen(url, timeout=timeout) as response:
+        with urlopen(Request(url, headers={"Authorization": f"Bearer {token}"} if token else {}), timeout=timeout) as response:
             body = response.read().decode("utf-8")
     except (HTTPError, URLError, TimeoutError):
         return None, None
@@ -69,6 +69,7 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=10, help="单请求超时秒数")
     parser.add_argument("--token", default=os.getenv("CHEMICALOPS_LOAD_TEST_TOKEN", ""), help="可选 Bearer token")
     parser.add_argument("--expected-status", type=int, default=200, help="期望 HTTP 状态码")
+    parser.add_argument("--metrics-token", default=os.getenv("METRICS_ACCESS_TOKEN", ""), help="独立的监控访问凭据")
     parser.add_argument("--metrics-url", default="http://127.0.0.1:8888/metrics", help="API Prometheus 指标地址")
     parser.add_argument("--output", default="", help="可选 JSON 结果文件路径")
     parser.add_argument("--api-instances", type=int, default=1, help="测试期间 API 实例数")
@@ -79,14 +80,14 @@ def main() -> None:
     if args.requests <= 0 or args.concurrency <= 0 or args.timeout <= 0:
         raise SystemExit("requests、concurrency 和 timeout 必须大于 0")
     headers = {"Authorization": f"Bearer {args.token}"} if args.token else {}
-    queries_before, cache_before = _metrics_snapshot(args.metrics_url, args.timeout)
+    queries_before, cache_before = _metrics_snapshot(args.metrics_url, args.timeout, args.metrics_token)
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
         results = list(executor.map(lambda _: _request(args.url, headers, args.timeout), range(args.requests)))
     elapsed = time.perf_counter() - started
     latencies = sorted(item[1] for item in results)
     failures = sum(status != args.expected_status for status, _ in results)
-    queries_after, cache_after = _metrics_snapshot(args.metrics_url, args.timeout)
+    queries_after, cache_after = _metrics_snapshot(args.metrics_url, args.timeout, args.metrics_token)
     cache_delta = None
     if cache_before is not None and cache_after is not None:
         cache_delta = {key: max(0, cache_after.get(key, 0) - cache_before.get(key, 0))

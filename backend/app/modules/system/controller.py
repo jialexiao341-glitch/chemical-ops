@@ -56,7 +56,8 @@ def registration_roles(db: Session = Depends(get_db)):
 
 
 @auth_router.post("/register", response_model=RegistrationRead, status_code=201, summary="提交注册申请")
-def register(data: RegistrationCreate, db: Session = Depends(get_db)):
+def register(data: RegistrationCreate, request: Request, db: Session = Depends(get_db)):
+    service.check_registration_rate(db, request.client.host if request.client else "unknown")
     user = service.register_user(db, data)
     return RegistrationRead(username=user.username, status=user.status)
 
@@ -147,10 +148,10 @@ def logout(db: Session = Depends(get_db), user: User = Depends(get_current_user)
 
 
 @router.post("/system/users", response_model=UserRead, status_code=status.HTTP_201_CREATED, summary="新增用户")
-def create_user(data: UserCreate, db: Session = Depends(get_db), _: User = Depends(require_permission("system.users.write"))) -> UserRead:
+def create_user(data: UserCreate, db: Session = Depends(get_db), user: User = Depends(require_permission("system.users.write"))) -> UserRead:
     """新增用户，并按请求中的角色 ID 建立用户角色关联。"""
 
-    return service.create_user(db, data)
+    return service.create_user(db, data, actor_id=user.id)
 
 
 @router.get("/system/users", response_model=UserPage, summary="分页查询用户")
@@ -260,10 +261,10 @@ def delete_department(department_id: int, db: Session = Depends(get_db), _: User
 
 
 @router.post("/system/roles", response_model=RoleRead, status_code=status.HTTP_201_CREATED, summary="新增角色")
-def create_role(data: RoleCreate, db: Session = Depends(get_db), _: User = Depends(require_permission("system.roles.write"))) -> RoleRead:
+def create_role(data: RoleCreate, db: Session = Depends(get_db), user: User = Depends(require_permission("system.roles.write"))) -> RoleRead:
     """创建角色并绑定权限。"""
 
-    return service.create_role(db, data)
+    return service.create_role(db, data, actor_id=user.id)
 
 
 @router.get("/system/roles", response_model=RolePage, summary="分页查询角色")
@@ -292,24 +293,24 @@ def get_role(role_id: int, db: Session = Depends(get_db), _: User = Depends(requ
 
 
 @router.patch("/system/roles/{role_id}", response_model=RoleRead, summary="更新角色")
-def update_role(role_id: int, data: RoleUpdate, db: Session = Depends(get_db), _: User = Depends(require_permission("system.roles.write"))) -> RoleRead:
+def update_role(role_id: int, data: RoleUpdate, db: Session = Depends(get_db), user: User = Depends(require_permission("system.roles.write"))) -> RoleRead:
     """部分更新角色并替换权限关联。"""
 
-    return service.update_role(db, role_id, data)
+    return service.update_role(db, role_id, data, actor_id=user.id)
 
 
 @router.delete("/system/roles/{role_id}", response_model=RoleRead, summary="停用角色")
-def delete_role(role_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("system.roles.write"))) -> RoleRead:
+def delete_role(role_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("system.roles.write"))) -> RoleRead:
     """软删除角色，将状态改为 INACTIVE。"""
 
-    return service.delete_role(db, role_id)
+    return service.delete_role(db, role_id, actor_id=user.id)
 
 
 @router.post("/system/permissions", response_model=PermissionRead, status_code=status.HTTP_201_CREATED, summary="新增权限")
-def create_permission(data: PermissionCreate, db: Session = Depends(get_db), _: User = Depends(require_permission("system.permissions.write"))) -> PermissionRead:
+def create_permission(data: PermissionCreate, db: Session = Depends(get_db), user: User = Depends(require_permission("system.permissions.write"))) -> PermissionRead:
     """创建一条系统权限。"""
 
-    return service.create_permission(db, data)
+    return service.create_permission(db, data, actor_id=user.id)
 
 
 @router.get("/system/permissions", response_model=PermissionPage, summary="分页查询权限")
@@ -338,14 +339,14 @@ def get_permission(permission_id: int, db: Session = Depends(get_db), _: User = 
 
 
 @router.patch("/system/permissions/{permission_id}", response_model=PermissionRead, summary="更新权限")
-def update_permission(permission_id: int, data: PermissionUpdate, db: Session = Depends(get_db), _: User = Depends(require_permission("system.permissions.write"))) -> PermissionRead:
+def update_permission(permission_id: int, data: PermissionUpdate, db: Session = Depends(get_db), user: User = Depends(require_permission("system.permissions.write"))) -> PermissionRead:
     """部分更新权限信息。"""
 
-    return service.update_permission(db, permission_id, data)
+    return service.update_permission(db, permission_id, data, actor_id=user.id)
 
 
 @router.delete("/system/permissions/{permission_id}", response_model=PermissionRead, summary="删除权限")
-def delete_permission(permission_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("system.permissions.write"))) -> PermissionRead:
+def delete_permission(permission_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("system.permissions.write"))) -> PermissionRead:
     """删除未绑定角色的权限。"""
 
-    return service.delete_permission(db, permission_id)
+    return service.delete_permission(db, permission_id, actor_id=user.id)

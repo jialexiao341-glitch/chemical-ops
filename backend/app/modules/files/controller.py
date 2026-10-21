@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from urllib.parse import quote
 
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
@@ -33,8 +34,25 @@ def get_file(file_id: int, db: Session = Depends(get_db), user: User = Depends(r
 @router.get("/{file_id}/download", summary="下载文件")
 def download_file(file_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("system.files.download"))) -> Response:
     """校验文件对象存在后下载文件。"""
-    value, content = service.read_file(db, user, file_id)
-    return Response(content=content, media_type=value.mime_type, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(value.file_name)}"})
+    value, stream = service.open_download(db, user, file_id)
+    closed = False
+    def close_stream():
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        stream.close()
+        if hasattr(stream, "release_conn"):
+            stream.release_conn()
+    def chunks():
+        try:
+            while chunk := stream.read(64 * 1024):
+                yield chunk
+        finally:
+            close_stream()
+    return StreamingResponse(chunks(), media_type=value.mime_type,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(value.file_name)}"},
+        background=BackgroundTask(close_stream))
 
 
 @router.post("/{file_id}/attachments", response_model=FileAttachmentRead, status_code=201, summary="关联业务附件")

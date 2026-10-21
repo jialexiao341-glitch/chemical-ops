@@ -371,9 +371,10 @@ def list_issue_requests(db: Session, user: User, *, status: str | None, page: in
     return crud.list_issue_requests(db, applicant_id=applicant_id, warehouse_ids=warehouse_ids, status=status, page=page, page_size=page_size)
 
 
-def list_issue_request_options(db: Session) -> list[dict]:
+def list_issue_request_options(db: Session, user: User) -> list[dict]:
     """Return the minimum available-stock details needed to create an issue request."""
 
+    warehouse_ids = accessible_warehouse_ids(db, user)
     rows = db.execute(
         select(
             InventoryBalance.id,
@@ -395,6 +396,7 @@ def list_issue_request_options(db: Session) -> list[dict]:
         .join(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id)
         .join(Unit, Unit.id == InventoryBalance.unit_id)
         .where(
+            InventoryBalance.warehouse_id.in_(warehouse_ids) if warehouse_ids is not None else True,
             InventoryBalance.status == "AVAILABLE",
             InventoryBalance.quantity > InventoryBalance.locked_quantity,
             Product.status == "ACTIVE",

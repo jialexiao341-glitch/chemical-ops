@@ -13,6 +13,9 @@ alerting:
 scrape_configs:
   - job_name: chemicalops-api
     metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/metrics_token
     static_configs:
       # Add one target per API instance; retain the instance label for process-local counters.
       - targets: ["host.docker.internal:8888"]

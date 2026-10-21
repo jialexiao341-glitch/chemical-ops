@@ -19,6 +19,10 @@ def _valid_production_settings(**overrides) -> Settings:
         "file_scan_enabled": True,
         "file_scan_command": "clamdscan",
         "idempotency_required": True,
+        "redis_enabled": True,
+        "redis_rate_limit_enabled": True,
+        "minio_secure": True,
+        "metrics_access_token": "test-metrics-token-0123456789-abcdef",
         "agent_enabled": False,
         "agent_allow_write_tools": False,
         "demo_default_password": "",
@@ -66,3 +70,14 @@ def test_production_config_does_not_restrict_non_production(environment: str) ->
     settings = Settings(app_env=environment, debug=True, jwt_secret_key="CHANGE_ME")
 
     assert production.production_config_errors(settings) == []
+
+
+@pytest.mark.parametrize("overrides,field", [
+    ({"redis_enabled": False, "redis_rate_limit_enabled": False}, "REDIS_ENABLED"),
+    ({"redis_rate_limit_enabled": False}, "REDIS_RATE_LIMIT_ENABLED"),
+    ({"file_storage_backend": "minio", "minio_secure": False}, "MINIO_SECURE"),
+    ({"metrics_access_token": ""}, "METRICS_ACCESS_TOKEN"),
+])
+def test_production_requires_shared_limits_tls_and_metrics_credential(monkeypatch, overrides, field):
+    monkeypatch.setattr(production.shutil, "which", lambda _: "/usr/bin/clamdscan")
+    assert any(field in message for message in production.production_config_errors(_valid_production_settings(**overrides)))

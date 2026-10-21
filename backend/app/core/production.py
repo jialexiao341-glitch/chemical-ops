@@ -68,6 +68,13 @@ def production_config_errors(settings: Settings) -> list[str]:
         ):
             errors.append("必须配置原始文件桶和解析结果桶")
 
+    if not settings.redis_enabled or not settings.redis_rate_limit_enabled:
+        errors.append("生产环境必须启用 REDIS_ENABLED 和 REDIS_RATE_LIMIT_ENABLED")
+    if storage_backend in {"minio", "s3"} and not settings.minio_secure:
+        errors.append("生产对象存储必须设置 MINIO_SECURE=true")
+    if len(settings.metrics_access_token.strip()) < 32 or _is_placeholder(settings.metrics_access_token):
+        errors.append("METRICS_ACCESS_TOKEN 必须是至少 32 位的非占位凭据")
+
     if not settings.file_scan_enabled:
         errors.append("生产环境必须启用文件病毒扫描")
     elif not _scanner_executable_exists(settings.file_scan_command):

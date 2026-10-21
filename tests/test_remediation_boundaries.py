@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, func
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
+from app.core.idempotency import IdempotencyMiddleware, MAX_IDEMPOTENCY_REQUEST_BYTES
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction, InventoryStocktakeRequest, InventoryStocktakeItem
 from app.modules.inventory_cost.model import InventoryCostLayer
 from app.modules.inventory_cost.service import allocate_outbound_cost, adjust_stocktake_cost
@@ -18,7 +19,6 @@ from app.modules.system.model import Role, User
 from app.modules.system.audit import AuditLog
 from app.modules.system.schema import UserUpdate, UserCreate
 from app.modules.files import service as file_service
-
 
 
 def stock_fixture(db):
@@ -117,3 +117,123 @@ def test_historical_return_cost_repair_is_audited_and_idempotent(db_session):
     assert wrong.remaining_quantity == 10 and correct.remaining_quantity == 8
     assert repair(db_session, actor.id) == []
     assert db_session.scalar(select(AuditLog.id).where(AuditLog.action_type == "REPAIR_COST_ALLOCATION", AuditLog.resource_id == tx.id)) is not None
+
+
+@pytest.mark.parametrize("target", ["buyer", "warehouse_receiver"])
+def test_delegated_user_manager_cannot_grant_admin(db_session, target):
+    actor = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == target))
+    admin = db_session.scalar(select(Role).where(Role.role_code == "SYS_ADMIN"))
+    with pytest.raises(AuthorizationError):
+        system_service.update_user(db_session, user.id, UserUpdate(role_ids=[admin.id]), actor_id=actor.id)
+    with pytest.raises(AuthorizationError):
+        system_service.create_user(db_session, UserCreate(username=f"denied-{uuid4().hex[:8]}", password="test-only-password", display_name="拒绝提权", role_ids=[admin.id]), actor_id=actor.id)
+    with pytest.raises(AuthorizationError):
+        system_service.require_authorization_admin(db_session, actor.id)
+
+
+def test_user_update_audits_without_password(db_session):
+    actor = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    system_service.update_user(db_session, user.id, UserUpdate(display_name="审计回归"), actor_id=actor.id)
+    log = db_session.scalar(select(AuditLog).where(AuditLog.resource_type == "USER", AuditLog.resource_id == user.id).order_by(AuditLog.id.desc()))
+    assert log.actor_id == actor.id and "display_name" in log.request_summary
+    assert "password_hash=" not in log.request_summary
+
+
+def test_registration_quota_precedes_password_hash(db_session):
+    ip = f"test-{uuid4().hex}"
+    for _ in range(3):
+        system_service.check_registration_rate(db_session, ip)
+    with pytest.raises(HTTPException) as error:
+        system_service.check_registration_rate(db_session, ip)
+    assert error.value.status_code == 429
+    system_service.check_registration_rate(db_session, f"other-{uuid4().hex}")
+
+
+def test_unlinked_internal_file_is_not_enumerable(monkeypatch):
+    db = SimpleNamespace(scalars=lambda *_: SimpleNamespace(all=lambda: []))
+    monkeypatch.setattr(file_service, "_is_system_admin", lambda *_: False)
+    value = SimpleNamespace(id=1, access_level="INTERNAL", uploader_id=2)
+    with pytest.raises(ResourceNotFoundError):
+        file_service._check_file_access(db, SimpleNamespace(id=3), value)
+    file_service._check_file_access(db, SimpleNamespace(id=2), value)
+
+
+def test_download_reads_bounded_chunks_and_closes_stream(monkeypatch):
+    import asyncio
+    from io import BytesIO
+    from app.modules.files.controller import download_file
+    class TrackedStream(BytesIO):
+        sizes = []
+        closes = 0
+        releases = 0
+        def read(self, size=-1):
+            self.sizes.append(size)
+            return super().read(size)
+        def close(self):
+            self.closes += 1
+            super().close()
+        def release_conn(self):
+            self.releases += 1
+    stream = TrackedStream(b"x" * 200_000)
+    monkeypatch.setattr(file_service, "open_download", lambda *_: (SimpleNamespace(mime_type="application/pdf", file_name="test.pdf"), stream))
+    response = download_file(1, object(), object())
+    assert not stream.sizes, "创建响应时不能提前读取文件"
+    async def consume():
+        data = [chunk async for chunk in response.body_iterator]
+        await response.background()
+        return data
+    data = asyncio.run(consume())
+    assert sum(map(len, data)) == 200_000
+    assert all(size == 64 * 1024 for size in stream.sizes)
+    assert stream.closes == stream.releases == 1
+
+
+def test_cleanup_expired_idempotency_records_preserves_live_record(db_session, monkeypatch):
+    from datetime import datetime, timedelta
+    from app.modules.system.idempotency_model import IdempotencyRecord
+    from app.core import idempotency
+    now = datetime.now()
+    expired = IdempotencyRecord(actor_key=uuid4().hex, idempotency_key=uuid4().hex,
+        method="POST", path="/test", request_hash="x", status="COMPLETED", expires_at=now - timedelta(hours=1))
+    live = IdempotencyRecord(actor_key=uuid4().hex, idempotency_key=uuid4().hex,
+        method="POST", path="/test", request_hash="x", status="COMPLETED", expires_at=now + timedelta(hours=1))
+    db_session.add_all([expired, live]); db_session.flush()
+    class SharedSession:
+        def __enter__(self): return db_session
+        def __exit__(self, *_): pass
+    monkeypatch.setattr(idempotency, "SessionLocal", SharedSession)
+    assert idempotency.cleanup_expired_records() >= 1
+    assert db_session.scalar(select(IdempotencyRecord.id).where(IdempotencyRecord.id == expired.id)) is None
+    assert db_session.scalar(select(IdempotencyRecord.id).where(IdempotencyRecord.id == live.id)) == live.id
+
+
+def test_idempotency_multipart_is_never_read(monkeypatch):
+    import asyncio
+    from starlette.requests import Request
+    from starlette.responses import Response
+    async def receive():
+        pytest.fail("幂等层不能读取 multipart 请求体")
+    request = Request({"type": "http", "method": "POST", "path": "/files", "headers": [(b"content-type", b"multipart/form-data; boundary=x"), (b"idempotency-key", b"test")]}, receive)
+    async def next_request(_):
+        return Response(status_code=204)
+    response = asyncio.run(IdempotencyMiddleware(lambda *_: None).dispatch(request, next_request))
+    assert response.status_code == 204
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_idempotency_rejects_oversize_body_before_db(declared):
+    import asyncio
+    from starlette.requests import Request
+    headers = [(b"idempotency-key", b"test")]
+    if declared:
+        headers.append((b"content-length", str(MAX_IDEMPOTENCY_REQUEST_BYTES + 1).encode()))
+    async def receive():
+        assert not declared, "声明超限时不应读取 body"
+        return {"type": "http.request", "body": b"x" * (MAX_IDEMPOTENCY_REQUEST_BYTES + 1), "more_body": False}
+    request = Request({"type": "http", "method": "POST", "path": "/write", "headers": headers}, receive)
+    async def next_request(_):
+        pytest.fail("超限请求不能到达业务端点")
+    response = asyncio.run(IdempotencyMiddleware(lambda *_: None).dispatch(request, next_request))
+    assert response.status_code == 413

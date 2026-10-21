@@ -260,7 +260,7 @@ def _check_file_access(db: Session, user: User, value: SysFile) -> None:
         resource = db.get(model, item.resource_id) if model is not None else None
         if resource is not None and _can_read_resource(db, user, item.resource_type) and _can_access_resource_instance(db, user, item.resource_type, resource):
             return
-    if linked_resources:
+    if linked_resources or (value.access_level == "INTERNAL" and value.uploader_id != user.id):
         raise ResourceNotFoundError(f"文件 {value.id} 不存在")
 
 
@@ -360,6 +360,25 @@ def read_file(db: Session, user: User, file_id: int) -> tuple[SysFile, bytes]:
         if response is not None:
             response.close()
             response.release_conn()
+
+
+def open_download(db: Session, user: User, file_id: int):
+    """先校验权限，再打开对象流；调用方负责关闭流并释放连接。"""
+    value = _require_file(db, file_id)
+    _check_file_access(db, user, value)
+    object_key = value.object_key
+    db.commit()
+    if _storage_backend() == "local":
+        root = storage_root().resolve()
+        target = (root / object_key).resolve()
+        if root not in target.parents or not target.is_file():
+            raise ResourceNotFoundError("文件对象不存在或已失效")
+        return value, target.open("rb")
+    try:
+        return value, _minio_client().get_object(_minio_bucket_for_key(object_key), object_key)
+    except Exception as exc:
+        raise ResourceNotFoundError("文件对象不存在或已失效") from exc
+
 
 
 def attach_file(db: Session, user: User, file_id: int, data: FileAttachmentCreate) -> SysFileAttachment:

@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     otel_enabled: bool = False
     otel_exporter_otlp_endpoint: str = ""
     otel_service_name: str = "chemicalops-api"
+    metrics_access_token: str = ""
     prometheus_url: str = "http://127.0.0.1:9090"
     monitoring_request_timeout_seconds: float = Field(default=3.0, gt=0, le=15)
     file_storage_root: str = "storage"

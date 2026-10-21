@@ -16,6 +16,8 @@ def test_health_exposes_data_environment(client: TestClient) -> None:
     assert payload["environment"]
     assert response.headers["x-request-id"]
     assert response.headers["x-trace-id"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
 
 
 def test_health_preserves_incoming_trace_headers(client: TestClient) -> None:
@@ -28,10 +30,13 @@ def test_health_preserves_incoming_trace_headers(client: TestClient) -> None:
     assert response.headers["x-trace-id"] == "trace-test-456"
 
 
-def test_metrics_endpoint_exposes_api_counter(client: TestClient) -> None:
+def test_metrics_endpoint_exposes_api_counter(client: TestClient, monkeypatch) -> None:
     """指标端点至少包含 HTTP 请求计数。"""
 
-    response = client.get("/metrics")
+    from app.main import settings
+    monkeypatch.setattr(settings, "metrics_access_token", "test-metrics-token")
+    assert client.get("/metrics").status_code == 401
+    response = client.get("/metrics", headers={"Authorization": "Bearer test-metrics-token"})
 
     assert response.status_code == 200
     assert "chemicalops_api_requests_count" in response.text

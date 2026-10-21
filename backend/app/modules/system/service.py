@@ -10,7 +10,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from app.core.errors import AuthenticationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
+from app.core.errors import AuthorizationError, AuthenticationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.core.security import create_access_token, hash_password, verify_password
 from app.modules.system import crud
 from app.modules.suppliers.model import Supplier
@@ -103,6 +103,22 @@ def user_read(db: Session, user: User) -> UserRead:
 
 def registration_roles(db: Session):
     return db.scalars(select(Role).where(Role.status == "ACTIVE", Role.role_code != "SYS_ADMIN").order_by(Role.id)).all()
+
+
+def check_registration_rate(db: Session, client_ip: str) -> None:
+    """数据库共享的 15 分钟/IP 注册限额，在密码散列前计数。"""
+    now = datetime.now()
+    key = _login_scope_key("registration_ip", client_ip)
+    db.execute(text("INSERT IGNORE INTO sys_login_attempts (scope_key, failure_count, window_started_at) VALUES (:key, 0, :now)"), {"key": key, "now": now})
+    row = db.execute(text("SELECT failure_count, window_started_at FROM sys_login_attempts WHERE scope_key=:key FOR UPDATE"), {"key": key}).mappings().one()
+    expired = now - row["window_started_at"] >= timedelta(minutes=15)
+    count = 0 if expired else row["failure_count"]
+    if count >= 3:
+        db.rollback()
+        raise HTTPException(429, "注册请求过于频繁，请稍后重试", headers={"Retry-After": "900"})
+    db.execute(text("UPDATE sys_login_attempts SET failure_count=:count, window_started_at=:started WHERE scope_key=:key"),
+               {"count": count + 1, "started": now if expired else row["window_started_at"], "key": key})
+    db.commit()
 
 
 def register_user(db: Session, data: RegistrationCreate) -> User:
@@ -222,13 +238,28 @@ def ensure_active_system_admin_remains(db: Session, excluded_user_ids: set[int])
         raise BusinessValidationError("至少保留一个启用的系统管理员账号")
 
 
-def create_user(db: Session, data: UserCreate) -> User:
+def _require_role_assignment(db: Session, actor_id: int | None, role_ids: list[int], *, target_id: int | None = None) -> None:
+    """只有系统管理员能变更管理员或管理授权的角色，防止委派管理间接提权。"""
+    if actor_id is None or "SYS_ADMIN" in crud.get_user_role_codes(db, actor_id):
+        return
+    roles = set(db.scalars(select(Role.role_code).where(Role.id.in_(set(role_ids)))).all())
+    permissions = set(db.scalars(select(Permission.permission_code).join(
+        RolePermission, RolePermission.permission_id == Permission.id,
+    ).where(RolePermission.role_id.in_(set(role_ids)))).all())
+    if "SYS_ADMIN" in roles or permissions & {"system.users.write", "system.roles.write", "system.permissions.write"}:
+        raise AuthorizationError("仅系统管理员可以授予管理授权角色")
+    if target_id is not None and "SYS_ADMIN" in crud.get_user_role_codes(db, target_id):
+        raise AuthorizationError("仅系统管理员可以修改系统管理员账号")
+
+
+def create_user(db: Session, data: UserCreate, *, actor_id: int | None = None) -> User:
     """校验用户名、部门和角色后创建用户。"""
 
     if crud.get_user_by_username(db, data.username):
         raise DuplicateResourceError(f"用户名 {data.username} 已存在")
     _require_department(db, data.department_id)
     _require_roles(db, data.role_ids)
+    _require_role_assignment(db, actor_id, data.role_ids)
     user = User(
         username=data.username,
         password_hash=hash_password(data.password),
@@ -240,6 +271,7 @@ def create_user(db: Session, data: UserCreate) -> User:
     db.add(user)
     db.flush()
     crud.replace_user_roles(db, user.id, data.role_ids)
+    add_audit_log(db, actor_id=actor_id, action_type="CREATE", resource_type="USER", resource_id=user.id, request_summary=f"创建用户，角色 ID={sorted(data.role_ids)}", result_status="SUCCESS")
     db.commit()
     db.refresh(user)
     return user
@@ -259,6 +291,7 @@ def update_user(
         raise BusinessValidationError("不能停用当前登录账号")
     next_role_codes = current_role_codes
     current_role_ids = set(crud.get_user_role_ids(db, user_id))
+    _require_role_assignment(db, actor_id, data.role_ids if data.role_ids is not None else list(current_role_ids), target_id=user_id)
     role_membership_changed = False
     if data.role_ids is not None:
         _require_roles(db, data.role_ids)
@@ -288,6 +321,7 @@ def update_user(
             account = db.scalar(select(SupplierPortalAccount).where(SupplierPortalAccount.user_id == user.id))
             if account is not None:
                 account.status = "INACTIVE"
+    add_audit_log(db, actor_id=actor_id, action_type="UPDATE", resource_type="USER", resource_id=user.id, request_summary=f"更新用户字段={sorted(values.keys())}，角色 ID={sorted(data.role_ids) if data.role_ids is not None else '未变更'}", result_status="SUCCESS")
     return crud.update_entity(db, user, values)
 
 
@@ -301,7 +335,9 @@ def delete_user(db: Session, user_id: int, *, actor_id: int | None = None) -> Us
         raise BusinessValidationError("不能停用当前登录账号")
     if user.status == "ACTIVE" and "SYS_ADMIN" in crud.get_user_role_codes(db, user_id):
         ensure_active_system_admin_remains(db, {user_id})
+    _require_role_assignment(db, actor_id, [], target_id=user_id)
     user.token_version += 1
+    add_audit_log(db, actor_id=actor_id, action_type="DISABLE", resource_type="USER", resource_id=user.id, request_summary="停用用户", result_status="SUCCESS")
     return crud.disable_entity(db, user)
 
 
@@ -352,8 +388,15 @@ def list_roles(db: Session, keyword: str | None, status: str | None, page: int, 
     return crud.list_roles(db, keyword, status, page, page_size)
 
 
-def create_role(db: Session, data: RoleCreate) -> Role:
+def require_authorization_admin(db: Session, actor_id: int | None) -> None:
+    if actor_id is not None and "SYS_ADMIN" not in crud.get_user_role_codes(db, actor_id):
+        raise AuthorizationError("仅系统管理员可以修改角色或权限定义")
+
+
+def create_role(db: Session, data: RoleCreate, *, actor_id: int | None = None) -> Role:
     """校验角色编码和权限后创建角色。"""
+
+    require_authorization_admin(db, actor_id)
 
     if crud.get_role_by_code(db, data.role_code):
         raise DuplicateResourceError(f"角色编码 {data.role_code} 已存在")
@@ -363,13 +406,16 @@ def create_role(db: Session, data: RoleCreate) -> Role:
     db.flush()
     for permission_id in sorted(set(data.permission_ids)):
         db.add(RolePermission(role_id=role.id, permission_id=permission_id))
+    add_audit_log(db, actor_id=actor_id, action_type="CREATE", resource_type="ROLE", resource_id=role.id, request_summary="create_role", result_status="SUCCESS")
     db.commit()
     db.refresh(role)
     return role
 
 
-def update_role(db: Session, role_id: int, data: RoleUpdate) -> Role:
+def update_role(db: Session, role_id: int, data: RoleUpdate, *, actor_id: int | None = None) -> Role:
     """更新角色资料和权限关联。"""
+
+    require_authorization_admin(db, actor_id)
 
     role = crud.get_role(db, role_id)
     if role is None:
@@ -393,6 +439,7 @@ def update_role(db: Session, role_id: int, data: RoleUpdate) -> Role:
             db.add(RolePermission(role_id=role_id, permission_id=permission_id))
     if authorization_changed:
         _invalidate_role_members(db, role_id)
+    add_audit_log(db, actor_id=actor_id, action_type="UPDATE", resource_type="ROLE", resource_id=role.id, request_summary="update_role", result_status="SUCCESS")
     return crud.update_entity(db, role, values)
 
 
@@ -407,8 +454,10 @@ def _require_permissions(db: Session, permission_ids: list[int]) -> None:
         raise ResourceNotFoundError(f"权限不存在：{missing}")
 
 
-def delete_role(db: Session, role_id: int) -> Role:
+def delete_role(db: Session, role_id: int, *, actor_id: int | None = None) -> Role:
     """软删除角色，将状态设置为 INACTIVE。"""
+
+    require_authorization_admin(db, actor_id)
 
     role = crud.get_role(db, role_id)
     if role is None:
@@ -417,6 +466,7 @@ def delete_role(db: Session, role_id: int) -> Role:
         raise BusinessValidationError("系统管理员角色不能停用")
     if role.status != "INACTIVE":
         _invalidate_role_members(db, role_id)
+    add_audit_log(db, actor_id=actor_id, action_type="DELETE", resource_type="ROLE", resource_id=role.id, request_summary="delete_role", result_status="SUCCESS")
     return crud.disable_entity(db, role)
 
 
@@ -426,25 +476,38 @@ def list_permissions(db: Session, keyword: str | None, permission_type: str | No
     return crud.list_permissions(db, keyword, permission_type, page, page_size)
 
 
-def create_permission(db: Session, data: PermissionCreate) -> Permission:
+def create_permission(db: Session, data: PermissionCreate, *, actor_id: int | None = None) -> Permission:
     """校验权限编码后创建权限。"""
+
+    require_authorization_admin(db, actor_id)
 
     if crud.get_permission_by_code(db, data.permission_code):
         raise DuplicateResourceError(f"权限编码 {data.permission_code} 已存在")
-    return crud.add_entity(db, Permission(**data.model_dump()))
+    permission = Permission(**data.model_dump())
+    db.add(permission)
+    db.flush()
+    add_audit_log(db, actor_id=actor_id, action_type="CREATE", resource_type="PERMISSION", resource_id=permission.id, request_summary="创建权限", result_status="SUCCESS")
+    db.commit()
+    db.refresh(permission)
+    return permission
 
 
-def update_permission(db: Session, permission_id: int, data: PermissionUpdate) -> Permission:
+def update_permission(db: Session, permission_id: int, data: PermissionUpdate, *, actor_id: int | None = None) -> Permission:
     """更新权限名称、类型、资源或操作。"""
+
+    require_authorization_admin(db, actor_id)
 
     permission = crud.get_permission(db, permission_id)
     if permission is None:
         raise ResourceNotFoundError(f"权限 {permission_id} 不存在")
+    add_audit_log(db, actor_id=actor_id, action_type="UPDATE", resource_type="PERMISSION", resource_id=permission.id, request_summary="update_permission", result_status="SUCCESS")
     return crud.update_entity(db, permission, data.model_dump(exclude_unset=True))
 
 
-def delete_permission(db: Session, permission_id: int) -> Permission:
+def delete_permission(db: Session, permission_id: int, *, actor_id: int | None = None) -> Permission:
     """权限表没有状态字段，删除前必须确认没有角色引用。"""
+
+    require_authorization_admin(db, actor_id)
 
     permission = crud.get_permission(db, permission_id)
     if permission is None:
@@ -452,6 +515,7 @@ def delete_permission(db: Session, permission_id: int) -> Permission:
     if db.scalar(select(RolePermission).where(RolePermission.permission_id == permission_id).limit(1)):
         raise BusinessValidationError("权限已绑定角色，不能直接删除")
     db.delete(permission)
+    add_audit_log(db, actor_id=actor_id, action_type="DELETE", resource_type="PERMISSION", resource_id=permission.id, request_summary="delete_permission", result_status="SUCCESS")
     db.commit()
     return permission
 

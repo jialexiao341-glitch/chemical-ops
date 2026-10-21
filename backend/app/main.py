@@ -1,5 +1,6 @@
 """ChemicalOps FastAPI 应用入口。"""
 
+import secrets
 import asyncio
 from contextlib import asynccontextmanager, suppress
 import hashlib
@@ -7,7 +8,7 @@ import logging
 from pathlib import Path
 import re
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -17,7 +18,8 @@ from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal, engine, refresh_database_pool_metrics
-from app.core.idempotency import IdempotencyMiddleware
+from app.core.idempotency import IdempotencyMiddleware, cleanup_expired_records
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.observability import JsonFormatter, RequestContextMiddleware, metrics
 from app.core.task_metrics import refresh_task_queue_metrics
 from app.core.telemetry import configure_tracing, shutdown_tracing
@@ -62,6 +64,15 @@ from app.modules.system.controller import auth_router, router as system_router
 
 settings = get_settings()
 LOGGER = logging.getLogger("chemicalops.api")
+
+
+async def _idempotency_cleanup_scheduler() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await asyncio.to_thread(cleanup_expired_records)
+        except Exception:
+            LOGGER.exception("幂等过期记录清理失败")
 
 
 async def _business_alert_scheduler() -> None:
@@ -236,6 +247,7 @@ async def lifespan(_: FastAPI):
             database_ready,
             minio_ready,
         )
+    cleanup_task = asyncio.create_task(_idempotency_cleanup_scheduler()) if database_ready else None
     scheduler_task = (
         asyncio.create_task(_business_alert_scheduler())
         if database_ready and settings.business_alerts_scheduler_enabled
@@ -244,6 +256,10 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        if cleanup_task is not None:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
         if scheduler_task is not None:
             scheduler_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -259,6 +275,9 @@ app = FastAPI(
     version="0.1.0",
     responses=API_ERROR_RESPONSES,
     lifespan=lifespan,
+    docs_url=None if settings.app_env.lower() in {"production", "prod"} else "/docs",
+    redoc_url=None if settings.app_env.lower() in {"production", "prod"} else "/redoc",
+    openapi_url=None if settings.app_env.lower() in {"production", "prod"} else "/openapi.json",
 )
 
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
@@ -271,6 +290,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware, production=settings.app_env.lower() in {"production", "prod"})
 app.add_middleware(RequestContextMiddleware, slow_request_ms=settings.slow_request_ms)
 
 
@@ -427,9 +447,12 @@ def readiness(response: Response) -> dict[str, object]:
 
 
 @app.get("/metrics", include_in_schema=False)
-def metrics_endpoint() -> PlainTextResponse:
+def metrics_endpoint(request: Request) -> PlainTextResponse:
     """输出 Prometheus 指标及来自持久化队列表的跨进程任务快照。"""
 
+    token = settings.metrics_access_token
+    if not token or not secrets.compare_digest(request.headers.get("authorization", ""), f"Bearer {token}"):
+        raise HTTPException(status_code=401, detail="监控接口需要有效的访问凭据")
     refresh_database_pool_metrics()
     try:
         with SessionLocal() as db:

@@ -35,3 +35,6 @@ storage/
 # Local agent skills and OpenSpec files
 /.agents/skills/
 /openspec/
+
+# 本地 Prometheus 抓取凭据
+/deploy/observability/secrets/

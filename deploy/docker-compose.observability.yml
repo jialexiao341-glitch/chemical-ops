@@ -34,6 +34,7 @@ services:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/secrets:/etc/prometheus/secrets:ro
       - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
       - chemicalops_prometheus_data:/prometheus
     command:

@@ -9,7 +9,9 @@ import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
+from app.core.observability import metrics
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -20,6 +22,7 @@ from app.modules.system.model import User
 
 LOGGER = logging.getLogger("chemicalops.idempotency")
 MAX_CACHED_RESPONSE_BYTES = 1024 * 1024
+MAX_IDEMPOTENCY_REQUEST_BYTES = 1024 * 1024
 IDEMPOTENCY_EXEMPT_SUFFIXES = ("/auth/login", "/ai/chat/stream")
 REPLAYABLE_HEADERS = {
     "cache-control",
@@ -159,6 +162,9 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
             return await call_next(request)
 
+        # multipart 交给 UploadFile 的限额读取，不在此层复制整个上传体。
+        if request.headers.get("content-type", "").lower().startswith("multipart/"):
+            return await call_next(request)
         settings = get_settings()
         key = request.headers.get("Idempotency-Key", "").strip()
         if not key:
@@ -168,7 +174,20 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         if len(key) > 128:
             return _error_response(422, "Idempotency-Key 长度不能超过 128 个字符")
 
-        body = await request.body()
+        try:
+            declared = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            return _error_response(422, "Content-Length 不合法")
+        if declared > MAX_IDEMPOTENCY_REQUEST_BYTES:
+            return _error_response(413, "幂等请求体不能超过 1 MB，文件请使用上传接口")
+        chunks = bytearray()
+        async for chunk in request.stream():
+            if len(chunks) + len(chunk) > MAX_IDEMPOTENCY_REQUEST_BYTES:
+                return _error_response(413, "幂等请求体不能超过 1 MB")
+            chunks.extend(chunk)
+        body = bytes(chunks)
+        request._body = body  # Starlette 将已受限的请求体回放给下游。
+
         request_hash = sha256(body).hexdigest()
         authorization = request.headers.get("Authorization", "")
         actor_identifier = authorization or "anonymous"
@@ -306,3 +325,18 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         except Exception:
             self._best_effort_record_state(record_id, "UNCERTAIN")
             raise
+
+
+def cleanup_expired_records() -> int:
+    """按小时调用，单事务删除过期缓存并暴露成功/失败指标。"""
+    try:
+        with SessionLocal() as db:
+            result = db.execute(delete(IdempotencyRecord).where(IdempotencyRecord.expires_at <= datetime.now()))
+            db.commit()
+            count = result.rowcount
+        metrics.increment("idempotency_cleanup", labels={"result": "success"})
+        metrics.increment("idempotency_expired_deleted", value=count)
+        return count
+    except Exception:
+        metrics.increment("idempotency_cleanup", labels={"result": "failed"})
+        raise

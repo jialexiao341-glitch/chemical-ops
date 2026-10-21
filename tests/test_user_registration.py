@@ -73,7 +73,9 @@ def test_registration_reject_and_no_review_bypass(client, db_session, demo_passw
     assert refused.status_code == 401 and '已被拒绝' in refused.json()['detail']
 
 
-def test_registration_forbids_admin_extra_fields_duplicates_and_disabled_roles(client, db_session, demo_password):
+def test_registration_forbids_admin_extra_fields_duplicates_and_disabled_roles(client, db_session, demo_password, monkeypatch):
+    # 此用例遍历业务校验，注册配额在独立用例验证。
+    monkeypatch.setattr("app.modules.system.service.check_registration_rate", lambda *_: None)
     data = payload(demo_password, 'SYS_ADMIN')
     assert client.post('/api/v1/auth/register', json=data).status_code == 400
     data['role_code'] = 'BUYER'
