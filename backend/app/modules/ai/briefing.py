@@ -20,6 +20,7 @@ from app.modules.ai.schema import (
     BriefingResponse,
 )
 from app.modules.ai.llm import chat
+from app.modules.ai.numeric_fidelity import faithful_numbers
 from app.modules.dashboard.service import get_overview, get_report
 from app.modules.notifications.service import notify_users
 from app.modules.system.audit import add_audit_log
@@ -72,7 +73,7 @@ def build_prompt(snapshot: dict[str, Any]) -> str:
         "2. 使用三段结构：【概览】【需关注】【建议】；\n"
         "3. 只引用快照中出现的数字与名称，禁止编造；"
         "没有值得关注的内容时如实说「今日无异常」；\n"
-        "4. 语言口语化、可直接发给管理层阅读。\n\n"
+        "4. 数值逐值复制为阿拉伯数字，不换算单位，不写中文数字或万/亿，不用数字序号。语言口语化、可直接发给管理层阅读。\n\n"
         f"数据快照：\n{json.dumps(snapshot, ensure_ascii=False)}"
     )
 
@@ -95,6 +96,12 @@ async def generate_briefing(
         )
     )
     content = result.answer or result.message.content
+    if not faithful_numbers(content, snapshot):
+        overview = snapshot.get("overview", {})
+        labels = {"purchase_orders_total": "采购订单总数", "purchase_orders_in_progress": "进行中订单",
+                  "deliveries_overdue": "逾期到货", "open_exceptions": "未关闭异常", "expiry_alerts": "效期预警"}
+        facts = "；".join(f"{label}：{overview[key]}" for key, label in labels.items() if key in overview)
+        content = f"【概览】{facts or '暂无汇总指标'}。\n【需关注】请按快照核对逾期、异常与效期明细。\n【建议】结合单据明细安排处理。"
 
     pushed = False
     notified_count = 0

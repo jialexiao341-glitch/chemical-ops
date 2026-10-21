@@ -285,7 +285,11 @@ async def _rewrite_text2sql_answer(result: object, dataset_label: str, settings:
         parsed = extract_json_object(raw)
         answer = parsed.get("answer")
         if isinstance(answer, str) and answer.strip():
-            return answer.strip()
+            from app.modules.ai.numeric_fidelity import faithful_numbers
+            evidence = {key: value for key, value in json.loads(payload).items() if key not in {"question", "dataset_label"}}
+            if faithful_numbers(answer, evidence):
+                return answer.strip()
+            LOGGER.warning("AI 答案数值或单位未通过证据白名单，使用模板兜底")
         return None
     except Exception as exc:  # 重写失败不能影响查询主链路
         LOGGER.warning("AI 答案重写失败，使用模板兜底 error_type=%s", type(exc).__name__)
