@@ -513,7 +513,8 @@ def _fake_hits():
 def test_chat_doc_path_injects_context_and_citations(client, demo_password, monkeypatch):
     from app.modules.ai import routing
     async def understand(*args, **kwargs):
-        return routing.Understanding(purpose='query', tasks=['document'])
+        return routing.Understanding(purpose='query', execution_mode='document', tasks=['document'], sub_tasks=[
+            routing.SubTask(id='t1', kind='document', question='检索化学品资料')])
     monkeypatch.setattr(routing, 'understand', understand)
     captured = {}
 
@@ -551,7 +552,8 @@ def test_chat_doc_path_injects_context_and_citations(client, demo_password, monk
 def test_chat_doc_path_empty_hits_gives_guidance(client, demo_password, monkeypatch):
     from app.modules.ai import routing
     async def understand(*args, **kwargs):
-        return routing.Understanding(purpose='query', tasks=['document'])
+        return routing.Understanding(purpose='query', execution_mode='document', tasks=['document'], sub_tasks=[
+            routing.SubTask(id='t1', kind='document', question='检索化学品资料')])
     monkeypatch.setattr(routing, 'understand', understand)
     async def fake_retrieve(_db, _question, **_kwargs):
         return []
@@ -581,7 +583,8 @@ def test_chat_doc_path_empty_hits_gives_guidance(client, demo_password, monkeypa
 def test_stream_doc_path_emits_deltas_and_citations(client, demo_password, monkeypatch):
     from app.modules.ai import routing
     async def understand(*args, **kwargs):
-        return routing.Understanding(purpose='query', tasks=['document'])
+        return routing.Understanding(purpose='query', execution_mode='document', tasks=['document'], sub_tasks=[
+            routing.SubTask(id='t1', kind='document', question='检索化学品资料')])
     monkeypatch.setattr(routing, 'understand', understand)
     async def fake_retrieve(_db, _question, **_kwargs):
         return _fake_hits()

@@ -487,8 +487,8 @@ def _resolve_candidates(state: RunState, result: dict, db: Session) -> None:
     chosen = state.selected_product if product else state.selected_rfq_item
     ids = {row[key] for row in result["rows"]}
     aggregate = state.workflow.all_products
-    question = state.memory_state.get('goal', {}).get('description', state.messages[-1])
-    if product and state.selected_product is None and any(word in question for word in ('汇总', '全部', '所有', '合计')):
+    understanding_slots = (state.memory_state.get("understanding") or {}).get("slots", {})
+    if product and state.selected_product is None and understanding_slots.get("aggregate_products"):
         from app.modules.ai.multi_intent import _inventory_family
         aggregate = aggregate or (not result['truncated'] and bool(ids) and
                                  _inventory_family(db, result['rows'], result['keyword']))
@@ -641,7 +641,9 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             raise AuthorizationError("当前没有可用的任务工具权限")
         if current.memory_state.get("route_turn") != len(current.messages):
             context = {"memory": current.memory_state, "messages": current.messages[:-1]}
-            decision = await routing.understand(current.messages[-1], context, settings)
+            from app.modules.ai import capabilities
+            manifest = capabilities.build_capability_manifest(db, user)
+            decision = await routing.understand(current.messages[-1], context, settings, manifest=manifest)
             _assert_running(db, user, current)
             current.memory_state["understanding"] = decision.model_dump(mode="json")
             current.memory_state["route_turn"] = len(current.messages)

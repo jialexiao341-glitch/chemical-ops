@@ -75,7 +75,7 @@ def _query_log_fields(user: User, query: str) -> dict[str, object]:
 
 async def _classify_chat_intent(db: Session, question: str, *, user: User, data: AIChatRequest) -> IntentResult:
     """聊天与 Agent 使用同一语义结果；客户端只能复用后端签发的短期结果。"""
-    from app.modules.ai import routing
+    from app.modules.ai import routing, capabilities
     if data.retry_failed or data.batch_choice:
         if data.attachments or data.attachment_file_ids:
             raise BusinessValidationError("重试使用原查询条件；修改附件或条件请重新发起查询。")
@@ -86,10 +86,11 @@ async def _classify_chat_intent(db: Session, question: str, *, user: User, data:
         decision = routing.read_ticket(data.route_token, user.id, question, data.conversation_id)
     else:
         context = routing.conversation_context(db, user, data.conversation_id)
+        manifest = capabilities.build_capability_manifest(db, user)
         # Context and authorization checks are complete; release the read transaction
         # before waiting for the routing model.
         db.commit()
-        decision = await routing.understand(question, context)
+        decision = await routing.understand(question, context, manifest=manifest)
     route = decision.route
     if route == "batch":
         return IntentResult(Intent.MULTI, "semantic_route", decision.model_dump(mode="json"))

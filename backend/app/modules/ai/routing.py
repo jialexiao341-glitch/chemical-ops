@@ -43,6 +43,12 @@ ROUTING_PROMPT = """# 角色与任务
 
 # 判断规则
 - purpose: capability（能做什么）、guidance（如何操作）、query（请求真实数据）、purchase_draft（准备采购申请预览）、greeting、unsupported、clarify。
+- execution_mode 必须明确输出：agent、batch、query、document、none。只有 purpose=query 且 dialogue_action!=cancel 时使用查询模式；其他意图和取消必须是 none。
+- 输出 clarification_slot 与 clarification_options；无待澄清内容时分别为 null 和 []。对可明确为有限选择的澄清，绑定一个稳定槽位并提供 2–5 个简短、互斥选项；不要把答案字段猜成产品 ID 或权限结论。
+- 如果会话 context.memory.pending_clarification 存在，用户的文本是对其中澄清问题的回答或新话题。选项回答只用于该槽位，dialogue_action=continue；明显的新请求设 switch；取消设 cancel。不得将澄清答案改绑到其他槽位。
+- 单个或同一产品的库存/报价组合使用 agent，tasks 仅含 inventory/quotes 类别，不生成 sub_tasks。多个独立查询对象或问题使用 batch，必须生成 2–6 个原子 sub_tasks，tasks 是这些子任务 kind 的去重集合；batch 可包含现有执行器支持的 inventory、quotes、analytics、document 类别。
+- 单个 analytics 子任务使用 query；单个 document 子任务使用 document。执行模式与任务类别、sub_tasks 数量/类型不一致时，重新按契约输出；不得通过删除用户请求中的一部分来凑成合法模式。
+- 多产品请求不得折叠成一个 agent 目标；同一产品的库存和报价可以由一个 agent 目标共同表达。执行器无法完整覆盖的混合请求（包括查询夹带写操作）整体澄清或拒绝，execution_mode=none、tasks=[]、sub_tasks=[]，不先执行可行部分。
 - dialogue_action: new、continue、modify、switch、cancel。否定的任务记入 excluded_tasks，并从 tasks 删除。
 - tasks: inventory（指定产品可用库存）、quotes（指定产品报价比较）、analytics（统计/流水/预警/订单等业务查询）、document（化学品性质/安全资料）。
 - 化学品的特性、物理化学性质、用途、危害等事实问答统一走 document 检索，不得作为 guidance 或闲聊直接凭模型记忆回答；例如“甲醇有什么特性吗？”也是 document。无资料时明确依据不足，不改走无来源的自由回答。
@@ -77,20 +83,23 @@ ROUTING_PROMPT = """# 角色与任务
 - 所有子任务均为只读；含要求写操作的复合请求整体标 unsupported，不得静默漏掉写操作。
 
 # 输出契约
-只输出 JSON 对象，字段限于：purpose, dialogue_action, tasks, excluded_tasks, slots, question, sub_tasks。
-slots 字段限于 product_keyword, rfq_no, warehouse_keyword, date_from, date_to, limit, unit。
+只输出 JSON 对象，字段限于：purpose, execution_mode, clarification_slot, clarification_options, dialogue_action, tasks, excluded_tasks, slots, question, sub_tasks。
+slots 字段限于 product_keyword, rfq_no, warehouse_keyword, date_from, date_to, limit, unit, aggregate_products。
 询价号只填入 rfq_no，不填 product_keyword；编号前缀和格式不能决定对象类型。返回条数填 limit，仓库条件填原始准确名称 warehouse_keyword；续答继承未修改的槽位。执行器不会用关键词正则重新解析这些条件。
+只有用户明确要求汇总全部匹配的产品规格时，aggregate_products 才为 true；明确排除全部、只查某个规格或未提出全规格汇总时为 false。不要仅因句子出现“全部/汇总”等字样就设为 true。
 无明确依据的字段为 null；tasks/excluded_tasks 为数组。不要输出推理过程或置信度。
 
 # 边界示例
-“你好，查乙醇库存” → query，tasks=[inventory]，product_keyword=乙醇。
-“查 64-17-5 的库存” → query，tasks=[inventory]，product_keyword=64-17-5。
-“库存查询支持哪些筛选条件” → capability，tasks=[]。
-“查库存，不用比较报价” → query，tasks=[inventory]，excluded_tasks=[quotes]。
-“查供应商总数” → query，tasks=[analytics]。
-“库存不足怎么处理” → guidance，tasks=[]。
-已有订单查询时“换成上个月” → query，dialogue_action=modify，tasks=[analytics]，继承未修改条件。
-“取消查询” → dialogue_action=cancel，tasks=[]。
+“你好，查乙醇库存” → purpose=query，execution_mode=agent，tasks=[inventory]，sub_tasks=[]，product_keyword=乙醇。
+“查 64-17-5 的库存” → purpose=query，execution_mode=agent，tasks=[inventory]，sub_tasks=[]，product_keyword=64-17-5。
+“查乙醇库存并比较报价” → purpose=query，execution_mode=agent，tasks=[inventory,quotes]，sub_tasks=[]。
+“查乙醇和甲醇库存” → purpose=query，execution_mode=batch，tasks=[inventory]，sub_tasks 含两个 inventory 原子任务。
+“库存查询支持哪些筛选条件” → purpose=capability，execution_mode=none，tasks=[]，sub_tasks=[]。
+“查库存，不用比较报价” → purpose=query，execution_mode=agent，tasks=[inventory]，excluded_tasks=[quotes]，sub_tasks=[]。
+“查供应商总数” → purpose=query，execution_mode=query，tasks=[analytics]，sub_tasks 含一个 analytics 任务。
+“库存不足怎么处理” → purpose=guidance，execution_mode=none，tasks=[]，sub_tasks=[]。
+已有订单查询时“换成上个月” → purpose=query，execution_mode=query，dialogue_action=modify，tasks=[analytics]，sub_tasks 含一个完整 analytics 任务并继承未修改条件。
+“取消查询” → purpose=clarify，execution_mode=none，dialogue_action=cancel，tasks=[]，sub_tasks=[]。
 """
 
 
@@ -135,7 +144,7 @@ def conversation_context(db: Session, user: User, conversation_id: int | None) -
             "memory": memory, "query_plan": query_plan}
 
 
-async def understand(question: str, context: dict | None = None, settings=None) -> Understanding:
+async def understand(question: str, context: dict | None = None, settings=None, *, manifest=None) -> Understanding:
     """只对完整明确的控制命令快速匹配；自然语言交给同一个语义理解器。"""
     normalized = question.strip().lower().rstrip("。！？!?")
     if normalized in {"/cancel", "取消查询", "取消任务", "停止查询"}:
@@ -146,14 +155,17 @@ async def understand(question: str, context: dict | None = None, settings=None) 
         return Understanding(purpose="greeting")
     from app.modules.ai.schema import AIChatRequest, AIChatMessage
     runtime = (settings or get_settings()).model_copy(update={"llm_temperature": 0, "llm_max_tokens": 6000})
+    manifest_payload = (manifest.model_dump(mode="json") if hasattr(manifest, "model_dump") else manifest)
     payload = {"question": question, "context": context or {}, "today": datetime.now().astimezone().date().isoformat()}
+    if manifest_payload is not None:
+        payload["capabilities"] = manifest_payload
     from app.modules.ai.catalog import catalog_prompt
-    capability_context = (
+    capability_context = ("" if manifest_payload is None else
         "\n# 标准统计可回答范围\n"
         "以下白名单列出标准统计查询可提供的指标、分组和筛选范围。derived_outputs 是服务端依据明细确定性计算并实际展示的派生结果，"
         "可用于判断复合查询是否完整可答；不得要求底层 SQL 直接输出这些派生项，也不得因 metrics 未包含它们而误判为不支持。"
         "执行前必须确认用户要求的每项指标都能由 metrics、outputs 或 derived_outputs 覆盖；不能完整覆盖时，按上方规则先澄清，不得用相近指标代替。\n"
-        + catalog_prompt()
+        + catalog_prompt({item["key"] for item in manifest_payload["analytics_datasets"]})
     )
     repair = ""
     for attempt in range(2):

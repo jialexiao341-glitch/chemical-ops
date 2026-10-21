@@ -46,7 +46,7 @@ from app.modules.ai.schema import (
 from app.modules.ai import briefing as briefing_service
 from app.modules.ai import drafts as drafts_service
 from app.modules.ai import nl_filters as nl_filters_service
-from app.modules.ai import service, routing
+from app.modules.ai import service, routing, capabilities
 from app.modules.ai import agent_tools
 from app.modules.ai import agent_runtime
 from app.modules.ai import purchase_draft_confirmations
@@ -75,7 +75,8 @@ async def route_request(data: RouteRequest, db: Session = Depends(get_db),
                         user: User = Depends(require_permission("ai.workspace.read"))) -> dict:
     """校验会话归属并理解当前请求，返回短期复用凭据；此接口不执行业务查询。"""
     context = routing.conversation_context(db, user, data.conversation_id)
-    decision = await routing.understand(data.question, context)
+    manifest = capabilities.build_capability_manifest(db, user)
+    decision = await routing.understand(data.question, context, manifest=manifest)
     return {"route": decision.route, "understanding": decision.model_dump(mode="json"),
             "route_token": routing.issue_ticket(decision, user.id, data.question, data.conversation_id)}
 

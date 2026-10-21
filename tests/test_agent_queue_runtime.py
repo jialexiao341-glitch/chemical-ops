@@ -235,7 +235,7 @@ def test_transport_error_preserves_checkpoint_for_queue_retry(queued_db, monkeyp
     async def unavailable(*args, **kwargs):
         raise httpx.ConnectError("simulated unavailable model")
     async def understand(*args, **kwargs):
-        return runtime.routing.Understanding(purpose="query", tasks=["inventory"])
+        return runtime.routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"])
     monkeypatch.setattr(runtime.routing, "understand", understand)
     monkeypatch.setattr(runtime.llm, "chat", unavailable)
     with pytest.raises(httpx.ConnectError):
@@ -251,7 +251,7 @@ def test_token_budget_is_persisted_to_task_and_queue_checkpoint(queued_db, monke
     task, execution = accept(queued_db)
     current = claim(queued_db, execution, monkeypatch)
     async def understand(*args, **kwargs):
-        return runtime.routing.Understanding(purpose="query", tasks=["inventory"])
+        return runtime.routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"])
     async def ask_user(*args, **kwargs):
         budget = gateway.current_task_token_budget()
         reservation = budget.reserve("planner prompt", 8)

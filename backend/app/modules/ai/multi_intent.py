@@ -356,6 +356,7 @@ async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversat
     同步与流式聊天共用此函数。会话只保存多计划集合，不把最后一项覆盖为单计划。
     函数提交本轮聊天记录；业务读取位于 savepoint 中，不写业务实体。
     """
+    decision = validate_batch_decision(decision)
     settings = get_settings()
     state = conversation_store.load_conversation_state(db, conversation)
     previous = (state.memory_state or {}).get("batch_tasks") if state else None
@@ -383,6 +384,17 @@ async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversat
         batch_result=report)
 
 
+def validate_batch_decision(decision: Understanding) -> Understanding:
+    """批次聊天入口重验契约，阻止无效计划或非批次模式进入执行。"""
+    try:
+        validated = Understanding.model_validate(decision.model_dump(mode="python"))
+    except (TypeError, ValueError) as exc:
+        raise BusinessValidationError("批次理解结果无效，请重新识别请求。") from exc
+    if validated.route != "batch":
+        raise BusinessValidationError("该请求不符合批次执行模式，请重新识别请求。")
+    return validated
+
+
 def previous_batch(db: Session, conversation_id: int) -> BatchResult:
     message = db.scalar(select(AIMessage).where(AIMessage.conversation_id == conversation_id,
                         AIMessage.message_role == "ASSISTANT").order_by(AIMessage.id.desc()).limit(1))
@@ -401,7 +413,7 @@ def retry_decision(db: Session, user: User, conversation_id: int | None, *, sele
     batch = previous_batch(db, conversation_id)
     if not any(task.status in ({TaskStatus.WAITING_INPUT} if selecting else {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}) for task in batch.tasks):
         raise BusinessValidationError("该批次没有失败或已取消项；待补充项请先提供查询条件。")
-    return Understanding(purpose="query", dialogue_action="continue",
+    return Understanding(purpose="query", execution_mode="batch", dialogue_action="continue",
         tasks=list(dict.fromkeys(task.kind for task in batch.tasks)),
         sub_tasks=[SubTask(id=task.id, kind=task.kind, question=task.question,
                    depends_on=task.depends_on, slots=(task.execution_plan or {}).get("slots", {})) for task in batch.tasks])

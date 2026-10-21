@@ -279,7 +279,8 @@ def test_ai_chat_routes_business_query_to_text2sql(client: TestClient, demo_pass
 
     from app.modules.ai import routing
     async def understand(*args, **kwargs):
-        return routing.Understanding(purpose='query', tasks=['analytics'])
+        return routing.Understanding(purpose='query', execution_mode='query', tasks=['analytics'], sub_tasks=[
+            routing.SubTask(id='t1', kind='analytics', question='统计采购订单数量')])
     monkeypatch.setattr(routing, 'understand', understand)
 
     calls: list[str] = []
@@ -328,7 +329,7 @@ def test_ai_chat_persists_conversation_and_messages(client: TestClient, demo_pas
         return "查询已通过 Text2SQL 执行，但没有找到符合条件的数据。", {"type": "text2sql", "source": "实时数据库只读查询", "row_count": 0, "stages": ["execution"], "query_trace": trace.model_dump(mode="json")}, trace
 
     async def understand(*args, **kwargs):
-        return routing.Understanding(purpose="query", tasks=["analytics"], sub_tasks=[
+        return routing.Understanding(purpose="query", execution_mode="query", tasks=["analytics"], sub_tasks=[
             routing.SubTask(id="t1", kind="analytics", question="查询采购订单")])
     monkeypatch.setattr(routing, "understand", understand)
     monkeypatch.setattr(service, "_run_text2sql_for_chat", fake_text2sql)

@@ -330,6 +330,7 @@ class Slots(BaseModel):
     date_to: date | None = None
     limit: int | None = Field(default=None, strict=True, ge=1, le=100)
     unit: str | None = Field(default=None, max_length=32)
+    aggregate_products: bool = False
 
     @model_validator(mode="after")
     def validate_dates(self):
@@ -353,6 +354,9 @@ class Understanding(BaseModel):
     """语义模型的严格输出契约，由程序校验后才能用于路由或拆分。"""
     model_config = ConfigDict(extra="forbid")
     purpose: Literal["capability", "guidance", "query", "purchase_draft", "greeting", "unsupported", "clarify"]
+    execution_mode: Literal["agent", "batch", "query", "document", "none"] = "none"
+    clarification_slot: str | None = Field(default=None, min_length=1, max_length=64)
+    clarification_options: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(default_factory=list, max_length=5)
     dialogue_action: Literal["new", "continue", "modify", "switch", "cancel"] = "new"
     tasks: list[Task] = Field(default_factory=list, max_length=4)
     excluded_tasks: list[Task] = Field(default_factory=list, max_length=4)
@@ -362,7 +366,29 @@ class Understanding(BaseModel):
 
     @model_validator(mode="after")
     def normalize(self):
-        """校验任务一致性和无环依赖，并去除被明确否定的任务类别。"""
+        """校验任务一致性、执行模式和无环依赖，再移除明确排除的类别。"""
+        if self.purpose == "clarify":
+            if self.clarification_options and not self.clarification_slot:
+                raise ValueError("澄清选项必须绑定待回答槽位")
+            if self.clarification_slot and len(self.clarification_options) < 2:
+                raise ValueError("可持久化澄清必须包含至少两个选项")
+            if len(set(self.clarification_options)) != len(self.clarification_options):
+                raise ValueError("澄清选项不得重复")
+        elif self.clarification_slot is not None or self.clarification_options:
+            raise ValueError("非澄清意图不得携带澄清槽位或选项")
+
+        if self.purpose != "query":
+            if self.execution_mode != "none" or self.tasks or self.sub_tasks:
+                raise ValueError("非查询意图必须使用 none 模式且不含查询任务")
+        elif self.dialogue_action == "cancel":
+            if self.execution_mode != "none" or self.tasks or self.sub_tasks:
+                raise ValueError("取消操作不得携带执行模式或查询任务")
+        else:
+            if self.execution_mode == "none":
+                raise ValueError("查询必须显式选择执行模式")
+            if not self.tasks:
+                raise ValueError("查询必须明确业务任务")
+
         seen = set()
         for task in self.sub_tasks:
             if task.id in seen or not set(task.depends_on) <= seen:
@@ -370,41 +396,68 @@ class Understanding(BaseModel):
             if task.kind in self.excluded_tasks:
                 raise ValueError("子任务不得执行被排除的意图")
             seen.add(task.id)
-        if self.sub_tasks and set(self.tasks) != {task.kind for task in self.sub_tasks}:
+        normalized_tasks = list(dict.fromkeys(task for task in self.tasks if task not in self.excluded_tasks))
+        subtask_kinds = {task.kind for task in self.sub_tasks}
+        if self.sub_tasks and set(normalized_tasks) != subtask_kinds:
             raise ValueError("子任务类别必须与总任务一致")
-        self.tasks = list(dict.fromkeys(task for task in self.tasks if task not in self.excluded_tasks))
-        if self.dialogue_action == "cancel":
-            self.tasks = []
-        elif self.purpose == "query" and not self.tasks:
-            raise ValueError("查询必须明确业务任务")
-        if self.purpose != "query":
-            self.tasks = []
-            self.sub_tasks = []
+        self.tasks = normalized_tasks
+
+        if self.purpose == "query" and self.dialogue_action != "cancel":
+            if self.execution_mode == "agent":
+                if not set(self.tasks) <= {"inventory", "quotes"} or self.sub_tasks:
+                    raise ValueError("agent 模式仅支持未拆分的库存或报价目标")
+            elif self.execution_mode == "batch":
+                if not 2 <= len(self.sub_tasks) <= 6:
+                    raise ValueError("batch 模式必须包含 2 至 6 个原子任务")
+                if set(self.tasks) != subtask_kinds:
+                    raise ValueError("batch 任务类别必须与子任务类别一致")
+            elif self.execution_mode == "query":
+                if self.tasks != ["analytics"] or len(self.sub_tasks) != 1 or self.sub_tasks[0].kind != "analytics":
+                    raise ValueError("query 模式必须包含一个 analytics 子任务")
+            elif self.execution_mode == "document":
+                if self.tasks != ["document"] or len(self.sub_tasks) != 1 or self.sub_tasks[0].kind != "document":
+                    raise ValueError("document 模式必须包含一个 document 子任务")
         return self
 
     @property
     def route(self) -> str:
-        """根据已校验任务决定入口；多项原子任务进入批次，混合未拆分则澄清。"""
+        """query 直接使用已经校验的执行模式，非查询意图返回其 purpose。"""
         if self.dialogue_action == "cancel":
             return "cancel"
         if self.purpose != "query":
             return self.purpose
-        tasks = set(self.tasks)
-        if len(self.sub_tasks) > 1:
-            return "batch"
-        if tasks <= {"inventory", "quotes"}:
-            return "agent"
-        if tasks == {"document"}:
-            return "document"
-        if tasks == {"analytics"}:
-            return "query"
-        return "clarify"  # 未拆分的混合请求不能直接执行
+        return self.execution_mode
 
     @property
     def agent_goal(self) -> str:
         """将库存/报价类别映射到现有 Agent 的完成条件；其他类别返回 unknown。"""
         return ({"inventory": "inventory_query", "quotes": "supplier_quote_query"}.get(self.tasks[0], "unknown")
                 if len(self.tasks) == 1 else "inventory_and_quotes_query" if set(self.tasks) == {"inventory", "quotes"} else "unknown")
+
+
+class PendingClarification(BaseModel):
+    """仅保存原问题摘要和一个受约束的待回答字段，不重复业务问题正文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    question_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    slot: str = Field(min_length=1, max_length=64)
+    question: str = Field(min_length=1, max_length=500)
+    options: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(min_length=2, max_length=5)
+    created_at: datetime
+    expires_at: datetime
+    permission_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    state_version: int = Field(strict=True, ge=1)
+    contract_version: str = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="after")
+    def validate_lifetime(self):
+        if self.expires_at <= self.created_at:
+            raise ValueError("澄清状态过期时间必须晚于创建时间")
+        if len(set(self.options)) != len(self.options):
+            raise ValueError("澄清状态选项不得重复")
+        return self
 
 
 class RouteRequest(BaseModel):

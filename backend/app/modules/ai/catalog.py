@@ -51,8 +51,8 @@ def slot_description(attribute: str) -> str:
                        for key, spec in CATALOG.items()}, ensure_ascii=False)
 
 
-def catalog_prompt() -> str:
-    """生成给模型看的最小白名单，不包含数据库中未开放的字段。"""
+def catalog_prompt(dataset_keys: set[str] | None = None) -> str:
+    """生成给模型看的字段白名单；传入数据集键时只包含当前用户可用数据集。"""
 
     return json.dumps(
         {
@@ -66,7 +66,8 @@ def catalog_prompt() -> str:
                 "derived_outputs": sorted(spec.derived_outputs),
             }
             for key, spec in CATALOG.items()
-            if key not in {"approved_requests_without_rfq", "weekly_order_risks", "inventory_by_batch", "accepted_orders_finance_gaps", "supplier_quote_delivery_profile", "inventory_movement_trace"}
+            if (key in dataset_keys if dataset_keys is not None else
+                key not in {"approved_requests_without_rfq", "weekly_order_risks", "inventory_by_batch", "accepted_orders_finance_gaps", "supplier_quote_delivery_profile", "inventory_movement_trace"})
         },
         ensure_ascii=False,
     )

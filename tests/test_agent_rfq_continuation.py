@@ -26,7 +26,7 @@ def waiting_rfq(db, actions, question='比较测试乙醇报价'):
 @pytest.mark.parametrize('number', ['Q-9', '2026/09-A', 'legacy_17', 'abc.002'])
 def test_nonstandard_number_never_replaces_verified_product(task_db, model_script, monkeypatch, number):
     async def structured_route(*args, **kwargs):
-        return runtime.Understanding(purpose='query', tasks=['inventory', 'quotes'], slots={'rfq_no': number})
+        return runtime.Understanding(purpose='query', execution_mode='agent', tasks=['inventory', 'quotes'], slots={'rfq_no': number})
     monkeypatch.setattr(runtime.routing, 'understand', structured_route)
     task_db.execute(text('UPDATE rfqs SET rfq_no=:number WHERE id=1'), {'number': number})
     task_db.commit()
@@ -52,7 +52,7 @@ def test_nonstandard_number_never_replaces_verified_product(task_db, model_scrip
 ])
 def test_rfq_condition_is_a_structured_slot(question, expected):
     """运行时只消费理解器契约，不在执行阶段重新解析业务语义。"""
-    decision = runtime.Understanding(purpose='query', tasks=['quotes'], slots={'rfq_no': expected})
+    decision = runtime.Understanding(purpose='query', execution_mode='agent', tasks=['quotes'], slots={'rfq_no': expected})
     assert decision.slots.rfq_no == expected
 
 
@@ -132,7 +132,7 @@ def test_changed_rfq_owner_blocks_continuation(task_db, model_script):
 
 def test_combined_resume_refreshes_inventory_and_preserves_limit(task_db, model_script, monkeypatch):
     async def structured_route(*args, **kwargs):
-        return runtime.Understanding(purpose='query', tasks=['inventory', 'quotes'], slots={'limit': 1})
+        return runtime.Understanding(purpose='query', execution_mode='agent', tasks=['inventory', 'quotes'], slots={'limit': 1})
     monkeypatch.setattr(runtime.routing, 'understand', structured_route)
     actions = model_script[0]
     result = waiting_rfq(task_db, actions, '查测试乙醇库存和报价；库存明细只返回1条。')
@@ -175,7 +175,7 @@ def test_transport_failure_has_separate_error_code(task_db, monkeypatch):
     async def disconnected(*args, **kwargs):
         raise httpx.ConnectError('test transport')
     async def understand(*args, **kwargs):
-        return runtime.routing.Understanding(purpose='query', tasks=['inventory'])
+        return runtime.routing.Understanding(purpose='query', execution_mode='agent', tasks=['inventory'])
     monkeypatch.setattr(runtime.routing, 'understand', understand)
     monkeypatch.setattr(runtime.llm, 'chat', disconnected)
     assert start(task_db).error_code == 'MODEL_SERVICE_ERROR'

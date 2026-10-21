@@ -844,6 +844,11 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
     spec = CATALOG.get(plan.dataset)
     if spec is None or plan.metric not in spec.metrics:
         raise BusinessValidationError("查询指标不在允许范围内")
+    role_codes = set(get_user_role_codes(db, user.id))
+    permission_codes = set(get_user_permission_codes(db, user.id))
+    from app.modules.ai.capabilities import dataset_accessible_by_codes
+    if not dataset_accessible_by_codes(plan.dataset, spec, role_codes, permission_codes):
+        raise BusinessValidationError("当前用户没有执行该数据集查询的权限")
     if plan.dataset == "approved_requests_without_rfq" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or plan.filters):
         raise BusinessValidationError("该申请关联查询不支持额外筛选条件")
     if plan.dataset == "overdue_unfulfilled_orders" and (
@@ -870,34 +875,6 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
         raise BusinessValidationError("时间字段不在允许范围内")
     if any(item.field not in spec.filters for item in plan.filters):
         raise BusinessValidationError("筛选字段不在允许范围内")
-    role_codes = set(get_user_role_codes(db, user.id))
-    permission_codes = set(get_user_permission_codes(db, user.id))
-    if "SYS_ADMIN" not in role_codes and spec.permission not in permission_codes:
-        raise BusinessValidationError("当前用户没有执行该数据集查询的权限")
-    if plan.dataset == "overdue_unfulfilled_orders" and "SYS_ADMIN" not in role_codes:
-        required_permissions = {"procurement.orders.read", "warehouse.inventory.read", "master.products.read"}
-        if not required_permissions.issubset(permission_codes):
-            raise BusinessValidationError("该关联查询需要采购订单、库存和产品主数据读取权限")
-    if plan.dataset == "weekly_order_risks" and "SYS_ADMIN" not in role_codes:
-        required_permissions = {"procurement.orders.read", "warehouse.deliveries.read"}
-        if not required_permissions.issubset(permission_codes):
-            raise BusinessValidationError("当前用户需要同时具备采购订单和到货单读取权限")
-    if plan.dataset == "accepted_orders_finance_gaps" and "SYS_ADMIN" not in role_codes:
-        required_permissions = {
-            "procurement.orders.read",
-            "warehouse.deliveries.read",
-            "quality.acceptances.read",
-            "finance.reconciliations.read",
-            "finance.invoices.read",
-            "finance.payments.read",
-            "finance.settlements.read",
-        }
-        if not required_permissions.issubset(permission_codes):
-            raise BusinessValidationError("当前用户需要同时具备采购订单、到货单、质量验收和财务对账、发票、付款、结算读取权限")
-    if plan.dataset == "supplier_quote_delivery_profile" and "SYS_ADMIN" not in role_codes:
-        required_permissions = {"master.suppliers.read", "procurement.rfqs.read", "procurement.orders.read", "warehouse.deliveries.read", "operations.exceptions.read"}
-        if not required_permissions.issubset(permission_codes):
-            raise BusinessValidationError("当前用户需要同时具备供应商、询价、采购订单、到货单和运营异常读取权限")
 
 
 _QUERY_PLAN_FIELDS = frozenset({"dataset", "metric", "time_field", "date_from", "date_to", "group_by", "filters", "order", "limit"})

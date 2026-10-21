@@ -50,7 +50,12 @@ def model_script(monkeypatch):
             inventory = '库存' in question or 'inventory' in previous
             quotes = '报价' in question or '询价' in question or 'quotes' in previous or 'quote' in previous
             tasks = (['inventory'] if inventory else []) + (['quotes'] if quotes else [])
-            return SimpleNamespace(message=SimpleNamespace(content=json.dumps({'purpose': 'query', 'tasks': tasks or ['inventory'], 'dialogue_action': 'switch' if switching else 'continue'})))
+            aggregate_products = '汇总' in question and '全部规格' in question
+            return SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+                'purpose': 'query', 'execution_mode': 'agent', 'tasks': tasks or ['inventory'],
+                'dialogue_action': 'switch' if switching else 'continue',
+                'slots': {'aggregate_products': aggregate_products},
+            })))
         assert response_format == {"type": "json_object"}
         assert system_prompt == runtime.PLANNER_PROMPT and settings.llm_max_tokens <= 2048
         contexts.append(json.loads(request.messages[0].content))
@@ -122,6 +127,45 @@ def test_inventory_summary_queries_all_specs_and_keeps_units_separate(task_db, m
     assert {row['product_id'] for row in inventory} == {1, 3}
     assert '87.25 千克' in result.reply and '5 升' in result.reply
     assert '查到这 2 个规格的可用库存合计为' in result.reply
+
+
+@pytest.mark.parametrize(
+    "question,aggregate_products,expected_aggregate",
+    [
+        ("不要全部，只查分析纯库存", False, False),
+        ("查乙醇库存", True, True),
+    ],
+)
+def test_candidate_aggregation_uses_structured_understanding_slot(
+    monkeypatch, question, aggregate_products, expected_aggregate
+):
+    from app.modules.ai.schema import Workflow
+
+    monkeypatch.setattr("app.modules.ai.multi_intent._inventory_family", lambda *_args: True)
+    state = runtime.RunState(
+        task_id="test",
+        revision=0,
+        messages=[question],
+        trace=[{"tool": "catalog.search_products", "arguments": {"keyword": "乙醇"}}],
+        turn_start=0,
+        memory_state={
+            "goal": {"intent": "inventory_query", "description": question},
+            "understanding": {"slots": {"aggregate_products": aggregate_products}},
+        },
+        workflow=Workflow(),
+    )
+    result = {
+        "tool": "catalog.search_products",
+        "rows": [{"product_id": 1}, {"product_id": 2}],
+        "total_rows": 2,
+        "truncated": False,
+        "keyword": "乙醇",
+    }
+
+    runtime._resolve_candidates(state, result, object())
+
+    assert state.workflow.all_products is expected_aggregate
+    assert (state.workflow.pending is None) is expected_aggregate
 
 
 def test_select_all_rechecks_candidates_and_queries_each_spec(task_db, model_script):
@@ -217,7 +261,7 @@ def test_ids_cannot_be_guessed_before_lookup(task_db, model_script):
 def test_excluded_task_cannot_be_restored_by_planner(task_db, model_script, monkeypatch):
     """即使规划器提出报价调用，也不能执行用户已明确排除的任务。"""
     async def understand(*args, **kwargs):
-        return runtime.routing.Understanding(purpose="query", tasks=["inventory"], excluded_tasks=["quotes"])
+        return runtime.routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"], excluded_tasks=["quotes"])
     monkeypatch.setattr(runtime.routing, "understand", understand)
     model_script[0].extend([tool("catalog.search_products", keyword="测试乙醇"),
                            tool("supplier_quotes.find_rfq_items", product_id=1)])
@@ -363,7 +407,7 @@ def test_actual_model_adapter_uses_planner_prompt_and_json_protocol(task_db, mon
         messages = payload.get('messages', payload.get('input'))
         if messages[0]['content'].startswith(runtime.routing.ROUTING_PROMPT):
             assert payload['text']['format']['type'] == 'json_schema'
-            return httpx.Response(200, json={'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps({'purpose': 'query', 'tasks': ['inventory']})}]}]})
+            return httpx.Response(200, json={'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps({'purpose': 'query', 'execution_mode': 'agent', 'tasks': ['inventory']})}]}]})
         assert payload['messages'][0]['content'] == runtime.PLANNER_PROMPT
         assert payload['response_format'] == {'type': 'json_object'}
         return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps(actions.pop(0))}}]})
@@ -411,6 +455,20 @@ def test_cancel_before_background_starts_does_not_call_model(task_db, model_scri
     asyncio.run(runtime.run_prepared_task(prepared.task_id, USER.id, prepared.revision))
     assert runtime.get_task(task_db, USER, prepared.task_id).status == 'CANCELLED'
     assert model_script[1] == []
+
+
+def test_agent_entry_rejects_non_agent_route_before_creating_task(task_db):
+    from app.modules.ai import routing
+
+    decision = routing.Understanding(
+        purpose="query", execution_mode="query", tasks=["analytics"],
+        sub_tasks=[routing.SubTask(id="t1", kind="analytics", question="统计采购订单数量")],
+    )
+    token = routing.issue_ticket(decision, USER.id, "统计采购订单数量", None)
+
+    with pytest.raises(BusinessValidationError, match="不是库存或报价任务"):
+        runtime.prepare_task(task_db, USER, runtime.TaskCreate(question="统计采购订单数量", route_token=token))
+    assert task_db.scalar(select(AIAgentTask.id)) is None
 
 
 def test_disabled_user_stops_background_before_model(task_db, model_script, monkeypatch):

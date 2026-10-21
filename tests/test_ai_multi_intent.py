@@ -17,14 +17,35 @@ from tests.test_rbac_separation import as_demo_role
 
 
 def decision(*tasks):
-    """构造通过类别与依赖校验的批次理解，不调用真实模型。"""
-    return routing.Understanding(purpose="query", tasks=list(dict.fromkeys(task["kind"] for task in tasks)), sub_tasks=tasks)
+    """构造批次理解；单项执行测试直接调用低层执行器，因此单项样本不经过路由校验。"""
+    values = {"purpose": "query", "execution_mode": "batch",
+              "tasks": list(dict.fromkeys(task["kind"] for task in tasks)), "sub_tasks": tasks}
+    if len(tasks) < 2:
+        return routing.Understanding.model_construct(**values)
+    return routing.Understanding(**values)
 
 
 def product_task(id="t1", kind="inventory", **kwargs):
     """生成明确产品的原子只读任务，允许测试覆盖槽位或依赖。"""
     return {"id": id, "kind": kind, "question": "查测试乙醇" + ("库存" if kind == "inventory" else "报价"),
             "slots": {"product_keyword": "测试乙醇"}, **kwargs}
+
+
+def test_batch_public_entry_revalidates_the_execution_contract():
+    from app.core.errors import BusinessValidationError
+
+    valid = decision(product_task(), product_task("t2"))
+    assert multi.validate_batch_decision(valid).route == "batch"
+
+    invalid = routing.Understanding.model_construct(
+        purpose="query", execution_mode="batch", tasks=["inventory"], sub_tasks=[
+            routing.SubTask(id="t1", kind="inventory", question="查测试乙醇库存")])
+    with pytest.raises(BusinessValidationError):
+        multi.validate_batch_decision(invalid)
+
+    agent = routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"])
+    with pytest.raises(BusinessValidationError):
+        multi.validate_batch_decision(agent)
 
 
 def test_same_category_multiple_tasks_and_dependency_validation():
@@ -34,9 +55,12 @@ def test_same_category_multiple_tasks_and_dependency_validation():
     assert result.route == "batch" and len(result.tasks) == 1 and len(result.sub_tasks) == 2
     for bad in [["t2"], ["t1"]]:
         with pytest.raises(ValueError):
-            decision({"id": "t1", "kind": "analytics", "question": "统计订单数量", "depends_on": bad})
+            routing.Understanding(purpose="query", execution_mode="batch", tasks=["analytics"], sub_tasks=[
+                {"id": "t1", "kind": "analytics", "question": "统计订单数量", "depends_on": bad},
+                {"id": "t2", "kind": "analytics", "question": "统计订单金额"},
+            ])
     with pytest.raises(ValueError):
-        routing.Understanding(purpose="query", tasks=["quotes"], excluded_tasks=["quotes"], sub_tasks=[product_task(kind="quotes")])
+        routing.Understanding(purpose="query", execution_mode="batch", tasks=["quotes"], excluded_tasks=["quotes"], sub_tasks=[product_task(kind="quotes")])
 
 
 def test_inventory_quotes_share_product_lookup_and_have_separate_evidence(tool_db, monkeypatch):
@@ -234,7 +258,7 @@ def test_dependent_plan_receives_only_successful_predecessor_evidence(db_session
 def test_single_followup_uses_resolved_subtask_question():
     """理解器还原的第二项查询必须传给规划器，不能丢失为无上下文的原句。"""
     from app.modules.ai.schema import Intent, IntentResult
-    resolved = routing.Understanding(purpose="query", dialogue_action="modify", tasks=["analytics"],
+    resolved = routing.Understanding(purpose="query", execution_mode="query", dialogue_action="modify", tasks=["analytics"],
         sub_tasks=[{"id": "t2", "kind": "analytics", "question": "统计已批准的采购申请数量"}])
     intent = IntentResult(Intent.QUERY, "semantic_route", resolved.model_dump(mode="json"))
     assert service._resolved_query_question("只修改第二项", intent) == "统计已批准的采购申请数量"
