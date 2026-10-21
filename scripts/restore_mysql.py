@@ -38,7 +38,11 @@ def main() -> int:
     # Logical backups produced by backup_mysql omit CREATE DATABASE/USE. Scan
     # across line breaks (including executable comments) without loading a large
     # dump into Python memory before opening a client.
-    redirect_pattern = re.compile(rb"\b(?:USE\s+|(?:CREATE|DROP|ALTER)\s+DATABASE\b)", re.I)
+    sql_separator = rb"(?:\s|/\*.*?\*/|--[^\r\n]*|\#[^\r\n]*)+"
+    redirect_pattern = re.compile(
+        rb"\b(?:USE" + sql_separator + rb"|(?:CREATE|DROP|ALTER)" + sql_separator + rb"DATABASE\b)",
+        re.I | re.S,
+    )
     with args.backup.open("rb") as source:
         if args.backup.stat().st_size:
             with mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as dump:
