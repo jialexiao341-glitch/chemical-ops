@@ -76,9 +76,14 @@ async def route_request(data: RouteRequest, db: Session = Depends(get_db),
     """校验会话归属并理解当前请求，返回短期复用凭据；此接口不执行业务查询。"""
     context = routing.conversation_context(db, user, data.conversation_id)
     manifest = capabilities.build_capability_manifest(db, user)
+    pending = (conversation_store.load_pending_clarification(db, user, data.conversation_id)
+               if data.conversation_id is not None else None)
+    if pending is not None:
+        context = routing.with_pending_clarification(db, user, data.conversation_id, context, pending)
     decision = await routing.understand(data.question, context, manifest=manifest)
     return {"route": decision.route, "understanding": decision.model_dump(mode="json"),
-            "route_token": routing.issue_ticket(decision, user.id, data.question, data.conversation_id)}
+            "route_token": routing.issue_ticket(decision, user.id, data.question, data.conversation_id,
+                                                pending_state_id=pending.state_id if pending else None)}
 
 
 @router.post("/agent/tools/execute", response_model=InventoryResult | QuoteResult | ProductSearchResult | RFQSearchResult,

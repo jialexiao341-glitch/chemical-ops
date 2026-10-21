@@ -6,7 +6,8 @@
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from sqlalchemy import delete, func, inspect, select, update
 from sqlalchemy.orm import Session
@@ -16,7 +17,7 @@ from app.core.errors import BusinessValidationError
 from app.core.cache import cached
 from app.core.config import get_settings
 from app.modules.ai.model import AIAgentTask, AIPurchaseDraftConfirmation, AIConversation, AIConversationState, AIMessage, AIQueryLog
-from app.modules.ai.schema import AIChatRequest, AIQueryTrace, AIHistorySnapshot, AIMessageSnapshot
+from app.modules.ai.schema import AIChatRequest, AIQueryTrace, AIHistorySnapshot, AIMessageSnapshot, PendingClarification, Understanding
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
 
@@ -262,8 +263,161 @@ def save_conversation_memory(db: Session, user: User, conversation_id: int, memo
             state_version=1,
         )
         db.add(row)
-    row.memory_state = json.loads(json.dumps(memory, ensure_ascii=False))
+    merged = {**(row.memory_state or {}), **memory}
+    next_version = (row.state_version or 0) + 1
+    if isinstance(merged.get("pending_clarification"), dict):
+        try:
+            pending = PendingClarification.model_validate(merged["pending_clarification"])
+            merged["pending_clarification"] = pending.model_copy(update={"state_version": next_version}).model_dump(mode="json")
+        except (TypeError, ValueError):
+            merged.pop("pending_clarification", None)
+    row.memory_state = json.loads(json.dumps(merged, ensure_ascii=False))
+    row.state_version = next_version
     row.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _permission_digest(db: Session, user: User) -> str:
+    value = json.dumps(permission_snapshot(db, user), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def save_pending_clarification(
+    db: Session, user: User, conversation_id: int, question: str, decision: Understanding, *,
+    expected_state_id: str | None = None, expected_state_version: int | None = None,
+    now: datetime | None = None, ttl_seconds: int = 900,
+) -> PendingClarification:
+    """创建或 CAS 替换待澄清状态；不保存原问题明文。"""
+    conversation = get_owned_conversation(db, user, conversation_id)
+    if not conversation_state_enabled(db):
+        raise BusinessValidationError("当前环境无法持久化澄清状态，请重新发起该请求。")
+    if not decision.clarification_slot or len(decision.clarification_options) < 2:
+        raise BusinessValidationError("澄清未提供可绑定的选项，不能安全续接。")
+    state = lock_conversation_state(db, conversation)
+    if state is None:
+        if expected_state_id is not None or expected_state_version is not None:
+            raise BusinessValidationError("澄清状态已变化，请重新选择。")
+        state = AIConversationState(conversation_id=conversation.id, thread_id=f"ai:{user.id}:{conversation.id}",
+                                    state_version=1, memory_state={})
+        db.add(state)
+        db.flush()
+    else:
+        db.refresh(state)
+    memory = dict(state.memory_state or {})
+    raw_pending = memory.get("pending_clarification")
+    if raw_pending:
+        current = PendingClarification.model_validate(raw_pending)
+        if current.state_id != expected_state_id or state.state_version != expected_state_version or current.state_version != state.state_version:
+            raise BusinessValidationError("澄清状态版本冲突，请重新选择。")
+    elif expected_state_id is not None or expected_state_version is not None:
+        raise BusinessValidationError("澄清状态已变化，请重新选择。")
+
+    expected_version = int(state.state_version or 0)
+    next_version = expected_version + 1
+    created = now or datetime.now(timezone.utc)
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    pending = PendingClarification(
+        state_id=uuid4().hex,
+        question_hash=hashlib.sha256(question.encode("utf-8")).hexdigest(),
+        slot=decision.clarification_slot,
+        question=decision.question or "请回答本轮澄清问题。",
+        options=decision.clarification_options,
+        created_at=created,
+        expires_at=created + timedelta(seconds=ttl_seconds),
+        permission_hash=_permission_digest(db, user),
+        state_version=next_version,
+        contract_version="1",
+    )
+    memory["pending_clarification"] = pending.model_dump(mode="json")
+    permission_state = permission_snapshot(db, user)
+    state.memory_state = memory
+    state.state_version = next_version
+    state.permission_snapshot = permission_state
+    state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.flush()
+    return pending
+
+
+def load_pending_clarification(db: Session, user: User, conversation_id: int, *, now: datetime | None = None) -> PendingClarification | None:
+    """读取本人有效澄清；过期、权限改变、版本不符或损坏状态被清除并拒绝续接。"""
+    conversation = get_owned_conversation(db, user, conversation_id)
+    state = load_conversation_state(db, conversation)
+    raw = (state.memory_state or {}).get("pending_clarification") if state else None
+    if not raw:
+        return None
+    try:
+        pending = PendingClarification.model_validate(raw)
+    except (TypeError, ValueError):
+        clear_pending_clarification(db, user, conversation_id)
+        raise BusinessValidationError("澄清状态无效，请重新发起原问题。") from None
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    message = None
+    if current_time >= pending.expires_at:
+        message = "澄清状态已过期，请重新发起原问题。"
+    elif pending.contract_version != "1" or pending.state_version != state.state_version:
+        message = "澄清状态版本已变化，请重新发起原问题。"
+    elif pending.permission_hash != _permission_digest(db, user):
+        message = "权限已变化，请重新发起原问题。"
+    if message:
+        clear_pending_clarification(db, user, conversation_id, state_id=pending.state_id,
+                                    expected_state_version=state.state_version)
+        raise BusinessValidationError(message)
+    return pending
+
+
+def clear_pending_clarification(
+    db: Session, user: User, conversation_id: int, *, state_id: str | None = None,
+    expected_state_version: int | None = None,
+) -> int:
+    """以状态 ID 和版本 CAS 清除 pending，保留同一 JSON 中的其他业务状态。"""
+    conversation = get_owned_conversation(db, user, conversation_id)
+    state = lock_conversation_state(db, conversation)
+    if state is None:
+        return 0
+    db.refresh(state)
+    memory = dict(state.memory_state or {})
+    raw = memory.get("pending_clarification")
+    if not raw:
+        if state_id is not None:
+            raise BusinessValidationError("澄清状态已被消费或清除。")
+        return int(state.state_version or 0)
+    current_version = int(state.state_version or 0)
+    try:
+        pending = PendingClarification.model_validate(raw)
+    except (TypeError, ValueError):
+        if state_id is not None or expected_state_version is not None:
+            raise BusinessValidationError("澄清状态无效或已变化，请重新发起原问题。") from None
+        memory.pop("pending_clarification", None)
+        state.memory_state = memory
+        state.state_version = current_version + 1
+        state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.flush()
+        return current_version + 1
+    if ((state_id is not None and pending.state_id != state_id)
+            or (expected_state_version is not None and current_version != expected_state_version)
+            or pending.state_version != current_version):
+        raise BusinessValidationError("澄清状态版本冲突，请重新选择。")
+    memory.pop("pending_clarification", None)
+    next_version = current_version + 1
+    state.memory_state = memory
+    state.state_version = next_version
+    state.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.flush()
+    return next_version
+
+
+def original_question_for_pending(db: Session, user: User, conversation_id: int, pending: PendingClarification) -> str | None:
+    """按摘要从本人会话消息中还原原问题，不在澄清状态重复存正文。"""
+    get_owned_conversation(db, user, conversation_id)
+    messages = db.scalars(select(AIMessage).where(
+        AIMessage.conversation_id == conversation_id, AIMessage.message_role == "USER"
+    ).order_by(AIMessage.id.desc()).limit(100)).all()
+    for message in messages:
+        if hashlib.sha256(message.content.encode("utf-8")).hexdigest() == pending.question_hash:
+            return message.content
+    return None
 
 
 def save_batch_state(db: Session, user: User, conversation: AIConversation, state: AIConversationState | None, tasks: list[dict]) -> None:

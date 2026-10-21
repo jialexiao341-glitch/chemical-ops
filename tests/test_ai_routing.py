@@ -183,12 +183,23 @@ def test_incomplete_model_response_is_regenerated_once(monkeypatch):
 
 def test_route_ticket_binds_user_question_conversation_and_signature():
     decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"])
-    token = routing.issue_ticket(decision, 7, "查乙醇库存", 9)
+    token = routing.issue_ticket(decision, 7, "查乙醇库存", 9, pending_state_id="a" * 32)
     assert routing.read_ticket(token, 7, "查乙醇库存", 9) == decision
+    assert routing.read_ticket_pending_state_id(token) == "a" * 32
     for user_id, question, cid in [(8, "查乙醇库存", 9), (7, "查甲醇库存", 9), (7, "查乙醇库存", 10)]:
         with pytest.raises(BusinessValidationError):
             routing.read_ticket(token, user_id, question, cid)
     payload = jwt.decode(token, options={"verify_signature": False})
+    legacy_payload = dict(payload)
+    legacy_payload.pop("contract_version", None)
+    legacy = jwt.encode(legacy_payload, get_settings().jwt_secret_key, algorithm=get_settings().jwt_algorithm)
+    with pytest.raises(BusinessValidationError):
+        routing.read_ticket(legacy, 7, "查乙醇库存", 9)
+    payload["contract_version"] = "999"
+    mismatched = jwt.encode(payload, get_settings().jwt_secret_key, algorithm=get_settings().jwt_algorithm)
+    with pytest.raises(BusinessValidationError):
+        routing.read_ticket(mismatched, 7, "查乙醇库存", 9)
+    payload.pop("contract_version", None)
     payload["exp"] = 1
     settings = get_settings()
     expired = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)

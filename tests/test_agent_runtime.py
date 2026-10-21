@@ -471,6 +471,36 @@ def test_agent_entry_rejects_non_agent_route_before_creating_task(task_db):
     assert task_db.scalar(select(AIAgentTask.id)) is None
 
 
+def test_agent_accepts_only_ticket_bound_pending_clarification(task_db, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.modules.ai import routing
+    from app.modules.ai.schema import PendingClarification
+
+    pending = PendingClarification(state_id="a" * 32, question_hash="b" * 64,
+        slot="product_keyword", question="查哪个产品？", options=["乙醇", "甲醇"],
+        created_at=datetime.now(timezone.utc), expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        permission_hash="c" * 64, state_version=1, contract_version="1")
+    decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"],
+                                     slots={"product_keyword": "乙醇"})
+    cleared = []
+    monkeypatch.setattr(runtime.tools, "list_tools", lambda *_: [{"name": "catalog.search_products"},
+        {"name": "inventory.query_available"}])
+    monkeypatch.setattr(runtime.conversation_store, "load_pending_clarification", lambda *_: pending)
+    monkeypatch.setattr(runtime.conversation_store, "clear_pending_clarification", lambda *args, **kwargs: cleared.append(kwargs))
+    monkeypatch.setattr(routing, "read_ticket", lambda *_: decision)
+    monkeypatch.setattr(routing, "read_ticket_pending_state_id", lambda *_: pending.state_id)
+    prepared = runtime.prepare_task(task_db, USER, runtime.TaskCreate(
+        question="乙醇", conversation_id=42, route_token="verified-ticket"))
+    assert prepared.memory_state["understanding"]["execution_mode"] == "agent"
+    assert cleared[0]["state_id"] == pending.state_id
+
+    cleared.clear()
+    with pytest.raises(BusinessValidationError, match="澄清答案或状态票据"):
+        runtime.prepare_task(task_db, USER, runtime.TaskCreate(
+            question="甲醛", conversation_id=43, route_token="verified-ticket"))
+    assert not cleared
+
+
 def test_disabled_user_stops_background_before_model(task_db, model_script, monkeypatch):
     """启动后用户停用，后台使用当前用户状态停止。"""
     task_db.execute(text("CREATE TABLE sys_users (id INTEGER PRIMARY KEY, status TEXT)"))

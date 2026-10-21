@@ -27,6 +27,7 @@ from app.modules.ai.model import AIMessage
 
 
 LOGGER = logging.getLogger("chemicalops.ai.routing")
+ROUTE_CONTRACT_VERSION = "1"
 
 
 ROUTING_PROMPT = """# 角色与任务
@@ -144,6 +145,17 @@ def conversation_context(db: Session, user: User, conversation_id: int | None) -
             "memory": memory, "query_plan": query_plan}
 
 
+def with_pending_clarification(db: Session, user: User, conversation_id: int,
+                               context: dict, pending) -> dict:
+    """将待澄清问题和原始请求临时注入模型上下文；原文只从所属会话消息读取。"""
+    original = conversation_store.original_question_for_pending(db, user, conversation_id, pending)
+    if not original:
+        raise BusinessValidationError("找不到本轮澄清对应的原问题，请重新发起查询。")
+    return {**context, "pending_clarification": {
+        **pending.model_dump(mode="json"), "original_question": original,
+    }}
+
+
 async def understand(question: str, context: dict | None = None, settings=None, *, manifest=None) -> Understanding:
     """只对完整明确的控制命令快速匹配；自然语言交给同一个语义理解器。"""
     normalized = question.strip().lower().rstrip("。！？!?")
@@ -190,11 +202,14 @@ async def understand(question: str, context: dict | None = None, settings=None, 
     return Understanding(purpose="clarify", question="本次请求暂未完成识别，尚未执行查询。请稍后重试，无需补充已有的查询条件。")
 
 
-def issue_ticket(decision: Understanding, user_id: int, question: str, conversation_id: int | None) -> str:
+def issue_ticket(decision: Understanding, user_id: int, question: str, conversation_id: int | None,
+                 *, pending_state_id: str | None = None) -> str:
     """签发五分钟路由凭据，绑定用户、原问题摘要和会话；不授予工具权限。"""
     settings = get_settings()
-    return jwt.encode({"aud": "chemicalops-intent", "sub": str(user_id), "question": hashlib.sha256(question.encode()).hexdigest(),
+    return jwt.encode({"aud": "chemicalops-intent", "sub": str(user_id), "contract_version": ROUTE_CONTRACT_VERSION,
+                       "question": hashlib.sha256(question.encode()).hexdigest(),
                        "conversation_id": conversation_id, "decision": decision.model_dump(mode="json"),
+                       "pending_state_id": pending_state_id,
                        "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -203,8 +218,23 @@ def read_ticket(token: str, user_id: int, question: str, conversation_id: int | 
     settings = get_settings()
     try:
         value = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm], audience="chemicalops-intent", options={"require": ["exp", "sub", "aud"]})
+        if value.get("contract_version") != ROUTE_CONTRACT_VERSION:
+            raise ValueError("route contract version mismatch")
         if value["sub"] != str(user_id) or value["conversation_id"] != conversation_id or value["question"] != hashlib.sha256(question.encode()).hexdigest():
             raise ValueError("route binding mismatch")
         return Understanding.model_validate(value["decision"])
     except (jwt.InvalidTokenError, ValidationError, KeyError, ValueError):
+        raise BusinessValidationError("意图识别结果已过期或与本次请求不一致，请重新发送") from None
+
+
+def read_ticket_pending_state_id(token: str) -> str | None:
+    """读取已由 read_ticket 验证的票据所绑定的澄清状态 ID。"""
+    settings = get_settings()
+    try:
+        value = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm],
+                           audience="chemicalops-intent", options={"require": ["contract_version", "exp"]})
+        if value.get("contract_version") != ROUTE_CONTRACT_VERSION:
+            raise ValueError("route contract version mismatch")
+        return value.get("pending_state_id")
+    except (jwt.InvalidTokenError, KeyError, ValueError):
         raise BusinessValidationError("意图识别结果已过期或与本次请求不一致，请重新发送") from None

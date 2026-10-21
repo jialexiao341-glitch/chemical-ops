@@ -835,14 +835,31 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
     catalog = {item["name"] for item in tools.list_tools(db, user)}
     if "catalog.search_products" not in catalog or not catalog & {"inventory.query_available", "supplier_quotes.compare"}:
         raise AuthorizationError("采购 Agent 需要产品读取权限及库存或询价读取权限")
+    conversation_id = getattr(data, "conversation_id", None)
+    if conversation_id is not None and not data.route_token:
+        pending = conversation_store.load_pending_clarification(db, user, conversation_id)
+        if pending is not None:
+            raise BusinessValidationError("请先通过统一路由回答本轮澄清，再启动 Agent 任务。")
     task_id = uuid4().hex
     state = RunState(task_id, 0, [data.question], [], 0, memory_state=_new_memory_state(data.question),
                      llm_token_limit=get_settings().agent_max_total_tokens,
                      workflow=Workflow())
     if data.route_token:
-        decision = routing.read_ticket(data.route_token, user.id, data.question, getattr(data, "conversation_id", None))
+        pending = (conversation_store.load_pending_clarification(db, user, conversation_id)
+                   if conversation_id is not None else None)
+        ticket_pending_id = routing.read_ticket_pending_state_id(data.route_token)
+        if pending is not None:
+            if data.question.strip() not in pending.options or ticket_pending_id != pending.state_id:
+                raise BusinessValidationError("澄清答案或状态票据无效，请重新选择。")
+        elif ticket_pending_id is not None:
+            raise BusinessValidationError("澄清状态已变化，请重新识别请求。")
+        decision = routing.read_ticket(data.route_token, user.id, data.question, conversation_id)
         if decision.route != "agent":
             raise BusinessValidationError("该请求不是库存或报价任务，请重新识别请求")
+        if pending is not None:
+            conversation_store.clear_pending_clarification(
+                db, user, conversation_id, state_id=pending.state_id,
+                expected_state_version=pending.state_version)
         state.memory_state["understanding"] = decision.model_dump(mode="json")
         state.memory_state["route_turn"] = 1
         state.memory_state["goal"]["intent"] = decision.agent_goal

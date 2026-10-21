@@ -77,18 +77,54 @@ async def _classify_chat_intent(db: Session, question: str, *, user: User, data:
     """聊天与 Agent 使用同一语义结果；客户端只能复用后端签发的短期结果。"""
     from app.modules.ai import routing, capabilities
     if data.retry_failed or data.batch_choice:
+        if data.conversation_id is not None and conversation_store.load_pending_clarification(
+                db, user, data.conversation_id) is not None:
+            raise BusinessValidationError("请先回答或取消本轮澄清，再继续批次任务。")
         if data.attachments or data.attachment_file_ids:
             raise BusinessValidationError("重试使用原查询条件；修改附件或条件请重新发起查询。")
         from app.modules.ai.multi_intent import retry_decision
         decision = retry_decision(db, user, data.conversation_id, selecting=data.batch_choice is not None)
         return IntentResult(Intent.MULTI, "retry_failed", decision.model_dump(mode="json"))
-    if data.route_token:
+    pending = (conversation_store.load_pending_clarification(db, user, data.conversation_id)
+               if data.conversation_id is not None else None)
+    context = routing.conversation_context(db, user, data.conversation_id)
+    manifest = capabilities.build_capability_manifest(db, user)
+    if pending is not None:
+        context = routing.with_pending_clarification(db, user, data.conversation_id, context, pending)
+        if question.strip() not in pending.options:
+            # Ask the model whether this is an explicit topic switch/cancel. All other
+            # text is rejected as an unbound answer and leaves the pending state intact.
+            if data.route_token:
+                decision = routing.read_ticket(data.route_token, user.id, question, data.conversation_id)
+                ticket_state_id = routing.read_ticket_pending_state_id(data.route_token)
+                if ticket_state_id != pending.state_id:
+                    raise BusinessValidationError("澄清状态已变化，请重新发送本轮答案。")
+            else:
+                db.commit()
+                decision = await routing.understand(question, context, manifest=manifest)
+            if decision.dialogue_action not in {"cancel", "switch"}:
+                options = "、".join(pending.options)
+                return IntentResult(Intent.CLARIFY, f"请从以下选项中选择：{options}")
+            conversation_store.clear_pending_clarification(
+                db, user, data.conversation_id, state_id=pending.state_id,
+                expected_state_version=pending.state_version)
+        else:
+            if data.route_token:
+                decision = routing.read_ticket(data.route_token, user.id, question, data.conversation_id)
+                ticket_state_id = routing.read_ticket_pending_state_id(data.route_token)
+                if ticket_state_id != pending.state_id:
+                    raise BusinessValidationError("澄清状态已变化，请重新发送本轮答案。")
+            else:
+                db.commit()
+                decision = await routing.understand(question, context, manifest=manifest)
+            conversation_store.clear_pending_clarification(
+                db, user, data.conversation_id, state_id=pending.state_id,
+                expected_state_version=pending.state_version)
+    elif data.route_token:
         decision = routing.read_ticket(data.route_token, user.id, question, data.conversation_id)
+        if routing.read_ticket_pending_state_id(data.route_token) is not None:
+            raise BusinessValidationError("澄清状态已变化，请重新发送本轮答案。")
     else:
-        context = routing.conversation_context(db, user, data.conversation_id)
-        manifest = capabilities.build_capability_manifest(db, user)
-        # Context and authorization checks are complete; release the read transaction
-        # before waiting for the routing model.
         db.commit()
         decision = await routing.understand(question, context, manifest=manifest)
     route = decision.route
@@ -99,7 +135,8 @@ async def _classify_chat_intent(db: Session, question: str, *, user: User, data:
         return IntentResult(Intent.CLARIFY, "请使用只读查询任务入口继续该库存或报价查询。")
     if route in {"clarify", "cancel"}:
         return IntentResult(Intent.CLARIFY, "已取消本次请求。" if route == "cancel" else
-                            decision.question or "这次请求包含不同处理流程，请先选择要查询的业务数据或化学品资料。")
+                            decision.question or "这次请求包含不同处理流程，请先选择要查询的业务数据或化学品资料。",
+                            decision.model_dump(mode="json"))
     return IntentResult({"capability": Intent.PROJECT, "greeting": Intent.GREETING,
                          "guidance": Intent.GUIDANCE, "document": Intent.DOC,
                          "query": Intent.QUERY}.get(route, Intent.UNSUPPORTED), "semantic_route", decision.model_dump(mode="json"))
@@ -114,6 +151,17 @@ def _resolved_query_question(question: str, intent: IntentResult) -> str:
         if len(decision.sub_tasks) == 1:
             return decision.sub_tasks[0].question
     return question
+
+
+def _save_clarification_if_bound(db: Session, user: User, conversation_id: int, data: AIChatRequest,
+                                 question: str, intent: IntentResult) -> None:
+    """只持久化具备明确槽位和有限选项的澄清，并与本轮消息同事务提交。"""
+    if intent.intent is not Intent.CLARIFY or not intent.understanding:
+        return
+    decision = Understanding.model_validate(intent.understanding)
+    if decision.dialogue_action == "cancel" or not decision.clarification_slot:
+        return
+    conversation_store.save_pending_clarification(db, user, conversation_id, question, decision)
 
 
 def _build_native_image_part(file_name: str, mime_type: str, content: bytes) -> dict[str, object] | None:
@@ -585,6 +633,7 @@ async def _chat_for_user_impl(db: Session, user: User, data: AIChatRequest) -> A
         raise BusinessValidationError("至少需要一条用户消息")
     LOGGER.info("AI 请求进入 mode=sync user_id=%s query_length=%s", user.id, len(user_message.content))
     intent_result = await _classify_chat_intent(db, user_message.content, user=user, data=data)
+    _save_clarification_if_bound(db, user, conversation.id, data, user_message.content, intent_result)
     LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
     if intent_result.intent is Intent.MULTI and not data.attachment_file_ids:
         from app.modules.ai import routing, multi_intent
@@ -699,6 +748,7 @@ async def _stream_chat_for_user_impl(db: Session, user: User, data: AIChatReques
     LOGGER.info("AI 请求进入 mode=stream %s", _query_log_fields(user, user_message.content))
     try:
         stream_intent_result = await _classify_chat_intent(db, user_message.content, user=user, data=data)
+        _save_clarification_if_bound(db, user, conversation.id, data, user_message.content, stream_intent_result)
     except BusinessValidationError as exc:
         yield "event: error\ndata: " + json.dumps({"message": str(exc)}, ensure_ascii=False) + "\n\n"
         return

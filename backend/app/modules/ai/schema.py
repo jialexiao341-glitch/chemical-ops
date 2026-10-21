@@ -631,6 +631,7 @@ class QuoteResult(ToolSchema):
 class TaskCreate(ToolSchema):
     question: str = Field(min_length=1, max_length=2000)
     route_token: str | None = Field(default=None, max_length=64000)
+    conversation_id: int | None = Field(default=None, gt=0)
 
 
 class TaskContinue(TaskCreate):
