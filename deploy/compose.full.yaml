@@ -1,0 +1,158 @@
+x-app: &app
+  image: chemicalops-api:local
+  build:
+    context: ..
+    dockerfile: backend/Dockerfile
+  env_file: ${CHEMICALOPS_ENV_FILE:?请指定独立生产配置文件绝对路径}
+  environment: &app-env
+    APP_ENV: production
+    DATABASE_URL: ""
+    DATABASE_SYNC_URL: ""
+    MYSQL_HOST: mysql
+    MYSQL_PORT: 3306
+    MYSQL_DATABASE: ${MYSQL_DATABASE:?请配置 MYSQL_DATABASE}
+    MYSQL_USER: ${MYSQL_USER:?请配置 MYSQL_USER}
+    MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请配置 MYSQL_PASSWORD}
+    REDIS_ENABLED: "true"
+    REDIS_RATE_LIMIT_ENABLED: "true"
+    REDIS_URL: redis://redis:6379/0
+    QDRANT_HOST: qdrant
+    QDRANT_PORT: 6333
+    FILE_STORAGE_BACKEND: minio
+    MINIO_ENDPOINT: minio:9000
+    MINIO_SECURE: "true"
+    MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?请配置 MINIO_ACCESS_KEY}
+    MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?请配置 MINIO_SECRET_KEY}
+    SSL_CERT_FILE: /etc/chemicalops/ca.pem
+    FILE_SCAN_ENABLED: "true"
+    FILE_SCAN_COMMAND: clamdscan --config-file=/etc/clamav/clamd.remote.conf --stream
+    IDEMPOTENCY_REQUIRED: "true"
+    TECHNICAL_DOCUMENT_EXECUTION_MODE: database
+    AGENT_EXECUTION_MODE: database
+  volumes:
+    - ${INTERNAL_CA_FILE:?请指定对象存储证书信任CA}:/etc/chemicalops/ca.pem:ro
+  restart: unless-stopped
+
+services:
+  mysql:
+    image: mysql:8.0.39
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?请配置 MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?请配置 MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请配置 MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请配置 MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -u"$$MYSQL_USER" -e "SELECT 1" "$$MYSQL_DATABASE"']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  qdrant:
+    image: qdrant/qdrant:v1.16.3
+    volumes: [qdrant_data:/qdrant/storage]
+    restart: unless-stopped
+  minio:
+    image: pgsty/minio:RELEASE.2026-03-25T00-00-00Z
+    command: server /data --certs-dir /certs
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?请配置 MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?请配置 MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+      - ${MINIO_TLS_DIR:?需包含public.crt和private.key且证书SAN包含minio}:/certs:ro
+    restart: unless-stopped
+  clamav:
+    image: clamav/clamav:1.4
+    volumes: [clamav_data:/var/lib/clamav]
+    restart: unless-stopped
+  migrate:
+    <<: *app
+    command: [python, scripts/migrate_database.py, upgrade]
+    restart: 'no'
+    volumes:
+      - ${INTERNAL_CA_FILE:?请指定对象存储证书信任CA}:/etc/chemicalops/ca.pem:ro
+      - ${BACKUP_DIR:?请指定持久化的 MySQL 备份目录}:/app/backups/mysql
+    depends_on:
+      mysql: {condition: service_healthy}
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-31Z
+    restart: 'no'
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - >-
+        until mc alias set local https://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 2; done;
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}";
+        mc mb --ignore-existing "local/$${MINIO_DOCUMENT_BUCKET}";
+        mc mb --ignore-existing "local/$${MINIO_RESULT_BUCKET}";
+        mc anonymous set none "local/$${MINIO_BUCKET}";
+        mc anonymous set none "local/$${MINIO_DOCUMENT_BUCKET}";
+        mc anonymous set none "local/$${MINIO_RESULT_BUCKET}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?请配置 MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?请配置 MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-chemicalops-files}
+      MINIO_DOCUMENT_BUCKET: ${MINIO_DOCUMENT_BUCKET:-chemicalops-documents}
+      MINIO_RESULT_BUCKET: ${MINIO_RESULT_BUCKET:-chemicalops-results}
+    volumes:
+      - ${INTERNAL_CA_FILE:?请指定CA}:/root/.mc/certs/CAs/internal.pem:ro
+    depends_on:
+      minio: {condition: service_started}
+  api:
+    <<: *app
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+      clamav: {condition: service_started}
+      qdrant: {condition: service_started}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8888/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 7s
+      retries: 30
+  worker-agent:
+    <<: *app
+    command: [python, scripts/run_task_worker.py, --queue, agent]
+    depends_on:
+      api: {condition: service_healthy}
+  worker-documents:
+    <<: *app
+    command: [python, scripts/run_task_worker.py, --queue, documents]
+    depends_on:
+      api: {condition: service_healthy}
+  frontend:
+    image: chemicalops-web:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    restart: unless-stopped
+  proxy:
+    image: nginx:1.28-alpine
+    ports: ['127.0.0.1:${HTTPS_PORT:-8443}:443']
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${TLS_DIR:?需包含fullchain.pem和privkey.pem}:/etc/nginx/tls:ro
+    depends_on:
+      api: {condition: service_healthy}
+      frontend: {condition: service_started}
+    restart: unless-stopped
+volumes:
+  mysql_data:
+  redis_data:
+  qdrant_data:
+  minio_data:
+  clamav_data:

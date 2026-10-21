@@ -132,7 +132,7 @@
 
 ### Task 12: 可复现依赖与完整部署
 
-**Files:** backend/requirements.lock; backend/Dockerfile; deploy/compose.full.yaml; deploy/nginx; scripts/restore_mysql.py; docs/完整部署与恢复运行说明.md
+**Files:** backend/requirements.lock; backend/Dockerfile; deploy/compose.full.yaml; deploy/nginx; scripts/restore_mysql.py; docs/部署与数据库恢复指南.md
 **Interfaces:** 锁定解析依赖；API/前端/Worker/反代/TLS/数据库和存储；复用现有备份恢复工具，演练在独立数据库/卷；不公开部署。
 **Tests / independent expectations:** 干净依赖安装；docker compose config；空环境健康检查；独立数据库恢复后迁移/行数/样本对账。
 - [ ] 写出以上行为的最小失败测试（先命名能捕捉的真实错误，必要时使用真实 MySQL 回滚事务）。

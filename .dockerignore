@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+.venv
+.tmp
+**/node_modules
+**/dist
+backups
+storage
+.superpowers

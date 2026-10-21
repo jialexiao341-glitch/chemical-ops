@@ -263,6 +263,13 @@ def _apply_migration(connection, migration: Migration) -> None:
         _apply_auth_security(connection)
     elif migration.version == "022":
         _apply_idempotency_response_headers(connection)
+    elif migration.version == "024":
+        if not _column_exists(connection, "md_products", "safety_stock_quantity"):
+            connection.exec_driver_sql("ALTER TABLE md_products ADD COLUMN safety_stock_quantity DECIMAL(18,6) NULL COMMENT '安全库存阈值，单位沿用产品计量单位' AFTER unit_id")
+            connection.commit()
+        if not _index_exists(connection, "md_products", "idx_product_safety_stock"):
+            connection.exec_driver_sql("ALTER TABLE md_products ADD KEY idx_product_safety_stock (status, safety_stock_quantity)")
+            connection.commit()
     elif migration.version == "034":
         _apply_return_reconciliation_items(connection, migration)
     elif migration.version == "053":
@@ -274,12 +281,29 @@ def _apply_migration(connection, migration: Migration) -> None:
 def _apply_purchase_order_source_guard(connection, migration: Migration) -> None:
     """恢复中断 DDL；唯一键已存在时不再扩大历史例外集合。"""
     indexes = inspect(connection).get_indexes("purchase_orders")
-    if any(index["name"] == "uk_purchase_order_comparison" for index in indexes):
+    if any(index["name"] == "uk_purchase_order_comparison" and index.get("column_names") == ["source_comparison_guard"] for index in indexes):
         return
     statements = [part.strip() for part in migration.path.read_text(encoding="utf-8").split(";") if part.strip()]
     for sql in statements:
-        if "ADD COLUMN legacy_source_duplicate" in sql and _column_exists(connection, "purchase_orders", "legacy_source_duplicate"):
-            continue
+        normalized = " ".join(sql.upper().split())
+        if normalized.startswith("ALTER TABLE PURCHASE_ORDERS"):
+            if "ADD COLUMN LEGACY_SOURCE_DUPLICATE" in normalized and _column_exists(
+                connection, "purchase_orders", "legacy_source_duplicate"
+            ):
+                continue
+            if "ADD COLUMN SOURCE_COMPARISON_GUARD" in normalized and _column_exists(
+                connection, "purchase_orders", "source_comparison_guard"
+            ):
+                continue
+            if "ADD UNIQUE KEY UK_PURCHASE_ORDER_COMPARISON" in normalized:
+                existing = next((index for index in indexes
+                                 if index["name"] == "uk_purchase_order_comparison"), None)
+                if existing and existing.get("column_names") == ["source_comparison_guard"]:
+                    continue
+                if existing:
+                    raise RuntimeError(
+                        "采购订单来源索引名称已占用且列不匹配；停止迁移以保留现有约束，需人工核对"
+                    )
         connection.exec_driver_sql(sql)
         connection.commit()
 

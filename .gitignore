@@ -20,6 +20,7 @@ frontend-legacy/
 .pnpm-store/
 
 # Local runtime data
+.tmp/
 logs/
 tmp/
 uploads/
