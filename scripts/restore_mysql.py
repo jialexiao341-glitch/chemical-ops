@@ -17,6 +17,91 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.core.config import get_settings
 
 
+def _has_database_redirect(source: mmap.mmap) -> bool:
+    """Detect database redirects while treating executable comments as SQL."""
+    index = 0
+    length = len(source)
+    executable_comment = False
+    previous: bytes | None = None
+    ddl = {b"CREATE", b"DROP", b"ALTER"}
+
+    while index < length:
+        if executable_comment and source[index:index + 2] == b"*/":
+            executable_comment = False
+            index += 2
+            continue
+        if source[index:index + 2] == b"/*":
+            if source[index:index + 3] == b"/*!" or source[index:index + 4].upper() == b"/*M!":
+                executable_comment = True
+                index += 3 if source[index:index + 3] == b"/*!" else 4
+                while index < length and 48 <= source[index] <= 57:
+                    index += 1
+                continue
+            end = source.find(b"*/", index + 2)
+            index = length if end < 0 else end + 2
+            continue
+        if source[index:index + 1] == b"#":
+            end = source.find(b"\n", index + 1)
+            index = length if end < 0 else end + 1
+            continue
+        if source[index:index + 2] == b"--" and (index + 2 == length or source[index + 2] <= 32):
+            end = source.find(b"\n", index + 2)
+            index = length if end < 0 else end + 1
+            continue
+
+        current = source[index]
+        if current <= 32:
+            index += 1
+            continue
+        if current in (39, 34):  # quoted string literal
+            quote = current
+            index += 1
+            while index < length:
+                if source[index] == 92 and index + 1 < length:
+                    index += 2
+                elif source[index] == quote:
+                    if index + 1 < length and source[index + 1] == quote:
+                        index += 2
+                    else:
+                        index += 1
+                        break
+                else:
+                    index += 1
+            previous = None
+            continue
+        if current == 96:  # quoted identifier
+            index += 1
+            while index < length:
+                if source[index] == 96:
+                    if index + 1 < length and source[index + 1] == 96:
+                        index += 2
+                    else:
+                        index += 1
+                        break
+                else:
+                    index += 1
+            token = b"<IDENT>"
+        elif (65 <= current <= 90) or (97 <= current <= 122) or current in (95, 36) or 48 <= current <= 57:
+            start = index
+            index += 1
+            while index < length:
+                char = source[index]
+                if (65 <= char <= 90) or (97 <= char <= 122) or (48 <= char <= 57) or char in (95, 36):
+                    index += 1
+                else:
+                    break
+            token = source[start:index].upper()
+        else:
+            previous = None
+            index += 1
+            continue
+
+        if previous == b"USE" or (previous in ddl and token == b"DATABASE"):
+            return True
+        previous = token
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="ChemicalOps MySQL 恢复")
     parser.add_argument("backup", type=Path, help="待恢复的 .sql 文件")
@@ -38,15 +123,10 @@ def main() -> int:
     # Logical backups produced by backup_mysql omit CREATE DATABASE/USE. Scan
     # across line breaks (including executable comments) without loading a large
     # dump into Python memory before opening a client.
-    sql_separator = rb"(?:\s|/\*.*?\*/|--[^\r\n]*|\#[^\r\n]*)+"
-    redirect_pattern = re.compile(
-        rb"\b(?:USE" + sql_separator + rb"|(?:CREATE|DROP|ALTER)" + sql_separator + rb"DATABASE\b)",
-        re.I | re.S,
-    )
     with args.backup.open("rb") as source:
         if args.backup.stat().st_size:
             with mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as dump:
-                if redirect_pattern.search(dump):
+                if _has_database_redirect(dump):
                     parser.error("备份包含数据库切换或数据库级 DDL；请使用单库备份")
     mysql = os.environ.get("MYSQL_CLIENT_PATH") or shutil.which("mysql")
     if not mysql:
