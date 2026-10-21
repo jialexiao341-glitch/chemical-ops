@@ -45,6 +45,7 @@ def allocate_outbound_cost(db: Session, transaction: InventoryTransaction, quant
             InventoryCostLayer.warehouse_id == transaction.warehouse_id,
             InventoryCostLayer.location_id == transaction.location_id,
             InventoryCostLayer.unit_id == transaction.unit_id,
+            InventoryCostLayer.batch_id == transaction.batch_id,
             InventoryCostLayer.remaining_quantity > 0,
         )
         .order_by(InventoryCostLayer.created_at, InventoryCostLayer.id)
@@ -64,6 +65,46 @@ def allocate_outbound_cost(db: Session, transaction: InventoryTransaction, quant
         remaining -= allocated
         total_cost += allocation_cost
     return total_cost
+
+
+def adjust_stocktake_cost(db: Session, transaction: InventoryTransaction, difference: Decimal, *, book_quantity: Decimal | None = None) -> None:
+    """盘亏消耗本批次成本；盘盈沿用本批次同库位的加权成本及币种。"""
+    if book_quantity is not None:
+        cost_quantity = db.scalar(select(func.coalesce(func.sum(InventoryCostLayer.remaining_quantity), 0)).where(
+            InventoryCostLayer.product_id == transaction.product_id,
+            InventoryCostLayer.warehouse_id == transaction.warehouse_id,
+            InventoryCostLayer.location_id == transaction.location_id,
+            InventoryCostLayer.batch_id == transaction.batch_id,
+            InventoryCostLayer.unit_id == transaction.unit_id,
+        ))
+        if cost_quantity != book_quantity:
+            raise BusinessValidationError("账面数量与批次成本层不一致，请先核对历史库存成本")
+    if difference < 0:
+        allocate_outbound_cost(db, transaction, -difference)
+        return
+    layers = list(db.scalars(select(InventoryCostLayer).where(
+        InventoryCostLayer.product_id == transaction.product_id,
+        InventoryCostLayer.warehouse_id == transaction.warehouse_id,
+        InventoryCostLayer.location_id == transaction.location_id,
+        InventoryCostLayer.batch_id == transaction.batch_id,
+        InventoryCostLayer.unit_id == transaction.unit_id,
+    ).order_by(InventoryCostLayer.created_at.desc(), InventoryCostLayer.id.desc()).with_for_update()).all())
+    available = [layer for layer in layers if layer.remaining_quantity > 0]
+    basis = available or layers[:1]
+    if not basis:
+        raise BusinessValidationError("盘盈批次缺少历史成本依据，请先完成库存成本回填")
+    if len({layer.currency_code for layer in basis}) != 1:
+        raise BusinessValidationError("盘盈批次存在多币种成本，需先核对成本口径")
+    quantity = sum((layer.remaining_quantity for layer in available), Decimal("0"))
+    unit_cost = (sum((layer.remaining_quantity * layer.unit_cost for layer in available), Decimal("0")) / quantity
+                 if quantity else basis[0].unit_cost)
+    db.add(InventoryCostLayer(
+        source_transaction_id=transaction.id, warehouse_id=transaction.warehouse_id,
+        location_id=transaction.location_id, product_id=transaction.product_id,
+        batch_id=transaction.batch_id, unit_id=transaction.unit_id,
+        unit_cost=unit_cost, currency_code=basis[0].currency_code,
+        original_quantity=difference, remaining_quantity=difference,
+    ))
 
 
 def create_fifo_outbound(db: Session, user: User, data: FifoOutboundCreate) -> InventoryFifoOutboundRequest:

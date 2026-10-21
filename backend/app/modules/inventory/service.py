@@ -36,7 +36,7 @@ from app.modules.inventory.schema import (
     WarehouseCreate,
 )
 from app.modules.inventory_cost.model import InventoryCostLayer
-from app.modules.inventory_cost.service import allocate_outbound_cost
+from app.modules.inventory_cost.service import allocate_outbound_cost, adjust_stocktake_cost
 from app.modules.products.model import Product
 from app.modules.purchase_orders.model import PurchaseOrderItem
 from app.modules.purchase_requests.model import Unit
@@ -1159,6 +1159,7 @@ def execute_stocktake_request(db: Session, user: User, stocktake_id: int) -> Inv
                 db.add(transaction)
                 db.flush()
                 transaction.transaction_no = f"IT{date.today():%Y%m%d}{transaction.id:06d}"
+                adjust_stocktake_cost(db, transaction, difference, book_quantity=item.book_quantity)
         stocktake.status = "COMPLETED"
         stocktake.completed_at = _now()
         add_audit_log(db, actor_id=user.id, action_type="STOCKTAKE", resource_type="INVENTORY_STOCKTAKE_REQUEST", resource_id=stocktake.id, request_summary="执行库存盘点差异调整", result_status="SUCCESS")

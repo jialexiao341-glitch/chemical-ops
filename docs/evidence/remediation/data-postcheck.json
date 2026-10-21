@@ -1,0 +1,12 @@
+{
+  "environment": "local development MySQL",
+  "cost_quantity_difference_slots_after": 0,
+  "repair_audit_records": 3,
+  "backup": "backups/mysql/chemicalops_20261021_110724.sql",
+  "pending_duplicate_order_ids": [
+    325,
+    326
+  ],
+  "pending_comparison_id": 383,
+  "database_writes": "Only three verified return cost allocations and their layers/audits were repaired; duplicate orders preserved."
+}

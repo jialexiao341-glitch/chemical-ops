@@ -1,0 +1,32 @@
+{
+  "applied": true,
+  "changes": [
+    {
+      "allocation_id": 1380,
+      "transaction_id": 3596,
+      "old_layer_id": 970,
+      "new_layer_id": 1008,
+      "quantity": "2.000000",
+      "old_cost": "54.000000",
+      "new_cost": "58.000000000000"
+    },
+    {
+      "allocation_id": 1656,
+      "transaction_id": 6652,
+      "old_layer_id": 944,
+      "new_layer_id": 1003,
+      "quantity": "2.000000",
+      "old_cost": "28.000000",
+      "new_cost": "20.000000000000"
+    },
+    {
+      "allocation_id": 1657,
+      "transaction_id": 6653,
+      "old_layer_id": 960,
+      "new_layer_id": 998,
+      "quantity": "2.000000",
+      "old_cost": "140.000000",
+      "new_cost": "144.000000000000"
+    }
+  ]
+}
