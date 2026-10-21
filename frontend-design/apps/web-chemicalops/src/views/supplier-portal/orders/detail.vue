@@ -207,7 +207,7 @@ onMounted(load);
                 {{ formatAmount(record.unit_price, 6) }} {{ order.currency_code }}
               </template>
               <template v-else-if="column.key === 'tax_rate'">
-                {{ record.tax_rate == null ? '-' : `${record.tax_rate}%` }}
+                {{ record.tax_rate == null ? '-' : `${formatQuantity(record.tax_rate)}%` }}
               </template>
               <template v-else-if="column.key === 'planned_arrival_date'">
                 {{ formatDate(record.planned_arrival_date) }}

@@ -12,7 +12,7 @@ import { Alert, Button, Empty, Input, Select, Spin, Tag, message } from 'antdv-n
 
 import { createBatchChecksApi, createBatchRecallReportApi, createFinanceChecksApi, decideExceptionActionApi, getBatchAssigneesApi, getBatchCheckEventsApi, getBatchChecksApi, getBatchRecallReportsApi, getBusinessInsightApi, getExceptionDecisionApi, getExceptionDecisionEventsApi, getFinanceAssigneesApi, getFinanceCheckEventsApi, getFinanceChecksApi, getInsightSnapshotsApi, getRecallReportOwnersApi, saveInsightSnapshotApi, updateBatchCheckApi, updateFinanceCheckApi, updateRecallReportWorkflowApi } from '#/api';
 
-import { formatDateTime } from '#/utils/format';
+import { formatDateTime, formatQuantity } from '#/utils/format';
 
 const emit = defineEmits(['changed']);
 const router = useRouter();
@@ -335,11 +335,11 @@ function exportRecallReport() {
     ['报告', report.batch_no, report.status, `生成时间 ${formatDateTime(saved.created_at)}；可见流水 ${report.visible_transaction_count}`],
     ['完成确认', recallWorkflowStatus(saved.workflow.status), saved.workflow.owner_name ?? '未指定负责人', `提交人 ${saved.workflow.submitted_by_name ?? '未提交'}；提交时间 ${formatDateTime(saved.workflow.submitted_at)}；复核人 ${saved.workflow.reviewed_by_name ?? '未复核'}；完成时间 ${formatDateTime(saved.workflow.completed_at)}`],
     ['最终结论', saved.workflow.conclusion ?? '', '', saved.workflow.review_reason ?? ''],
-    ...report.slots.map((row) => ['库位数量', `仓库 #${row.warehouse_id} / 库位 #${row.location_id} / 单位 #${row.unit_id}`, `余额 ${row.quantity ?? '缺失'}；流水净额 ${row.movement_net}；差额 ${row.difference ?? '无法判定'}`, `${row.status}；核查 ${row.check_status}`]),
-    ...report.outflows.map((row) => ['出库去向', row.transaction_no, `${row.quantity} / 单位 #${row.unit_id}；${recallCheckStatus(row.check_status)}`, `${sourceTypeLabel(row.source_type)} #${row.source_id ?? '缺失'}；${row.source_reason ?? (row.source_found ? '来源单据已找到' : '来源缺失')}；${row.finding ?? ''}`]),
-    ...(report.source_matches ?? []).map((row) => ['来源明细匹配', row.transaction_no, `${row.quantity} / 单位 #${row.unit_id}；明细执行量 ${row.expected_quantity ?? '无法确认'}；${sourceMatchStatus(row.status)}`, `${sourceTypeLabel(row.source_type)} #${row.source_id ?? '缺失'} / 明细 #${row.item_id ?? '未定位'}；${row.reason}`]),
-    ...(report.transfer_pairs ?? []).map((row) => ['调拨两端核对', `申请 #${row.request_id} / 明细 #${row.item_id}`, `出库 ${row.outbound_quantity ?? '超出权限'}；入库 ${row.inbound_quantity ?? '超出权限'} / 单位 #${row.unit_id}`, `${transferPairStatus(row.status)}；${row.review_status === 'VERIFIED' ? '两端已复核' : '两端复核未完成'}；出库流水 ${row.outbound_ids.join('、')}；入库流水 ${row.inbound_ids.join('、')}`]),
-    ...report.transfer_differences.map((row) => ['调拨差异', `申请 #${row.request_id}`, `净额 ${row.net} / 单位 #${row.unit_id}`, '需核对调拨两端']),
+    ...report.slots.map((row) => ['库位数量', `仓库 #${row.warehouse_id} / 库位 #${row.location_id} / 单位 #${row.unit_id}`, `余额 ${row.quantity == null ? '缺失' : formatQuantity(row.quantity)}；流水净额 ${formatQuantity(row.movement_net)}；差额 ${row.difference == null ? '无法判定' : formatQuantity(row.difference)}`, `${row.status}；核查 ${row.check_status}`]),
+    ...report.outflows.map((row) => ['出库去向', row.transaction_no, `${formatQuantity(row.quantity)} / 单位 #${row.unit_id}；${recallCheckStatus(row.check_status)}`, `${sourceTypeLabel(row.source_type)} #${row.source_id ?? '缺失'}；${row.source_reason ?? (row.source_found ? '来源单据已找到' : '来源缺失')}；${row.finding ?? ''}`]),
+    ...(report.source_matches ?? []).map((row) => ['来源明细匹配', row.transaction_no, `${formatQuantity(row.quantity)} / 单位 #${row.unit_id}；明细执行量 ${row.expected_quantity == null ? '无法确认' : formatQuantity(row.expected_quantity)}；${sourceMatchStatus(row.status)}`, `${sourceTypeLabel(row.source_type)} #${row.source_id ?? '缺失'} / 明细 #${row.item_id ?? '未定位'}；${row.reason}`]),
+    ...(report.transfer_pairs ?? []).map((row) => ['调拨两端核对', `申请 #${row.request_id} / 明细 #${row.item_id}`, `出库 ${row.outbound_quantity == null ? '超出权限' : formatQuantity(row.outbound_quantity)}；入库 ${row.inbound_quantity == null ? '超出权限' : formatQuantity(row.inbound_quantity)} / 单位 #${row.unit_id}`, `${transferPairStatus(row.status)}；${row.review_status === 'VERIFIED' ? '两端已复核' : '两端复核未完成'}；出库流水 ${row.outbound_ids.join('、')}；入库流水 ${row.inbound_ids.join('、')}`]),
+    ...report.transfer_differences.map((row) => ['调拨差异', `申请 #${row.request_id}`, `净额 ${formatQuantity(row.net)} / 单位 #${row.unit_id}`, '需核对调拨两端']),
     ...report.limitations.map((item) => ['范围与结论', item, '', '']),
     ...(report.checks ?? []).map((item) => ['生成时核查记录', `核查项 #${item.id}`, recallCheckStatus(item.status), `负责人 #${item.assignee_id ?? '未指定'}；核查人 #${item.checked_by ?? '未核查'}；复核人 #${item.reviewed_by ?? '未复核'}；${item.finding ?? ''}`]),
     ...saved.workflow.events.map((event) => ['报告确认记录', formatDateTime(event.created_at), `${recallWorkflowAction(event.action)} · ${event.actor_name}`, `${event.conclusion ?? ''}；${event.review_reason ?? ''}`]),
@@ -486,29 +486,29 @@ defineExpose({ open });
               <div class="text-muted-foreground">可见流水 {{ selectedRecallReport.result_json.visible_transaction_count }} 条 · 来源缺失 {{ selectedRecallReport.result_json.missing_source_count }} 条 · 明细冲突 {{ selectedRecallReport.result_json.conflict_source_count === undefined ? '未评估' : `${selectedRecallReport.result_json.conflict_source_count} 条` }} · 未复核 {{ selectedRecallReport.result_json.open_check_count }} 项 · 未建核查 {{ selectedRecallReport.result_json.missing_check_count }} 项</div>
               <div class="font-medium">库位数量对账</div>
               <div v-for="row in selectedRecallReport.result_json.slots" :key="`${row.warehouse_id}-${row.location_id}-${row.unit_id}`" class="border-t pt-2">
-                仓库 #{{ row.warehouse_id }} · 库位 #{{ row.location_id }} · 单位 #{{ row.unit_id }}：余额 {{ row.quantity ?? '缺失' }}，流水净额 {{ row.movement_net }}，差额 {{ row.difference ?? '无法判定' }} · {{ recallSlotStatus(row.status) }} · {{ recallCheckStatus(row.check_status) }}
+                仓库 #{{ row.warehouse_id }} · 库位 #{{ row.location_id }} · 单位 #{{ row.unit_id }}：余额 {{ row.quantity == null ? '缺失' : formatQuantity(row.quantity) }}，流水净额 {{ formatQuantity(row.movement_net) }}，差额 {{ row.difference == null ? '无法判定' : formatQuantity(row.difference) }} · {{ recallSlotStatus(row.status) }} · {{ recallCheckStatus(row.check_status) }}
               </div>
               <div class="font-medium">出库去向</div>
               <div v-for="row in selectedRecallReport.result_json.outflows" :key="row.transaction_id" class="border-t pt-2">
-                {{ row.transaction_no }} · {{ row.quantity }} / 单位 #{{ row.unit_id }} · {{ sourceTypeLabel(row.source_type) }} #{{ row.source_id ?? '缺失' }} · {{ row.source_status ? sourceMatchStatus(row.source_status) : row.source_found ? '来源单据已找到' : '来源缺失' }} · {{ recallCheckStatus(row.check_status) }}
+                {{ row.transaction_no }} · {{ formatQuantity(row.quantity) }} / 单位 #{{ row.unit_id }} · {{ sourceTypeLabel(row.source_type) }} #{{ row.source_id ?? '缺失' }} · {{ row.source_status ? sourceMatchStatus(row.source_status) : row.source_found ? '来源单据已找到' : '来源缺失' }} · {{ recallCheckStatus(row.check_status) }}
                 <div v-if="row.finding" class="text-muted-foreground">{{ row.finding }}</div>
               </div>
               <template v-if="selectedRecallReport.result_json.source_matches?.length">
                 <h4 class="font-medium">来源明细匹配</h4>
                 <div v-for="row in selectedRecallReport.result_json.source_matches" :key="row.transaction_id" class="border-t pt-2">
                   <div class="flex flex-wrap items-center justify-between gap-2"><span>{{ row.transaction_no }} · {{ sourceTypeLabel(row.source_type) }} #{{ row.source_id ?? '缺失' }} · 明细 #{{ row.item_id ?? '未定位' }}</span><Tag :color="row.status === 'MATCHED' ? 'green' : 'gold'">{{ sourceMatchStatus(row.status) }}</Tag></div>
-                  <div class="mt-1 break-words text-muted-foreground">流水 {{ row.quantity }} / 单位 #{{ row.unit_id }} · 明细执行量 {{ row.expected_quantity ?? '无法确认' }}；{{ row.reason }}</div>
+                  <div class="mt-1 break-words text-muted-foreground">流水 {{ formatQuantity(row.quantity) }} / 单位 #{{ row.unit_id }} · 明细执行量 {{ row.expected_quantity == null ? '无法确认' : formatQuantity(row.expected_quantity) }}；{{ row.reason }}</div>
                 </div>
               </template>
               <template v-if="selectedRecallReport.result_json.transfer_pairs?.length">
                 <h4 class="font-medium">调拨两端核对</h4>
                 <div v-for="row in selectedRecallReport.result_json.transfer_pairs" :key="row.item_id" class="border-t pt-2">
                   <div class="flex flex-wrap items-center justify-between gap-2"><span>调拨申请 #{{ row.request_id }} · 明细 #{{ row.item_id }} · 单位 #{{ row.unit_id }}</span><Tag :color="row.status === 'MATCHED' ? 'green' : 'gold'">{{ transferPairStatus(row.status) }}</Tag></div>
-                  <div class="mt-1 text-muted-foreground">出库 {{ row.outbound_quantity ?? '超出权限' }}（流水 {{ row.outbound_ids.join('、') || '缺失' }}）· 入库 {{ row.inbound_quantity ?? '超出权限' }}（流水 {{ row.inbound_ids.join('、') || '缺失' }}）· {{ row.review_status === 'VERIFIED' ? '两端已复核' : '两端复核未完成' }}</div>
+                  <div class="mt-1 text-muted-foreground">出库 {{ row.outbound_quantity == null ? '超出权限' : formatQuantity(row.outbound_quantity) }}（流水 {{ row.outbound_ids.join('、') || '缺失' }}）· 入库 {{ row.inbound_quantity == null ? '超出权限' : formatQuantity(row.inbound_quantity) }}（流水 {{ row.inbound_ids.join('、') || '缺失' }}）· {{ row.review_status === 'VERIFIED' ? '两端已复核' : '两端复核未完成' }}</div>
                 </div>
               </template>
               <template v-if="!selectedRecallReport.result_json.transfer_pairs">
-                <div v-for="row in selectedRecallReport.result_json.transfer_differences" :key="`${row.request_id}-${row.unit_id}`" class="border-t pt-2">调拨申请 #{{ row.request_id }} · 单位 #{{ row.unit_id }} · 出入库净差 {{ row.net }}，需核对调拨两端。</div>
+                <div v-for="row in selectedRecallReport.result_json.transfer_differences" :key="`${row.request_id}-${row.unit_id}`" class="border-t pt-2">调拨申请 #{{ row.request_id }} · 单位 #{{ row.unit_id }} · 出入库净差 {{ formatQuantity(row.net) }}，需核对调拨两端。</div>
               </template>
               <div v-for="item in selectedRecallReport.result_json.limitations" :key="item" class="border-t pt-2 text-muted-foreground">{{ item }}</div>
             </div>

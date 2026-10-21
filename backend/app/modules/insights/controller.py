@@ -1,5 +1,6 @@
 """面向业务对象的只读分析接口，所有结论均附带来源或数据边界。"""
 
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -41,6 +42,8 @@ router = APIRouter(
     tags=["业务分析"],
     dependencies=[Depends(require_permission("ai.workspace.read"))],
 )
+
+_DECIMAL_TEXT = re.compile(r"(?<![\w-])([+-]?\d+\.\d+)(?![\w.])")
 
 
 class InsightEvidence(BaseModel):
@@ -84,7 +87,9 @@ def _result(kind: str, title: str, audience: str, summary: str) -> BusinessInsig
 
 def _evidence(result: BusinessInsight, label: str, value: object, source: str, path: str | None = None) -> None:
     """把数据库中的可读事实追加到结果中。"""
-    result.evidence.append(InsightEvidence(label=label, value=str(value), source=source, path=path))
+    text = str(value)
+    text = _DECIMAL_TEXT.sub(lambda match: match.group(1).rstrip("0").rstrip("."), text)
+    result.evidence.append(InsightEvidence(label=label, value=text, source=source, path=path))
 
 
 def _check_permission(db: Session, user: User, code: str | tuple[str, ...]) -> None:

@@ -16,7 +16,7 @@ import {
 } from 'antdv-next';
 
 import { createInvoiceApi, getReconciliationListApi } from '#/api';
-import { formatDate } from '#/utils/format';
+import { formatAmount, formatDate } from '#/utils/format';
 
 const emit = defineEmits(['success']);
 const { hasAccessByCodes } = useAccess();
@@ -115,7 +115,7 @@ const [Modal, modalApi] = useVbenModal({
       options.value = res.items
         .filter((item) => !['CANCELLED', 'CLOSED'].includes(item.status))
         .map((item) => ({
-          label: `${item.reconciliation_no}（应付 ${item.total_amount} ${item.currency_code}）`,
+          label: `${item.reconciliation_no}（应付 ${formatAmount(item.total_amount)} ${item.currency_code}）`,
           value: item.id,
         }));
     } finally {

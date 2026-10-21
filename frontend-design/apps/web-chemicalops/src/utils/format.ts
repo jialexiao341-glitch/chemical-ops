@@ -14,6 +14,50 @@ function toNumber(value: null | number | string | undefined): null | number {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** 将数字或 Decimal 字符串转为普通十进制文本，避免格式化时经过二进制浮点数。 */
+function decimalText(value: number | string): string | null {
+  const text = String(value).trim();
+  const match = text.match(/^([+-]?)(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i);
+  if (!match) return null;
+  const [, sign = '', whole = '0', fraction = '', exponentText] = match;
+  const exponent = Number(exponentText ?? 0);
+  const digits = `${whole}${fraction}`;
+  const point = whole.length + exponent;
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/** 以十进制整数进行显示精度舍入，避免 Number 舍入引入长尾小数。 */
+function formatDecimal(value: number | string, precision?: number): string | null {
+  const text = decimalText(value);
+  if (text === null) return null;
+  const match = text.match(/^([+-]?)(\d+)(?:\.(\d+))?$/);
+  if (!match) return null;
+  const [, sign = '', rawWhole = '0', fraction = ''] = match;
+  const whole = rawWhole.replace(/^0+(?=\d)/, '');
+  let integer = BigInt(`${whole}${fraction}` || '0');
+  let digits = fraction;
+  if (precision !== undefined && digits.length > precision) {
+    const kept = digits.slice(0, precision);
+    const roundDigit = Number(digits[precision] ?? '0');
+    integer = BigInt(`${whole}${kept}` || '0');
+    if (roundDigit >= 5) integer += 1n;
+    digits = kept;
+    const normalized = integer.toString().padStart(whole.length + precision, '0');
+    const splitAt = normalized.length - precision;
+    const roundedWhole = precision ? normalized.slice(0, splitAt) : normalized;
+    const roundedFraction = precision ? normalized.slice(splitAt) : '';
+    const grouped = roundedWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const trimmedFraction = roundedFraction.replace(/0+$/, '');
+    return `${sign === '-' && integer !== 0n ? '-' : ''}${grouped}${trimmedFraction ? `.${trimmedFraction}` : ''}`;
+  }
+  const trimmedFraction = digits.replace(/0+$/, '');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const isZero = BigInt(`${whole}${fraction}` || '0') === 0n;
+  return `${sign === '-' && !isZero ? '-' : ''}${grouped}${trimmedFraction ? `.${trimmedFraction}` : ''}`;
+}
+
 /**
  * 去除数值字符串末尾多余的 0。
  *
@@ -35,23 +79,14 @@ export function trimDecimal(value: null | number | string | undefined): string {
 /**
  * 格式化数量：千分位 + 去除末尾多余 0。
  *
- * @param precision 需要保留的最大小数位，默认不限制（仅去除末尾 0）
+ * @param precision 需要保留的最大小数位，默认 6 位（与业务数量字段精度一致）
  */
 export function formatQuantity(
   value: null | number | string | undefined,
   precision?: number,
 ): string {
-  const parsed = toNumber(value);
-  if (parsed === null) {
-    return '-';
-  }
-  if (precision === undefined) {
-    return parsed.toLocaleString('zh-CN', { maximumFractionDigits: 20 });
-  }
-  return parsed.toLocaleString('zh-CN', {
-    maximumFractionDigits: precision,
-    minimumFractionDigits: 0,
-  });
+  if (value === null || value === undefined || value === '' || toNumber(value) === null) return '-';
+  return formatDecimal(value, precision ?? 6) ?? String(value);
 }
 
 /** 格式化金额，默认保留 2 位小数 */

@@ -25,7 +25,7 @@ import {
   updateConversationApi,
 } from '#/api';
 import { AI_FILTER_TARGETS } from '#/utils/ai-list-filters';
-import { formatDateTime } from '#/utils/format';
+import { formatAmount, formatDateTime, formatQuantity } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
 
 import QueryEvidence from './query-evidence.vue';
@@ -688,7 +688,7 @@ async function previewPurchaseRequestDraft(freeText?: string) {
       technical_requirements: item.technical_requirements?.trim() || null,
     })),
   };
-  const text = freeText ?? `采购用途：${payload.purpose}；物料：${payload.items.map((item) => `${item.requested_name} ${item.quantity} ${draftUnits.value.find((unit) => unit.id === item.unit_id)?.unit_name ?? ''}`).join('；')}`;
+  const text = freeText ?? `采购用途：${payload.purpose}；物料：${payload.items.map((item) => `${item.requested_name} ${formatQuantity(item.quantity)} ${draftUnits.value.find((unit) => unit.id === item.unit_id)?.unit_name ?? ''}`).join('；')}`;
   inputText.value = '';
   const history = [...messages.value];
   const userId = nextId();
@@ -759,7 +759,7 @@ function confirmCreatePurchaseDraft(item: UiMessage) {
   const confirmationId = proposal.confirmation_id;
   const previewVersion = proposal.preview_version;
   const itemSummary = proposal.display_items
-    .map((line) => `${line.requested_name} ${line.quantity} ${line.unit_name}`)
+    .map((line) => `${line.requested_name} ${formatQuantity(line.quantity)} ${line.unit_name}`)
     .join('；');
   Modal.confirm({
     content: `用途：${proposal.draft.purpose}。明细：${itemSummary}。确认后会创建状态为“草稿”的采购申请，不会提交审批。`,
@@ -1335,12 +1335,12 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
                   <div v-if="item.draftProposal.clarification_question" role="status" class="text-amber-700">{{ item.draftProposal.clarification_question }}</div>
                   <div>用途：{{ item.draftProposal.draft.purpose }}</div>
                   <div>优先级：{{ item.draftProposal.draft.priority || 'NORMAL' }} · 币种：{{ item.draftProposal.draft.currency_code || 'CNY' }}</div>
-                  <div v-if="item.draftProposal.draft.budget_amount">预算：{{ item.draftProposal.draft.budget_amount }}</div>
+                  <div v-if="item.draftProposal.draft.budget_amount">预算：{{ formatAmount(item.draftProposal.draft.budget_amount) }}</div>
                   <ul class="list-disc space-y-1 pl-5">
                     <li v-for="(line, index) in item.draftProposal.display_items" :key="`${line.requested_name}-${index}`">
-                      {{ line.requested_name }}：{{ line.quantity }} {{ line.unit_name }}
+                      {{ line.requested_name }}：{{ formatQuantity(line.quantity) }} {{ line.unit_name }}
                       <span v-if="line.product_name" class="text-muted-foreground">（关联产品：{{ line.product_name }}）</span>
-                      <span v-if="line.budget_price" class="text-muted-foreground">· 单价 {{ line.budget_price }}</span>
+                      <span v-if="line.budget_price" class="text-muted-foreground">· 单价 {{ formatAmount(line.budget_price, 6) }}</span>
                     </li>
                   </ul>
                   <ul v-if="item.draftProposal.warnings.length" class="list-disc pl-5 text-amber-700">
@@ -1350,13 +1350,13 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
                     <summary class="cursor-pointer text-muted-foreground">产品、库存与报价查询依据（{{ item.draftProposal.evidence.length }} 项）</summary>
                     <ul class="list-disc space-y-1 pl-5">
                       <li v-for="(entry, index) in item.draftProposal.evidence" :key="`${entry.tool}-${index}`">
-                        {{ entry.label }}：{{ entry.rows?.length ? `${entry.rows.length} 条记录` : entry.totals?.length ? entry.totals.map((total: any) => `${total.available_quantity} ${total.unit_name}`).join('、') : '无匹配记录' }}
+                        {{ entry.label }}：{{ entry.rows?.length ? `${entry.rows.length} 条记录` : entry.totals?.length ? entry.totals.map((total: any) => `${formatQuantity(total.available_quantity)} ${total.unit_name}`).join('、') : '无匹配记录' }}
                         <span v-if="entry.sources?.length" class="text-muted-foreground"> · 来源 {{ entry.sources.map((source: any) => `${source.resource}#${source.record_id}`).join('、') }}</span>
                         <span v-if="entry.scope" class="text-muted-foreground"> · {{ entry.scope }}</span>
                         <ul v-if="entry.rows?.length" class="list-disc pl-5 text-muted-foreground">
                           <li v-for="(row, rowIndex) in entry.rows" :key="rowIndex">
                             <template v-if="entry.tool === 'catalog.search_products'">{{ row.product_name }} · {{ row.product_code }} · {{ row.model || '未登记型号' }} / {{ row.packaging_spec || '未登记包装' }}</template>
-                            <template v-else-if="entry.tool === 'supplier_quotes.compare'">{{ row.supplier_name }}：{{ row.unit_price }} {{ row.currency_code }}/{{ row.unit_name }} · {{ row.rank ? `可比组排名 ${row.rank}` : '不可比，不排序' }}<span v-if="row.valid_until"> · 有效至 {{ row.valid_until }}</span></template>
+                            <template v-else-if="entry.tool === 'supplier_quotes.compare'">{{ row.supplier_name }}：{{ formatAmount(row.unit_price, 6) }} {{ row.currency_code }}/{{ row.unit_name }} · {{ row.rank ? `可比组排名 ${row.rank}` : '不可比，不排序' }}<span v-if="row.valid_until"> · 有效至 {{ row.valid_until }}</span></template>
                             <template v-else>{{ row.rfq_no }} · 询价明细 #{{ row.rfq_item_id }} · {{ row.specification || '未登记规格' }}</template>
                           </li>
                         </ul>
@@ -1427,20 +1427,20 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
               <div class="ai-draft-recognized">
                 <strong>已识别</strong>
                 <span>{{ draftPurpose || '采购用途待补充' }}</span>
-                <span v-for="(item, index) in draftItems" :key="index">{{ item.requested_name || `物料 ${index + 1} 待补充` }}{{ item.quantity ? ` · ${item.quantity}` : '' }}{{ draftUnits.find((unit) => unit.id === item.unit_id)?.unit_name ? ` ${draftUnits.find((unit) => unit.id === item.unit_id)?.unit_name}` : '' }}{{ item.technical_requirements ? ` · ${item.technical_requirements}` : '' }}</span>
+                <span v-for="(item, index) in draftItems" :key="index">{{ item.requested_name || `物料 ${index + 1} 待补充` }}{{ item.quantity ? ` · ${formatQuantity(item.quantity)}` : '' }}{{ draftUnits.find((unit) => unit.id === item.unit_id)?.unit_name ? ` ${draftUnits.find((unit) => unit.id === item.unit_id)?.unit_name}` : '' }}{{ item.technical_requirements ? ` · ${item.technical_requirements}` : '' }}</span>
                 <span v-if="draftExpectedDate">期望到货：{{ draftExpectedDate }}</span>
-                <span v-if="draftBudget != null">预算：{{ draftBudget }} {{ draftCurrency }}</span>
+                <span v-if="draftBudget != null">预算：{{ formatAmount(draftBudget) }} {{ draftCurrency }}</span>
                 <span v-if="draftPriority !== 'NORMAL'">优先级：{{ draftPriorityLabel(draftPriority) }}</span>
               </div>
               <Input v-if="!draftPurpose.trim()" v-model:value="draftPurpose" :maxlength="1000" placeholder="缺少：采购用途" />
               <div v-for="(item, index) in draftItems" :key="index" class="ai-draft-item">
                 <div class="ai-draft-item-heading"><strong>物料 {{ index + 1 }}</strong><button v-if="draftItems.length > 1" type="button" class="ai-mode-exit" @click="removeDraftItem(index)">移除</button></div>
-                <Select v-if="needsDraftProductChoice(index) && canReadDraftProducts" v-model:value="item.product_id" show-search :filter-option="false" :loading="draftProductsLoading" :options="[...draftProducts.map((product) => ({ value: product.id, label: `${product.product_name} · ${product.product_code}${product.purity_value ? ` · ${product.purity_value}${product.purity_unit ?? ''}` : ''}${product.packaging_spec ? ` · ${product.packaging_spec}` : ''}${product.model ? ` · ${product.model}` : ''}` })), { value: -1, label: '目录外物料（手动填写）' }]" placeholder="请选择准确产品规格" @search="searchDraftProducts" @change="onDraftProductChange(item)" />
+                <Select v-if="needsDraftProductChoice(index) && canReadDraftProducts" v-model:value="item.product_id" show-search :filter-option="false" :loading="draftProductsLoading" :options="[...draftProducts.map((product) => ({ value: product.id, label: `${product.product_name} · ${product.product_code}${product.purity_value != null && product.purity_value !== '' ? ` · ${formatQuantity(product.purity_value)}${product.purity_unit ?? ''}` : ''}${product.packaging_spec ? ` · ${product.packaging_spec}` : ''}${product.model ? ` · ${product.model}` : ''}` })), { value: -1, label: '目录外物料（手动填写）' }]" placeholder="请选择准确产品规格" @search="searchDraftProducts" @change="onDraftProductChange(item)" />
                 <Input v-if="needsDraftProductChoice(index) && item.product_id === -1" v-model:value="item.requested_name" placeholder="目录外物料名称" />
                 <Input v-if="!item.requested_name" v-model:value="item.requested_name" placeholder="缺少：物料名称" />
                 <div class="ai-draft-grid ai-draft-line-grid">
                   <InputNumber v-if="item.quantity == null" v-model:value="item.quantity" class="w-full" :min="0.000001" :precision="6" placeholder="缺少：数量" />
-                  <span v-else class="ai-draft-known-value">数量：{{ item.quantity }}</span>
+                  <span v-else class="ai-draft-known-value">数量：{{ formatQuantity(item.quantity) }}</span>
                   <Select v-if="item.unit_id == null" v-model:value="item.unit_id" :options="draftUnits.map((unit) => ({ label: unit.unit_name, value: unit.id }))" placeholder="缺少：计量单位" />
                   <span v-else class="ai-draft-known-value">单位：{{ draftUnits.find((unit) => unit.id === item.unit_id)?.unit_name || '已识别' }}</span>
                 </div>

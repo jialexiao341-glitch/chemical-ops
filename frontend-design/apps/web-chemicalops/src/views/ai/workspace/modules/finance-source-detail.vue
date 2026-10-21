@@ -11,7 +11,12 @@ import {
   getReconciliationApi,
   getSettlementApi,
 } from '#/api';
-import { formatDate, formatDateTime } from '#/utils/format';
+import { formatAmount, formatDate, formatDateTime } from '#/utils/format';
+
+const amountFields = new Set([
+  'amount', 'amount_excl_tax', 'amount_incl_tax', 'settlement_amount',
+  'tax_amount', 'total_amount',
+]);
 
 type FinanceRecordKind = 'invoices' | 'payments' | 'reconciliations' | 'settlements';
 interface FinanceRecordRequest {
@@ -76,6 +81,8 @@ const items = computed(() =>
         ? formatDateTime(value)
         : typeof value === 'string' && /_date$/.test(key)
           ? formatDate(value)
+        : amountFields.has(key) && (typeof value === 'string' || typeof value === 'number')
+          ? formatAmount(value, Number(record.value?.amount_precision ?? 2))
         : value == null || value === ''
           ? '—'
           : String(value),

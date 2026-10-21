@@ -20,6 +20,7 @@ import {
   rejectPaymentApi,
 } from '#/api';
 import { getSupplierNameMap } from '#/utils/lookup';
+import { formatAmount } from '#/utils/format';
 
 import { useColumns, useGridFormSchema } from './data';
 import CreateModal from './modules/create.vue';
@@ -94,7 +95,7 @@ function onActionClick({ code, row }: { code: string; row: FinanceApi.Payment })
 
 function runApprove(row: FinanceApi.Payment) {
   Modal.confirm({
-    content: `确认审批通过付款 ${row.payment_no}（${row.amount} ${row.currency_code}）？`,
+    content: `确认审批通过付款 ${row.payment_no}（${formatAmount(row.amount)} ${row.currency_code}）？`,
     okText: '审批通过',
     onOk: async () => {
       if (!hasAccessByCodes(['finance.payments.approve'])) return;

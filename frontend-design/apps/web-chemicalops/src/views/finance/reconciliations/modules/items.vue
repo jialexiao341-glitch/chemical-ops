@@ -110,7 +110,7 @@ const [Drawer, drawerApi] = useVbenDrawer<number>({ onOpenChange(open) { if (ope
           <template #bodyCell="{ column, record: row }">
             <template v-if="column.key === 'product'">{{ row.product_name }}<div class="text-muted-foreground">第 {{ row.line_no }} 行 · {{ row.unit_name }}</div></template>
             <template v-else-if="String(column.key).endsWith('_quantity')">{{ quantityText(row, column.key) }}</template>
-            <template v-else-if="column.key === 'price'">{{ formatAmount(row.unit_price, 6) }}<div>{{ row.tax_rate }}%</div></template>
+            <template v-else-if="column.key === 'price'">{{ formatAmount(row.unit_price, 6) }}<div>{{ row.tax_rate == null ? '-' : formatQuantity(row.tax_rate) }}%</div></template>
             <template v-else-if="column.key === 'amount'">{{ formatAmount(row.amount_excl_tax, basis.amount_precision) }} / {{ formatAmount(row.tax_amount, basis.amount_precision) }}<div class="font-semibold">{{ formatAmount(row.amount_incl_tax, basis.amount_precision) }}</div></template>
             <template v-else-if="column.key === 'decision'">
               <template v-if="Number(row.returned_quantity) > 0">

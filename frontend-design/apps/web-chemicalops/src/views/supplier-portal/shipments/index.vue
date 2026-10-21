@@ -11,7 +11,7 @@ import { Button, DatePicker, Input, InputNumber, message, Modal, Select, Tag } f
 
 import { createSupplierShipmentApi, getSupplierOrderApi, getSupplierOrderListApi, getSupplierShipmentListApi } from '#/api';
 import { DELIVERY_STATUS_DICT, PURCHASE_ORDER_STATUS_DICT } from '#/constants/dictionary';
-import { formatDate } from '#/utils/format';
+import { formatDate, formatQuantity } from '#/utils/format';
 import SupplierRecordList from '../components/SupplierRecordList.vue';
 
 defineOptions({ name: 'SupplierShipmentList' });
@@ -152,7 +152,7 @@ onMounted(loadOrders);
       <div v-if="lines.length" class="rounded-md border">
         <div class="border-b px-3 py-2 font-medium">发货明细</div>
         <div v-for="line in lines" :key="line.id" class="grid grid-cols-[minmax(0,1fr)_150px] items-center gap-3 border-b px-3 py-2 last:border-0">
-          <div class="min-w-0"><div class="truncate font-medium">{{ line.name }}</div><div class="text-xs text-muted-foreground">订单 {{ line.orderQuantity }} · 已收 {{ line.receivedQuantity }}</div></div>
+          <div class="min-w-0"><div class="truncate font-medium">{{ line.name }}</div><div class="text-xs text-muted-foreground">订单 {{ formatQuantity(line.orderQuantity) }} · 已收 {{ formatQuantity(line.receivedQuantity) }}</div></div>
           <InputNumber v-model:value="line.quantity" :min="0" :max="Math.max(0, line.orderQuantity - line.receivedQuantity)" :precision="3" class="w-full" placeholder="本次发货" />
         </div>
       </div>

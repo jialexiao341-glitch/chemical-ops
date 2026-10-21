@@ -7,6 +7,7 @@ import { useVbenModal } from '@vben/common-ui';
 import { Alert, Empty, Input, message, Select, Spin } from 'antdv-next';
 
 import { createReconciliationApi, getPurchaseOrderListApi } from '#/api';
+import { formatAmount } from '#/utils/format';
 
 const emit = defineEmits(['success']);
 const { hasAccessByCodes } = useAccess();
@@ -63,7 +64,7 @@ const [Modal, modalApi] = useVbenModal({
         status: 'COMPLETED',
       });
       options.value = res.items.map((item) => ({
-        label: `${item.po_no}（${item.order_amount}）`,
+        label: `${item.po_no}（${formatAmount(item.order_amount)}）`,
         value: item.id,
       }));
     } finally {

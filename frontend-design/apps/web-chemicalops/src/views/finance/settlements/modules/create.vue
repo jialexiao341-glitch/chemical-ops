@@ -14,6 +14,7 @@ import {
 } from 'antdv-next';
 
 import { createSettlementApi, getReconciliationListApi } from '#/api';
+import { formatAmount } from '#/utils/format';
 
 const emit = defineEmits(['success']);
 const { hasAccessByCodes } = useAccess();
@@ -70,7 +71,7 @@ const [Modal, modalApi] = useVbenModal({
         status: 'CONFIRMED',
       });
       options.value = res.items.map((item) => ({
-        label: `${item.reconciliation_no}（应付 ${item.total_amount} ${item.currency_code}）`,
+        label: `${item.reconciliation_no}（应付 ${formatAmount(item.total_amount)} ${item.currency_code}）`,
         value: item.id,
       }));
     } finally {
