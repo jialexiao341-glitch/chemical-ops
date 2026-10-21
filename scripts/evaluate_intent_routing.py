@@ -19,6 +19,10 @@ CASES = [
     ("查乙醇和甲醇库存", {}, "batch", ["inventory"]),
     ("查乙醇库存并统计本月订单数量", {}, "batch", ["inventory", "analytics"]),
     ("你好，查乙醇库存", {}, "agent", ["inventory"]),
+    ("查乙醇最近的供应商报价", {}, "agent", ["quotes"]),
+    ("查乙醇库存并比较报价", {}, "agent", ["inventory", "quotes"]),
+    ("乙醇的闪点是多少", {}, "document", ["document"]),
+    ("帮我起草一份甲醇采购申请", {}, "purchase_draft", []),
     ("查 64-17-5 的库存", {}, "agent", ["inventory"]),
     ("库存查询支持哪些筛选条件？", {}, "capability", []),
     ("库存不足怎么处理？", {}, "guidance", []),
@@ -26,7 +30,6 @@ CASES = [
     ("不要创建订单，只统计本月订单金额", {}, "query", ["analytics"]),
     ("查供应商总数", {}, "query", ["analytics"]),
     ("把时间改成上个月", {"query_plan": {"dataset": "purchase_orders"}, "messages": [{"role": "user", "content": "统计本月采购订单金额"}]}, "query", ["analytics"]),
-    ("查乙醇库存并比较报价", {}, "batch", ["inventory", "quotes"]),
     ("查乙醇闪点并查库存", {}, "batch", ["document", "inventory"]),
     ("帮我创建采购订单", {}, "unsupported", []),
     ("查一下它的库存", {"messages": [{"role": "user", "content": "乙醇闪点是多少"}]}, "agent", ["inventory"]),
@@ -79,6 +82,22 @@ def check_contract(question, result):
     return all(checks)
 
 
+def check_execution_contract(result, expected_route: str) -> bool:
+    """核对路由标签与已校验执行模式、子任务结构的一致性。"""
+    expected_mode = expected_route if expected_route in {"agent", "batch", "query", "document"} else "none"
+    if result.execution_mode != expected_mode:
+        return False
+    if expected_mode == "none":
+        return not result.tasks and not result.sub_tasks
+    if expected_mode == "agent":
+        return bool(result.tasks) and not result.sub_tasks
+    if expected_mode == "batch":
+        return 2 <= len(result.sub_tasks) <= 6 and {task.kind for task in result.sub_tasks} == set(result.tasks)
+    if expected_mode == "query":
+        return result.tasks == ["analytics"] and len(result.sub_tasks) == 1 and result.sub_tasks[0].kind == "analytics"
+    return result.tasks == ["document"] and len(result.sub_tasks) == 1 and result.sub_tasks[0].kind == "document"
+
+
 async def evaluate(output: Path, repeats: int = 1) -> None:
     """调用配置模型评测合成样本，写入不含密钥的 JSON 证据。
 
@@ -94,12 +113,15 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
             start = perf_counter()
             result = await understand(question, context, settings)
             recognized = result.route == expected_route and set(result.tasks) == set(expected_tasks)
+            execution_contract = check_execution_contract(result, expected_route)
             planned = check_contract(question, result)
             return {"question": question, "context": context, "expected_route": expected_route,
                     "expected_tasks": expected_tasks, "actual": result.model_dump(mode="json"), "route": result.route,
                     "recognition_passed": recognized, "plan_contract_passed": planned,
-                    "execution_passed": None,
-                    "passed": recognized and planned is not False and (expected_route != "batch" or len(result.sub_tasks) == 2),
+                    "expected_execution_mode": (expected_route if expected_route in {"agent", "batch", "query", "document"} else "none"),
+                    "execution_contract_passed": execution_contract,
+                    "tool_invoked": False,
+                    "passed": recognized and execution_contract and planned is not False,
                     "seconds": round(perf_counter() - start, 2)}
     results = []
     for round_index in range(repeats):
@@ -113,7 +135,9 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
     report["recognition"] = {"total": len(results), "passed": sum(row["recognition_passed"] for row in results)}
     planned = [row for row in results if row["plan_contract_passed"] is not None]
     report["plan_contract"] = {"total": len(planned), "passed": sum(row["plan_contract_passed"] for row in planned)}
-    report["execution"] = {"total": 0, "passed": 0, "note": "本脚本不执行查询，不能当作执行成功率"}
+    report["execution_contract"] = {"total": len(results), "passed": sum(row["execution_contract_passed"] for row in results),
+                                     "note": "只核对执行模式与任务结构；不调用工具或数据库，也不代表执行成功率"}
+    report["tool_execution"] = {"total": 0, "passed": 0, "note": "本脚本不会调用工具"}
     report["stability"] = {"total_samples": len(CASES), "passed_all_rounds": sum(
         all(row["passed"] for row in results if row["question"] == case[0]) for case in CASES)}
     output.parent.mkdir(parents=True, exist_ok=True)
