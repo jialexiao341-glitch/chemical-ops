@@ -282,6 +282,36 @@ function movementCharts(rows: Row[]): QueryChartPlan[] {
   return charts;
 }
 
+function overdueOrderCharts(trace: QueryTrace, rows: Row[]): QueryChartPlan[] {
+  const note = trace.truncated ? '图表仅根据本次展示的订单明细汇总，未包含被截断记录' : undefined;
+  const ordersBySupplier = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const supplier = label(row.supplier);
+    const orderNo = label(row.po_no, '');
+    if (!orderNo) continue;
+    const orders = ordersBySupplier.get(supplier) ?? new Set<string>();
+    orders.add(orderNo);
+    ordersBySupplier.set(supplier, orders);
+  }
+  const orderCounts = [...ordersBySupplier].map(([supplier, orders]) => ({ label: supplier, value: orders.size }));
+  const charts: QueryChartPlan[] = [];
+  const orderChart = bar('各供应商逾期未交订单数（订单号去重）', orderCounts, '个订单', note);
+  if (orderChart) charts.push(orderChart);
+
+  const units = [...new Set(rows.map((row) => label(row.order_unit, '')))].filter(Boolean);
+  for (const unit of units) {
+    const scoped = rows.filter((row) => label(row.order_unit, '') === unit);
+    const quantityChart = bar(
+      `各供应商逾期未交数量 · ${unit}`,
+      sumBy(scoped, (row) => label(row.supplier), (row) => number(row.unfulfilled_quantity)),
+      unit,
+      note,
+    );
+    if (quantityChart) charts.push(quantityChart);
+  }
+  return charts;
+}
+
 function orderTraceCharts(rows: Row[]): QueryChartPlan[] {
   return [
     donut('业务环节可见状态', countBy(rows, (row) => label(row.status)), '个环节'),
@@ -305,6 +335,7 @@ export function buildQueryCharts(trace?: QueryTrace): QueryChartPlan[] {
     case 'accepted_orders_finance_gaps': return financeGapCharts(rows);
     case 'supplier_quote_delivery_profile': return supplierProfileCharts(rows);
     case 'inventory_movement_trace': return movementCharts(rows);
+    case 'overdue_unfulfilled_orders': return overdueOrderCharts(trace, rows);
     case 'purchase_order_trace': return orderTraceCharts(rows);
     default: return genericCharts(trace, rows);
   }

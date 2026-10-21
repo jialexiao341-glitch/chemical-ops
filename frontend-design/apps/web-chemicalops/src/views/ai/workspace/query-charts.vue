@@ -30,7 +30,11 @@ function cell(value: unknown): string {
     <p v-if="charts.length && trace.truncated" class="text-muted-foreground m-0 text-xs">
       图表仅根据本次返回的 {{ rows.length }} 行绘制，更多记录未计入。
     </p>
-    <details v-if="columns.length" class="rounded-md border border-border/70 bg-background/80 text-xs">
+    <details
+      v-if="columns.length"
+      :open="trace.dataset === 'overdue_unfulfilled_orders'"
+      class="rounded-md border border-border/70 bg-background/80 text-xs"
+    >
       <summary class="text-muted-foreground cursor-pointer px-3 py-2 font-medium select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
         查看结构化数据（{{ rows.length }} 行）
       </summary>

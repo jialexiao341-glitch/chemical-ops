@@ -19,7 +19,7 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import Select, and_, case, desc, exists, func, literal, not_, or_, select, union_all
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
@@ -159,6 +159,95 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
                          else PurchaseRequest.applicant_id == user.id)
             statement = statement.where(condition)
         return statement
+    if plan.dataset == "overdue_unfulfilled_orders":
+        from app.modules.inventory.service import accessible_warehouse_ids
+
+        if user is None or db is None:
+            raise BusinessValidationError("该关联查询必须使用已认证用户和数据库会话")
+        warehouse_ids = accessible_warehouse_ids(db, user)
+        if warehouse_ids == set():
+            raise BusinessValidationError("当前没有可查询的仓库，无法比较安全库存")
+        product_unit = aliased(Unit)
+        due_date = func.coalesce(PurchaseOrderItem.planned_arrival_date, PurchaseOrder.expected_arrival_date)
+        stock_available = case(
+            (
+                and_(InventoryBalance.unit_id == Product.unit_id, InventoryBalance.status == "AVAILABLE"),
+                case(
+                    (InventoryBalance.quantity > InventoryBalance.locked_quantity,
+                     InventoryBalance.quantity - InventoryBalance.locked_quantity),
+                    else_=0,
+                ),
+            ),
+            else_=0,
+        )
+        stock_unit_mismatch = case(
+            (and_(InventoryBalance.status == "AVAILABLE", InventoryBalance.quantity > 0, InventoryBalance.unit_id != Product.unit_id), 1),
+            else_=0,
+        )
+        stock_query = (
+            select(
+                InventoryBalance.product_id.label("product_id"),
+                func.coalesce(func.sum(stock_available), 0).label("available_stock"),
+                func.coalesce(func.sum(stock_unit_mismatch), 0).label("unit_mismatch_count"),
+                func.count(InventoryBalance.id).label("balance_count"),
+            )
+            .select_from(InventoryBalance)
+            .join(Product, Product.id == InventoryBalance.product_id)
+            .join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id)
+            .where(Warehouse.status == "ACTIVE")
+        )
+        if warehouse_ids is not None:
+            stock_query = stock_query.where(InventoryBalance.warehouse_id.in_(warehouse_ids))
+        stock = stock_query.group_by(InventoryBalance.product_id).subquery()
+        available = func.coalesce(stock.c.available_stock, 0)
+        mismatches = func.coalesce(stock.c.unit_mismatch_count, 0)
+        balance_count = func.coalesce(stock.c.balance_count, 0)
+        stock_status = case(
+            (mismatches > 0, "计量单位不一致，无法比较"),
+            (balance_count == 0, "没有库存记录，无法判断"),
+            (Product.safety_stock_quantity.is_(None), "未设置安全库存"),
+            (available < Product.safety_stock_quantity, "低于安全库存"),
+            else_="达到或高于安全库存",
+        )
+        statement = (
+            select(
+                PurchaseOrder.id.label("_source_order_id"),
+                PurchaseOrderItem.id.label("_source_record_id"),
+                Product.id.label("_source_product_id"),
+                PurchaseOrder.po_no.label("po_no"),
+                Supplier.supplier_name.label("supplier"),
+                Product.product_code.label("product_code"),
+                PurchaseOrderItem.product_name_snapshot.label("product"),
+                Unit.unit_name.label("order_unit"),
+                PurchaseOrderItem.order_quantity.label("order_quantity"),
+                PurchaseOrderItem.received_quantity.label("received_quantity"),
+                (PurchaseOrderItem.order_quantity - PurchaseOrderItem.received_quantity).label("unfulfilled_quantity"),
+                due_date.label("expected_arrival_date"),
+                product_unit.unit_name.label("stock_unit"),
+                available.label("available_stock"),
+                Product.safety_stock_quantity.label("safety_stock_quantity"),
+                stock_status.label("stock_status"),
+                mismatches.label("unit_mismatch_count"),
+            )
+            .select_from(PurchaseOrder)
+            .join(Supplier, Supplier.id == PurchaseOrder.supplier_id)
+            .join(PurchaseOrderItem, PurchaseOrderItem.po_id == PurchaseOrder.id)
+            .join(Product, Product.id == PurchaseOrderItem.product_id)
+            .join(Unit, Unit.id == PurchaseOrderItem.unit_id)
+            .join(product_unit, product_unit.id == Product.unit_id)
+            .outerjoin(stock, stock.c.product_id == Product.id)
+            .where(
+                PurchaseOrder.status.in_(("ORDERED", "PARTIAL")),
+                PurchaseOrderItem.received_quantity < PurchaseOrderItem.order_quantity,
+                due_date < date.today(),
+                order_read_condition(user, get_user_role_codes(db, user.id)),
+            )
+        )
+        if plan.date_from:
+            statement = statement.where(due_date >= plan.date_from)
+        if plan.date_to:
+            statement = statement.where(due_date < date.fromordinal(plan.date_to.toordinal() + 1))
+        return statement.order_by(Supplier.supplier_name, PurchaseOrder.po_no, PurchaseOrderItem.line_no).limit(plan.limit + 1)
     if plan.dataset == "weekly_order_risks":
         today = date.today()
         week_start = today - timedelta(days=today.weekday())
@@ -641,6 +730,7 @@ def _serialize(value: Any) -> Any:
 DATASET_LABELS = {
     "approved_requests_without_rfq": "已审批未建立询价单的采购申请",
     "weekly_order_risks": "本周订单履约风险",
+    "overdue_unfulfilled_orders": "逾期未交采购订单及关联产品库存",
     "inventory_by_batch": "产品批次可用库存",
     "accepted_orders_finance_gaps": "已验收订单财务进度",
     "supplier_quote_delivery_profile": "供应商报价、交期与异常表现",
@@ -661,6 +751,7 @@ DATASET_LABELS = {
 METRIC_LABELS = {"count": "数量", "records": "业务明细", "amount": "金额", "sum_quantity": "数量合计"}
 DIMENSION_LABELS = {"supplier": "供应商", "region": "区域", "status": "状态", "priority": "优先级", "currency": "币种", "product": "产品", "warehouse": "仓库", "result": "验收结果", "severity": "严重程度", "type": "异常类型"}
 FIELD_LABELS = {"metric_value": "指标值", "request_no": "申请编号", "purpose": "申请用途", "approved_at": "审批时间", "expected_date": "期望到货日期", "po_no": "订单编号", "delivery_no": "到货单号", "expected_arrival_date": "预计到货日", "actual_arrival_date": "实际到货日", "overdue_this_week": "本周逾期（1是）", "short_quantity": "本周短交数量", "documents_missing": "本周单证未齐（1是）", "product_code": "产品编码", "product": "产品", "warehouse": "仓库", "batch_no": "批次", "expiry_date": "有效期至", "quantity": "账面数量", "locked_quantity": "锁定数量", "available_quantity": "可用数量", "order_currency": "订单币种", "finance_currency": "财务币种", "order_amount": "订单金额", "reconciliation_no": "对账单号", "reconciliation_status": "对账状态", "reconciliation_amount": "对账金额", "verified_invoice_amount": "已核验发票金额", "paid_amount": "已付款金额", "settlement_no": "结算单号", "settlement_status": "结算状态", "reconciliation_progress": "对账进度", "invoice_progress": "开票进度", "payment_progress": "付款进度", "settlement_progress": "结算进度", "unit": "单位", "supplier": "供应商", "quote_no": "报价单号", "quote_date": "报价日期", "quote_status": "报价状态", "currency": "报价币种", "quoted_unit_price": "报价单价", "quote_unit": "报价单位", "quoted_lead_days": "报价交期（天）", "actual_delivery_count": "实际到货批次数", "avg_actual_lead_days": "平均实际到货周期（天）", "supplier_exception_count": "供应商关联异常数", "supplier_open_exception_count": "供应商未关闭异常数", "event_time": "发生时间", "event_type": "变动类型", "transaction_no": "流水编号", "source_type_label": "来源单据类型", "source_id": "来源单据编号", "location": "库位", "quantity_change": "数量变化（出库为负）", "balance_status": "当前库存状态", "reason": "原因/备注", **DIMENSION_LABELS}
+FIELD_LABELS.update({"overdue_days": "逾期天数", "order_unit": "订单单位", "order_quantity": "订购数量", "received_quantity": "已收数量", "unfulfilled_quantity": "未交数量", "stock_unit": "库存单位", "available_stock": "当前可用库存", "safety_stock_quantity": "安全库存阈值", "stock_status": "安全库存比较", "unit_mismatch_count": "单位不一致记录数"})
 
 
 def _build_slots(plan: QueryPlan) -> list[dict[str, Any]]:
@@ -703,6 +794,8 @@ def _build_query_template(plan: QueryPlan) -> str:
         today = date.today()
         week_start = today - timedelta(days=today.weekday())
         return f"自然周 {week_start.isoformat()} 至 {today.isoformat()} · 预计本周逾期未到货 · 本周确认短交 · 本周登记且单证未齐"
+    if plan.dataset == "overdue_unfulfilled_orders":
+        return "采购订单明细 · 订单状态为已下单或部分到货 · 未交数量=订购数量-已收数量 · 预计到货日期早于今天 · 安全库存按产品单位与当前可访问启用仓库的可用余额比较"
     metric = "SUM(order_amount)" if plan.metric == "amount" and plan.dataset == "purchase_orders" else plan.metric.upper()
     group = DIMENSION_LABELS.get(plan.group_by, plan.group_by or "整体")
     time_range = f"{plan.date_from or '起始时间'} 至 {plan.date_to or '结束时间'}" if plan.date_from or plan.date_to else "不限时间"
@@ -718,6 +811,8 @@ def _unit_metadata(plan: QueryPlan, rows: list[dict[str, Any]]) -> tuple[str | N
     """只从查询结果或固定指标语义推导单位，不让模型猜单位。"""
     if plan.dataset == "accepted_orders_finance_gaps":
         return "各订单原币", "每笔金额保留其订单/财务币种，不合并不同币种"
+    if plan.dataset == "overdue_unfulfilled_orders":
+        return "数量按订单单位和库存单位分别展示", "逾期天数按预计到货日期计算至查询日；库存只合计单位与产品安全库存单位一致、状态为可用的余额"
     if plan.dataset == "supplier_quote_delivery_profile":
         return "报价按行所示币种和单位；交期为天", "报价币种和单位来自历史报价；实际周期为订单日期至关联到货单实际日期的自然日平均值，异常按供应商汇总"
 
@@ -751,6 +846,10 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
         raise BusinessValidationError("查询指标不在允许范围内")
     if plan.dataset == "approved_requests_without_rfq" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or plan.filters):
         raise BusinessValidationError("该申请关联查询不支持额外筛选条件")
+    if plan.dataset == "overdue_unfulfilled_orders" and (
+        plan.metric != "records" or plan.time_field != "expected_arrival_date" or plan.group_by or plan.filters
+    ):
+        raise BusinessValidationError("逾期未交订单关联查询仅支持预计到货日期筛选和明细输出")
     if plan.dataset == "weekly_order_risks" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or plan.filters):
         raise BusinessValidationError("该订单风险查询按固定自然周口径执行，不支持额外筛选条件")
     if plan.dataset == "inventory_by_batch" and (plan.time_field or plan.date_from or plan.date_to or plan.group_by or any(item.field != "product_id" or item.operator != "in" for item in plan.filters)):
@@ -775,6 +874,10 @@ def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
     permission_codes = set(get_user_permission_codes(db, user.id))
     if "SYS_ADMIN" not in role_codes and spec.permission not in permission_codes:
         raise BusinessValidationError("当前用户没有执行该数据集查询的权限")
+    if plan.dataset == "overdue_unfulfilled_orders" and "SYS_ADMIN" not in role_codes:
+        required_permissions = {"procurement.orders.read", "warehouse.inventory.read", "master.products.read"}
+        if not required_permissions.issubset(permission_codes):
+            raise BusinessValidationError("该关联查询需要采购订单、库存和产品主数据读取权限")
     if plan.dataset == "weekly_order_risks" and "SYS_ADMIN" not in role_codes:
         required_permissions = {"procurement.orders.read", "warehouse.deliveries.read"}
         if not required_permissions.issubset(permission_codes):
@@ -1008,6 +1111,17 @@ def _fallback_query_plan(question: str) -> QueryPlan | None:
     """为高频、口径固定的采购查询提供不依赖模型格式的安全兜底。"""
 
     normalized = question.lower()
+    if ("逾期" in normalized and any(marker in normalized for marker in ("未交", "未完成", "未履约"))
+            and any(marker in normalized for marker in ("订单", "采购"))):
+        today = date.today()
+        date_from = date_to = None
+        if "本月" in normalized:
+            date_from, date_to = today.replace(day=1), today
+        elif "上月" in normalized or "上个月" in normalized:
+            date_to = today.replace(day=1) - timedelta(days=1)
+            date_from = date_to.replace(day=1)
+        return QueryPlan(dataset="overdue_unfulfilled_orders", metric="records", time_field="expected_arrival_date",
+                         date_from=date_from, date_to=date_to, order="asc", limit=100)
     is_request_without_rfq = (
         "申请" in normalized
         and "询价" in normalized
@@ -1101,7 +1215,7 @@ def _fixed_plan_before_model(question: str, db: Session, user: User,
         LOGGER.info("AI 查询计划使用供应商固定关联查询 question_hash=%s", _query_hash(question))
         return supplier_profile
     fallback = _fallback_query_plan(question)
-    if fallback is not None and fallback.dataset in {"approved_requests_without_rfq", "weekly_order_risks", "accepted_orders_finance_gaps"}:
+    if fallback is not None and fallback.dataset in {"approved_requests_without_rfq", "weekly_order_risks", "accepted_orders_finance_gaps", "overdue_unfulfilled_orders"}:
         LOGGER.info("AI 查询计划使用固定关联查询 question_hash=%s dataset=%s", _query_hash(question), fallback.dataset)
         return fallback
     if fallback is not None and "逾期" in question and any(marker in question for marker in ("到货", "收货", "入库")):
@@ -1168,6 +1282,21 @@ def _source_records(dataset: str, rows: list[dict[str, Any]]) -> list[dict[str, 
         label = ""
         filters: dict[str, str | int] = {}
         record_id = row.get("_source_record_id")
+        if dataset == "overdue_unfulfilled_orders":
+            order_no = str(row.get("po_no") or "")
+            order_record = {"dataset": "purchase_orders", "label": f"采购订单 {order_no}".strip(),
+                            "record_id": row.get("_source_order_id"), "filters": {"keywords": order_no}}
+            product_id = row.get("_source_product_id")
+            product_record = {"dataset": "inventory", "label": f"{row.get('product') or '产品'}库存记录",
+                              "record_id": None, "filters": {"product_id": int(product_id)}} if product_id else None
+            for source in (order_record, product_record):
+                if source is None:
+                    continue
+                identity = (source["dataset"], source["record_id"] or tuple(sorted(source["filters"].items())))
+                if identity not in seen:
+                    seen.add(identity)
+                    records.append(source)
+            continue
         if dataset == "approved_requests_without_rfq":
             target = "purchase_requests"
             label = f"采购申请 {row.get('request_no') or ''}".strip()
@@ -1277,7 +1406,18 @@ async def run_text2sql(
         }
 
     def validate_plan_node(state: Text2SQLState) -> dict[str, Any]:
-        plan = state["plan"].model_copy(update={"limit": min(state["plan"].limit, state["request_limit"])})
+        if state["plan"].dataset == "overdue_unfulfilled_orders":
+            normalized = state["question"].lower()
+            explicit_limit = re.search(
+                r"(?:最多(?:显示|展示|列出|返回)?|前|top\s*|显示|展示|列出|返回)\s*(\d+)\s*(?:条|个|项)?",
+                normalized,
+            )
+            # 该关联查询需要完整明细才能给出有用的供应商汇总；默认展示上限为 100，
+            # 只有用户明确指定条数时才收窄。不能让通用计划的 20 条默认值静默截断汇总。
+            effective_limit = min(int(explicit_limit.group(1)), 100) if explicit_limit else 100
+        else:
+            effective_limit = min(state["plan"].limit, state["request_limit"])
+        plan = state["plan"].model_copy(update={"limit": effective_limit})
         _validate_plan(db, user, plan)
         return {"plan": plan, "stages": [*state.get("stages", []), "slot_filling"]}
 
@@ -1297,9 +1437,16 @@ async def run_text2sql(
         truncated = len(result) > state["plan"].limit
         result = result[: state["plan"].limit]
         raw_rows = [{str(key): _serialize(value) for key, value in row.items()} for row in result]
+        if state["plan"].dataset == "overdue_unfulfilled_orders":
+            today = date.today()
+            for row in raw_rows:
+                due_date_value = row.get("expected_arrival_date")
+                if due_date_value:
+                    row["overdue_days"] = (today - date.fromisoformat(due_date_value)).days
         source_records = _source_records(state["plan"].dataset, raw_rows)
         rows = [
-            {key: value for key, value in row.items() if not key.startswith("_source_")}
+            {key: value for key, value in row.items()
+             if not key.startswith("_source_") and not (state["plan"].dataset == "overdue_unfulfilled_orders" and key == "unit_mismatch_count")}
             for row in raw_rows
         ]
         if rows:
@@ -1308,6 +1455,8 @@ async def run_text2sql(
             columns = ["request_no", "purpose", "priority", "approved_at", "expected_date"]
         elif state["plan"].dataset == "weekly_order_risks":
             columns = ["po_no", "supplier", "delivery_no", "product", "unit", "expected_arrival_date", "actual_arrival_date", "overdue_this_week", "short_quantity", "documents_missing"]
+        elif state["plan"].dataset == "overdue_unfulfilled_orders":
+            columns = ["po_no", "supplier", "product_code", "product", "order_quantity", "received_quantity", "unfulfilled_quantity", "order_unit", "expected_arrival_date", "overdue_days", "available_stock", "safety_stock_quantity", "stock_unit", "stock_status"]
         elif state["plan"].dataset == "inventory_by_batch":
             columns = ["product_code", "product", "warehouse", "batch_no", "expiry_date", "unit", "quantity", "locked_quantity", "available_quantity"]
         elif state["plan"].dataset == "inventory_movement_trace":

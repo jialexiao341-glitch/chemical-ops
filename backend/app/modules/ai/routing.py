@@ -49,6 +49,19 @@ ROUTING_PROMPT = """# 角色与任务
 - CAS、产品名和单号是对象参数，不直接决定任务类别。问候不覆盖同一句实际请求。
 - “怎么用/支持哪些条件/不足时怎么处理”通常是咨询或指导，不触发真实库存查询。
 - query 必须有 tasks；intent 不清楚时 purpose=clarify 并给出一个具体 question。
+- 执行任何查询前，判断业务口径是否存在会改变结果且无法从常用业务含义、上下文或系统规则确定的实质歧义。只有这类歧义才需要澄清；普通表达差异、已有明确语义（如“逾期”指截至查询日已超过到期日）、可采用稳定常用默认值的条件，以及可从已授权查询结果推导的对象，不得成为追问理由。
+- 确需澄清时，整个请求设为 purpose=clarify，只问一个最关键、能改变查询结果的业务选择；简短说明两个可选口径及其影响，不重复用户已给条件，不展示容易误导的计算日期边界。不得生成任何 sub_tasks，也不得先执行其余独立项。用户确认后沿用该口径执行，不再重复确认。
+- 若用户明确提出的指标或明细不能由当前白名单数据集完整回答，不得把可执行的子集标成已完成，不得静默改成相近指标。应在执行前用 purpose=clarify 说明当前缺少的口径或数据，并询问用户是否接受可支持的替代范围；不要让用户补充系统本可从前置结果查出的产品、订单等对象。
+- 时间口径：明确“本月/上月/截至目前”等相对时间，按输入 today 和数据集默认业务日期换算；用户明确指定的日期字段优先。只有存在两个以上合理日期含义且会改变结果、上下文也无法判断时才澄清；回答中说明实际使用的日期字段与范围，不把自然语言月份扩成未来日期。
+- 统计粒度：依照用户所说的业务实体选择统计单位；“订单数”按唯一订单编号计数，“明细/产品数量”按订单行或产品统计。汇总和明细粒度不同要明确标注。若“数量”对应多种可能实体且结果会不同，才询问要按订单、订单行还是产品统计。
+- 数量与单位：不同计量单位分别展示和汇总；只有系统提供可验证的单位换算规则时才能换算。未明确要求平均值、最大值等统计时，逐条展示明细中的天数等事实，不擅自生成统计值；用户明确要求的统计若数据或白名单不支持，说明限制，不以明细冒充该统计。
+- 业务状态：按系统状态定义区分未开始、部分完成、在途、已完成、关闭和取消。默认排除已关闭/取消记录；部分完成仍有未完成量时保留；在途数量按“尚未入库/验收”的实际口径描述。用户明确指定状态范围时遵从用户指定；状态字段或对应关系不足以判断时才澄清，并说明状态范围。
+- 缺失值：区分数值为零、没有可见记录、未配置阈值和单位无法比较；缺记录或缺配置不得当作零，也不能据此判定安全。无法比较的部分单独列明，不影响其他可计算结果。
+- 数据范围：服务端权限和资源范围是强制边界，不能通过提示词放宽。答案说明实际使用的可访问仓库或数据范围；结果截断时说明展示上限、截断状态及汇总仅基于已展示记录，不能把部分结果称作全量统计。
+- 能力判断必须依据注入的白名单 outputs/metrics。不要因某字段未出现在通用采购订单或库存汇总中，就断言整个系统没有该字段；跨订单明细与库存阈值的查询优先使用明确提供的关联数据集。
+- 若一个白名单数据集已同时覆盖复合问题的所有指标与关联实体，应将其组织为一个 analytics 子任务；不要拆成互相不能传递结果的订单和库存任务。
+- 对“本月逾期未交采购订单”，按预计到货日期落在本月至查询日、且截至查询日仍未交来筛选；只统计已逾期的订单，未来到期订单不算逾期，并逐笔计算逾期天数。用户明确指定其他日期口径时遵从用户口径。若请求另有确实无法从上下文判断的关键口径，再按通用规则澄清。
+- 复合查询中的后续对象若由前置查询结果确定，且后续任务类型支持消费前置证据，保留任务间 depends_on；不要要求用户重复提供结果中可取得的实体名称或编码。若当前执行链路不支持这种跨类型关联，应在执行前说明能力限制并询问是否继续可独立完成的部分，不得把关联缺口伪装成用户漏填对象。
 - 历史批次有多项查询而用户只说“改成上个月”等，未明确修改哪项或全部时，应澄清；明确“以上各项都改成上个月”时为每项重建子任务。
 - 批次补充或修改时，若用户明确要求其他项保持不变，sub_tasks 必须保留这些项及原 ID；补充项继承原查询类型，仅替换明确的新条件。
 - 当前明确“改查甲醇库存”等对象和任务类别时，只执行本轮指定的库存任务，不从旧的“库存与报价”请求恢复报价；仅在用户明确要求其他项不变时保留它们。不能为了保留历史而扩展本轮任务。
@@ -134,11 +147,18 @@ async def understand(question: str, context: dict | None = None, settings=None) 
     from app.modules.ai.schema import AIChatRequest, AIChatMessage
     runtime = (settings or get_settings()).model_copy(update={"llm_temperature": 0, "llm_max_tokens": 6000})
     payload = {"question": question, "context": context or {}, "today": datetime.now().astimezone().date().isoformat()}
+    from app.modules.ai.catalog import catalog_prompt
+    capability_context = (
+        "\n# 标准统计可回答范围\n"
+        "以下白名单列出标准统计查询可提供的指标、分组和筛选范围。执行前必须确认用户要求的每项指标都能由这些范围回答；"
+        "不能完整覆盖时，按上方规则先澄清，不得用相近指标代替。\n"
+        + catalog_prompt()
+    )
     repair = ""
     for attempt in range(2):
         try:
             response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
-                                          runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=ROUTING_PROMPT + repair, interpret_only=True)
+                                          runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=ROUTING_PROMPT + capability_context + repair, interpret_only=True)
             return Understanding.model_validate_json(response.message.content, strict=True)
         except ValidationError as exc:
             # 只反馈结构错误位置，不把模型原始输出或用户数据写入日志。

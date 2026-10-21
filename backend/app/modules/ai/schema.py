@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from app.modules.ai.catalog import CATALOG, slot_description
+from app.modules.purchase_requests.schema import PurchaseRequestCreate
 
 
 class AIChatMessage(BaseModel):
@@ -239,10 +240,19 @@ class AIPurchaseDraftConfirm(BaseModel):
 
 
 class AIPurchaseDraftRequest(BaseModel):
-    """待整理成采购申请表单候选值的自然语言需求。"""
+    """自然语言或结构化采购申请草稿候选值。"""
 
-    question: str = Field(min_length=1, max_length=10_000)
+    model_config = ConfigDict(extra="forbid")
+
+    question: str | None = Field(default=None, min_length=1, max_length=10_000)
+    draft: PurchaseRequestCreate | None = None
     conversation_id: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_input_mode(self) -> "AIPurchaseDraftRequest":
+        if (self.question is None) == (self.draft is None):
+            raise ValueError("question 和 draft 必须且只能提供一个")
+        return self
 
 
 class AIPurchaseDraftPatch(BaseModel):

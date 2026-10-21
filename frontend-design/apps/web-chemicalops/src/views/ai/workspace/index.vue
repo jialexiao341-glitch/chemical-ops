@@ -7,7 +7,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { Page } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
 
-import { Button, Input, message, Modal, Select, Spin, Tag } from 'antdv-next';
+import { Button, Input, InputNumber, message, Modal, Select, Spin, Tag } from 'antdv-next';
 
 import {
   cancelAgentTaskApi,
@@ -15,6 +15,8 @@ import {
   createAgentChatApi, continueAgentChatApi, continueAgentTaskApi, getAgentTaskApi,
   confirmPurchaseRequestDraftApi,
   generateBriefingApi,
+  getProductListApi,
+  getUnitListApi,
   getAIMessagesApi,
   getConversationListApi,
   parseNaturalFiltersApi,
@@ -43,7 +45,7 @@ const { hasAccessByCodes, hasAccessByRoles } = useAccess();
 const canCreatePurchaseDraft = hasAccessByCodes(['procurement.requests.write']);
 const canPushBriefing = hasAccessByRoles(['SYS_ADMIN', 'PROCUREMENT_MANAGER']);
 
-const AI_DATASET_READ_PERMISSIONS: Record<string, string> = {
+const AI_DATASET_READ_PERMISSIONS: Record<string, string | string[]> = {
   accepted_orders_finance_gaps: 'finance.reconciliations.read',
   approved_requests_without_rfq: 'procurement.requests.read',
   deliveries: 'warehouse.deliveries.read',
@@ -56,6 +58,11 @@ const AI_DATASET_READ_PERMISSIONS: Record<string, string> = {
   inventory_by_batch: 'warehouse.inventory.read',
   inventory_movement_trace: 'warehouse.inventory.read',
   inventory_transactions: 'warehouse.inventory.read',
+  overdue_unfulfilled_orders: [
+    'procurement.orders.read',
+    'warehouse.inventory.read',
+    'master.products.read',
+  ],
   purchase_orders: 'procurement.orders.read',
   purchase_requests: 'procurement.requests.read',
   quality_acceptances: 'quality.acceptances.read',
@@ -68,7 +75,10 @@ const AI_DATASET_READ_PERMISSIONS: Record<string, string> = {
 
 function canReadDataset(dataset?: string) {
   const permission = dataset ? AI_DATASET_READ_PERMISSIONS[dataset] : undefined;
-  return Boolean(permission && hasAccessByCodes([permission]));
+  if (!permission) return false;
+  return Array.isArray(permission)
+    ? permission.every((code) => hasAccessByCodes([code]))
+    : hasAccessByCodes([permission]);
 }
 
 /** 聊天界面的一条消息 */
@@ -126,7 +136,20 @@ const filterKeyword = ref('');
 const filterRange = ref<AiApi.NLFilterResult['time_range']>();
 const filterParsing = ref(false);
 const draftMode = ref(false);
+const draftPrepared = ref(false);
+const draftMissingFields = ref<string[]>([]);
 const draftFollowups = ref<string[]>([]);
+const draftPurpose = ref('');
+const draftPriority = ref('NORMAL');
+const draftBudget = ref<number>();
+const draftCurrency = ref('CNY');
+const draftExpectedDate = ref<any>();
+const draftItems = ref<Array<{ product_id?: number; requested_name: string; quantity?: number; unit_id?: number; technical_requirements?: string }>>([{ requested_name: '' }]);
+const draftProducts = ref<Array<{ id: number; product_code: string; product_name: string; model?: string | null; packaging_spec?: string | null; purity_value?: string | null; purity_unit?: string | null; unit_id: number }>>([]);
+const draftUnits = ref<Array<{ id: number; unit_name: string }>>([]);
+const draftProductsLoading = ref(false);
+const canReadDraftProducts = computed(() => hasAccessByCodes(['master.products.read']) || hasAccessByRoles(['SYS_ADMIN']));
+const draftFormReady = computed(() => Boolean(draftPurpose.value.trim()) && draftItems.value.length > 0 && draftItems.value.every((item, index) => item.requested_name.trim() && Number(item.quantity) > 0 && Number(item.unit_id) > 0 && (!needsDraftProductChoice(index) || Number(item.product_id) > 0 || (item.product_id === -1 && item.requested_name.trim()))));
 const creatingDraftMessageId = ref<string>();
 const filterFieldNames = computed(() => Object.keys(filterDraft.value));
 const conversationGroups = computed(() => {
@@ -448,13 +471,19 @@ async function removeConversation(conversation: AiApi.Conversation) {
 /** 发送消息并消费 SSE 流 */
 async function onSend(retryFailed = false) {
   const text = inputText.value.trim();
-  if (!text || sending.value || historyLoading.value) {
+  if ((!text && !(draftMode.value && draftFormReady.value)) || sending.value || historyLoading.value) {
     return;
   }
   if (currentAgent.value?.status === 'RUNNING') { message.info('正在查询，请等待结果自动更新。'); return; }
   if (draftMode.value) {
     if (!canCreatePurchaseDraft) { draftMode.value = false; message.error('你没有创建采购申请草稿的权限。'); return; }
-    await previewPurchaseRequestDraft(text);
+    if (!draftPrepared.value) {
+      if (!text) return;
+      await previewPurchaseRequestDraft(text);
+      return;
+    }
+    if (!draftFormReady.value) { message.warning('请补全标记为缺失的采购信息。'); return; }
+    await previewPurchaseRequestDraft();
     return;
   }
   let routeToken: string | undefined;
@@ -483,6 +512,8 @@ async function onSend(retryFailed = false) {
         return;
       }
       draftFollowups.value = [];
+      draftPrepared.value = false;
+      draftMissingFields.value = [];
       draftMode.value = true;
       await previewPurchaseRequestDraft(text);
       return;
@@ -641,8 +672,23 @@ async function reloadActiveConversation() {
   if (epoch === chatEpoch) { messages.value = historyMessages(res.items); scrollToBottom(); }
 }
 
-async function previewPurchaseRequestDraft(text: string) {
-  const fullQuestion = [...draftFollowups.value, text].join('\n');
+async function previewPurchaseRequestDraft(freeText?: string) {
+  if (freeText) await loadDraftFormOptions();
+  const payload: import('#/api').PurchaseRequestApi.RequestPayload = {
+    purpose: draftPurpose.value.trim(),
+    priority: draftPriority.value,
+    budget_amount: draftBudget.value ?? null,
+    currency_code: draftCurrency.value,
+    expected_date: typeof draftExpectedDate.value === 'string' ? draftExpectedDate.value : draftExpectedDate.value?.format?.('YYYY-MM-DD') ?? null,
+    items: draftItems.value.map((item) => ({
+      product_id: Number(item.product_id) > 0 ? item.product_id : null,
+      requested_name: item.requested_name.trim(),
+      quantity: Number(item.quantity),
+      unit_id: Number(item.unit_id),
+      technical_requirements: item.technical_requirements?.trim() || null,
+    })),
+  };
+  const text = freeText ?? `采购用途：${payload.purpose}；物料：${payload.items.map((item) => `${item.requested_name} ${item.quantity} ${draftUnits.value.find((unit) => unit.id === item.unit_id)?.unit_name ?? ''}`).join('；')}`;
   inputText.value = '';
   const history = [...messages.value];
   const userId = nextId();
@@ -655,15 +701,39 @@ async function previewPurchaseRequestDraft(text: string) {
   sending.value = true;
   scrollToBottom();
   try {
-    const result = await proposePurchaseRequestDraftApi(fullQuestion);
-    draftMode.value = result.missing_fields.length > 0;
-    draftFollowups.value = result.missing_fields.length > 0 ? [...draftFollowups.value, text] : [];
+    const result = await proposePurchaseRequestDraftApi(freeText ? [...draftFollowups.value, freeText].join('\n') : payload);
+    draftMissingFields.value = result.missing_fields;
+    if (result.missing_fields.length > 0) {
+      draftPurpose.value = result.draft.purpose ?? '';
+      draftPriority.value = result.draft.priority ?? 'NORMAL';
+      draftBudget.value = result.draft.budget_amount == null ? undefined : Number(result.draft.budget_amount);
+      draftCurrency.value = result.draft.currency_code ?? 'CNY';
+      draftExpectedDate.value = result.draft.expected_date ?? undefined;
+      draftItems.value = result.draft.items.map((item) => ({
+        product_id: item.product_id ?? undefined,
+        requested_name: item.requested_name ?? '',
+        quantity: item.quantity == null ? undefined : Number(item.quantity),
+        unit_id: item.unit_id ?? undefined,
+        technical_requirements: item.technical_requirements ?? undefined,
+      }));
+      if (!draftItems.value.length) draftItems.value = [{ requested_name: '' }];
+      draftPrepared.value = true;
+      draftMode.value = true;
+      draftFollowups.value = freeText ? [...draftFollowups.value, freeText] : draftFollowups.value;
+    } else {
+      draftPrepared.value = false;
+      draftMode.value = false;
+      draftFollowups.value = [];
+    }
+    const responseText = result.missing_fields.length
+      ? `我已从描述中识别到${draftItems.value.length}项采购信息。已提供的内容已保留，请在输入区补充标记为缺失的项目，再生成草稿预览。\n\n尚缺：${result.missing_fields.join('、')}`
+      : '已识别并整理采购信息，下面是草稿预览。请核对后确认创建。';
     messages.value = messages.value.map((item) =>
       item.id === assistantId
         ? {
             ...item,
-            content: '以下是根据你提供的信息整理的采购申请草稿预览。请核对物料、数量、单位、用途和预算；确认后只创建草稿，不会提交审批。',
-            draftProposal: result,
+            content: responseText,
+            ...(result.missing_fields.length ? {} : { draftProposal: result }),
             streaming: false,
           }
         : item,
@@ -984,9 +1054,17 @@ async function selectSlashCommand(command?: SlashCommand) {
   }
   if (command === 'purchase-draft') {
     draftFollowups.value = [];
+    draftPrepared.value = false;
+    draftMissingFields.value = [];
+    draftPurpose.value = '';
+    draftPriority.value = 'NORMAL';
+    draftBudget.value = undefined;
+    draftCurrency.value = 'CNY';
+    draftExpectedDate.value = undefined;
+    draftItems.value = [{ requested_name: '' }];
     draftMode.value = true;
+    void loadDraftFormOptions();
     await nextTick();
-    document.querySelector<HTMLTextAreaElement>('.ai-composer-input textarea')?.focus();
     return;
   }
   if (command === 'briefing') {
@@ -996,6 +1074,60 @@ async function selectSlashCommand(command?: SlashCommand) {
   if (command === 'briefing-push') {
     confirmBriefingPush();
   }
+}
+
+async function loadDraftFormOptions() {
+  try {
+    const units = await getUnitListApi({ silent: true });
+    draftUnits.value = units.filter((unit) => unit.status === 'ACTIVE').map(({ id, unit_name }) => ({ id, unit_name }));
+    if (canReadDraftProducts.value) {
+      draftProductsLoading.value = true;
+      const result = await getProductListApi({ page: 1, page_size: 100, status: 'ACTIVE' }, { silent: true });
+      draftProducts.value = result.items.map((product) => ({
+        id: product.id, product_code: product.product_code, product_name: product.product_name,
+        model: product.model, packaging_spec: product.packaging_spec, purity_value: product.purity_value,
+        purity_unit: product.purity_unit, unit_id: product.unit_id,
+      }));
+    }
+  } catch {
+    message.error('加载产品或计量单位失败，请稍后重试。');
+  } finally {
+    draftProductsLoading.value = false;
+  }
+}
+
+async function searchDraftProducts(keyword: string) {
+  if (!canReadDraftProducts.value) return;
+  draftProductsLoading.value = true;
+  try {
+    const result = await getProductListApi({ page: 1, page_size: 100, keyword: keyword.trim() || undefined, status: 'ACTIVE' }, { silent: true });
+    draftProducts.value = result.items.map((product) => ({
+      id: product.id, product_code: product.product_code, product_name: product.product_name,
+      model: product.model, packaging_spec: product.packaging_spec, purity_value: product.purity_value,
+      purity_unit: product.purity_unit, unit_id: product.unit_id,
+    }));
+  } catch {
+    message.error('搜索产品目录失败，请稍后重试。');
+  } finally {
+    draftProductsLoading.value = false;
+  }
+}
+
+function addDraftItem() { draftItems.value.push({ requested_name: '' }); }
+function needsDraftProductChoice(index: number) {
+  return draftMissingFields.value.some((field) => field.startsWith(`第 ${index + 1} 项产品规格`));
+}
+function draftPriorityLabel(value: string) {
+  return ({ LOW: '低', NORMAL: '普通', HIGH: '高', URGENT: '紧急' } as Record<string, string>)[value] ?? value;
+}
+function removeDraftItem(index: number) {
+  if (draftItems.value.length > 1) draftItems.value.splice(index, 1);
+}
+function onDraftProductChange(item: (typeof draftItems.value)[number]) {
+  const product = draftProducts.value.find((candidate) => candidate.id === item.product_id);
+  if (!product) return;
+  item.requested_name = product.product_name;
+  item.unit_id = product.unit_id;
 }
 
 watch(
@@ -1182,7 +1314,7 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
               >
                 <div v-if="item.content && !item.agentTask && !item.streaming" class="mt-2 flex flex-wrap items-center gap-2">
                   <AgentSourcePopover v-for="group in sourceGroups(item)" :key="group.label" :entries="group.entries" :source-label="group.label" @open-record="openSourceRecord" @open-dataset="openDataset" />
-                  <span v-if="sourceGroups(item).some((group) => group.entries.some((source) => source.status))" class="text-muted-foreground text-xs">部分来源已失效或尚未核验，请查看来源状态并重新查询。</span>
+                  <span v-if="sourceGroups(item).some((group) => group.entries.some((source) => source.status))" class="text-muted-foreground text-xs">历史答案已保留；部分来源可能已更新、失效或尚未核验，请查看来源状态。</span>
                 </div>
                 <div
                   v-if="item.content && !item.agentTask"
@@ -1290,23 +1422,50 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
                 </span>
               </button>
             </div>
+            <div v-if="draftMode && draftPrepared" class="ai-draft-form">
+              <div class="ai-draft-mode-heading"><Tag color="blue">/ 采购申请草稿模式</Tag><span>Agent 已识别的内容已保留，只需补全缺失项</span></div>
+              <div class="ai-draft-recognized">
+                <strong>已识别</strong>
+                <span>{{ draftPurpose || '采购用途待补充' }}</span>
+                <span v-for="(item, index) in draftItems" :key="index">{{ item.requested_name || `物料 ${index + 1} 待补充` }}{{ item.quantity ? ` · ${item.quantity}` : '' }}{{ draftUnits.find((unit) => unit.id === item.unit_id)?.unit_name ? ` ${draftUnits.find((unit) => unit.id === item.unit_id)?.unit_name}` : '' }}{{ item.technical_requirements ? ` · ${item.technical_requirements}` : '' }}</span>
+                <span v-if="draftExpectedDate">期望到货：{{ draftExpectedDate }}</span>
+                <span v-if="draftBudget != null">预算：{{ draftBudget }} {{ draftCurrency }}</span>
+                <span v-if="draftPriority !== 'NORMAL'">优先级：{{ draftPriorityLabel(draftPriority) }}</span>
+              </div>
+              <Input v-if="!draftPurpose.trim()" v-model:value="draftPurpose" :maxlength="1000" placeholder="缺少：采购用途" />
+              <div v-for="(item, index) in draftItems" :key="index" class="ai-draft-item">
+                <div class="ai-draft-item-heading"><strong>物料 {{ index + 1 }}</strong><button v-if="draftItems.length > 1" type="button" class="ai-mode-exit" @click="removeDraftItem(index)">移除</button></div>
+                <Select v-if="needsDraftProductChoice(index) && canReadDraftProducts" v-model:value="item.product_id" show-search :filter-option="false" :loading="draftProductsLoading" :options="[...draftProducts.map((product) => ({ value: product.id, label: `${product.product_name} · ${product.product_code}${product.purity_value ? ` · ${product.purity_value}${product.purity_unit ?? ''}` : ''}${product.packaging_spec ? ` · ${product.packaging_spec}` : ''}${product.model ? ` · ${product.model}` : ''}` })), { value: -1, label: '目录外物料（手动填写）' }]" placeholder="请选择准确产品规格" @search="searchDraftProducts" @change="onDraftProductChange(item)" />
+                <Input v-if="needsDraftProductChoice(index) && item.product_id === -1" v-model:value="item.requested_name" placeholder="目录外物料名称" />
+                <Input v-if="!item.requested_name" v-model:value="item.requested_name" placeholder="缺少：物料名称" />
+                <div class="ai-draft-grid ai-draft-line-grid">
+                  <InputNumber v-if="item.quantity == null" v-model:value="item.quantity" class="w-full" :min="0.000001" :precision="6" placeholder="缺少：数量" />
+                  <span v-else class="ai-draft-known-value">数量：{{ item.quantity }}</span>
+                  <Select v-if="item.unit_id == null" v-model:value="item.unit_id" :options="draftUnits.map((unit) => ({ label: unit.unit_name, value: unit.id }))" placeholder="缺少：计量单位" />
+                  <span v-else class="ai-draft-known-value">单位：{{ draftUnits.find((unit) => unit.id === item.unit_id)?.unit_name || '已识别' }}</span>
+                </div>
+              </div>
+              <Button type="dashed" block @click="addDraftItem">＋ 添加物料</Button>
+            </div>
+            <div v-else-if="draftMode" class="ai-draft-query-heading"><Tag color="blue">/ 采购申请草稿模式</Tag><span>描述需求，Agent 会先提取已有信息，再询问缺项</span></div>
             <Input.TextArea
+              v-if="!draftMode || !draftPrepared"
               v-model:value="inputText"
               class="ai-composer-input"
               :maxlength="2000"
               :rows="2"
-              :placeholder="currentAgent?.status === 'WAITING_INPUT' ? '补充产品名称、规格或询价编号…' : agentMode ? '描述要查询的库存或供应商报价…' : draftMode ? '写明采购用途、物料、数量和单位…' : '给化运 AI 发送消息，输入 / 选择功能'"
+              :placeholder="currentAgent?.status === 'WAITING_INPUT' ? '补充产品名称、规格或询价编号…' : agentMode ? '描述要查询的库存或供应商报价…' : draftMode ? '例如：实验室补充甲醇分析纯 50 升，预计 11 月 5 日到货…' : '给化运 AI 发送消息，输入 / 选择功能'"
               @keydown="onTextKeydown"
               @input="onComposerInput"
             />
             <div class="ai-composer-actions">
               <div class="flex min-w-0 items-center gap-3">
-                <span class="ai-composer-hint">{{ currentAgent?.status === 'WAITING_INPUT' ? '补充信息后继续当前查询' : agentMode ? '采购只读查询' : draftMode ? '补充采购申请缺少的信息' : 'Enter 发送 · Shift+Enter 换行' }}</span>
+                <span class="ai-composer-hint">{{ currentAgent?.status === 'WAITING_INPUT' ? '补充信息后继续当前查询' : agentMode ? '采购只读查询' : draftMode ? (draftPrepared ? '补齐缺失信息后生成草稿预览' : '发送需求，由 Agent 识别已有采购信息') : 'Enter 发送 · Shift+Enter 换行' }}</span>
                 <button v-if="agentMode" class="ai-mode-exit" type="button" @click="agentMode = false">退出只读查询</button>
                 <button v-if="draftMode" class="ai-mode-exit" type="button" @click="draftMode = false">退出草稿模式</button>
               </div>
               <button v-if="canStop" class="ai-send" type="button" :disabled="stopping" aria-label="停止查询" title="停止查询" @click="stopCurrentWork"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg></button>
-              <button v-else class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || !inputText.trim()" :aria-label="draftMode ? '生成预览' : '发送消息'" :title="draftMode ? '生成预览' : '发送消息'" @click="onSend()">
+              <button v-else class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || (draftMode ? (draftPrepared ? !draftFormReady : !inputText.trim()) : !inputText.trim())" :aria-label="draftMode ? (draftPrepared ? '生成草稿预览' : '识别采购信息') : '发送消息'" :title="draftMode ? (draftPrepared ? '生成草稿预览' : '识别采购信息') : '发送消息'" @click="onSend()">
                 <svg v-if="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
                 <span v-else class="ai-send-loading">···</span>
               </button>
@@ -1439,6 +1598,18 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
 .ai-composer-shell { width: 100%; padding: 12px clamp(20px, 5vw, 88px) 22px; }
 .ai-main.is-empty .ai-composer-shell { max-width: 1160px; margin: 24px auto auto; padding-bottom: 0; }
 .ai-composer { position: relative; max-width: 1100px; margin: 0 auto; padding: 12px 14px 10px; border: 1px solid #e0e5ed; border-radius: 22px; background: #fff; box-shadow: 0 10px 28px rgb(37 52 88 / 6%); transition: border-color .18s, box-shadow .18s; }
+.ai-draft-form { display: grid; gap: 10px; padding: 2px 2px 10px; }
+.ai-draft-mode-heading, .ai-draft-query-heading, .ai-draft-item-heading { display: flex; align-items: center; gap: 10px; }
+.ai-draft-mode-heading > span, .ai-draft-field > span { color: #818b9e; font-size: 12px; }
+.ai-draft-query-heading { padding: 2px 2px 10px; color: #818b9e; font-size: 12px; }
+.ai-draft-recognized { display: grid; gap: 4px; padding: 9px 11px; border-radius: 10px; background: #f5f7fb; color: #5c667b; font-size: 12px; }
+.ai-draft-recognized strong { color: #4568f5; font-weight: 600; }
+.ai-draft-known-value { align-self: center; color: #5c667b; font-size: 13px; }
+.ai-draft-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.ai-draft-field { display: grid; gap: 5px; }
+.ai-draft-item { display: grid; gap: 8px; padding: 10px; border: 1px solid #e9edf3; border-radius: 12px; background: #fafbfc; }
+.ai-draft-item-heading { justify-content: space-between; color: #45516a; font-size: 13px; }
+.ai-draft-line-grid { grid-template-columns: minmax(90px, .7fr) minmax(120px, .8fr) minmax(180px, 1.5fr); }
 .ai-slash-menu { position: absolute; right: 14px; bottom: calc(100% + 10px); left: 14px; z-index: 5; display: grid; gap: 2px; padding: 7px; border: 1px solid #e4e8f0; border-radius: 14px; background: #fff; box-shadow: 0 14px 34px rgb(30 44 72 / 16%); }
 .ai-slash-command { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; color: #343b45; cursor: pointer; text-align: left; }
 .ai-slash-command:hover, .ai-slash-command.is-active { background: #f1f2f3; }
@@ -1489,6 +1660,7 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
   .ai-toolbar { padding: 12px 16px; }
   .ai-toolbar :deep(.ant-btn) { height: 30px; padding-inline: 9px; font-size: 12px; }
   .ai-messages, .ai-composer-shell { padding-inline: 20px; }
+  .ai-draft-grid, .ai-draft-line-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
   .ai-sidebar { flex-basis: 68px; width: 68px; align-items: center; padding-inline: 8px; }

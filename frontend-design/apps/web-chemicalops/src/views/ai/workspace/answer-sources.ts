@@ -65,7 +65,11 @@ export function answerSources(citations: any[] = [], canRead: (dataset: string) 
         ...(trace.rows ?? []).slice(0, 5).map((row: any) => (trace.columns ?? []).map((column: any) => `${column.label || column.key}：${row[column.key] ?? '—'}`).join('；')),
       ].filter(Boolean).join('\n');
       add({ key: `query:${trace.dataset}:${trace.executed_at ?? ''}:${JSON.stringify(trace.slots ?? [])}`, label: '数据库查询',
-        title: trace.dataset_label || trace.dataset, description, reference: '当前用户权限范围内的查询快照', observedAt: trace.executed_at, dataset: trace.dataset });
+        title: trace.dataset_label || trace.dataset,
+        description: citation.snapshot_status === 'changed' ? `${description}\n\n提示：这是历史答案快照，相关数据可能已变化；重新查询可获取当前结果。` : description,
+        reference: citation.snapshot_status === 'changed' ? '历史快照 · 数据可能已变化' : '当前用户权限范围内的查询快照',
+        observedAt: trace.executed_at, dataset: trace.dataset,
+        status: citation.snapshot_status === 'changed' ? '历史数据已变化' : undefined });
       for (const record of records) add({ key: `record:${record.dataset}:${record.record_id ?? JSON.stringify(record.filters)}`, label: '业务记录',
         title: record.label || trace.dataset_label, description: record.label || '本次查询引用的业务记录', reference: record.record_id ? `记录 #${record.record_id}` : '本次查询的筛选范围',
         observedAt: trace.executed_at, record });

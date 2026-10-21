@@ -176,7 +176,9 @@ async def purchase_request_draft_preview(
 ) -> AIPurchaseDraftPreview:
     """只返回候选字段；不写入申请、不提交审批。"""
 
-    return await drafts_service.propose_purchase_request_draft(db, user, data.question, conversation_id=data.conversation_id)
+    return await drafts_service.propose_purchase_request_draft(
+        db, user, data.question, draft=data.draft, conversation_id=data.conversation_id
+    )
 
 
 @router.patch("/purchase-request-draft/{confirmation_id}", response_model=AIPurchaseDraftPreview,
@@ -234,7 +236,7 @@ async def chat_stream(data: AIChatRequest, db: Session = Depends(get_db), user: 
     """以 SSE 增量返回模型内容，正常结束后保存完整助手消息。"""
 
     user_query = next((message.content for message in reversed(data.messages) if message.role == "user"), "")
-    LOGGER.info("AI HTTP 请求 mode=stream user_id=%s conversation_id=%s attachments=%s query_length=%s", user.id, data.conversation_id or "new", len(user_query))
+    LOGGER.info("AI HTTP 请求 mode=stream request_id=%s user_id=%s conversation_id=%s attachments=%s query_length=%s", get_request_id(), user.id, data.conversation_id or "new", len(data.attachment_file_ids), len(user_query))
     metrics.increment("ai_requests", labels={"mode": "stream", "status": "started"})
     return StreamingResponse(
         service.stream_chat_for_user(db, user, data),
@@ -268,7 +270,7 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
     result = []
     for item in items:
         from app.modules.ai.history_access import visible_message
-        content, citations = visible_message(db, user, item)
+        content, citations = visible_message(db, user, item, allow_stale_snapshot=True)
         if isinstance(citations, list):
             normalized = []
             for citation in citations:

@@ -7,6 +7,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -249,6 +250,67 @@ def _format_text2sql_result(result: object) -> str:
     return "\n".join(lines)
 
 
+def _format_overdue_unfulfilled_orders(result: object) -> str:
+    """Deterministically summarize the fixed order/inventory join without model arithmetic."""
+    rows = list(getattr(result, "rows", []) or [])
+    if not rows:
+        return "按预计到货日期早于本次查询日、且采购订单仍有未交数量的口径，未找到符合条件的采购订单明细。"
+
+    def quantity(value: object) -> str:
+        try:
+            rendered = format(Decimal(str(value)).normalize(), "f")
+            return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+        except Exception:
+            return str(value)
+
+    supplier_totals: dict[str, dict[str, object]] = {}
+    low_stock: dict[str, dict[str, object]] = {}
+    for row in rows:
+        supplier = str(row.get("supplier") or "未记录供应商")
+        summary = supplier_totals.setdefault(supplier, {"orders": set(), "quantities": {}})
+        summary["orders"].add(str(row.get("po_no") or ""))
+        unit = str(row.get("order_unit") or "未记录单位")
+        amounts = summary["quantities"]
+        amounts[unit] = amounts.get(unit, Decimal(0)) + Decimal(str(row.get("unfulfilled_quantity") or 0))
+
+        product_key = str(row.get("product_code") or row.get("product") or "")
+        if row.get("stock_status") == "低于安全库存":
+            low_stock.setdefault(product_key, row)
+
+    lines = [
+        "口径：按预计到货日期筛选，日期早于本次查询日且订单状态为已下单或部分到货；未交数量=订购数量−已收数量，部分到货订单只计剩余量。",
+        "逾期天数逐条按预计到货日期计算至查询日；订单数按订单编号去重，未交数量按订单单位分别合计，不跨单位相加。",
+        "库存口径：只汇总当前用户可访问的启用仓库中、单位与产品安全库存单位一致的可用余额。",
+        "",
+        "供应商汇总（订单数去重；数量按单位分别合计）：",
+    ]
+    for supplier, summary in supplier_totals.items():
+        amounts_text = "、".join(f"{quantity(value)} {unit}" for unit, value in summary["quantities"].items())
+        lines.append(f"- {supplier}：{len(summary['orders'])} 个采购订单；未交数量 {amounts_text}。")
+    lines.append("\n订单逐条信息及对应库存比较见下方结构化表格。")
+    if low_stock:
+        lines.append("\n低于安全库存的关联产品：")
+        lines.extend(
+            f"- {row.get('product')}（{row.get('product_code')}）：可用库存 {quantity(row.get('available_stock'))} {row.get('stock_unit')}，"
+            f"安全库存 {quantity(row.get('safety_stock_quantity'))} {row.get('stock_unit')}。"
+            for row in low_stock.values()
+        )
+    elif any(row.get("stock_status") in {"低于安全库存", "达到或高于安全库存"} for row in rows):
+        lines.append("\n本次可比较的关联产品中，没有发现低于已登记安全库存阈值的产品。")
+    if any(row.get("stock_status") == "计量单位不一致，无法比较" for row in rows):
+        lines.append("部分产品的库存计量单位与安全库存单位不一致，无法进行阈值比较。")
+    if any(row.get("stock_status") == "未设置安全库存" for row in rows):
+        lines.append("部分产品未登记安全库存阈值，无法判断是否低于安全库存。")
+    if any(row.get("stock_status") == "没有库存记录，无法判断" for row in rows):
+        lines.append("部分产品没有可访问的库存记录，不能据此判断其可用库存为零或是否低于安全库存。")
+    if getattr(result, "truncated", False):
+        display_limit = getattr(getattr(result, "plan", None), "limit", 100)
+        lines.append(
+            f"结果已截断：最多展示 {display_limit} 条，本次展示 {len(rows)} 条。以上订单汇总和低库存产品清单仅基于已展示明细，不能视为全部符合条件记录的总数；请缩小日期或供应商范围后继续查询。"
+        )
+    return "\n".join(lines)
+
+
 async def _rewrite_text2sql_answer(result: object, dataset_label: str, settings: Settings) -> str | None:
     """把查询结果交给模型重写成结论先行的自然中文。
 
@@ -415,7 +477,9 @@ async def _run_text2sql_for_chat(
     executed_at = datetime.now()
     dataset_spec = CATALOG[result.plan.dataset]
     permission = dataset_spec.permission
-    if result.plan.dataset == "weekly_order_risks":
+    if result.plan.dataset == "overdue_unfulfilled_orders":
+        permission = "procurement.orders.read + warehouse.inventory.read + master.products.read"
+    elif result.plan.dataset == "weekly_order_risks":
         permission = "procurement.orders.read + warehouse.deliveries.read"
     elif result.plan.dataset == "accepted_orders_finance_gaps":
         permission = "procurement.orders.read + warehouse.deliveries.read + quality.acceptances.read + finance.reconciliations.read + finance.invoices.read + finance.payments.read + finance.settlements.read"
@@ -458,12 +522,16 @@ async def _run_text2sql_for_chat(
         stages=result.stages,
         render=result.render,
     )
-    answer = _format_text2sql_result(result)
-    # 先模板后重写：模型输出自然中文结论，失败时模板兜底，查询链路永不因重写而中断
+    if result.plan.dataset == "overdue_unfulfilled_orders":
+        answer = _format_overdue_unfulfilled_orders(result)
+    else:
+        answer = _format_text2sql_result(result)
+    # 特殊关联结果由代码确定性汇总，避免模型自行计算供应商订单数或数量。
     db.commit()
-    rewritten = await _rewrite_text2sql_answer(result, dataset_spec.label, settings)
-    if rewritten:
-        answer = rewritten
+    if result.plan.dataset != "overdue_unfulfilled_orders":
+        rewritten = await _rewrite_text2sql_answer(result, dataset_spec.label, settings)
+        if rewritten:
+            answer = rewritten
     trace.answer = answer
     LOGGER.info("AI 查询槽位 user_id=%s slot_count=%s filled_count=%s", user.id, len(result.slots), sum(slot.get("status") == "filled" for slot in result.slots))
     LOGGER.info("AI 查询模板 user_id=%s template_hash=%s", user.id, _text_fingerprint(result.template))

@@ -53,9 +53,9 @@ def _build_prompt(question: str, units: list[Unit]) -> str:
 async def propose_purchase_request_draft(
     db: Session,
     user: User,
-    question: str,
+    question: str | None = None,
     settings: Settings | None = None,
-    *, conversation_id: int | None = None,
+    *, draft: PurchaseRequestCreate | None = None, conversation_id: int | None = None,
 ) -> AIPurchaseDraftPreview:
     """将明确需求转成需用户确认的候选值，不创建或提交采购申请。"""
 
@@ -68,18 +68,24 @@ async def propose_purchase_request_draft(
     if not units:
         raise BusinessValidationError("当前没有可用计量单位，无法整理采购申请草稿")
 
-    result = await chat(
-        AIChatRequest(messages=[AIChatMessage(role="user", content="请按提供的规则整理字段，只输出 JSON。")]),
-        settings or get_settings(),
-        attachment_context=[_build_prompt(question, units)],
-        response_format=schema_response_format(_DraftProposal, "purchase_draft_proposal"),
-    )
-    raw_answer = result.answer or result.message.content
-    try:
-        payload = extract_json_object(raw_answer)
-        proposal = _DraftProposal.model_validate(payload)
-    except (BusinessValidationError, ValidationError, TypeError, ValueError) as exc:
-        raise BusinessValidationError("AI 没有给出完整、可检查的采购申请字段；请补充用途、物料、数量和计量单位") from exc
+    structured = draft is not None
+    if draft is not None:
+        proposal = _DraftProposal.model_validate({**draft.model_dump(mode="python"), "missing_fields": []})
+    else:
+        if not question:
+            raise BusinessValidationError("请提供采购申请信息")
+        result = await chat(
+            AIChatRequest(messages=[AIChatMessage(role="user", content="请按提供的规则整理字段，只输出 JSON。")]),
+            settings or get_settings(),
+            attachment_context=[_build_prompt(question, units)],
+            response_format=schema_response_format(_DraftProposal, "purchase_draft_proposal"),
+        )
+        raw_answer = result.answer or result.message.content
+        try:
+            payload = extract_json_object(raw_answer)
+            proposal = _DraftProposal.model_validate(payload)
+        except (BusinessValidationError, ValidationError, TypeError, ValueError) as exc:
+            raise BusinessValidationError("AI 没有给出完整、可检查的采购申请字段；请补充用途、物料、数量和计量单位") from exc
 
     missing_fields = list(proposal.missing_fields)
     if not proposal.purpose.strip():
@@ -89,8 +95,6 @@ async def propose_purchase_request_draft(
             missing_fields.append(f"第 {index} 项物料名称")
         if item.quantity is None:
             missing_fields.append(f"第 {index} 项数量")
-        if item.unit_id is None:
-            missing_fields.append(f"第 {index} 项计量单位")
     product_by_id: dict[int, Product] = {}
     unit_by_id = {item.id: item for item in units}
     warnings: list[str] = []
@@ -99,7 +103,15 @@ async def propose_purchase_request_draft(
     evidence: list[dict] = []
     for index, item in enumerate(proposal.items, start=1):
         product = None
-        if item.requested_name.strip() and ("SYS_ADMIN" in roles or "master.products.read" in permissions):
+        if item.product_id is not None:
+            if "SYS_ADMIN" not in roles and "master.products.read" not in permissions:
+                raise BusinessValidationError("当前账号无权读取所选产品目录")
+            product = db.get(Product, item.product_id)
+            if product is None or product.status != "ACTIVE":
+                raise BusinessValidationError("所选产品不存在或已停用，请重新选择")
+            if item.unit_id != product.unit_id:
+                raise BusinessValidationError("所选计量单位与产品目录单位不一致，请重新选择产品或单位")
+        elif not structured and item.requested_name.strip() and ("SYS_ADMIN" in roles or "master.products.read" in permissions):
             matches = agent_tools.execute_tool(db, user, ToolCall(
                 tool="catalog.search_products", arguments={"keyword": item.requested_name.strip(), "limit": 10}
             ))
@@ -110,11 +122,16 @@ async def propose_purchase_request_draft(
                 missing_fields.append(f"第 {index} 项产品规格（候选不止一个，请补充准确名称、编码或规格）")
             elif not matches.total_rows:
                 warnings.append(f"“{item.requested_name}”未匹配到现有产品目录；可按未关联目录产品的名称继续申请。")
-        elif item.requested_name.strip():
+        elif item.requested_name.strip() and not structured:
             warnings.append(f"当前账号无产品目录读取权限，未查询“{item.requested_name}”的目录匹配。")
-        unit = unit_by_id.get(item.unit_id) if item.unit_id is not None else None
-        if item.unit_id is not None and unit is None:
+        effective_unit_id = item.unit_id or (product.unit_id if product else None)
+        if effective_unit_id is None:
+            missing_fields.append(f"第 {index} 项计量单位")
+        unit = unit_by_id.get(effective_unit_id) if effective_unit_id is not None else None
+        if effective_unit_id is not None and unit is None:
             raise BusinessValidationError("AI 返回了目录中不存在或已停用的计量单位，请重新生成草稿建议")
+        if product is not None and effective_unit_id != product.unit_id:
+            raise BusinessValidationError("所选计量单位与产品目录单位不一致，请重新选择产品或单位")
         if product is not None:
             product_by_id[product.id] = product
             for tool_name, arguments, label in (
@@ -140,8 +157,9 @@ async def propose_purchase_request_draft(
         draft_items.append(
             {
                 **item.model_dump(mode="json"),
-                "requested_name": item.requested_name.strip(),
+                "requested_name": product.product_name if product else item.requested_name.strip(),
                 "product_id": product.id if product else None,
+                "unit_id": effective_unit_id,
             }
         )
         display_items.append(
@@ -178,8 +196,8 @@ async def propose_purchase_request_draft(
     snapshot_versions = {
         "actor_department_id": user.department_id,
         "products": {str(product.id): {"version_no": product.version_no, "status": product.status} for product in product_by_id.values()},
-        "units": {str(item.unit_id): {"unit_name": unit_by_id[item.unit_id].unit_name, "dimension": unit_by_id[item.unit_id].dimension}
-                  for item in proposal.items if item.unit_id is not None},
+        "units": {str(item["unit_id"]): {"unit_name": unit_by_id[item["unit_id"]].unit_name, "dimension": unit_by_id[item["unit_id"]].dimension}
+                  for item in draft_items if item["unit_id"] is not None},
     }
     snapshot = draft.model_dump(mode="json")
     confirmation_id = uuid4().hex
