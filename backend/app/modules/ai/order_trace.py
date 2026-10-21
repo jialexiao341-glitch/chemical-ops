@@ -25,7 +25,7 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 
 
-ORDER_NO_PATTERN = re.compile(r"\b(PO[-_][A-Z0-9][A-Z0-9-]*)\b", re.IGNORECASE)
+ORDER_NO_PATTERN = re.compile(r"\b(PO(?:[-_])?[A-Z0-9]*\d[A-Z0-9_-]*)\b", re.IGNORECASE)
 TRACE_MARKERS = ("为什么", "原因", "结算", "全流程", "到哪一步", "进度", "追溯", "未完成", "卡在哪", "异常订单")
 
 PERMISSION_BY_STAGE = {
@@ -48,7 +48,7 @@ def extract_order_trace_no(question: str) -> str | None:
     if not any(marker in question for marker in TRACE_MARKERS):
         return None
     match = ORDER_NO_PATTERN.search(question.upper())
-    return match.group(1).replace("_", "-") if match else None
+    return match.group(1) if match else None
 
 
 def _iso(value: Any) -> str | None:
@@ -83,6 +83,24 @@ def _record(no: str | None, status: str | None, updated_at: datetime | None, **v
         "updated_at": _iso(updated_at),
         **{key: value for key, value in values.items() if value is not None},
     }
+
+
+def format_stage_line(stage: dict[str, Any]) -> str:
+    """把一个追溯环节格式化为回答中的一行，供完整回答与按问题聚焦复用。"""
+
+    if stage["status"] == "NO_PERMISSION":
+        return f"- {stage['stage']}：当前账号无读取权限，无法核验。"
+    records = stage.get("records") or []
+    if not records:
+        return f"- {stage['stage']}：{stage.get('summary') or '没有查到关联记录'}。"
+    descriptions = []
+    for record in records[:8]:
+        text = str(record.get("number") or record.get("batch_id") or "关联记录")
+        if record.get("status"):
+            text += f"（{record['status']}）"
+        descriptions.append(text)
+    suffix = f"；{stage['summary']}" if len(records) > 8 or stage.get("truncated") else ""
+    return f"- {stage['stage']}：" + "、".join(descriptions) + suffix
 
 
 def _require_order_scope(db: Session, user: User, order: PurchaseOrder, roles: set[str]) -> None:
@@ -291,20 +309,7 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
 
     unavailable = [item["stage"] for item in stages if item["status"] == "NO_PERMISSION"]
     lines = [f"订单 {order.po_no} 跨模块追溯", f"供应商：{supplier_name or '未登记'}；订单状态：{order.status}。"]
-    for item in stages:
-        if item["status"] == "NO_PERMISSION":
-            lines.append(f"- {item['stage']}：当前账号无读取权限，无法核验。")
-        elif item["records"]:
-            descriptions = []
-            for record in item["records"][:8]:
-                text = str(record.get("number") or record.get("batch_id") or "关联记录")
-                if record.get("status"):
-                    text += f"（{record['status']}）"
-                descriptions.append(text)
-            suffix = f"；{item['summary']}" if len(item["records"]) > 8 or item.get("truncated") else ""
-            lines.append(f"- {item['stage']}：" + "、".join(descriptions) + suffix)
-        else:
-            lines.append(f"- {item['stage']}：{item['summary']}。")
+    lines.extend(format_stage_line(item) for item in stages)
     if conclusion:
         lines.append("可见数据中的未完成原因：" + "；".join(conclusion) + "。")
     elif unavailable:

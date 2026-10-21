@@ -18,6 +18,13 @@ def test_order_trace_requires_order_number_and_trace_question() -> None:
     assert extract_order_trace_no("为什么订单还没有结算") is None
 
 
+def test_order_trace_accepts_production_order_number_without_rewriting_it() -> None:
+    assert extract_order_trace_no("采购订单 PO20261021000001 为什么还没有结算？") == "PO20261021000001"
+    assert extract_order_trace_no("采购订单 po_26001 为什么还没有结算？") == "PO_26001"
+    assert extract_order_trace_no("为什么 POST 请求失败") is None
+    assert extract_order_trace_no("为什么 POBOX 还没有结算") is None
+
+
 def test_denied_stage_does_not_expose_records_or_counts() -> None:
     denied = _stage("发票", False, [{"number": "INV-SECRET", "amount": "1000"}], summary="找到 1 条记录")
 

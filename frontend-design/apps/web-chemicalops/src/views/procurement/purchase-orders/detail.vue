@@ -44,6 +44,7 @@ import { getSupplierNameMap, getUnitNameMap } from '#/utils/lookup';
 import ApproveModal from './modules/approve.vue';
 import CancelModal from './modules/cancel.vue';
 import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
+import PageCopilotDrawer from '#/views/ai/workspace/modules/page-copilot-drawer.vue';
 
 defineOptions({ name: 'PurchaseOrderDetail' });
 
@@ -54,6 +55,9 @@ const userStore = useUserStore();
 
 const order = ref<PurchaseOrderApi.PurchaseOrder>();
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
+const copilotDrawer = ref<{
+  open: (objectType: 'purchase_order', id: number, question?: string) => void;
+}>();
 const loading = ref(false);
 const acting = ref(false);
 const resolveSupplier = ref<(id?: null | number) => string>(() => '-');
@@ -192,6 +196,7 @@ onMounted(load);
 <template>
   <Page auto-content-height>
     <BusinessInsightDrawer ref="insightDrawer" />
+    <PageCopilotDrawer ref="copilotDrawer" />
     <Approve @success="load" />
     <Cancel @success="load" />
     <Spin :spinning="loading">
@@ -209,6 +214,12 @@ onMounted(load);
             </Tag>
           </div>
           <div class="flex flex-wrap gap-2">
+            <Button
+              v-if="order.id && hasAccessByCodes(['ai.workspace.read'])"
+              @click="copilotDrawer?.open('purchase_order', order.id, '这单当前进展和卡点是什么？')"
+            >
+              问 AI
+            </Button>
             <Button
               v-if="order.id && hasAccessByCodes(['finance.reconciliations.read']) && hasAccessByCodes(['ai.workspace.read'])"
               @click="insightDrawer?.open('finance-difference', order.id)"

@@ -16,6 +16,8 @@ from app.core.observability import get_request_id, metrics, observe_duration
 from app.modules.ai.schema import (
     AIChatRequest,
     AIChatResponse,
+    AIContextAskRequest,
+    AIContextAskResponse,
     AIConversationPage,
     AIConversationRead,
     AIConversationUpdate,
@@ -44,6 +46,7 @@ from app.modules.ai.schema import (
     ToolCall,
 )
 from app.modules.ai import briefing as briefing_service
+from app.modules.ai import context as context_service
 from app.modules.ai import drafts as drafts_service
 from app.modules.ai import nl_filters as nl_filters_service
 from app.modules.ai import service, routing, capabilities
@@ -68,6 +71,13 @@ LOGGER = logging.getLogger('chemicalops.ai.http')
 def agent_tool_catalog(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict[str, object]]:
     """返回认证用户可见的只读工具目录；无权限工具不出现在返回结果中。"""
     return agent_tools.list_tools(db, user)
+
+
+@router.post("/context/ask", response_model=AIContextAskResponse, summary="按当前页面对象提问")
+def context_ask(data: AIContextAskRequest, db: Session = Depends(get_db),
+                user: User = Depends(get_current_user)) -> AIContextAskResponse:
+    """页面 Copilot 入口：服务端重新读取对象并鉴权，不信任客户端快照。"""
+    return context_service.ask_context(db, user, data)
 
 
 @router.post("/route", summary="理解会话请求并生成受约束路由")

@@ -89,6 +89,65 @@ export namespace AiApi {
     };
   }
 
+  /** 页面 Copilot 支持的业务对象类型；服务端按类型重新读取并鉴权 */
+  export type ContextObjectType =
+    | 'delivery'
+    | 'finance_reconciliation'
+    | 'inventory_balance'
+    | 'purchase_order'
+    | 'purchase_request'
+    | 'quality_acceptance'
+    | 'rfq'
+    | 'supplier';
+
+  /** 已按当前用户权限读取的业务上下文 */
+  export interface ContextSnapshot {
+    object_id: number;
+    object_type: ContextObjectType;
+    reference_no?: null | string;
+    source_records: Array<{
+      dataset?: string;
+      filters?: Record<string, number | string>;
+      label?: string;
+      record_id?: null | number;
+    }>;
+    status?: null | string;
+    suggested_questions: string[];
+    summary: string[];
+    title: string;
+  }
+
+  export interface OrderTraceStage {
+    records: Array<Record<string, any>>;
+    stage: string;
+    status: string;
+    summary?: null | string;
+    truncated?: boolean;
+  }
+
+  export interface OrderTrace {
+    conclusion?: string[];
+    order_status?: string;
+    po_no?: string;
+    stages?: OrderTraceStage[];
+    supplier?: null | string;
+    unavailable_stages?: string[];
+  }
+
+  /** 页面 Copilot 的确定性回答及来源 */
+  export interface ContextAskResult {
+    answer: string;
+    citations: Array<{
+      order_trace?: OrderTrace;
+      po_no?: string;
+      source_records?: ContextSnapshot['source_records'];
+      type: string;
+    }>;
+    context: ContextSnapshot;
+    model: string;
+    provider: string;
+  }
+
   export interface PurchaseDraftPreview {
     confirmation_id?: null | string;
     preview_version?: null | number;
@@ -140,6 +199,18 @@ export async function confirmPurchaseRequestDraftApi(confirmationId: string, pre
     '/ai/purchase-request-draft/confirm',
     { confirmation_id: confirmationId, preview_version: previewVersion, confirm: true },
   );
+}
+
+/** 按当前页面对象提问；只提交对象引用，业务字段和权限由服务端重新读取。 */
+export async function askPageContextApi(
+  question: string,
+  objectType: AiApi.ContextObjectType,
+  objectId: number,
+) {
+  return requestClient.post<AiApi.ContextAskResult>('/ai/context/ask', {
+    context: { object_id: objectId, object_type: objectType },
+    question,
+  });
 }
 
 /** 查询当前用户的 AI 会话列表 */
