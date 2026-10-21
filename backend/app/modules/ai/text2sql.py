@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import logging
@@ -1088,7 +1089,9 @@ def _merge_follow_up_plan(question: str, previous_plan: QueryPlan) -> QueryPlan:
     return previous_plan.model_copy(update=updates)
 
 
-async def _understand_question(question: str, settings: Settings, db: Session, user: User, previous_plan: QueryPlan | None = None) -> QueryPlan:
+def _fixed_plan_before_model(question: str, db: Session, user: User,
+                            previous_plan: QueryPlan | None = None) -> QueryPlan | None:
+    """同步只读检查器；调用方在线程池运行，避免 ORM 阻塞事件循环。"""
     movement_trace = _inventory_movement_trace_plan(db, user, question, previous_plan)
     if movement_trace is not None:
         LOGGER.info("AI 查询计划使用库存变动追溯固定查询 question_hash=%s", _query_hash(question))
@@ -1104,6 +1107,13 @@ async def _understand_question(question: str, settings: Settings, db: Session, u
     if fallback is not None and "逾期" in question and any(marker in question for marker in ("到货", "收货", "入库")):
         LOGGER.info("AI 查询计划使用安全兜底 question_hash=%s dataset=%s metric=%s", _query_hash(question), fallback.dataset, fallback.metric)
         return fallback
+    return None
+
+
+async def _understand_question(question: str, settings: Settings, db: Session, user: User, previous_plan: QueryPlan | None = None) -> QueryPlan:
+    fixed_plan = await asyncio.to_thread(_fixed_plan_before_model, question, db, user, previous_plan)
+    if fixed_plan is not None:
+        return fixed_plan
     prompt = text2sql_plan_prompt("")
     payload = json.dumps({"question": question, "today": date.today().isoformat(), "previous_plan": previous_plan.model_dump(mode="json") if previous_plan else None}, ensure_ascii=False)
     # Planning performs only reads before this point; do not hold its SQL connection

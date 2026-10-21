@@ -18,6 +18,8 @@ from app.modules.ai.schema import (
     AIChatResponse,
     BatchResult,
     BatchStatus,
+    BatchChoice,
+    PendingChoice,
     QueryPlan,
     SubTask,
     TASK_STATUS_LABELS,
@@ -72,11 +74,12 @@ async def plan_analytics(db: Session, user: User, task: SubTask, settings: Setti
     else:
         plan = await text2sql._understand_question(task.question, settings, db, user, previous_plan)
     text2sql._reject_unsupported_metric(task.question)
-    text2sql._validate_plan(db, user, plan)
+    await asyncio.to_thread(text2sql._validate_plan, db, user, plan)
     return plan
 
 
-def execute_product_task(db: Session, user: User, task: SubTask, result: TaskResult, products: dict[str, dict]) -> None:
+def execute_product_task(db: Session, user: User, task: SubTask, result: TaskResult, products: dict[str, dict],
+                         *, selection: BatchChoice | None = None, prior_pending: PendingChoice | None = None) -> None:
     """固定工具计划；同批明确相同关键词共享授权定位，不共享其他参数。"""
     available = {entry["name"] for entry in agent_tools.list_tools(db, user)}
     required = "inventory.query_available" if task.kind == "inventory" else "supplier_quotes.compare"
@@ -106,11 +109,21 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
         result.tool_calls.append({"tool": "catalog.search_products", "arguments": {"keyword": keyword},
                                   "fingerprint": fingerprint({k: v for k, v in products[keyword].items() if k != "observed_at"})})
     product = products[keyword]
+    if selection and selection.entity == 'product':
+        from app.modules.ai.candidate_resolution import validate_selection
+        chosen = validate_selection(prior_pending, entity='product', selected_id=selection.selected_id, revision=selection.revision)
+        if chosen not in {row['product_id'] for row in product['rows']}:
+            raise BusinessValidationError('所选产品已不在当前授权候选中')
+        product = {**product, 'rows': [row for row in product['rows'] if row['product_id'] == chosen],
+                   'total_rows': 1, 'truncated': False}
     aggregate = (task.kind == "inventory" and product["total_rows"] > 1 and not product["truncated"]
                  and _inventory_family(db, product["rows"], keyword))
     if (product["total_rows"] != 1 and not aggregate) or product["truncated"]:
         result.status = TaskStatus.WAITING_INPUT if product["total_rows"] else TaskStatus.SUCCEEDED
         result.answer = f"找到多个与“{keyword}”匹配的规格，请补充需要查询的规格名称或产品编码。" if product["total_rows"] else f"暂时没有找到与“{keyword}”匹配的产品，请核对名称或产品编码。"
+        if product['total_rows']:
+            result.pending = PendingChoice(entity='product', lookup_arguments={'keyword': keyword},
+                candidates=product['rows'], revision=(prior_pending.revision + 1 if prior_pending else 1))
         return
     product_id = product["rows"][0]["product_id"]
     arguments = {"product_id": product_id, "limit": slots.limit or 20}
@@ -143,9 +156,19 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
         if slots.rfq_no:
             lookup["rfq_no"] = slots.rfq_no
         rfqs = execute("supplier_quotes.find_rfq_items", **lookup)
+        if selection and selection.entity == 'rfq_item':
+            from app.modules.ai.candidate_resolution import validate_selection
+            chosen = validate_selection(prior_pending, entity='rfq_item', selected_id=selection.selected_id, revision=selection.revision)
+            if chosen not in {row['rfq_item_id'] for row in rfqs['rows']}:
+                raise BusinessValidationError('所选询价明细已不在当前授权候选中')
+            rfqs = {**rfqs, 'rows': [row for row in rfqs['rows'] if row['rfq_item_id'] == chosen],
+                    'total_rows': 1, 'truncated': False}
         if rfqs["total_rows"] != 1 or rfqs["truncated"]:
             result.status = TaskStatus.WAITING_INPUT if rfqs["total_rows"] else TaskStatus.SUCCEEDED
             result.answer = "找到多个询价明细，请补充询价单号。" if rfqs["total_rows"] else "当前授权范围没有可用询价明细。"
+            if rfqs['total_rows']:
+                result.pending = PendingChoice(entity='rfq_item', lookup_arguments=lookup, candidates=rfqs['rows'],
+                    revision=(prior_pending.revision + 1 if prior_pending else 1))
             return
         value = execute("supplier_quotes.compare", **arguments, rfq_item_id=rfqs["rows"][0]["rfq_item_id"])
     from app.modules.ai.agent_runtime import _summary
@@ -155,6 +178,7 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
 
 async def execute_batch(db: Session, user: User, decision: Understanding, settings: Settings, *,
                         previous_tasks: list[dict] | None = None, retry_failed: bool = False,
+                        selection: BatchChoice | None = None,
                         on_progress: Callable[[dict], Awaitable[None]] | None = None) -> BatchResult:
     """同一数据库会话顺序执行；上限六项，前项失败阻塞依赖项，独立项继续。"""
     results = {task.id: TaskResult(id=task.id, kind=task.kind, question=task.question, depends_on=task.depends_on)
@@ -162,10 +186,19 @@ async def execute_batch(db: Session, user: User, decision: Understanding, settin
     previous = {task["id"]: task for task in previous_tasks or []}
     products = {}
     reused = set()
-    if retry_failed:
+    if selection:
+        from app.modules.ai.candidate_resolution import validate_selection
+        old = previous.get(selection.task_id)
+        if not old or old.get('status') != TaskStatus.WAITING_INPUT:
+            raise BusinessValidationError('当前没有可选择的待补充任务')
+        validate_selection(TaskResult.model_validate(old).pending, entity=selection.entity,
+                           selected_id=selection.selected_id, revision=selection.revision)
+    if retry_failed or selection:
         for task in decision.sub_tasks:
             old = previous.get(task.id, {})
             if old.get("status") not in {TaskStatus.SUCCEEDED, TaskStatus.WAITING_INPUT}:
+                continue
+            if selection and task.id == selection.task_id:
                 continue
             saved = TaskResult.model_validate(old)
             if (saved.kind, saved.question, saved.depends_on) != (task.kind, task.question, task.depends_on):
@@ -244,7 +277,10 @@ async def execute_batch(db: Session, user: User, decision: Understanding, settin
                         result.answer, result.citations = response.message.content, citations
                         result.status = TaskStatus.SUCCEEDED
                 else:
-                    execute_product_task(db, user, task, result, products)
+                    extra = {}
+                    if selection and task.id == selection.task_id:
+                        extra = {'selection': selection, 'prior_pending': TaskResult.model_validate(previous[task.id]).pending}
+                    await asyncio.to_thread(execute_product_task, db, user, task, result, products, **extra)
             except (AuthorizationError, ResourceNotFoundError, BusinessValidationError, ValueError):
                 db.rollback()
                 result.status, result.error_code, result.answer = TaskStatus.FAILED, "QUERY_REJECTED", "该项查询未通过权限或参数校验，请核对条件。"
@@ -325,7 +361,7 @@ async def reply_for_user(db: Session, user: User, data: AIChatRequest, conversat
     if data.retry_failed:
         previous = [task.model_dump(mode="json") for task in previous_batch(db, conversation.id).tasks]
     batch = await execute_batch(db, user, decision, settings, previous_tasks=previous,
-                                retry_failed=data.retry_failed, on_progress=on_progress)
+                                retry_failed=data.retry_failed, selection=data.batch_choice, on_progress=on_progress)
     question = next(message.content for message in reversed(data.messages) if message.role == "user")
     answer = summarize(batch, question)
     report = batch.model_dump(mode="json")
@@ -356,13 +392,13 @@ def previous_batch(db: Session, conversation_id: int) -> BatchResult:
     return BatchResult.model_validate(report)
 
 
-def retry_decision(db: Session, user: User, conversation_id: int | None) -> Understanding:
+def retry_decision(db: Session, user: User, conversation_id: int | None, *, selecting: bool = False) -> Understanding:
     """仅从本人最新批次恢复任务，客户端不能提交计划或指定执行他人结果。"""
     if not conversation_id:
         raise BusinessValidationError("重试必须指定原查询会话。")
     conversation_store.get_owned_conversation(db, user, conversation_id)
     batch = previous_batch(db, conversation_id)
-    if not any(task.status in {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED} for task in batch.tasks):
+    if not any(task.status in ({TaskStatus.WAITING_INPUT} if selecting else {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}) for task in batch.tasks):
         raise BusinessValidationError("该批次没有失败或已取消项；待补充项请先提供查询条件。")
     return Understanding(purpose="query", dialogue_action="continue",
         tasks=list(dict.fromkeys(task.kind for task in batch.tasks)),

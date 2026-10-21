@@ -22,11 +22,21 @@ class AIChatMessage(BaseModel):
     content: str = Field(min_length=1, max_length=20_000)
 
 
+class BatchChoice(BaseModel):
+    """仅选择服务端已保存候选，不承载客户端执行计划。"""
+    model_config = ConfigDict(extra="forbid")
+    task_id: str = Field(pattern=r"^t[1-6]$")
+    entity: Literal["product", "rfq_item"]
+    selected_id: int = Field(strict=True, gt=0)
+    revision: int = Field(strict=True, ge=1)
+
+
 class AIChatRequest(BaseModel):
     """AI 对话请求；附件通过文件 ID 关联到当前用户已上传的文件。"""
 
     route_token: str | None = Field(default=None, max_length=64000)
     retry_failed: bool = Field(default=False, strict=True)
+    batch_choice: BatchChoice | None = None
     messages: list[AIChatMessage] = Field(min_length=1, max_length=50)
     attachments: list[str] = Field(default_factory=list, max_length=20)
     attachment_file_ids: list[int] = Field(default_factory=list, max_length=20)
@@ -232,6 +242,15 @@ class AIPurchaseDraftRequest(BaseModel):
     """待整理成采购申请表单候选值的自然语言需求。"""
 
     question: str = Field(min_length=1, max_length=10_000)
+    conversation_id: int | None = Field(default=None, gt=0)
+
+
+class AIPurchaseDraftPatch(BaseModel):
+    """只接受草稿字段的显式修改；当前版本必须再次确认。"""
+    model_config = ConfigDict(extra="forbid")
+    confirmation_id: str = Field(min_length=32, max_length=32, pattern="^[a-f0-9]{32}$")
+    preview_version: int = Field(strict=True, ge=1)
+    changes: dict[str, Any] = Field(min_length=1)
 
 
 # 共享意图与状态
@@ -625,12 +644,20 @@ class TaskResult(BaseModel):
     citations: list[dict] = Field(default_factory=list)
     evidence: list[dict] = Field(default_factory=list)
     tool_calls: list[dict] = Field(default_factory=list)
+    pending: PendingChoice | None = None
 
 
 class BatchResult(BaseModel):
     """整批汇总状态及按原始顺序排列的子任务结果。"""
     status: BatchStatus
     tasks: list[TaskResult]
+
+
+class AgentTaskPage(BaseModel):
+    items: list[TaskRead]
+    total: int
+    page: int
+    page_size: int
 
 
 # 查询计划

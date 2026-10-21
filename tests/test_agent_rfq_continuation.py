@@ -24,7 +24,10 @@ def waiting_rfq(db, actions, question='比较测试乙醇报价'):
 
 
 @pytest.mark.parametrize('number', ['Q-9', '2026/09-A', 'legacy_17', 'abc.002'])
-def test_nonstandard_number_never_replaces_verified_product(task_db, model_script, number):
+def test_nonstandard_number_never_replaces_verified_product(task_db, model_script, monkeypatch, number):
+    async def structured_route(*args, **kwargs):
+        return runtime.Understanding(purpose='query', tasks=['inventory', 'quotes'], slots={'rfq_no': number})
+    monkeypatch.setattr(runtime.routing, 'understand', structured_route)
     task_db.execute(text('UPDATE rfqs SET rfq_no=:number WHERE id=1'), {'number': number})
     task_db.commit()
     actions, contexts = model_script
@@ -47,8 +50,10 @@ def test_nonstandard_number_never_replaces_verified_product(task_db, model_scrip
     ('询价编号华东采购-九月的报价', '华东采购-九月'),
     ('查库存和2026/09-A报价', '2026/09-A'),
 ])
-def test_rfq_condition_uses_semantic_position(question, expected):
-    assert runtime._rfq_condition(question) == expected
+def test_rfq_condition_is_a_structured_slot(question, expected):
+    """运行时只消费理解器契约，不在执行阶段重新解析业务语义。"""
+    decision = runtime.Understanding(purpose='query', tasks=['quotes'], slots={'rfq_no': expected})
+    assert decision.slots.rfq_no == expected
 
 
 def test_product_code_quote_request_is_not_forced_into_rfq_filter(task_db, model_script):
@@ -125,7 +130,10 @@ def test_changed_rfq_owner_blocks_continuation(task_db, model_script):
             runtime.TaskContinue(question='选择', revision=result.revision, rfq_item_id=11))
 
 
-def test_combined_resume_refreshes_inventory_and_preserves_limit(task_db, model_script):
+def test_combined_resume_refreshes_inventory_and_preserves_limit(task_db, model_script, monkeypatch):
+    async def structured_route(*args, **kwargs):
+        return runtime.Understanding(purpose='query', tasks=['inventory', 'quotes'], slots={'limit': 1})
+    monkeypatch.setattr(runtime.routing, 'understand', structured_route)
     actions = model_script[0]
     result = waiting_rfq(task_db, actions, '查测试乙醇库存和报价；库存明细只返回1条。')
     task_db.execute(text('UPDATE inventory_balances SET quantity=150 WHERE id=1'))

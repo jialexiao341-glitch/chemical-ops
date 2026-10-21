@@ -55,6 +55,7 @@ async def propose_purchase_request_draft(
     user: User,
     question: str,
     settings: Settings | None = None,
+    *, conversation_id: int | None = None,
 ) -> AIPurchaseDraftPreview:
     """将明确需求转成需用户确认的候选值，不创建或提交采购申请。"""
 
@@ -184,6 +185,10 @@ async def propose_purchase_request_draft(
     confirmation_id = uuid4().hex
     expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
     preview_version = 1
+    if conversation_id is not None:
+        from app.modules.ai.conversation_store import get_owned_conversation
+        get_owned_conversation(db, user, conversation_id)
+        evidence = [*evidence, {"type": "conversation", "conversation_id": conversation_id}]
     db.add(AIPurchaseDraftConfirmation(
         confirmation_id=confirmation_id, user_id=user.id, preview_version=preview_version,
         request_hash=hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),

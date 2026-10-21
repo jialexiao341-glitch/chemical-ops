@@ -66,6 +66,7 @@ ROUTING_PROMPT = """# 角色与任务
 # 输出契约
 只输出 JSON 对象，字段限于：purpose, dialogue_action, tasks, excluded_tasks, slots, question, sub_tasks。
 slots 字段限于 product_keyword, rfq_no, warehouse_keyword, date_from, date_to, limit, unit。
+询价号只填入 rfq_no，不填 product_keyword；编号前缀和格式不能决定对象类型。返回条数填 limit，仓库条件填原始准确名称 warehouse_keyword；续答继承未修改的槽位。执行器不会用关键词正则重新解析这些条件。
 无明确依据的字段为 null；tasks/excluded_tasks 为数组。不要输出推理过程或置信度。
 
 # 边界示例

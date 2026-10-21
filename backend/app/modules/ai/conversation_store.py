@@ -8,14 +8,14 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, inspect, select
+from sqlalchemy import delete, func, inspect, select, update
 from sqlalchemy.orm import Session
 from pydantic import TypeAdapter
 
 from app.core.errors import BusinessValidationError
 from app.core.cache import cached
 from app.core.config import get_settings
-from app.modules.ai.model import AIConversation, AIConversationState, AIMessage, AIQueryLog
+from app.modules.ai.model import AIAgentTask, AIPurchaseDraftConfirmation, AIConversation, AIConversationState, AIMessage, AIQueryLog
 from app.modules.ai.schema import AIChatRequest, AIQueryTrace, AIHistorySnapshot, AIMessageSnapshot
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
@@ -121,6 +121,33 @@ def save_query_state(
 def delete_conversation(db: Session, user: User, conversation_id: int) -> None:
     """删除当前用户自己的会话及其消息。"""
     conversation = get_owned_conversation(db, user, conversation_id)
+    # 取消任务并提升版本号，使持有旧租约的运行者无法覆盖删除状态。
+    tasks = list(db.scalars(select(AIAgentTask).where(AIAgentTask.user_id == user.id,
+        AIAgentTask.status.in_(("RUNNING", "WAITING_INPUT"))).with_for_update()).all())
+    for task in tasks:
+        if (task.payload.get("chat") or {}).get("conversation_id") != conversation.id:
+            continue
+        task.status = "CANCELLED"
+        task.revision += 1
+        task.reply = "会话已删除，任务已取消。"
+        task.payload = {**task.payload, "chat": None,
+                        "memory_state": {**(task.payload.get("memory_state") or {}), "pending": None}}
+        from app.modules.task_queue.model import TaskExecution, TaskResourceLock
+        executions = list(db.scalars(select(TaskExecution).where(TaskExecution.business_id == task.id,
+            TaskExecution.task_type == "agent.run", TaskExecution.actor_id == user.id,
+            TaskExecution.status.in_(("QUEUED", "RUNNING", "RETRYING"))).with_for_update()).all())
+        for execution in executions:
+            execution.status = "CANCELLED"
+            execution.fencing_token += 1
+            execution.lease_until = None
+            db.execute(delete(TaskResourceLock).where(TaskResourceLock.execution_id == execution.id))
+    confirmations = db.scalars(select(AIPurchaseDraftConfirmation).where(
+        AIPurchaseDraftConfirmation.user_id == user.id,
+        AIPurchaseDraftConfirmation.status == "PENDING",
+        func.json_contains(AIPurchaseDraftConfirmation.evidence,
+                           func.json_object("conversation_id", conversation.id)) == 1).with_for_update()).all()
+    for confirmation in confirmations:
+        confirmation.status = "CANCELLED"
     if conversation_state_enabled(db):
         db.execute(delete(AIConversationState).where(AIConversationState.conversation_id == conversation.id))
     if query_log_enabled(db):

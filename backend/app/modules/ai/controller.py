@@ -37,6 +37,8 @@ from app.modules.ai.schema import (
     TaskContinue,
     TaskCreate,
     TaskRead,
+    AgentTaskPage,
+    AIPurchaseDraftPatch,
     Text2SQLRequest,
     Text2SQLResponse,
     ToolCall,
@@ -91,6 +93,21 @@ async def agent_task_create(data: TaskCreate, db: Session = Depends(get_db),
                             user: User = Depends(get_current_user)):
     """按用户目标运行只读工具循环，返回任务 ID、状态、公开轨迹和来源。"""
     return await agent_runtime.create_task(db, user, data)
+
+
+@router.get("/agent/tasks", response_model=AgentTaskPage, summary="分页查询本人 Agent 任务")
+def agent_task_list(page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100),
+                    status: str | None = Query(default=None, pattern="^(RUNNING|WAITING_INPUT|SUCCEEDED|FAILED|CANCELLED)$"),
+                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return agent_runtime.list_tasks(db, user, page=page, page_size=page_size, status=status)
+
+
+@router.get("/agent/tasks/{task_id}/export", summary="导出本人且当前仍可访问的任务结果")
+def agent_task_export(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from fastapi.responses import Response
+    content = agent_runtime.export_task_csv(db, user, task_id)
+    return Response(content=content, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="agent-task-{task_id}.csv"'})
 
 
 @router.get("/agent/tasks/{task_id}", response_model=TaskRead, summary="查询本人 Agent 任务")
@@ -159,7 +176,18 @@ async def purchase_request_draft_preview(
 ) -> AIPurchaseDraftPreview:
     """只返回候选字段；不写入申请、不提交审批。"""
 
-    return await drafts_service.propose_purchase_request_draft(db, user, data.question)
+    return await drafts_service.propose_purchase_request_draft(db, user, data.question, conversation_id=data.conversation_id)
+
+
+@router.patch("/purchase-request-draft/{confirmation_id}", response_model=AIPurchaseDraftPreview,
+              summary="修改草稿预览并生成新的待确认版本")
+def purchase_request_draft_patch(confirmation_id: str, data: AIPurchaseDraftPatch,
+                                 db: Session = Depends(get_db),
+                                 user: User = Depends(require_permission("procurement.requests.write"))):
+    if confirmation_id != data.confirmation_id:
+        from app.core.errors import BusinessValidationError
+        raise BusinessValidationError("预览编号不匹配")
+    return purchase_draft_confirmations.patch_purchase_draft(db, user, data)
 
 
 @router.post("/purchase-request-draft/confirm", response_model=PurchaseRequestRead, summary="确认指定预览并创建采购申请草稿")

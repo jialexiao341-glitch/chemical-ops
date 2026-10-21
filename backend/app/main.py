@@ -58,6 +58,7 @@ from app.modules.jobs.controller import router as jobs_router
 from app.modules.jobs.service import run_scheduled_alert_scan
 from app.modules.dashboard.controller import router as dashboard_router
 from app.modules.ai.controller import router as ai_router
+from app.modules.ai.lifecycle import cleanup_expired_ai_records
 from app.modules.insights.controller import router as insights_router
 from app.modules.monitoring.controller import router as monitoring_router
 from app.modules.system.controller import auth_router, router as system_router
@@ -67,11 +68,17 @@ settings = get_settings()
 LOGGER = logging.getLogger("chemicalops.api")
 
 
+def _cleanup_ai_records() -> dict[str, int]:
+    with SessionLocal() as db:
+        return cleanup_expired_ai_records(db)
+
+
 async def _idempotency_cleanup_scheduler() -> None:
     while True:
         await asyncio.sleep(3600)
         try:
             await asyncio.to_thread(cleanup_expired_records)
+            await asyncio.to_thread(_cleanup_ai_records)
         except Exception:
             LOGGER.exception("幂等过期记录清理失败")
 

@@ -95,25 +95,6 @@ workflow.rfq_no 是从用户询价语境提取的原始条件，与产品名称/
 """
 
 
-def _rfq_condition(question: str) -> str | None:
-    # 识别语义位置，不绑定 RFQ/EVAL 前缀；不把孤立编号猜成询价。
-    token = r"([A-Za-z0-9][A-Za-z0-9_.:/-]{1,31})(?![A-Za-z0-9_.:/-])"
-    patterns = (
-        r"询价(?:单|编号|号)\s*[:：]?\s*" + token,
-        r"在\s*" + token + r"\s*(?:的)?(?:有效最新|最新|有效)?报价",
-        r"询价(?:编号|单号)\s*[:：]?\s*[‘“\"]?([^\s，。；‘’“”\"]{1,32}?)(?:的报价|[’”\"])",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, question)
-        if match:
-            return match.group(1)
-    # “比较产品编码报价”仍可能指产品；仅组合库存查询后的独立编号归入询价条件。
-    match = re.search(r"(?:比较|比对|和|及|与)\s*" + token + r"\s*(?:的)?(?:有效最新|最新|有效)?报价", question)
-    if match and any(word in question[:match.start()] for word in ("库存", "现货", "可用量")):
-        return match.group(1)
-    return None
-
-
 @dataclass
 class RunState:
     """单轮运行状态；本轮证据必须重新查询，不能把历史客户端数据当授权事实。"""
@@ -300,6 +281,63 @@ def get_task(db: Session, user: User, task_id: str) -> TaskRead:
         conversation_id=(task.payload.get("chat") or {}).get("conversation_id"))
 
 
+def list_tasks(db: Session, user: User, *, page: int = 1, page_size: int = 20, status: str | None = None):
+    """分页返回本人任务；逐条重验权限，失效证据以清空内容呈现。"""
+    from sqlalchemy import func
+    from app.modules.ai.schema import AgentTaskPage
+    page_size = min(100, max(1, page_size))
+    conditions = [AIAgentTask.user_id == user.id]
+    if status:
+        conditions.append(AIAgentTask.status == status)
+    total = db.scalar(select(func.count(AIAgentTask.id)).where(*conditions)) or 0
+    rows = list(db.scalars(select(AIAgentTask).where(*conditions)
+        .order_by(AIAgentTask.updated_at.desc(), AIAgentTask.id.desc())
+        .offset((max(1, page) - 1) * page_size).limit(page_size)).all())
+    items = []
+    for task in rows:
+        try:
+            _check_trace_access(db, user, task.payload.get("trace", []))
+            items.append(TaskRead(id=task.id, status=task.status, revision=task.revision, reply=task.reply,
+                can_select_all_products=(task.payload.get('memory_state') or {}).get('goal', {}).get('intent') == 'inventory_query',
+                error_code=task.error_code, messages=task.payload.get("messages", []), trace=task.payload.get("trace", []),
+                conversation_id=(task.payload.get("chat") or {}).get("conversation_id")))
+        except (AuthorizationError, ResourceNotFoundError, BusinessValidationError):
+            items.append(TaskRead(id=task.id, status=task.status, revision=task.revision,
+                reply="当前权限或数据范围已变化，任务结果不可访问。", error_code="RESULT_UNAVAILABLE",
+                messages=[], trace=[], conversation_id=None))
+    return AgentTaskPage(items=items, total=total, page=max(1, page), page_size=page_size)
+
+
+def _csv_cell(value) -> str:
+    import json
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    # Excel/Calc interpret formula prefixes after leading control/space characters.
+    first = text.lstrip("\ufeff\t\r\n ")[:1]
+    return "'" + text if first in {"=", "+", "-", "@"} else text
+
+
+def export_task_csv(db: Session, user: User, task_id: str) -> str:
+    """按任务所有者和当前证据范围导出有限 CSV，防止公式执行。"""
+    import csv
+    import io
+    task = _load(db, user, task_id)
+    _check_trace_access(db, user, task.payload.get("trace", []))
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\r\n")
+    writer.writerow(["任务编号", "步骤", "动作", "工具", "状态", "参数", "结果"])
+    count = 0
+    for entry in task.payload.get("trace", []):
+        if entry.get("action") != "call_tool":
+            continue
+        if count >= 1000:
+            break
+        writer.writerow([_csv_cell(task.id), _csv_cell(entry.get("step")), _csv_cell(entry.get("action")),
+                         _csv_cell(entry.get("tool", "")), _csv_cell(entry.get("status", "")),
+                         _csv_cell(entry.get("arguments", {})), _csv_cell(entry.get("result", {}))])
+        count += 1
+    return "\ufeff" + output.getvalue()
+
+
 def _persist(db: Session, user: User, state: RunState) -> None:
     """用版本号和 RUNNING 状态更新快照，防重复继续或取消后的旧运行覆盖状态。"""
     memory = _sync_memory_state(state)
@@ -368,9 +406,18 @@ def _assert_running(db: Session, user: User, state: RunState) -> None:
         raise TaskInterrupted()
 
 
+def _decision_messages(messages: list[str], *, history_count: int = 6,
+                       old_message_limit: int = 1200) -> list[str]:
+    """限制送入模型的冗余对话；完整目标、待选项和证据仍由结构化状态保留。"""
+    recent = messages[-history_count:]
+    if len(recent) <= 1:
+        return recent
+    return [*(message[:old_message_limit] for message in recent[:-1]), recent[-1]]
+
+
 async def _decide(state: RunState, catalog: list[dict], settings: Settings):
     """复用模型 HTTP 超时/错误处理，严格解析一种下一步动作，不解析自由文本指令。"""
-    context = json.dumps({"messages": state.messages,
+    context = json.dumps({"messages": _decision_messages(state.messages),
         "tools": [{k: item[k] for k in ("name", "description", "input_schema")} for item in catalog],
         "current_turn_steps": state.trace[state.turn_start:],
         "recent_task_memory": state.memory_state,
@@ -497,17 +544,11 @@ def _resume_action(state: RunState) -> CallAction | FinishAction | None:
         previous = next((e["arguments"] for e in reversed(state.trace[:state.turn_start])
                          if e.get("tool") == name and e.get("status") == "SUCCEEDED"), {})
         args = {**previous, "product_id": state.verified_product}
-        label = "库存" if name == "inventory.query_available" else "报价"
-        question = state.memory_state.get("goal", {}).get("description") or state.messages[0]
-        limit = re.search(label + r"[^，。；]{0,20}?(?:返回|显示)\s*(\d+)\s*条", question)
-        if limit:
-            args["limit"] = min(int(limit.group(1)), 100)
         parsed_limit = (state.memory_state.get("understanding") or {}).get("slots", {}).get("limit")
         if parsed_limit is not None:
             args["limit"] = parsed_limit
-        warehouse = re.search(r"仓库\s*(\d+)", question) if label == "库存" else None
-        if warehouse:
-            args["warehouse_id"] = int(warehouse.group(1))
+        if name == "inventory.query_available" and state.memory_state.get("slots", {}).get("warehouse"):
+            args["warehouse_id"] = state.memory_state["slots"]["warehouse"]
         return args
     if state.workflow.all_products and state.workflow.verified_products:
         completed_products = {e['result']['product_id'] for e in entries if e.get('tool') == 'inventory.query_available'}
@@ -635,6 +676,16 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             current.memory_state["goal"]["intent"] = decision.agent_goal
             if decision.slots.rfq_no:
                 current.workflow.rfq_no = decision.slots.rfq_no
+            if decision.slots.warehouse_keyword:
+                visible = tools.accessible_warehouse_ids(db, user)
+                query = select(Warehouse.id).where(Warehouse.status == "ACTIVE",
+                    Warehouse.warehouse_name == decision.slots.warehouse_keyword)
+                if visible is not None:
+                    query = query.where(Warehouse.id.in_(visible))
+                matches = list(db.scalars(query))
+                if len(matches) != 1:
+                    raise BusinessValidationError("请提供当前可访问仓库的准确名称")
+                current.memory_state.setdefault("slots", {})["warehouse"] = matches[0]
             current.memory_state["understanding_applied_turn"] = len(current.messages)
         current.decisions += 1
         metrics.increment("agent_steps", labels={"step": "plan"})
@@ -785,7 +836,7 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
     task_id = uuid4().hex
     state = RunState(task_id, 0, [data.question], [], 0, memory_state=_new_memory_state(data.question),
                      llm_token_limit=get_settings().agent_max_total_tokens,
-                     workflow=Workflow(rfq_no=_rfq_condition(data.question)))
+                     workflow=Workflow())
     if data.route_token:
         decision = routing.read_ticket(data.route_token, user.id, data.question, getattr(data, "conversation_id", None))
         if decision.route != "agent":
@@ -851,9 +902,10 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
             raise BusinessValidationError("选择必须来自本任务已返回的候选")
         if "workflow" in task.payload and pending is None:
             raise BusinessValidationError("当前没有待选择的候选")
-        if pending and (pending.entity != ("product" if key == "product_id" else "rfq_item") or
-                        chosen not in {row[key] for row in pending.candidates} or pending.revision != task.revision):
-            raise BusinessValidationError("选择必须来自本轮待确认的候选")
+        if pending:
+            from app.modules.ai.candidate_resolution import validate_selection
+            validate_selection(pending, entity="product" if key == "product_id" else "rfq_item",
+                               selected_id=chosen, revision=task.revision)
     product = None if data.all_products else product_choice or task.payload.get("selected_product")
     rfq_item = rfq_choice or task.payload.get("selected_rfq_item")
     if product_choice is not None and product_choice != task.payload.get("selected_product"):
@@ -865,7 +917,6 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
             workflow.rfq_no = chosen_row["rfq_no"]
     else:
         workflow.resume_selection = False
-        workflow.rfq_no = _rfq_condition(data.question) or workflow.rfq_no
     workflow.pending = None
     memory = json.loads(json.dumps(task.payload.get("memory_state") or _new_memory_state(task.payload["messages"][0]), ensure_ascii=False))
     memory["pending"] = None

@@ -25,7 +25,7 @@ def test_preview_endpoint_is_available_to_authorized_user_without_creating_a_req
     from app.modules.ai import controller
     from app.modules.ai.schema import AIPurchaseDraftPreview
 
-    async def fake_proposal(*_args):
+    async def fake_proposal(*_args, **_kwargs):
         return AIPurchaseDraftPreview(
             draft={"purpose": "实验", "items": [{"requested_name": "乙醇", "quantity": "12", "unit_id": 3}]},
             display_items=[{"requested_name": "乙醇", "quantity": "12", "unit_name": "升"}],
@@ -68,6 +68,8 @@ class _Database:
 
 
 def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monkeypatch) -> None:
+    from app.modules.ai import conversation_store
+    monkeypatch.setattr(conversation_store, 'get_owned_conversation', lambda *_args: object())
     async def fake_chat(request, _settings, *, attachment_context, response_format):
         assert "请按提供的规则整理字段" in request.messages[0].content
         assert "采购乙醇 12 升，用于实验" in attachment_context[0]
@@ -109,6 +111,7 @@ def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monk
             database,
             SimpleNamespace(id=5, department_id=2, status="ACTIVE"),
             "采购乙醇 12 升，用于实验",
+            conversation_id=77,
         )
     )
 
@@ -121,6 +124,7 @@ def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monk
     assert preview.confirmation_id and preview.preview_version == 1
     assert database.added[0].object_versions["products"]["9"]["version_no"] == 3
     assert database.added[0].evidence == preview.evidence
+    assert {"type": "conversation", "conversation_id": 77} in preview.evidence
 
 
 def test_proposal_returns_clarification_without_issuing_confirmation(monkeypatch) -> None:

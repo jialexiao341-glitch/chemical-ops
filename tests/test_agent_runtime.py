@@ -248,6 +248,17 @@ def test_context_and_time_budget_stop(task_db, model_script, monkeypatch):
     assert start(task_db).error_code == 'TASK_TIMEOUT'
 
 
+def test_decision_history_budget_keeps_latest_request_and_structured_state():
+    from app.modules.ai.agent_runtime import _decision_messages
+    messages = [f'历史轮次 {index} ' + ('x' * 2000) for index in range(20)]
+    bounded = _decision_messages(messages)
+    assert len(bounded) == 6
+    assert all(len(message) <= 1200 for message in bounded[:-1])
+    assert bounded[-1] == messages[-1]
+    # Candidate and original goal are held separately in RunState.memory_state/workflow;
+    # compaction only changes this ephemeral model input, never the saved task.
+
+
 def test_unknown_write_tools_cannot_create_business_data(task_db, model_script):
     """注入的写工具与 SQL 名称只形成失败记录，不触发核心业务写入。"""
     actions, _ = model_script
