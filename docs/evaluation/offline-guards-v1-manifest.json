@@ -1,0 +1,25 @@
+{
+  "suite": "offline-guards-v1",
+  "numeric_cases": "docs/evaluation/offline-numeric-associations-v1.json",
+  "numeric_case_count": 12,
+  "business_case_count": 120,
+  "quality_scope": "deterministic_no_llm_no_writes",
+  "files": [
+    {
+      "sha256": "3ad419d5c13b96da773706a1d9353272289946d07ac93748b99bf94b08673392",
+      "path": "docs/evaluation/offline-numeric-associations-v1.json"
+    },
+    {
+      "sha256": "f5d68ac92fed35f744b73eeef5f03a5b65066c3197f37cee6d183441fc6a9034",
+      "path": "docs/evaluation/agent-business-v1-cases.json"
+    },
+    {
+      "sha256": "070c94ce942d3e5eb906e4fddb6ae859cdfde721a5586555885b5fb4221ed596",
+      "path": "scripts/agent_business_cases.py"
+    },
+    {
+      "sha256": "f58611b467fdc0ebe751bba8c8bf6faff71227ae1830489d443e3f0830c00c58",
+      "path": "scripts/agent_evaluation_data.py"
+    }
+  ]
+}

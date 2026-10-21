@@ -1,0 +1,14 @@
+[
+  {"id":"literal-valid","answer":"金额 1200 CNY","evidence":{"rows":[{"metric_value":"1200.00"}],"unit":"CNY"},"expected":true},
+  {"id":"literal-invented","answer":"金额 1201 CNY","evidence":{"rows":[{"metric_value":"1200.00"}],"unit":"CNY"},"expected":false},
+  {"id":"currency-invented","answer":"金额 1200 USD","evidence":{"rows":[{"metric_value":"1200.00"}],"unit":"CNY"},"expected":false},
+  {"id":"scale-invented","answer":"金额 1.2 万元","evidence":{"rows":[{"metric_value":"1200.00"}],"unit":"CNY"},"expected":false},
+  {"id":"chinese-number","answer":"金额一千二百元","evidence":{"rows":[{"metric_value":"1200.00"}],"unit":"CNY"},"expected":false},
+  {"id":"metadata-not-metric","answer":"金额：2 CNY","evidence":{"rows":[{"amount":1200}],"row_count":2,"render_columns":[{"key":"amount","label":"金额"}],"unit":"CNY"},"expected":false},
+  {"id":"metrics-swapped","answer":"金额：3；数量：1200","evidence":{"rows":[{"amount":1200,"quantity":3}],"render_columns":[{"key":"amount","label":"金额"},{"key":"quantity","label":"数量"}]},"expected":false},
+  {"id":"metrics-correct","answer":"金额：1200；数量：3","evidence":{"rows":[{"amount":1200,"quantity":3}],"render_columns":[{"key":"amount","label":"金额"},{"key":"quantity","label":"数量"}]},"expected":true},
+  {"id":"entity-swapped","answer":"甲公司 金额：300 USD；乙公司 金额：1200 CNY","evidence":{"rows":[{"supplier":"甲公司","amount":1200,"currency":"CNY"},{"supplier":"乙公司","amount":300,"currency":"USD"}],"render_columns":[{"key":"amount","label":"金额"}]},"expected":false},
+  {"id":"row-units-swapped","answer":"甲公司 金额：1200 USD；乙公司 金额：300 CNY","evidence":{"rows":[{"supplier":"甲公司","amount":1200,"currency":"CNY"},{"supplier":"乙公司","amount":300,"currency":"USD"}],"render_columns":[{"key":"amount","label":"金额"}]},"expected":false},
+  {"id":"entity-unit-correct","answer":"甲公司 金额：1,200.00 CNY；乙公司 金额：300 USD","evidence":{"rows":[{"supplier":"甲公司","amount":1200,"currency":"CNY"},{"supplier":"乙公司","amount":300,"currency":"USD"}],"render_columns":[{"key":"amount","label":"金额"}]},"expected":true},
+  {"id":"unknown-natural-language-association","answer":"采购订单总数：3；未关闭异常：12","evidence":{"overview":{"purchase_orders_total":12,"open_exceptions":3}},"expected":false}
+]

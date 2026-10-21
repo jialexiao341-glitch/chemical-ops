@@ -172,8 +172,6 @@ class Settings(BaseSettings):
     agent_context_max_chars: int = Field(default=18000, ge=2000, le=18000)
     agent_max_total_tokens: int = Field(default=65536, ge=1024, le=1_000_000)
     agent_allow_write_tools: bool = False
-    agent_save_input_content: bool = False
-    agent_save_output_content: bool = False
 
     # 文档知识库向量检索：Qdrant 存章节向量，embeddings 走 OpenAI 兼容接口（本地 LM Studio）。
     qdrant_host: str = "127.0.0.1"

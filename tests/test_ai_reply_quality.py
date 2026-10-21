@@ -52,7 +52,7 @@ def test_rewrite_answer_uses_llm_json(monkeypatch: pytest.MonkeyPatch):
         captured["request"] = request
         captured["response_format"] = kwargs.get("response_format")
         captured["system_prompt"] = kwargs.get("system_prompt")
-        return _fake_response('{"answer": "本月华东化工采购金额最高，为 12000.00 元（CNY）。"}')
+        return _fake_response('{"answer": "华东化工 金额：12000.00 CNY；北方试剂 金额：8000.00 CNY"}')
 
     monkeypatch.setattr(service, "chat", fake_chat)
 
@@ -243,7 +243,7 @@ def test_result_rewrite_prompt_requires_answering_original_question():
 def test_system_prompt_has_style_and_readonly_rules():
     assert "先给结论" in agent_prompt.SYSTEM_PROMPT
     assert "不要编造" in agent_prompt.SYSTEM_PROMPT
-    assert "不能创建或修改业务数据" in agent_prompt.SYSTEM_PROMPT
+    assert "模型不能直接写入业务数据" in agent_prompt.SYSTEM_PROMPT
 
 
 def test_plan_prompt_includes_today_date():
