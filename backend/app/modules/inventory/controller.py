@@ -126,10 +126,12 @@ def create_issue_request(data: InventoryIssueRequestCreate, db: Session = Depend
 
 
 @router.get("/issue-request-options", response_model=list[InventoryIssueOptionRead], summary="查询可申请领用的库存选项")
-def list_issue_request_options(db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.issue.read"))) -> list[InventoryIssueOptionRead]:
+def list_issue_request_options(keyword: str | None = Query(default=None, max_length=200),
+                               page: int = Query(default=1, ge=1), page_size: int = Query(default=100, ge=1, le=100),
+                               db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.issue.read"))) -> list[InventoryIssueOptionRead]:
     """仅返回领用申请所需的可选库存信息。"""
 
-    return service.list_issue_request_options(db, user)
+    return service.list_issue_request_options(db, user, keyword=keyword, page=page, page_size=page_size)
 
 
 @router.get("/issue-requests", response_model=InventoryIssueRequestPage, summary="查询库存领用申请")

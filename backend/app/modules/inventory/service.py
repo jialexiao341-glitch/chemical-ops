@@ -371,7 +371,8 @@ def list_issue_requests(db: Session, user: User, *, status: str | None, page: in
     return crud.list_issue_requests(db, applicant_id=applicant_id, warehouse_ids=warehouse_ids, status=status, page=page, page_size=page_size)
 
 
-def list_issue_request_options(db: Session, user: User) -> list[dict]:
+def list_issue_request_options(db: Session, user: User, *, keyword: str | None = None,
+                               page: int = 1, page_size: int = 100) -> list[dict]:
     """Return the minimum available-stock details needed to create an issue request."""
 
     warehouse_ids = accessible_warehouse_ids(db, user)
@@ -403,8 +404,11 @@ def list_issue_request_options(db: Session, user: User) -> list[dict]:
             Warehouse.status == "ACTIVE",
             WarehouseLocation.status == "ACTIVE",
             InventoryBatch.status == "ACTIVE",
+              ((Product.product_name.like(f"%{keyword.strip()}%")) |
+               (InventoryBatch.batch_no.like(f"%{keyword.strip()}%"))) if keyword else True,
         )
-        .order_by(Product.product_name, InventoryBatch.batch_no, Warehouse.warehouse_name)
+          .order_by(Product.product_name, InventoryBatch.batch_no, Warehouse.warehouse_name, InventoryBalance.id)
+          .offset((max(1, page) - 1) * min(100, max(1, page_size))).limit(min(100, max(1, page_size)))
     ).mappings().all()
     return [dict(row) for row in rows]
 

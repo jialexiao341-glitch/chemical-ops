@@ -27,8 +27,10 @@ def create_fifo_outbound(data: FifoOutboundCreate, db: Session = Depends(get_db)
 
 
 @router.get("/expiry-alerts", response_model=list[ExpiryAlertRead], summary="查询库存有效期预警")
-def list_expiry_alerts(days: int = Query(default=30, ge=0, le=3650), db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.expiry.read"))) -> list[ExpiryAlertRead]:
+def list_expiry_alerts(days: int = Query(default=30, ge=0, le=3650),
+                       page: int = Query(default=1, ge=1), page_size: int = Query(default=100, ge=1, le=100),
+                       db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.expiry.read"))) -> list[ExpiryAlertRead]:
     """查询未来指定天数内到期且仍有库存的批次。"""
     from app.modules.inventory.service import accessible_warehouse_ids
-    rows = service.list_expiry_alerts(db, days=days, warehouse_ids=accessible_warehouse_ids(db, user))
+    rows = service.list_expiry_alerts(db, days=days, warehouse_ids=accessible_warehouse_ids(db, user), page=page, page_size=page_size)
     return [ExpiryAlertRead(product_id=batch.product_id, batch_id=batch.id, batch_no=batch.batch_no, warehouse_id=balance.warehouse_id, location_id=balance.location_id, quantity=balance.quantity, expiry_date=batch.expiry_date, days_remaining=days_remaining, alert_level=level) for batch, balance, days_remaining, level in rows]

@@ -367,8 +367,12 @@ def create_shipment_notice(db: Session, user: User, data: SupplierShipmentCreate
 def _shipment_read(db: Session, delivery_id: int) -> SupplierShipmentRead:
     delivery = db.scalar(select(Delivery).options(selectinload(Delivery.items)).where(Delivery.id == delivery_id))
     order = db.get(PurchaseOrder, delivery.po_id)
+    return _shipment_row(delivery, order.po_no)
+
+
+def _shipment_row(delivery: Delivery, po_no: str) -> SupplierShipmentRead:
     return SupplierShipmentRead(
-        id=delivery.id, delivery_no=delivery.delivery_no, po_id=order.id, po_no=order.po_no,
+        id=delivery.id, delivery_no=delivery.delivery_no, po_id=delivery.po_id, po_no=po_no,
         shipment_date=delivery.shipment_date, expected_arrival_date=delivery.expected_arrival_date,
         logistics_company=delivery.logistics_company, tracking_no=delivery.tracking_no,
         status=delivery.status, note=delivery.note, created_at=delivery.created_at, items=delivery.items,
@@ -385,10 +389,11 @@ def list_shipment_notices(db: Session, user: User, *, keyword: str | None, statu
         conditions.append(Delivery.status == status)
     total = db.scalar(select(func.count(Delivery.id)).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(*conditions)) or 0
     rows = db.execute(
-        select(Delivery.id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(*conditions)
+        select(Delivery, PurchaseOrder.po_no).options(selectinload(Delivery.items))
+        .join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(*conditions)
         .order_by(Delivery.id.desc()).offset((page - 1) * page_size).limit(page_size)
     ).all()
-    return SupplierShipmentPage(items=[_shipment_read(db, row.id) for row in rows], total=total, page=page, page_size=page_size)
+    return SupplierShipmentPage(items=[_shipment_row(delivery, po_no) for delivery, po_no in rows], total=total, page=page, page_size=page_size)
 
 
 def create_quality_document(db: Session, user: User, *, po_id: int, po_item_id: int | None, document_type: str, note: str | None, file_name: str, mime_type: str, content: bytes):
@@ -415,7 +420,10 @@ def create_quality_document(db: Session, user: User, *, po_id: int, po_item_id: 
 
 def _quality_document_read(db: Session, document_id: int) -> SupplierQualityDocumentRead:
     row = db.execute(select(SupplierQualityDocument, PurchaseOrder.po_no, SysFile.file_name).join(PurchaseOrder, PurchaseOrder.id == SupplierQualityDocument.po_id).join(SysFile, SysFile.id == SupplierQualityDocument.file_id).where(SupplierQualityDocument.id == document_id)).first()
-    document, po_no, file_name = row
+    return _quality_document_row(*row)
+
+
+def _quality_document_row(document: SupplierQualityDocument, po_no: str, file_name: str) -> SupplierQualityDocumentRead:
     return SupplierQualityDocumentRead(id=document.id, document_no=document.document_no, po_id=document.po_id, po_no=po_no, po_item_id=document.po_item_id, file_id=document.file_id, file_name=file_name, document_type=document.document_type, status=document.status, note=document.note, submitted_at=document.submitted_at, review_note=document.review_note)
 
 
@@ -428,8 +436,8 @@ def list_quality_documents(db: Session, user: User, *, keyword: str | None, stat
         pattern = f"%{keyword.strip()}%"
         conditions.append((SupplierQualityDocument.document_no.like(pattern)) | (PurchaseOrder.po_no.like(pattern)) | (SysFile.file_name.like(pattern)))
     total = db.scalar(select(func.count(SupplierQualityDocument.id)).join(PurchaseOrder, PurchaseOrder.id == SupplierQualityDocument.po_id).join(SysFile, SysFile.id == SupplierQualityDocument.file_id).where(*conditions)) or 0
-    ids = db.scalars(select(SupplierQualityDocument.id).join(PurchaseOrder, PurchaseOrder.id == SupplierQualityDocument.po_id).join(SysFile, SysFile.id == SupplierQualityDocument.file_id).where(*conditions).order_by(SupplierQualityDocument.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
-    return SupplierQualityDocumentPage(items=[_quality_document_read(db, document_id) for document_id in ids], total=total, page=page, page_size=page_size)
+    rows = db.execute(select(SupplierQualityDocument, PurchaseOrder.po_no, SysFile.file_name).join(PurchaseOrder, PurchaseOrder.id == SupplierQualityDocument.po_id).join(SysFile, SysFile.id == SupplierQualityDocument.file_id).where(*conditions).order_by(SupplierQualityDocument.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    return SupplierQualityDocumentPage(items=[_quality_document_row(*row) for row in rows], total=total, page=page, page_size=page_size)
 
 
 def get_quality_document_file(db: Session, user: User, document_id: int):
