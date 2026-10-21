@@ -301,12 +301,18 @@ def get_latest_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparis
 def select_quote(db: Session, user: User, rfq_id: int, data: QuoteSelection) -> RFQ:
     """确认中选报价，关闭询价单并拒绝其他未中选报价。"""
 
+    # 固定锁序：询价单 -> 比价单；锁定读取刷新已有 identity map。
+    db.scalar(select(RFQ).where(RFQ.id == rfq_id).with_for_update().execution_options(populate_existing=True))
     rfq = get_rfq(db, user, rfq_id)
-    comparison = crud.get_comparison(db, rfq.id, data.comparison_id)
+    if rfq.status == "CLOSED":
+        raise DuplicateResourceError("询价单已经完成定标，不能重复确认")
+    comparison = db.scalar(select(QuoteComparison).where(
+        QuoteComparison.id == data.comparison_id, QuoteComparison.rfq_id == rfq.id,
+    ).with_for_update().execution_options(populate_existing=True))
     if comparison is None:
         raise ResourceNotFoundError("比价结果不存在")
     if comparison.status != "DRAFT":
-        raise BusinessValidationError("该比价结果已经确认或取消")
+        raise DuplicateResourceError("该比价结果已经确认或取消")
     quote = crud.get_quote(db, data.quote_id)
     if quote is None or quote.rfq_id != rfq.id:
         raise BusinessValidationError("中选报价不属于当前询价单")

@@ -5,8 +5,9 @@ from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
-from app.core.errors import BusinessValidationError, ResourceNotFoundError
+from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.purchase_orders.scope import ORDER_READ_ALL_ROLES, order_read_condition
 from app.modules.purchase_orders import crud
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderApproval, PurchaseOrderEvent, PurchaseOrderItem
@@ -18,7 +19,7 @@ from app.modules.purchase_orders.schema import (
 )
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem
 from app.modules.purchase_requests.service import get_request as get_scoped_purchase_request
-from app.modules.rfqs.model import RFQItem, SupplierQuoteItem
+from app.modules.rfqs.model import RFQ, RFQItem, QuoteComparison, SupplierQuoteItem
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_role_codes
 from app.modules.system.model import User
@@ -62,7 +63,11 @@ def _add_event(db: Session, order: PurchaseOrder, user_id: int, event_type: str,
 def _validate_source(db: Session, user: User, data: PurchaseOrderCreate):
     """校验比价结果、中选报价和产品明细可以生成采购订单。"""
 
-    comparison = crud.get_comparison(db, data.comparison_id)
+    rfq_id = db.scalar(select(QuoteComparison.rfq_id).where(QuoteComparison.id == data.comparison_id))
+    if rfq_id is not None:
+        db.scalar(select(RFQ).where(RFQ.id == rfq_id).with_for_update())
+    comparison = db.scalar(select(QuoteComparison).where(QuoteComparison.id == data.comparison_id)
+                           .with_for_update().execution_options(populate_existing=True))
     if comparison is None:
         raise ResourceNotFoundError("报价比较结果不存在")
     if comparison.status != "CONFIRMED" or comparison.selected_quote_id != data.quote_id:
@@ -99,9 +104,9 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate) -> Purchase
     """根据已确认的中选报价生成采购订单草稿。"""
 
     comparison, quote, source_request, rfq_items, quote_items = _validate_source(db, user, data)
-    existing_order = db.scalar(select(PurchaseOrder.id).where(PurchaseOrder.source_quote_id == quote.id))
+    existing_order = db.scalar(select(PurchaseOrder.id).where(PurchaseOrder.source_comparison_id == comparison.id).with_for_update())
     if existing_order is not None:
-        raise BusinessValidationError("该中选报价已经生成采购订单，不能重复下单")
+        raise DuplicateResourceError("该比价结果已经生成采购订单，不能重复下单")
     order = PurchaseOrder(
         po_no=f"TEMP-PO-{user.id}-{int(_now().timestamp())}",
         supplier_id=quote.supplier_id,
@@ -139,7 +144,13 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate) -> Purchase
         )
     order.order_amount = total
     db.add(order)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        if "uk_purchase_order_comparison" in str(exc.orig):
+            raise DuplicateResourceError("该比价结果已经生成采购订单，不能重复下单") from exc
+        raise
     order.po_no = f"PO{date.today():%Y%m%d}{order.id:06d}"
     _add_event(db, order, user.id, "CREATED", None, "DRAFT", "由中选报价生成采购订单草稿")
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary="根据中选报价生成采购订单", result_status="SUCCESS")

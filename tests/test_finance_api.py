@@ -92,6 +92,14 @@ def test_finance_full_settlement_flow(client: TestClient, db_session, demo_passw
     settlement = client.post("/api/v1/finance/settlements", headers=clerk, json={"reconciliation_id": reconciliation_id})
     assert settlement.status_code == 201, settlement.text
     settlement_id = settlement.json()["id"]
+    duplicate = client.post("/api/v1/finance/settlements", headers=clerk, json={"reconciliation_id": reconciliation_id})
+    assert duplicate.status_code == 409, duplicate.text
+    cancelled = client.post(f"/api/v1/finance/settlements/{settlement_id}/cancel", headers=clerk, json={"reason": "核对后重建"})
+    assert cancelled.status_code == 200, cancelled.text
+    rebuilt = client.post("/api/v1/finance/settlements", headers=clerk, json={"reconciliation_id": reconciliation_id})
+    assert rebuilt.status_code == 201, rebuilt.text
+    assert rebuilt.json()["id"] != settlement_id
+    settlement_id = rebuilt.json()["id"]
     confirmed = client.post(f"/api/v1/finance/settlements/{settlement_id}/confirm", headers=manager)
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["status"] == "CONFIRMED"

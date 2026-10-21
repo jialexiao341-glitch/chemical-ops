@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Date, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Computed, JSON, Date, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -94,10 +94,14 @@ class FinanceSettlement(Base):
     """采购结算单。"""
 
     __tablename__ = "finance_settlements"
+    __table_args__ = (UniqueConstraint("active_reconciliation_id", name="uk_finance_settlement_reconciliation"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     settlement_no: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
-    reconciliation_id: Mapped[int] = mapped_column(ForeignKey("finance_reconciliations.id"), nullable=False, unique=True)
+    reconciliation_id: Mapped[int] = mapped_column(ForeignKey("finance_reconciliations.id"), nullable=False)
+    active_reconciliation_id: Mapped[int | None] = mapped_column(
+        Computed("CASE WHEN status <> 'CANCELLED' THEN reconciliation_id ELSE NULL END", persisted=True),
+    )
     po_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.id"), nullable=False)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), nullable=False)
     settlement_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)

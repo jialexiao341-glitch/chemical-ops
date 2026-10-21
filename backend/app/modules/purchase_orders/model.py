@@ -14,6 +14,7 @@ class PurchaseOrder(Base):
     """采购订单主单。"""
 
     __tablename__ = "purchase_orders"
+    __table_args__ = (UniqueConstraint("source_comparison_id", name="uk_purchase_order_comparison"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     po_no: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)

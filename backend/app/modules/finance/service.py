@@ -420,7 +420,10 @@ def create_settlement(db: Session, user: User, data: SettlementCreate) -> Financ
         raise BusinessValidationError("只有已确认且未关闭的对账单可以创建结算单")
     if _sum_payments(db, reconciliation.id, paid_only=True) < reconciliation.total_amount:
         raise BusinessValidationError("实际付款未达到对账应付总额，不能结算")
-    if crud.get_settlement(db, reconciliation.id) is not None:
+    if db.scalar(select(FinanceSettlement.id).where(
+        FinanceSettlement.reconciliation_id == reconciliation.id,
+        FinanceSettlement.status != "CANCELLED",
+    ).with_for_update()) is not None:
         raise DuplicateResourceError("该对账单已经存在结算单")
     settlement = FinanceSettlement(
         settlement_no=f"TEMP-FS-{uuid4().hex[:12]}",
@@ -434,7 +437,13 @@ def create_settlement(db: Session, user: User, data: SettlementCreate) -> Financ
         note=data.note,
     )
     db.add(settlement)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        if "uk_finance_settlement_reconciliation" in str(exc.orig):
+            raise DuplicateResourceError("该对账单已经存在有效结算单") from exc
+        raise
     settlement.settlement_no = f"FS{date.today():%Y%m%d}{settlement.id:06d}"
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="FINANCE_SETTLEMENT", resource_id=settlement.id, request_summary="创建采购结算单", result_status="SUCCESS")
     db.commit()
