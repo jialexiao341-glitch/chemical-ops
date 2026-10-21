@@ -1,6 +1,6 @@
 import type { AgentApi } from '../../../api/ai/agent';
 import { describe, expect, it } from 'vitest';
-import { acceptTask, inventoryProductLabel, inventorySource, inventorySummary, waitingCandidates, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS } from './task-view';
+import { acceptTask, inventoryProductLabel, inventorySource, inventorySummary, waitingCandidates, agentDisplayNumber, primaryTaskResults, agentSourcePreview, TASK_LABELS, TASK_ERROR_HELP } from './task-view';
 
 const waiting: AgentApi.Task = { id: 'a', revision: 2, status: 'WAITING_INPUT', reply: '', error_code: null, messages: [], trace: [
   { step: 1, action: 'call_tool', status: 'SUCCEEDED', result: { tool: 'catalog.search_products', total_rows: 2, truncated: false, rows: [], sources: [] } },
@@ -29,6 +29,15 @@ describe('采购任务状态与来源', () => {
       FAILED: '已停止',
       CANCELLED: '已取消',
     });
+  });
+  it('所有可恢复任务错误码都有行动建议，不只显示通用提示', () => {
+    for (const code of [
+      'INVALID_EVIDENCE', 'INCOMPLETE_TASK', 'REPEATED_TOOL', 'TOOL_ERRORS',
+      'INTENT_MISMATCH', 'TOKEN_BUDGET_EXCEEDED', 'DATABASE_ERROR',
+      'MODEL_SERVICE_ERROR', 'RUNTIME_ERROR',
+    ]) {
+      expect(TASK_ERROR_HELP[code], code).toBeTruthy();
+    }
   });
   it('强制等待只展示最新候选，普通追问不能选择历史候选', () => {
     expect(waitingCandidates(waiting)?.tool).toBe('catalog.search_products');

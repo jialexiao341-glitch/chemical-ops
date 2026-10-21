@@ -123,4 +123,13 @@ export const TASK_ERROR_HELP: Record<string, string> = {
   MODEL_FORMAT_ERROR: '模型返回格式无效。请重新发起；若重复发生，请联系管理员检查模型配置。',
   STEP_LIMIT: '查询步骤达到上限。请明确产品规格及询价编号后重新发起。',
   CONTEXT_LIMIT: '任务内容超过上限。请缩小查询范围后重新发起。',
+  INVALID_EVIDENCE: '模型引用了不存在的证据，任务已停止。请重新发起查询。',
+  INCOMPLETE_TASK: '查询目标尚未全部完成。请补充缺失条件，或分项重新查询。',
+  REPEATED_TOOL: '模型重复调用了相同工具。请补充更明确的产品、仓库或询价条件后重试。',
+  TOOL_ERRORS: '工具参数连续无效。请核对产品、询价编号或缩小查询范围。',
+  INTENT_MISMATCH: '本轮请求与任务目标不一致。请重新描述要查询的库存或报价。',
+  TOKEN_BUDGET_EXCEEDED: '本次任务预算已用完。请缩小范围或分多次查询。',
+  DATABASE_ERROR: '业务数据读取失败。请稍后重试或联系管理员。',
+  MODEL_SERVICE_ERROR: '模型服务暂时不可用。请稍后重试。',
+  RUNTIME_ERROR: '任务执行遇到异常，已停止。请缩小范围后重试。',
 };
