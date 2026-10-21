@@ -113,6 +113,10 @@ services:
       minio: {condition: service_started}
   api:
     <<: *app
+    command: [python, -m, uvicorn, app.main:app, --host, 0.0.0.0, --port, '8888', --proxy-headers, --forwarded-allow-ips, '${PROXY_API_IP:-172.30.0.2}']
+    networks:
+      default: {}
+      proxy_api: {}
     depends_on:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
@@ -139,6 +143,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
+    networks:
+      - proxy_frontend
     restart: unless-stopped
   proxy:
     image: nginx:1.28-alpine
@@ -146,6 +152,10 @@ services:
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ${TLS_DIR:?需包含fullchain.pem和privkey.pem}:/etc/nginx/tls:ro
+    networks:
+      proxy_api:
+        ipv4_address: ${PROXY_API_IP:-172.30.0.2}
+      proxy_frontend: {}
     depends_on:
       api: {condition: service_healthy}
       frontend: {condition: service_started}
@@ -156,3 +166,12 @@ volumes:
   qdrant_data:
   minio_data:
   clamav_data:
+networks:
+  proxy_api:
+    ipam:
+      config:
+        - subnet: ${PROXY_API_SUBNET:-172.30.0.0/24}
+  proxy_frontend:
+    ipam:
+      config:
+        - subnet: ${PROXY_FRONTEND_SUBNET:-172.31.0.0/24}

@@ -12,4 +12,4 @@ COPY deploy/clamd.conf /etc/clamav/clamd.remote.conf
 RUN useradd --create-home --uid 10001 chemicalops && mkdir -p /app/storage /app/backups/mysql && chown -R chemicalops:chemicalops /app/storage /app/backups
 USER chemicalops
 EXPOSE 8888
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1"]
