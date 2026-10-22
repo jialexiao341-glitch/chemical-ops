@@ -981,6 +981,7 @@ class QuoteRow(ToolSchema):
     rank: int | None = None
     comparison_status: Literal["COMPARABLE", "NOT_COMPARABLE"] = "NOT_COMPARABLE"
     comparison_reasons: list[str] = Field(default_factory=list)
+    quality_history: dict | None = None
 
 
 class QuoteResult(ToolSchema):
@@ -994,10 +995,11 @@ class QuoteResult(ToolSchema):
     specification: str | None
     technical_requirements: str | None
     scope: str = "同一询价明细；普通用户仅本人询价，采购经理/管理员全部询价"
-    comparison_basis: str = "仅在币种、单位、税率、含税口径和供应商型号相同的组内按单价排名；总成本按询价量/同单位 MOQ 拆分商品税与已登记运费，账期和交期独立展示；不做汇率换算或综合评分"
+    comparison_basis: str = "仅在币种、单位、税率、含税口径和供应商型号相同的组内按单价排名；成本候选仅在完整可比报价中按全部询价明细的已知总成本确定，账期、交期和可见质量验收事实作为解释与风险，不合成综合分，不做汇率换算"
     total_rows: int
     truncated: bool
     rows: list[QuoteRow]
+    recommendation: dict | None = None
     sources: list[Source]
     warnings: list[str]
 

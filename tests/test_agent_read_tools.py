@@ -241,8 +241,14 @@ def test_unknown_and_write_tools_rejected(tool_db):
             call(tool_db, name=name, product_id=1)
 
 
-def test_quote_revision_expiry_currency_unit_tax_and_model_boundaries(tool_db):
+def test_quote_revision_expiry_currency_unit_tax_and_model_boundaries(tool_db, monkeypatch):
     """独立预期值核验报价有效性、版本选择及可比组排名。"""
+    from app.modules.rfqs import service as rfq_service
+
+    monkeypatch.setattr(rfq_service, "quality_history_by_supplier", lambda _db, _user, ids, **_kwargs: {
+        supplier_id: {"status": "UNKNOWN", "reason": "当前账号无质量验收读取权限"}
+        for supplier_id in ids
+    })
     result = call(tool_db, name="supplier_quotes.compare", product_id=1, rfq_item_id=11)
     assert result.total_rows == 9
     assert {row.quote_id: row.rank for row in result.rows} == {2: 2, 3: 1, 5: None, 6: None, 7: None, 8: None, 9: None, 15: None, 16: None}
@@ -254,6 +260,10 @@ def test_quote_revision_expiry_currency_unit_tax_and_model_boundaries(tool_db):
     cost_row = next(row for row in result.rows if row.quote_id == 2)
     assert cost_row.cost_analysis["total_cost"] == "121.200000"
     assert cost_row.cost_analysis["complete"] is True
+    assert result.recommendation["status"] == "RECOMMENDED"
+    assert result.recommendation["candidate_quote_id"] == 2
+    assert any("报价 3" in risk and "不完整" in risk for risk in result.recommendation["risks"])
+    assert any("质量风险未知" in risk for risk in result.recommendation["risks"])
     assert any("含税口径" in warning for warning in result.warnings)
 
 

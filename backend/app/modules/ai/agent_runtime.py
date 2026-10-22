@@ -86,6 +86,7 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 根据已返回结果决定后续工具；不要重复调用同工具同参数。未授权工具不在目录中。
 用户指定返回条数时，必须在对应业务工具 arguments.limit 中保留该值（不超过工具上限）。
 库存 totals 已按全部授权余额计算，即使 limit=1 也无需扩大明细条数获取全范围合计。
+报价比较的 recommendation 是服务端依据完整可比总成本、交期、原始付款条件及当前账号可见验收事实生成的结构化候选。status=RECOMMENDED 时按其 reasons/risks 说明结论；status=TIE 或 NO_RECOMMENDATION 时必须说明未产生唯一候选。不得把账期、交期或验收次数换算成金额/风险分，也不得据此创建或确认中选提案。
 没有数据要说明范围，缺产品名称/询价条件要追问。只读阶段不能创建草稿、定标、审批或下单。
 
 # 完成条件与证据
@@ -512,7 +513,7 @@ def _compact_planner_step(step: dict, *, keep_rows: int, text_limit: int) -> dic
         "total_rows", "truncated", "totals", "planner_truncated", "planner_note",
         "planner_sources_truncated", "scope", "warnings", "rows", "sources",
         "request_no", "po_no", "purpose", "status", "items", "answer", "stages",
-        "conclusion", "unavailable_stages", "source_records",
+        "conclusion", "unavailable_stages", "source_records", "recommendation",
     )
     compact_result = {key: result[key] for key in keys if key in result}
     for key in ("rows", "sources", "warnings"):

@@ -54,6 +54,7 @@ from app.modules.ai.tool_sql_timeout import (
     tool_deadline_context,
 )
 from app.modules.rfqs.total_cost import calculate_total_cost
+from app.modules.rfqs.recommendation import build_quote_recommendation
 from app.modules.chemicals.model import Chemical
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.inventory.service import accessible_warehouse_ids
@@ -306,7 +307,7 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
             "payment_terms": row.payment_terms,
         }
     truncated = total > arguments.limit
-    warnings = ["报价数量、起订量和交期仅展示原值；不推断目标数量可成交，不自动选定供应商。"]
+    warnings = ["报价数量、起订量和交期仅展示原值；成本候选仅基于完整可比总成本，不自动确认中选。"]
     groups: dict[tuple, list[QuoteRow]] = {}
     for row in rows:
         if row.unit_id != context.requested_unit_id:
@@ -350,12 +351,40 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
     if truncated:
         warnings.append("报价已截断，全部候选不排序；请缩小范围或在原询价页面核对。")
     if any(not row.cost_analysis["complete"] for row in rows):
-        warnings.append("至少一条报价缺少成本组成或单位口径；该行不生成完整总额。MOQ、交期、账期与质量验收事实独立展示，不合成推荐分数。")
+        warnings.append("至少一条报价缺少成本组成或单位口径；该行不生成完整总额。交期、账期与可见质量验收事实不折算为金额或综合分。")
+    from app.modules.rfqs.service import quality_history_by_supplier
+    quality_by_supplier = quality_history_by_supplier(
+        db,
+        user,
+        {row.supplier_id for row in rows},
+        permission_codes=get_user_permission_codes(db, user.id),
+        role_codes=roles,
+    )
+    for row in rows:
+        row.quality_history = quality_by_supplier.get(row.supplier_id)
+    recommendation = build_quote_recommendation(
+        [
+            {
+                "quote_id": row.quote_id,
+                "supplier_id": row.supplier_id,
+                "rfq_item_id": arguments.rfq_item_id,
+                "currency_code": row.currency_code,
+                "comparison_status": row.comparison_status,
+                "cost_analysis": row.cost_analysis,
+                "lead_days": row.lead_days,
+                "payment_terms": row.payment_terms,
+                "quality_history": row.quality_history,
+            }
+            for row in rows
+        ],
+        expected_item_ids={arguments.rfq_item_id},
+        truncated=truncated,
+    )
     return QuoteResult(
         observed_at=datetime.now(timezone.utc), as_of=today, product_id=arguments.product_id,
         rfq_id=context.rfq_id, rfq_no=context.rfq_no, rfq_item_id=arguments.rfq_item_id,
         specification=context.specification, technical_requirements=context.technical_requirements,
-        total_rows=total, truncated=truncated, rows=rows,
+        total_rows=total, truncated=truncated, rows=rows, recommendation=recommendation,
         sources=[Source(resource="supplier_quote_items", record_id=row.quote_item_id,
                         parent_id=context.rfq_id) for row in rows], warnings=warnings,
     )
@@ -530,7 +559,7 @@ TOOLS = {
                  "warehouse.inventory.read", InventoryInput, InventoryResult, query_inventory,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
-        ToolSpec("supplier_quotes.compare", "同一可见询价明细的最新有效提交报价，分可比组排序",
+        ToolSpec("supplier_quotes.compare", "比较同一可见询价明细的最新有效报价，并在完整可比报价中提供成本候选及交期、账期、可见质量事实风险",
                  "procurement.rfqs.read", QuoteInput, QuoteResult, compare_quotes,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),

@@ -115,6 +115,15 @@ export namespace RfqApi {
     confirmed_by?: null | number;
     created_at?: string;
     created_by?: number;
+    decision_analysis?: null | {
+      candidate_quote_id: null | number;
+      candidate_supplier_id: null | number;
+      currency_code: null | string;
+      reasons: string[];
+      risks: string[];
+      status: 'NO_RECOMMENDATION' | 'RECOMMENDED' | 'TIE';
+      total_cost: null | string;
+    };
     id: number;
     items?: ComparisonItem[];
     rfq_id?: number;

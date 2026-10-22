@@ -47,6 +47,15 @@ function choose() {
 function visibleWarnings(result: AgentApi.Result) {
   return 'warnings' in result ? [...new Set(result.warnings)].filter((text) => !text.includes('截断')) : [];
 }
+function quoteRecommendationLines(result?: AgentApi.Result) {
+  if (!result || result.tool !== 'supplier_quotes.compare' || !result.recommendation) return [];
+  const recommendation = result.recommendation;
+  const lines = recommendation.status === 'RECOMMENDED'
+    ? [`成本候选：${result.rows.find((row) => row.quote_id === recommendation.candidate_quote_id)?.supplier_name ?? `报价 #${recommendation.candidate_quote_id}`} · ${recommendation.currency_code} ${agentDisplayNumber(recommendation.total_cost ?? '-')}`]
+    : ['未生成唯一成本候选。'];
+  lines.push(...recommendation.reasons, ...recommendation.risks.map((risk) => `待核实：${risk}`));
+  return lines;
+}
 </script>
 <template>
   <article class="agent-chat">
@@ -134,6 +143,12 @@ function visibleWarnings(result: AgentApi.Result) {
           <li><strong>询价 {{ entry.result.rfq_no }} 的供应商报价。</strong>查到 <strong>{{ entry.result.rows.length }} 条</strong>报价明细；规格为 {{ entry.result.specification || '未登记规格' }}，技术要求为 {{ entry.result.technical_requirements || '无技术要求' }}。<span v-if="entry.result.total_rows === 0">暂时没有找到符合条件的最新报价。</span><AgentSourcePopover :result="entry.result" /></li>
           <li><strong>比较口径。</strong>{{ entry.result.comparison_basis }}。<strong>不同可比组的排名不能相互比较。</strong></li>
         </ol>
+        <div v-if="quoteRecommendationLines(entry.result).length" class="agent-notice">
+          <span aria-hidden="true">ⓘ</span>
+          <div>
+            <p v-for="line in quoteRecommendationLines(entry.result)" :key="line">{{ line }}</p>
+          </div>
+        </div>
         <details v-if="entry.result.total_rows > 0" class="agent-disclosure">
           <summary><span>查看报价与可比组排名</span><span class="agent-count">{{ entry.result.rows.length }}{{ entry.result.truncated ? ` / ${entry.result.total_rows}` : '' }} 条</span></summary>
           <div class="agent-table"><table><caption class="sr-only">报价明细；不同可比组不能相互比较</caption><thead><tr><th>供应商 / 报价</th><th class="agent-numeric">报价单价</th><th>型号 / 税务口径</th><th>组内排名</th><th>报价量 / MOQ / 交期 / 账期</th><th>总成本</th><th>日期 / 有效期</th></tr></thead><tbody>

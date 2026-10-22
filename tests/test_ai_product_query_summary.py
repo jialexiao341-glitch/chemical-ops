@@ -57,3 +57,39 @@ def test_quote_summary_preserves_cost_completeness_and_currency():
     assert "121.20 CNY" in summary and "MOQ 增加采购量 2 千克" in summary
     assert "总成本尚不完整：运费未登记" in summary
     assert "121.20 USD" not in summary
+
+
+def test_quote_summary_explains_cost_candidate_and_keeps_risks_separate():
+    summary = summarize_product_evidence([{
+        "tool": "supplier_quotes.compare", "rfq_no": "RFQ-2", "total_rows": 2,
+        "recommendation": {
+            "status": "RECOMMENDED", "candidate_quote_id": 51,
+            "currency_code": "CNY", "total_cost": "100.00",
+            "reasons": ["在 2 份完整可比报价中，总成本最低为 100.00 CNY。"],
+            "risks": ["付款条件为：月结30天；未将资金占用折算为金额。", "历史质量风险未知：无质量权限。"],
+        },
+        "rows": [
+            {"quote_id": 51, "quote_no": "Q-51", "supplier_name": "甲供应商",
+             "unit_price": "10.00", "currency_code": "CNY", "unit_name": "千克", "rank": 1}
+        ],
+    }])
+
+    assert "成本候选：甲供应商（Q-51）" in summary
+    assert "100.00 CNY" in summary
+    assert "未将资金占用折算为金额" in summary
+    assert "历史质量风险未知" in summary
+
+
+def test_quote_summary_does_not_name_a_candidate_when_analysis_is_tied():
+    summary = summarize_product_evidence([{
+        "tool": "supplier_quotes.compare", "rfq_no": "RFQ-3", "total_rows": 2,
+        "recommendation": {
+            "status": "TIE", "candidate_quote_id": None, "reasons": ["两个报价总成本并列。"], "risks": []
+        },
+        "rows": [
+            {"quote_id": 51, "quote_no": "Q-51", "supplier_name": "甲", "unit_price": "10", "currency_code": "CNY", "unit_name": "千克", "rank": 1}
+        ],
+    }])
+
+    assert "两个报价总成本并列。" in summary
+    assert "成本候选：甲（Q-51）" not in summary

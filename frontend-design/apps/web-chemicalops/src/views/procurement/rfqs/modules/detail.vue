@@ -55,6 +55,23 @@ const supplierMap = ref<Map<number, string>>(new Map());
 const unitMap = ref<Map<number, string>>(new Map());
 const activeTab = ref('items');
 const scenarioPriceWeight = ref(70);
+const decisionAnalysis = computed(() => comparison.value?.decision_analysis);
+const recommendedRow = computed(() => {
+  const quoteId = decisionAnalysis.value?.candidate_quote_id;
+  return quoteId == null
+    ? undefined
+    : comparison.value?.items?.find(
+        (row) => row.quote_id === quoteId && row.comparison_status === 'COMPARABLE',
+      );
+});
+const recommendedSelectionReason = computed(() => {
+  const analysis = decisionAnalysis.value;
+  if (!analysis) return '';
+  return [
+    ...analysis.reasons,
+    ...analysis.risks.map((risk) => `核查事项：${risk}`),
+  ].join('；').slice(0, 500);
+});
 
 const [SelectQuote, selectQuoteApi] = useVbenModal({
   connectedComponent: SelectQuoteModal,
@@ -192,7 +209,7 @@ async function onQuoteSuccess() {
   emit('success');
 }
 
-function onSelectQuote(record: RfqApi.ComparisonItem) {
+function onSelectQuote(record: RfqApi.ComparisonItem, suggestedReason?: string) {
   if (!detail.value?.id || !comparison.value?.id) {
     return;
   }
@@ -207,6 +224,7 @@ function onSelectQuote(record: RfqApi.ComparisonItem) {
       supplierName: supplierName(record.supplier_id),
       totalAmount: record.total_amount,
       unitPrice: record.quoted_unit_price,
+      suggestedReason,
     })
     .open();
 }
@@ -480,12 +498,44 @@ defineExpose({ drawerApi });
               description="还没有生成比价，请先点击「生成比价」"
             />
             <div v-else class="space-y-3">
-              <Alert class="mb-3" type="info" show-icon message="总成本按询价数量与 MOQ 计算，并拆分货款、税费和运费；缺少运费或税务信息时标记为未完整。MOQ、交期、账期和可见的历史验收情况作为独立事实展示，不合并成分数。" />
+              <Alert class="mb-3" type="info" show-icon message="总成本按全部询价明细的采购量与 MOQ 计算，并拆分货款、税费和运费。成本候选只来自完整可比报价；交期、账期和可见历史验收作为独立事实与风险提示，不折算为金额或成本候选分。" />
               <div class="flex items-center gap-3">
                 <span class="text-sm">比价单：{{ comparison.comparison_no }}</span>
                 <Tag :color="COMPARISON_STATUS_DICT.color(comparison.status)">
                   {{ COMPARISON_STATUS_DICT.label(comparison.status) }}
                 </Tag>
+              </div>
+              <div v-if="decisionAnalysis" class="space-y-3 rounded-lg border p-3">
+                <Alert
+                  :type="decisionAnalysis.status === 'RECOMMENDED' ? 'info' : 'warning'"
+                  show-icon
+                  :message="decisionAnalysis.status === 'RECOMMENDED'
+                    ? `成本候选：${recommendedRow ? supplierName(recommendedRow.supplier_id) : `报价 #${decisionAnalysis.candidate_quote_id}`} · ${decisionAnalysis.currency_code} ${formatAmount(decisionAnalysis.total_cost)}`
+                    : '当前无法生成唯一成本候选'"
+                />
+                <div v-if="decisionAnalysis.reasons.length" class="text-sm">
+                  <div class="mb-1 font-medium">推荐理由</div>
+                  <ul class="list-disc space-y-1 pl-5 text-muted-foreground">
+                    <li v-for="reason in decisionAnalysis.reasons" :key="reason">{{ reason }}</li>
+                  </ul>
+                </div>
+                <div v-if="decisionAnalysis.risks.length" class="text-sm">
+                  <div class="mb-1 font-medium">风险与待核实项</div>
+                  <ul class="list-disc space-y-1 pl-5 text-amber-700">
+                    <li v-for="risk in decisionAnalysis.risks" :key="risk">{{ risk }}</li>
+                  </ul>
+                </div>
+                <div v-if="recommendedRow && comparison.status === 'DRAFT' && hasAccessByCodes(['procurement.rfqs.award'])" class="flex justify-end">
+                  <Button
+                    type="primary"
+                    @click="onSelectQuote(
+                      recommendedRow,
+                      recommendedSelectionReason,
+                    )"
+                  >
+                    依据成本候选准备中选提案
+                  </Button>
+                </div>
               </div>
               <div class="rounded-lg border p-3">
                 <div class="flex flex-wrap items-center justify-between gap-3">
@@ -532,7 +582,7 @@ defineExpose({ drawerApi });
                     <template v-else-if="column.key === 'count'">{{ record.count }}</template>
                   </template>
                 </Table>
-                <div class="mt-2 text-xs text-muted-foreground">当前缺少可比的历史履约与验收样本，因此本次只按报价价格和交期试算。</div>
+                <div class="mt-2 text-xs text-muted-foreground">此情景仅按价格与交期权重试算；账期与质量验收不计入分数，查看上方成本候选的风险提示。</div>
               </div>
               <Table
                 :columns="comparisonColumns"

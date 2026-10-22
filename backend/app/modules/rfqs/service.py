@@ -19,6 +19,7 @@ from app.modules.rfqs.schema import (
     SupplierQuoteCreate,
 )
 from app.modules.rfqs.total_cost import calculate_total_cost
+from app.modules.rfqs.recommendation import build_quote_recommendation
 from app.modules.deliveries.model import Delivery
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.quality_acceptances.model import QualityAcceptance
@@ -414,30 +415,61 @@ def build_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
     quality_history = quality_history_by_supplier(db, user, {row.supplier_id for row in saved_comparison.items})
     for row in saved_comparison.items:
         row.quality_history = quality_history.get(row.supplier_id)
+    saved_comparison.decision_analysis = _decision_analysis(saved_comparison, set(rfq_items))
     return saved_comparison
 
 
 def get_latest_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
     """查询询价单最近一次已生成的比价结果。"""
 
-    get_rfq(db, user, rfq_id)
+    rfq = get_rfq(db, user, rfq_id)
     comparison = crud.get_latest_comparison(db, rfq_id)
     if comparison is None:
         raise ResourceNotFoundError("当前询价单还没有比价结果")
     quality_history = quality_history_by_supplier(db, user, {row.supplier_id for row in comparison.items})
     for row in comparison.items:
         row.quality_history = quality_history.get(row.supplier_id)
+    comparison.decision_analysis = _decision_analysis(comparison, {item.id for item in rfq.items})
     return comparison
 
 
-def quality_history_by_supplier(db: Session, user: User, supplier_ids: set[int]) -> dict[int, dict]:
+def _decision_analysis(comparison: QuoteComparison, expected_item_ids: set[int]) -> dict:
+    """把当前比价快照转成非持久化的成本候选及风险摘要。"""
+    return build_quote_recommendation(
+        [
+            {
+                "quote_id": row.quote_id,
+                "supplier_id": row.supplier_id,
+                "rfq_item_id": row.rfq_item_id,
+                "currency_code": row.currency_code,
+                "comparison_status": row.comparison_status,
+                "cost_analysis": row.cost_analysis,
+                "lead_days": row.lead_days,
+                "payment_terms": row.payment_terms,
+                "quality_history": row.quality_history,
+            }
+            for row in comparison.items
+        ],
+        expected_item_ids=expected_item_ids,
+    )
+
+
+def quality_history_by_supplier(
+    db: Session,
+    user: User,
+    supplier_ids: set[int],
+    *,
+    permission_codes: list[str] | set[str] | None = None,
+    role_codes: list[str] | set[str] | None = None,
+) -> dict[int, dict]:
     """只在当前用户有质量读取权限时，按质量模块现有范围汇总已完成验收事实。"""
-    if not supplier_ids or "quality.acceptances.read" not in set(get_user_permission_codes(db, user.id)):
+    permissions = set(permission_codes) if permission_codes is not None else set(get_user_permission_codes(db, user.id))
+    if not supplier_ids or "quality.acceptances.read" not in permissions:
         return {
             supplier_id: {"status": "UNKNOWN", "reason": "当前账号无质量验收读取权限"}
             for supplier_id in supplier_ids
         }
-    roles = get_user_role_codes(db, user.id)
+    roles = list(role_codes) if role_codes is not None else get_user_role_codes(db, user.id)
     rows = db.execute(
         select(PurchaseOrder.supplier_id, QualityAcceptance.result, func.count().label("count"))
         .join(Delivery, Delivery.po_id == PurchaseOrder.id)

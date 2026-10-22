@@ -33,6 +33,8 @@ export namespace AgentApi {
   }
   export interface Quote {
     quote_item_id: number;
+    quote_id: number;
+    supplier_id: number;
     quote_no: string;
     quote_version: number;
     quote_date: string;
@@ -56,6 +58,7 @@ export namespace AgentApi {
     freight_tax_included: boolean | null;
     cost_analysis: null | { complete: boolean; currency_code: string; goods_amount: null | string; goods_tax: null | string; freight_amount: null | string; freight_tax: null | string; total_cost: null | string; purchase_quantity: null | string; moq_extra_quantity: null | string; reasons: string[] };
     lead_days: null | number;
+    quality_history?: null | { status: string; sample_count?: number; passed?: number; partial?: number; failed?: number; reason?: string };
   }
   interface ResultBase {
     total_rows: number;
@@ -86,6 +89,15 @@ export namespace AgentApi {
         specification: null | string;
         technical_requirements: null | string;
         warnings: string[];
+        recommendation: null | {
+          status: 'NO_RECOMMENDATION' | 'RECOMMENDED' | 'TIE';
+          candidate_quote_id: null | number;
+          candidate_supplier_id: null | number;
+          currency_code: null | string;
+          total_cost: null | string;
+          reasons: string[];
+          risks: string[];
+        };
         rows: Quote[];
       });
   export interface Step {

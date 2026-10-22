@@ -130,6 +130,25 @@ def test_planner_view_limits_sources_even_when_rows_are_small():
     assert len(entry["result"]["sources"]) == 100
 
 
+def test_compacted_planner_evidence_keeps_structured_quote_recommendation():
+    step = {
+        "step": 2, "action": "call_tool", "tool": "supplier_quotes.compare", "status": "SUCCEEDED",
+        "result": {
+            "tool": "supplier_quotes.compare", "total_rows": 2, "truncated": False,
+            "recommendation": {"status": "RECOMMENDED", "candidate_quote_id": 51,
+                               "currency_code": "CNY", "total_cost": "100.000000",
+                               "reasons": ["成本最低"], "risks": ["付款条件需复核"]},
+            "rows": [{"quote_id": 51, "supplier_name": "甲"}],
+            "sources": [{"resource": "supplier_quote_items", "record_id": 501}],
+        },
+    }
+
+    compact = runtime._compact_planner_step(step, keep_rows=0, text_limit=180)
+
+    assert compact["result"]["recommendation"]["candidate_quote_id"] == 51
+    assert compact["result"]["recommendation"]["risks"] == ["付款条件需复核"]
+
+
 def test_planner_context_budget_keeps_goal_question_and_step_evidence():
     payload = {
         "messages": ["旧问题" + "x" * 6000 for _ in range(5)] + ["查询本轮目标乙醇库存"],

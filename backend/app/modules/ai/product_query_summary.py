@@ -37,6 +37,24 @@ def summarize_product_evidence(entries: Sequence[Mapping[str, Any]]) -> str:
             lines.append(f"{label}：可用库存为 {amounts}。" if amounts else f"{label}：暂时没有找到库存记录。")
         elif tool == "supplier_quotes.compare":
             lines.append(f"询价 {result['rfq_no']}：找到 {result['total_rows']} 条符合条件的最新报价。")
+            recommendation = result.get("recommendation") or {}
+            candidate_id = recommendation.get("candidate_quote_id")
+            if recommendation.get("status") == "RECOMMENDED" and candidate_id is not None:
+                candidate = next((row for row in result.get("rows", [])
+                                  if row.get("quote_id") == candidate_id), None)
+                if candidate:
+                    name = candidate.get("supplier_name") or f"供应商 #{candidate.get('supplier_id', '-') }"
+                    quote_no = candidate.get("quote_no") or f"报价 #{candidate_id}"
+                    lines.append(
+                        f"成本候选：{name}（{quote_no}），总成本 {recommendation['total_cost']} "
+                        f"{recommendation['currency_code']}。理由：{'；'.join(recommendation.get('reasons') or [])}"
+                    )
+                else:
+                    lines.append(f"成本候选报价 #{candidate_id}，总成本 {recommendation['total_cost']} {recommendation['currency_code']}。")
+            elif recommendation.get("status") in {"TIE", "NO_RECOMMENDATION"}:
+                lines.append("未生成唯一成本候选：" + "；".join(recommendation.get("reasons") or ["完整可比报价不足"]) + "。")
+            for risk in recommendation.get("risks") or []:
+                lines.append(f"候选核查提示：{risk}")
             for row in result.get("rows", []):
                 summary = (f"{row['supplier_name']}：{row['unit_price']} {row['currency_code']}/{row['unit_name']}"
                            f"，可比组单价排名 {row['rank'] if row['rank'] is not None else '不排序'}。")

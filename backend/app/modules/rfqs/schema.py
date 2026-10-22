@@ -227,6 +227,7 @@ class QuoteComparisonRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     items: list[QuoteComparisonItemRead]
+    decision_analysis: dict | None = None
 
 
 class QuoteSelection(BaseModel):

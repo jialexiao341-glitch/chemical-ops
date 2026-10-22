@@ -25,6 +25,7 @@ interface SelectQuotePayload {
   supplierName: string;
   totalAmount?: null | string;
   unitPrice?: null | string;
+  suggestedReason?: string;
 }
 
 /**
@@ -80,7 +81,7 @@ const [Modal, modalApi] = useVbenModal<null | SelectQuotePayload>({
   onOpenChange(isOpen) {
     if (isOpen) {
       payload.value = modalApi.getData();
-      reason.value = '';
+      reason.value = payload.value?.suggestedReason ?? '';
     }
   },
 });

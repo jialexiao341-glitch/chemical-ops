@@ -156,6 +156,9 @@ def test_comparison_includes_explainable_cost_breakdown_and_quality_unknown(monk
     assert row.cost_analysis["complete"] is True
     assert row.quality_history["status"] == "UNKNOWN"
     assert "权限" in row.quality_history["reason"]
+    assert comparison.decision_analysis["status"] == "RECOMMENDED"
+    assert comparison.decision_analysis["candidate_quote_id"] == 51
+    assert any("质量风险未知" in risk for risk in comparison.decision_analysis["risks"])
 
 
 def test_comparison_does_not_choose_a_basis_when_signature_groups_are_tied(monkeypatch):
