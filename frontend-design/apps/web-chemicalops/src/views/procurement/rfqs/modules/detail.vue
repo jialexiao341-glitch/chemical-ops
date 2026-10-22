@@ -1,7 +1,8 @@
 <script lang="ts" setup>
 import type { RfqApi } from '#/api';
 
-import { computed, ref } from 'vue';
+import { computed, h, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
@@ -24,7 +25,6 @@ import {
 
 import {
   buildComparisonApi,
-  createPurchaseOrderApi,
   getComparisonApi,
   getRfqApi,
   createActionProposalApi,
@@ -42,9 +42,15 @@ import { getSupplierNameMap, getUnitNameMap } from '#/utils/lookup';
 import QuoteModal from './quote.vue';
 import SelectQuoteModal from './select-quote.vue';
 import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
+import {
+  buildPurchaseOrderDraftPayload,
+  PURCHASE_ORDER_DRAFT_ACTION,
+  purchaseOrderDraftPreview,
+} from './order-draft-proposal';
 
 const emit = defineEmits(['success']);
 const { hasAccessByCodes } = useAccess();
+const router = useRouter();
 
 const detail = ref<RfqApi.Rfq>();
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
@@ -241,17 +247,56 @@ async function onCreateOrder() {
     return;
   }
   acting.value = true;
+  let awaitingConfirmation = false;
   try {
-    await createPurchaseOrderApi({
-      comparison_id: comparison.value.id,
-      quote_id: comparison.value.selected_quote_id,
+    const proposal = await createActionProposalApi(
+      PURCHASE_ORDER_DRAFT_ACTION,
+      buildPurchaseOrderDraftPayload(comparison.value.id, comparison.value.selected_quote_id),
+      makeIdempotencyKey(),
+    );
+    if (!canConfirmActionProposal(proposal, proposal.preview_version, false)) {
+      message.warning(proposal.blockers.join('；') || '当前报价不能生成订单草稿，请检查来源状态。');
+      return;
+    }
+    const preview = purchaseOrderDraftPreview(proposal, unitName);
+    awaitingConfirmation = true;
+    Modal.confirm({
+      title: '核对条款并生成采购订单草稿',
+      content: h('div', { class: 'max-h-80 space-y-2 overflow-y-auto' }, [
+        h('div', { class: 'text-sm text-muted-foreground' },
+          `比价单 ${preview.comparisonNo || '-'} · 报价 ${preview.quoteNo || '-'} · 供应商 ${supplierName(preview.supplierId)}`),
+        ...preview.items.map((item, index) => h('div', {
+          key: index,
+          class: 'rounded-md border border-border p-3 text-sm leading-6',
+        }, item)),
+        ...(preview.warnings.length ? [h('ul', { class: 'list-disc space-y-1 pl-5 text-sm text-amber-700' },
+          preview.warnings.map((warning) => h('li', { key: warning }, warning)))] : []),
+        h('div', { class: 'text-sm text-muted-foreground' },
+          '确认后只创建采购订单草稿，订单审批与正式下单仍按原流程办理。'),
+      ]),
+      okText: '确认生成草稿',
+      cancelText: '返回核对',
+      onCancel: () => { acting.value = false; },
+      onOk: async () => {
+        try {
+          const order = await confirmActionProposalApi<{ id: number; po_no: string }>(
+            proposal.confirmation_id,
+            proposal.preview_version,
+          );
+          message.success(`采购订单草稿 ${order.po_no} 已生成`);
+          emit('success');
+          if (hasAccessByCodes(['procurement.orders.read'])) {
+            await router.push({ name: 'PurchaseOrderDetail', params: { id: order.id } });
+          }
+        } finally {
+          acting.value = false;
+        }
+      },
     });
-    message.success('采购订单草稿已生成，请到采购订单页面提交审批');
-    emit('success');
   } catch {
     // 同 onSend：错误提示由请求层负责，这里保持按钮可用以便重试。
   } finally {
-    acting.value = false;
+    if (!awaitingConfirmation) acting.value = false;
   }
 }
 
@@ -275,7 +320,8 @@ const canCreateOrder = computed(
   () =>
     !!comparison.value?.selected_quote_id &&
     comparison.value?.status === 'CONFIRMED' &&
-    hasAccessByCodes(['procurement.orders.write']),
+    hasAccessByCodes(['procurement.orders.write']) &&
+    hasAccessByCodes(['procurement.rfqs.read']),
 );
 
 const itemColumns = [
@@ -429,7 +475,7 @@ defineExpose({ drawerApi });
             type="primary"
             @click="onCreateOrder"
           >
-            依据中选报价生成采购订单
+            检查条款并准备订单草稿
           </Button>
         </div>
 

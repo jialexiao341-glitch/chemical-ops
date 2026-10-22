@@ -3,9 +3,11 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { AgentApi, AiApi } from '#/api';
 
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 
 import { Page } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { Button, Input, Modal, Select, message } from 'antdv-next';
 
@@ -28,6 +30,9 @@ import { retryQuestion, taskActionFeedback, taskActions } from './task-actions';
 import ActionProposalDetail from './ActionProposalDetail.vue';
 
 defineOptions({ name: 'AiTaskHistory' });
+
+const router = useRouter();
+const { hasAccessByCodes } = useAccess();
 
 const status = ref<AgentApi.Task['status']>();
 const inboxOnly = ref(true);
@@ -344,9 +349,19 @@ function confirmProposal() {
     onOk: async () => {
       proposalBusy.value = true;
       try {
-        await confirmActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+        const result = await confirmActionProposalApi<{ id?: number; po_no?: string }>(
+          proposal.confirmation_id,
+          proposal.preview_version,
+        );
         selectedProposal.value = await getActionProposalApi(proposal.confirmation_id);
-        message.success('已按确认的预览执行动作');
+        if (proposal.action_type === 'purchase_order.create_draft' && result.po_no) {
+          message.success(`采购订单草稿 ${result.po_no} 已生成`);
+          if (result.id && hasAccessByCodes(['procurement.orders.read'])) {
+            await router.push({ name: 'PurchaseOrderDetail', params: { id: result.id } });
+          }
+        } else {
+          message.success('已按确认的预览执行动作');
+        }
         void proposalGridApi.query();
       } catch {
         message.error('提案状态或权限已变化，正在重新读取服务端状态');

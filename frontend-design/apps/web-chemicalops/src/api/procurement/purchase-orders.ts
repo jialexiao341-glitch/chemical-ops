@@ -20,6 +20,7 @@ export namespace PurchaseOrderApi {
     supplier_model_snapshot?: null | string;
     supplier_product_id?: null | number;
     tax_rate?: null | string;
+    payment_terms_snapshot?: null | string;
     unit_id: number;
     unit_price: string;
     updated_at?: string;

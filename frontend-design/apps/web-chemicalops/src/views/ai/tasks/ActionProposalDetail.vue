@@ -27,6 +27,7 @@ const actionLabels: Record<string, string> = {
   'rfq.create_draft': '创建询价草稿',
   'rfq.send': '发送询价',
   'rfq.select_quote': '确认中选报价',
+  'purchase_order.create_draft': '生成采购订单草稿',
 };
 const statusLabels: Record<AiApi.ActionProposalRead['status'], string> = {
   CANCELLED: '已取消',
@@ -52,8 +53,13 @@ const fieldLabels: Record<string, string> = {
   selected_quote: '中选报价',
   selection_reason: '中选理由',
   status: '询价状态',
+  supplier: '供应商',
+  items: '订单明细与条款',
+  delivery_address: '收货地址',
+  expected_arrival_date: '预计到货日期',
+  note: '备注',
 };
-const dateFields = new Set(['expected_date', 'requested_delivery_date', 'quote_deadline']);
+const dateFields = new Set(['expected_date', 'requested_delivery_date', 'quote_deadline', 'expected_arrival_date']);
 const statusColor: Record<AiApi.ActionProposalRead['status'], string> = {
   CANCELLED: 'default', EXECUTED: 'success', EXPIRED: 'warning', INVALIDATED: 'error', PENDING: 'processing',
 };
@@ -97,6 +103,12 @@ function formatValue(value: unknown) {
   if (value === null || value === undefined || value === '') return '—';
   return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
+
+function orderTermsLines(evidence: Record<string, unknown>) {
+  return Array.isArray(evidence.items)
+    ? evidence.items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    : [];
+}
 </script>
 
 <template>
@@ -133,7 +145,18 @@ function formatValue(value: unknown) {
     <section v-if="proposal.evidence.length">
       <h3 class="mb-2 font-medium">证据</h3>
       <ul class="list-disc space-y-1 pl-5 text-sm">
-        <li v-for="(item, index) in proposal.evidence" :key="index">{{ formatValue(item) }}</li>
+        <li v-for="(item, index) in proposal.evidence" :key="index">
+          <template v-if="item.type === 'purchase_order_terms_check'">
+            <div class="mb-1 text-muted-foreground">比价单 {{ formatValue(item.comparison_no) }} · 报价 {{ formatValue(item.quote_no) }} · 申请 {{ formatValue(item.request_no) }}</div>
+            <div v-for="line in orderTermsLines(item)" :key="formatValue(line.line_no)" class="border-b border-border py-2 last:border-0">
+              <div class="font-medium">第 {{ formatValue(line.line_no) }} 行 · {{ formatValue(line.product) }}</div>
+              <div class="text-muted-foreground">数量 {{ formatValue(line.quantity) }} / 单位 {{ formatValue(line.unit_name || `#${formatValue(line.unit_id)}`) }} · 单价 {{ formatValue(line.unit_price) }} {{ formatValue(line.currency_code) }} · 税率 {{ line.tax_rate == null ? '未提供' : `${formatValue(line.tax_rate)}%` }}</div>
+              <div class="text-muted-foreground">交期 {{ line.lead_days == null ? '未提供' : `${formatValue(line.lead_days)} 天` }} · 付款条件 {{ formatValue(line.payment_terms || '报价未提供') }} · 申请剩余量 {{ formatValue(line.available_request_quantity ?? '无法核对') }}</div>
+              <div class="text-muted-foreground">要求到货 {{ formatValue(line.required_delivery_date || '未提供') }}</div>
+            </div>
+          </template>
+          <span v-else>{{ formatValue(item) }}</span>
+        </li>
       </ul>
     </section>
 
@@ -155,7 +178,7 @@ function formatValue(value: unknown) {
         <Select v-if="field === 'priority'" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :options="PRIORITY_DICT.options()" class="w-full" />
         <DatePicker v-else-if="dateFields.has(field)" :aria-label="fieldLabels[field]" :show-time="field === 'quote_deadline'" :value="dateValue(value)" class="w-full" @change="updateDate(field, $event)" />
         <InputNumber v-else-if="field === 'budget_amount'" :aria-label="fieldLabels[field]" :value="typeof value === 'number' || typeof value === 'string' ? Number(value) : null" :min="0" class="w-full" @change="updateNumber(field, $event)" />
-        <Input.TextArea v-else-if="field === 'purpose' || field === 'delivery_requirements' || field === 'selection_reason'" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :rows="2" :maxlength="field === 'selection_reason' ? 2000 : 1000" />
+        <Input.TextArea v-else-if="['purpose', 'delivery_requirements', 'selection_reason', 'delivery_address', 'note'].includes(field)" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :rows="2" :maxlength="field === 'selection_reason' ? 2000 : field === 'delivery_address' ? 500 : 1000" />
         <Input v-else v-model:value="revisionValues[field]" :aria-label="fieldLabels[field] || field" />
       </div>
     </section>
