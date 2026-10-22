@@ -29,7 +29,7 @@ def allow_ai_workspace_permission(app):
 def tool_db(monkeypatch):
     """建立隔离业务样本和角色权限替身；查询执行真实 SQL，测试后销毁数据库。"""
     roles = {9: ["SYS_ADMIN"], 10: ["PROCUREMENT_MANAGER"]}
-    permissions = {7: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"],
+    permissions = {7: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read", "procurement.requests.read", "procurement.orders.read"],
                    8: ["warehouse.inventory.read"], 10: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"]}
     monkeypatch.setattr(tools, "get_settings", lambda: SimpleNamespace(agent_enabled=True))
     monkeypatch.setattr(tools, "get_user_role_codes", lambda _db, uid: roles.get(uid, []))
@@ -225,6 +225,49 @@ def test_tools_issue_only_reads_and_do_not_create_business_records(tool_db):
     finally:
         event.remove(tool_db.bind, "before_cursor_execute", capture)
     assert statements and all(statement.lstrip().upper().startswith("SELECT") for statement in statements)
+
+
+def test_new_read_tools_use_exact_identifiers_and_registered_permissions(tool_db, monkeypatch):
+    from app.modules.ai import order_trace
+    from app.modules.purchase_requests import service as request_service
+
+    request = SimpleNamespace(
+        id=31, request_no="PR20261022000031", purpose="乙醇采购", priority="NORMAL",
+        budget_amount=100, currency_code="CNY", expected_date=None, status="APPROVING",
+        items=[SimpleNamespace(line_no=1, requested_name="乙醇", technical_requirements=None,
+            quantity=2, unit_id=1, budget_price=50, expected_date=None, fulfilled_quantity=0, status="OPEN")],
+        approvals=[SimpleNamespace(approver_id=999, opinion="敏感审批意见")],
+    )
+    seen = []
+    def get_request_by_no(_db, _user, request_no):
+        seen.append(request_no)
+        return request if request_no == request.request_no else None
+    monkeypatch.setattr(request_service, "get_request_by_no", get_request_by_no)
+    result = call(tool_db, name="purchase_requests.get_by_no", request_no=request.request_no)
+    assert result.total_rows == 1
+    assert result.rows[0]["request_no"] == request.request_no
+    assert "opinion" not in str(result.model_dump()) and "approver_id" not in str(result.model_dump())
+    assert seen == [request.request_no]
+    assert call(tool_db, name="purchase_requests.get_by_no", request_no="PR20261022000032").total_rows == 0
+
+    expected = {
+        "po_no": "PO-26001", "supplier": "供应商", "order_status": "OPEN",
+        "order_updated_at": None, "stages": [], "conclusion": [],
+        "unavailable_stages": ["发票"], "source_records": [], "answer": "追溯结果",
+    }
+    traced = []
+    monkeypatch.setattr(order_trace, "trace_purchase_order", lambda _db, _user, po_no: traced.append(po_no) or expected)
+    assert call(tool_db, name="purchase_orders.trace_by_no", po_no="PO-26001").answer == "追溯结果"
+    assert traced == ["PO-26001"]
+
+
+def test_new_read_tools_recheck_permissions_and_reject_extra_fields(tool_db):
+    with pytest.raises(AuthorizationError):
+        call(tool_db, actor_id=8, name="purchase_requests.get_by_no", request_no="PR20261022000031")
+    with pytest.raises(AuthorizationError):
+        call(tool_db, actor_id=8, name="purchase_orders.trace_by_no", po_no="PO-26001")
+    with pytest.raises(BusinessValidationError, match="参数"):
+        call(tool_db, name="purchase_requests.get_by_no", request_no="PR20261022000031", user_id=7)
 
 
 def test_http_routes_require_authentication_and_reject_extra_identity_fields():

@@ -24,6 +24,7 @@ def test_manifest_exposes_only_current_tools_datasets_and_non_identifying_scopes
     assert {item["name"] for item in payload["agent_tools"]} == {
         "catalog.search_products", "inventory.query_available",
         "supplier_quotes.find_rfq_items", "supplier_quotes.compare",
+        "purchase_orders.trace_by_no",
     }
     datasets = {item["key"] for item in payload["analytics_datasets"]}
     assert {"purchase_orders", "deliveries", "inventory", "weekly_order_risks"} <= datasets
@@ -31,6 +32,18 @@ def test_manifest_exposes_only_current_tools_datasets_and_non_identifying_scopes
     assert '"17"' not in serialized and '"42"' not in serialized
     assert "permission_codes" not in payload and "user_id" not in serialized
     assert payload["resource_scopes"] == ["currently_accessible_warehouses"]
+
+
+def test_manifest_tool_metadata_is_sourced_from_registered_tool_spec(monkeypatch):
+    monkeypatch.setattr(capabilities, "get_user_role_codes", lambda *_: ["SYS_ADMIN"])
+    monkeypatch.setattr(capabilities, "get_user_permission_codes", lambda *_: set())
+    monkeypatch.setattr(capabilities, "accessible_warehouse_ids", lambda *_: None)
+    monkeypatch.setattr(capabilities, "agent_enabled", lambda: True)
+
+    payload = capabilities.build_capability_manifest(object(), SimpleNamespace(id=7)).model_dump(mode="json")
+    expected = {name: (spec.version, spec.risk) for name, spec in capabilities.TOOLS.items()}
+
+    assert {item["name"]: (item["version"], item["risk"]) for item in payload["agent_tools"]} == expected
 
 
 def test_manifest_omits_agent_and_document_capabilities_when_disabled_or_unavailable(monkeypatch):

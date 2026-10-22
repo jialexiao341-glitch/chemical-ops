@@ -317,7 +317,7 @@ TASK_STATUS_LABELS = {
 
 # 语义理解与路由
 
-Task = Literal["inventory", "quotes", "analytics", "document"]
+Task = Literal["inventory", "quotes", "purchase_request", "order_trace", "analytics", "document"]
 
 
 class Slots(BaseModel):
@@ -325,6 +325,8 @@ class Slots(BaseModel):
     model_config = ConfigDict(extra="forbid")
     product_keyword: str | None = Field(default=None, max_length=200)
     rfq_no: str | None = Field(default=None, max_length=32)
+    request_no: str | None = Field(default=None, max_length=32)
+    po_no: str | None = Field(default=None, max_length=32)
     warehouse_keyword: str | None = Field(default=None, max_length=128)
     date_from: date | None = None
     date_to: date | None = None
@@ -404,11 +406,15 @@ class Understanding(BaseModel):
 
         if self.purpose == "query" and self.dialogue_action != "cancel":
             if self.execution_mode == "agent":
-                if not set(self.tasks) <= {"inventory", "quotes"} or self.sub_tasks:
-                    raise ValueError("agent 模式仅支持未拆分的库存或报价目标")
+                if not set(self.tasks) <= {"inventory", "quotes", "purchase_request", "order_trace"} or self.sub_tasks:
+                    raise ValueError("agent 模式仅支持未拆分的库存、报价、采购申请或订单追溯目标")
+                if set(self.tasks) & {"purchase_request", "order_trace"} and len(self.tasks) != 1:
+                    raise ValueError("采购申请读取和订单追溯必须作为单一 Agent 目标执行")
             elif self.execution_mode == "batch":
                 if not 2 <= len(self.sub_tasks) <= 6:
                     raise ValueError("batch 模式必须包含 2 至 6 个原子任务")
+                if not subtask_kinds <= {"inventory", "quotes", "analytics", "document"}:
+                    raise ValueError("批次暂不支持采购申请读取或订单追溯")
                 if set(self.tasks) != subtask_kinds:
                     raise ValueError("batch 任务类别必须与子任务类别一致")
             elif self.execution_mode == "query":
@@ -430,8 +436,9 @@ class Understanding(BaseModel):
 
     @property
     def agent_goal(self) -> str:
-        """将库存/报价类别映射到现有 Agent 的完成条件；其他类别返回 unknown。"""
-        return ({"inventory": "inventory_query", "quotes": "supplier_quote_query"}.get(self.tasks[0], "unknown")
+        """将单一 Agent 类别映射到服务端完成条件。"""
+        return ({"inventory": "inventory_query", "quotes": "supplier_quote_query",
+                 "purchase_request": "purchase_request_query", "order_trace": "purchase_order_trace"}.get(self.tasks[0], "unknown")
                 if len(self.tasks) == 1 else "inventory_and_quotes_query" if set(self.tasks) == {"inventory", "quotes"} else "unknown")
 
 
@@ -571,6 +578,14 @@ class RFQSearchInput(ToolSchema):
     limit: Annotated[int, Field(strict=True, ge=1, le=20)] = 10
 
 
+class PurchaseRequestInput(ToolSchema):
+    request_no: str = Field(min_length=1, max_length=32, pattern=r"^PR[A-Za-z0-9_-]+$")
+
+
+class PurchaseOrderTraceInput(ToolSchema):
+    po_no: str = Field(min_length=1, max_length=32, pattern=r"^PO[-_A-Za-z0-9]+$")
+
+
 class ProductCandidate(ToolSchema):
     product_id: int
     product_code: str
@@ -606,6 +621,26 @@ class RFQSearchResult(ToolSchema):
     truncated: bool
     rows: list[RFQCandidate]
     sources: list["Source"]
+
+
+class PurchaseRequestResult(ToolSchema):
+    tool: Literal["purchase_requests.get_by_no"] = "purchase_requests.get_by_no"
+    total_rows: int
+    rows: list[dict[str, Any]]
+    sources: list["Source"]
+
+
+class PurchaseOrderTraceResult(ToolSchema):
+    tool: Literal["purchase_orders.trace_by_no"] = "purchase_orders.trace_by_no"
+    po_no: str
+    supplier: str | None
+    order_status: str
+    order_updated_at: str | None
+    stages: list[dict[str, Any]]
+    conclusion: list[str]
+    unavailable_stages: list[str]
+    source_records: list[dict[str, Any]]
+    answer: str
 
 
 class Source(ToolSchema):

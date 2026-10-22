@@ -43,6 +43,8 @@ def test_inventory_aggregation_is_carried_as_a_structured_slot():
 @pytest.mark.parametrize("purpose,mode,tasks,subtasks,expected", [
     ("query", "agent", ["inventory"], [], "agent"),
     ("query", "agent", ["inventory", "quotes"], [], "agent"),
+    ("query", "agent", ["purchase_request"], [], "agent"),
+    ("query", "agent", ["order_trace"], [], "agent"),
     ("query", "batch", ["inventory"], ["inventory", "inventory"], "batch"),
     ("query", "batch", ["analytics"], ["analytics", "analytics"], "batch"),
     ("query", "batch", ["document"], ["document", "document"], "batch"),
@@ -81,11 +83,28 @@ def test_execution_mode_is_explicit_and_controls_route(purpose, mode, tasks, sub
     {"purpose": "query", "execution_mode": "query", "tasks": ["analytics", "inventory"],
      "sub_tasks": [{"id": "t1", "kind": "analytics", "question": "订单数"}]},
     {"purpose": "query", "execution_mode": "document", "tasks": ["document"]},
+    {"purpose": "query", "execution_mode": "batch", "tasks": ["purchase_request"],
+     "sub_tasks": [{"id": "t1", "kind": "purchase_request", "question": "读取申请 PR20261022000001"},
+                   {"id": "t2", "kind": "purchase_request", "question": "读取申请 PR20261022000002"}]},
+    {"purpose": "query", "execution_mode": "agent", "tasks": ["purchase_request", "inventory"]},
     {"purpose": "greeting", "execution_mode": "agent"},
 ])
 def test_invalid_execution_mode_combinations_are_rejected(payload):
     with pytest.raises(ValidationError):
         routing.Understanding.model_validate(payload)
+
+
+@pytest.mark.parametrize("kind,slot,number,intent", [
+    ("purchase_request", "request_no", "PR20261022000001", "purchase_request_query"),
+    ("order_trace", "po_no", "PO-26001", "purchase_order_trace"),
+])
+def test_agent_numbered_read_tasks_keep_exact_identifier_slot(kind, slot, number, intent):
+    decision = routing.Understanding.model_validate({
+        "purpose": "query", "execution_mode": "agent", "tasks": [kind],
+        "slots": {slot: number},
+    })
+    assert decision.agent_goal == intent
+    assert getattr(decision.slots, slot) == number
 
 
 def test_routing_catalog_exposes_deterministic_derived_outputs():

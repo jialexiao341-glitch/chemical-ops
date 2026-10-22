@@ -86,8 +86,8 @@ def build_capability_manifest(db: Session, user: User) -> CapabilityManifest:
             {
                 "name": spec.name,
                 "description": spec.description,
-                "version": "1.0",
-                "risk": "READ_ONLY",
+                "version": spec.version,
+                "risk": spec.risk,
                 "input_schema": spec.input_schema.model_json_schema(),
             }
             for spec in TOOLS.values()

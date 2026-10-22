@@ -161,6 +161,17 @@ def get_request(db: Session, user: User, request_id: int, *, for_update: bool = 
     return request
 
 
+def get_request_by_no(db: Session, user: User, request_no: str) -> PurchaseRequest | None:
+    """按准确编号读取当前用户可见申请；不存在与超出范围均返回空。"""
+    request_id = db.scalar(select(PurchaseRequest.id).where(PurchaseRequest.request_no == request_no))
+    if request_id is None:
+        return None
+    try:
+        return get_request(db, user, request_id)
+    except ResourceNotFoundError:
+        return None
+
+
 def update_request(db: Session, user: User, request_id: int, data: PurchaseRequestUpdate) -> PurchaseRequest:
     """更新草稿或被驳回的采购申请。"""
 

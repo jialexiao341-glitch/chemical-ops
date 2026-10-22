@@ -752,6 +752,72 @@ def test_agent_entry_rejects_missing_tool_permission(task_db, monkeypatch):
     assert task_db.scalar(select(AIAgentTask.id)) is None
 
 
+@pytest.mark.parametrize("kind,slot,number,permission,tool_name,intent", [
+    ("purchase_request", "request_no", "PR20261022000031", "procurement.requests.read",
+     "purchase_requests.get_by_no", "purchase_request_query"),
+    ("order_trace", "po_no", "PO-26001", "procurement.orders.read",
+     "purchase_orders.trace_by_no", "purchase_order_trace"),
+])
+def test_numbered_agent_task_starts_with_only_its_read_permission(
+    task_db, monkeypatch, kind, slot, number, permission, tool_name, intent,
+):
+    from app.modules.ai import routing
+
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: [permission])
+    decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=[kind], slots={slot: number})
+    monkeypatch.setattr(routing, "read_ticket", lambda *_args: decision)
+    monkeypatch.setattr(routing, "read_ticket_pending_state_id", lambda *_args: None)
+    prepared = runtime.prepare_task(task_db, USER, runtime.TaskCreate(
+        question=f"查询 {number}", route_token="verified-ticket"))
+
+    assert prepared.memory_state["goal"]["intent"] == intent
+    assert prepared.memory_state["understanding"]["slots"][slot] == number
+
+
+def test_agent_capability_mapping_requires_only_the_task_tool():
+    from app.modules.ai import routing
+
+    for kind, tool_name in (("purchase_request", "purchase_requests.get_by_no"),
+                            ("order_trace", "purchase_orders.trace_by_no")):
+        decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=[kind])
+        runtime._ensure_agent_capabilities(decision, {tool_name})
+        with pytest.raises(AuthorizationError):
+            runtime._ensure_agent_capabilities(decision, set())
+
+
+def test_numbered_agent_summaries_are_deterministic_and_use_trace_answer():
+    request_reply = runtime._summary([{"tool": "purchase_requests.get_by_no", "result": {
+        "rows": [{"request_no": "PR20261022000031", "status": "APPROVING",
+                  "purpose": "乙醇采购", "items": [{"line_no": 1}]}]}}])
+    order_reply = runtime._summary([{"tool": "purchase_orders.trace_by_no", "result": {"answer": "追溯结论"}}])
+    assert request_reply == "采购申请 PR20261022000031：APPROVING；用途：乙醇采购；明细 1 项。"
+    assert order_reply == "追溯结论"
+
+
+@pytest.mark.parametrize("intent,tool_name,result", [
+    ("purchase_request_query", "purchase_requests.get_by_no", {"total_rows": 0, "rows": []}),
+    ("purchase_order_trace", "purchase_orders.trace_by_no", {"stages": [], "source_records": []}),
+])
+def test_numbered_agent_completion_requires_its_tool_evidence(intent, tool_name, result):
+    entry = {"tool": tool_name, "result": result}
+    runtime._validate_finish_evidence(intent, [entry])
+    with pytest.raises(BusinessValidationError, match="INCOMPLETE_TASK"):
+        runtime._validate_finish_evidence(intent, [])
+    with pytest.raises(BusinessValidationError, match="INCOMPLETE_TASK"):
+        runtime._validate_finish_evidence(intent, [{"tool": "catalog.search_products", "result": {"total_rows": 0}}])
+
+
+@pytest.mark.parametrize("tool_name", ["purchase_requests.get_by_no", "purchase_orders.trace_by_no"])
+def test_revoked_numbered_tool_permission_blocks_historical_evidence(monkeypatch, tool_name):
+    monkeypatch.setattr(tools, "list_tools", lambda *_args: [])
+    monkeypatch.setattr(tools, "accessible_warehouse_ids", lambda *_args: None)
+    monkeypatch.setattr(tools, "get_user_role_codes", lambda *_args: [])
+    with pytest.raises(AuthorizationError, match="权限已变化"):
+        runtime._check_trace_access(SimpleNamespace(), USER, [{
+            "action": "call_tool", "tool": tool_name, "status": "SUCCEEDED", "result": {},
+        }])
+
+
 def test_agent_accepts_only_ticket_bound_pending_clarification(task_db, monkeypatch):
     from datetime import datetime, timedelta, timezone
     from app.modules.ai import routing

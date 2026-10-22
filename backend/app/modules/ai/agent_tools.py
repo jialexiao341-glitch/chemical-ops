@@ -20,6 +20,10 @@ from app.modules.ai.schema import (
     ProductCandidate,
     ProductSearchInput,
     ProductSearchResult,
+    PurchaseOrderTraceInput,
+    PurchaseOrderTraceResult,
+    PurchaseRequestInput,
+    PurchaseRequestResult,
     QuoteInput,
     QuoteResult,
     QuoteRow,
@@ -249,6 +253,33 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
     )
 
 
+def get_purchase_request(db: Session, user: User, arguments: PurchaseRequestInput) -> PurchaseRequestResult:
+    """按精确编号读取当前用户可见申请；不返回审批意见或审批人身份。"""
+    from app.modules.purchase_requests import service as request_service
+
+    request = request_service.get_request_by_no(db, user, arguments.request_no)
+    if request is None:
+        return PurchaseRequestResult(total_rows=0, rows=[], sources=[])
+    row = {
+        "request_no": request.request_no, "purpose": request.purpose, "priority": request.priority,
+        "budget_amount": request.budget_amount, "currency_code": request.currency_code,
+        "expected_date": request.expected_date, "status": request.status,
+        "items": [{key: getattr(item, key) for key in (
+            "line_no", "requested_name", "technical_requirements", "quantity", "unit_id",
+            "budget_price", "expected_date", "fulfilled_quantity", "status",
+        )} for item in request.items],
+    }
+    return PurchaseRequestResult(total_rows=1, rows=[row],
+        sources=[Source(resource="purchase_requests", record_id=request.id)])
+
+
+def trace_purchase_order(db: Session, user: User, arguments: PurchaseOrderTraceInput) -> PurchaseOrderTraceResult:
+    """订单工具只负责契约适配，范围与逐环节授权由既有追溯服务执行。"""
+    from app.modules.ai.order_trace import trace_purchase_order as trace_service
+
+    return PurchaseOrderTraceResult(**trace_service(db, user, arguments.po_no))
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """静态工具契约：Schema 与处理函数由代码登记，禁止按模型文本动态查找函数。"""
@@ -258,6 +289,8 @@ class ToolSpec:
     input_schema: type[ToolSchema]
     output_schema: type[ToolSchema]
     handler: Callable
+    version: str = "1.0"
+    risk: str = "READ_ONLY"
 
 
 TOOLS = {
@@ -270,6 +303,10 @@ TOOLS = {
                  "warehouse.inventory.read", InventoryInput, InventoryResult, query_inventory),
         ToolSpec("supplier_quotes.compare", "同一可见询价明细的最新有效提交报价，分可比组排序",
                  "procurement.rfqs.read", QuoteInput, QuoteResult, compare_quotes),
+        ToolSpec("purchase_requests.get_by_no", "按精确编号读取当前用户可见采购申请及明细",
+                 "procurement.requests.read", PurchaseRequestInput, PurchaseRequestResult, get_purchase_request),
+        ToolSpec("purchase_orders.trace_by_no", "按精确订单号跨业务环节追溯采购订单",
+                 "procurement.orders.read", PurchaseOrderTraceInput, PurchaseOrderTraceResult, trace_purchase_order),
     )
 }
 
@@ -284,14 +321,14 @@ def _permissions(db: Session, user: User) -> tuple[bool, set[str]]:
 def list_tools(db: Session, user: User) -> list[dict[str, object]]:
     """仅向用户公开当前有权执行的只读工具及输入/输出 Schema；不调用模型。"""
     admin, permissions = _permissions(db, user)
-    return [{"name": spec.name, "description": spec.description, "version": "1.0",
-             "risk": "READ_ONLY", "permission": spec.permission,
+    return [{"name": spec.name, "description": spec.description, "version": spec.version,
+             "risk": spec.risk, "permission": spec.permission,
              "input_schema": spec.input_schema.model_json_schema(),
              "output_schema": spec.output_schema.model_json_schema()}
             for spec in TOOLS.values() if admin or spec.permission in permissions]
 
 
-def execute_tool(db: Session, user: User, call: ToolCall) -> InventoryResult | QuoteResult | ProductSearchResult | RFQSearchResult:
+def execute_tool(db: Session, user: User, call: ToolCall) -> ToolSchema:
     """统一执行入口：白名单、当前权限、参数 Schema、资源范围、输出 Schema。
 
     用户身份只取自认证上下文；拒绝模型夹带的身份、SQL 和其他未登记参数。
