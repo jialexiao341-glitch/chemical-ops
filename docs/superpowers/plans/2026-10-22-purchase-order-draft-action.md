@@ -117,11 +117,14 @@
 **Files:**
 - Modify: `frontend-design/apps/web-chemicalops/src/views/procurement/rfqs/modules/detail.vue`
 - Modify: `frontend-design/apps/web-chemicalops/src/views/procurement/rfqs/modules/order-draft-proposal.ts`
+- Modify: `frontend-design/apps/web-chemicalops/src/views/procurement/purchase-orders/detail.vue`
+- Modify: `frontend-design/apps/web-chemicalops/src/views/procurement/purchase-orders/item-display.ts`
 - Modify: `frontend-design/apps/web-chemicalops/src/views/ai/tasks/ActionProposalDetail.vue`
 - Modify: `frontend-design/apps/web-chemicalops/src/views/ai/tasks/index.vue`
 - Modify: `frontend-design/apps/web-chemicalops/src/api/procurement/purchase-orders.ts` to expose the line snapshot; `rfqs.ts` only if new RFQ types are needed
 - Modify: `frontend-design/apps/web-chemicalops/src/api/ai/agent.ts` only if proposal result types are needed
 - Test: `frontend-design/apps/web-chemicalops/src/views/procurement/rfqs/modules/detail.test.ts`; retain existing `frontend-design/apps/web-chemicalops/src/views/ai/workspace/action-proposal-policy.test.ts` regressions.
+- Test: `frontend-design/apps/web-chemicalops/src/views/procurement/purchase-orders/item-display.test.ts` verifies that historical NULL values display as “未留存快照”.
 
 **Interfaces:**
 - Consumes: Task 2's action type and preview/read contract; existing `createActionProposalApi`, `confirmActionProposalApi`, `canConfirmActionProposal` and RFQ detail template.
@@ -131,10 +134,10 @@
 
   Assert that creating an order proposal calls `createActionProposalApi('purchase_order.create_draft', ...)`, does not call `createPurchaseOrderApi`, and confirmation uses the preview version before showing the returned PO number.
 
-- [ ] **Step 2: Run the frontend test to verify it fails**
+- [ ] **Step 2: Run the frontend tests to verify they fail before implementation**
 
-  Run: `pnpm exec vitest run src/views/procurement/rfqs/modules/detail.test.ts`
-  Expected: FAIL because the current button calls the direct purchase-order write API.
+  Run from `frontend-design/apps/web-chemicalops`: `pnpm exec vitest run src/views/procurement/rfqs/modules/detail.test.ts src/views/procurement/purchase-orders/item-display.test.ts`.
+  Expected: FAIL because the proposal payload/preview helpers and historical snapshot label do not exist yet.
 
 - [ ] **Step 3: Replace direct creation with proposal preview and confirmation**
 
@@ -146,7 +149,7 @@
 
 - [ ] **Step 5: Run frontend verification**
 
-  Run from `frontend-design/apps/web-chemicalops`: `pnpm exec vue-tsc --noEmit --skipLibCheck` and `pnpm exec vitest run src/views/procurement/rfqs/modules/detail.test.ts src/views/ai/workspace/action-proposal-policy.test.ts`.
+  Run from `frontend-design/apps/web-chemicalops`: `pnpm exec vue-tsc --noEmit --skipLibCheck` and `pnpm exec vitest run src/views/procurement/rfqs/modules/detail.test.ts src/views/procurement/purchase-orders/item-display.test.ts src/views/ai/workspace/action-proposal-policy.test.ts`.
   Expected: exit 0; existing unrelated failures, if present, are recorded separately.
 
 - [ ] **Step 6: Commit the UI slice**
