@@ -9,19 +9,23 @@ import { computed, nextTick, ref } from 'vue';
 import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
-import { message, Select } from 'antdv-next';
+import { message, Modal, Select } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
 import {
+  createActionProposalApi,
+  confirmActionProposalApi,
   createRfqApi,
   getProductApi,
   getProductListApi,
   getPurchaseRequestListApi,
+  getPurchaseRequestApi,
   getSupplierListApi,
   getUnitListApi,
   updateRfqApi,
 } from '#/api';
 import ItemsEditor from '#/components/items-editor/index.vue';
+import { canConfirmActionProposal } from '#/views/ai/workspace/action-proposal-policy';
 
 const { hasAccessByCodes } = useAccess();
 const canConfirm = computed(() => hasAccessByCodes(['procurement.rfqs.write']));
@@ -56,6 +60,7 @@ const [Form, formApi] = useVbenForm({
         help: '可选。关联已批准的采购申请后，明细会带上申请中的物料。',
         placeholder: '不关联则为独立询价',
         showSearch: true,
+        onChange: (value: number | undefined) => { if (!id.value) void loadSourceRequest(value); },
       },
       fieldName: 'source_request_id',
       label: '来源采购申请',
@@ -161,6 +166,38 @@ function createItemRow(): RfqItemRow {
   };
 }
 
+async function loadSourceRequest(requestId?: number) {
+  if (!requestId) {
+    items.value = [createItemRow()];
+    return;
+  }
+  let request;
+  try {
+    request = await getPurchaseRequestApi(requestId);
+  } catch {
+    message.error('来源采购申请读取失败，请重新选择。');
+    return;
+  }
+  if (request.status !== 'APPROVED') {
+    message.warning('只能从已审批采购申请生成询价草稿');
+    return;
+  }
+  items.value = (request.items ?? []).map((item) => ({
+    source_request_item_id: item.id,
+    product_id: item.product_id ?? undefined,
+    quantity: Number(item.quantity),
+    requested_name: item.requested_name,
+    required_delivery_date: item.expected_date ?? undefined,
+    specification: '',
+    technical_requirements: item.technical_requirements ?? '',
+    unit_id: item.unit_id,
+  }));
+}
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 const [Drawer, drawerApi] = useVbenDrawer<null | RfqApi.Rfq>({
   async onConfirm() {
     if (!canConfirm.value) return;
@@ -183,6 +220,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | RfqApi.Rfq>({
         ...values,
         items: items.value.map((item) => ({
           product_id: item.product_id ?? undefined,
+          source_request_item_id: item.source_request_item_id ?? undefined,
           quantity: Number(item.quantity),
           requested_name: item.requested_name,
           required_delivery_date: item.required_delivery_date ?? undefined,
@@ -196,7 +234,29 @@ const [Drawer, drawerApi] = useVbenDrawer<null | RfqApi.Rfq>({
         // 供应商邀请使用联合主键，更新时同样提交完整列表
         await updateRfqApi(id.value, payload as RfqApi.RfqPayload);
       } else {
-        await createRfqApi(payload as RfqApi.RfqPayload);
+        if (!payload.source_request_id) {
+          await createRfqApi(payload as RfqApi.RfqPayload);
+          emit('success');
+          drawerApi.close();
+          return;
+        }
+        const proposal = await createActionProposalApi('rfq.create_draft', payload, makeIdempotencyKey());
+        if (!canConfirmActionProposal(proposal, proposal.preview_version, false)) {
+          message.warning(proposal.blockers.join('；') || '当前询价预览不能确认，请重新检查。');
+          return;
+        }
+        const lines = payload.items.map((item: any) => `${item.requested_name} ${item.quantity}`).join('；');
+        Modal.confirm({
+          title: '确认创建询价草稿',
+          content: `来源申请：${payload.source_request_id}。供应商：${payload.supplier_ids.length} 家。明细：${lines}`,
+          okText: '确认创建草稿',
+          onOk: async () => {
+            await confirmActionProposalApi<RfqApi.Rfq>(proposal.confirmation_id, proposal.preview_version);
+            emit('success');
+            drawerApi.close();
+          },
+        });
+        return;
       }
       emit('success');
       drawerApi.close();

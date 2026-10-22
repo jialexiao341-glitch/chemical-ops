@@ -114,6 +114,7 @@ export function useColumns(
 
 /** 询价明细的编辑行 */
 export interface RfqItemRow {
+  source_request_item_id?: null | number;
   product_id?: null | number;
   quantity?: null | number | string;
   requested_name?: string;

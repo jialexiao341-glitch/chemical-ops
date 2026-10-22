@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -44,6 +44,42 @@ class AIPurchaseDraftConfirmation(Base):
     purchase_request_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_requests.id"), nullable=True)
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+    executed_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)
+
+
+class AIAgentActionProposal(Base):
+    """用户确认前的动作快照与执行结果账本。"""
+
+    __tablename__ = "ai_agent_action_proposals"
+    __table_args__ = (
+        UniqueConstraint("confirmation_id", name="uq_ai_action_proposal_confirmation"),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_ai_action_proposal_user_idempotency"),
+        Index("ix_ai_action_proposal_owner_status", "user_id", "status"),
+        Index("ix_ai_action_proposal_expiry_status", "status", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    confirmation_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    resource_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    preview_version: Mapped[int] = mapped_column(nullable=False, default=1)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expected_resource_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    diff: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    evidence: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    warnings: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    blockers: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    permission_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(20), nullable=False, default="LOW")
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+    updated_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3))
     executed_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)
 
 

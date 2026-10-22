@@ -172,7 +172,7 @@ def get_request_by_no(db: Session, user: User, request_no: str) -> PurchaseReque
         return None
 
 
-def update_request(db: Session, user: User, request_id: int, data: PurchaseRequestUpdate) -> PurchaseRequest:
+def update_request(db: Session, user: User, request_id: int, data: PurchaseRequestUpdate, *, commit: bool = True) -> PurchaseRequest:
     """更新草稿或被驳回的采购申请。"""
 
     request = get_request(db, user, request_id, for_update=True)
@@ -194,11 +194,13 @@ def update_request(db: Session, user: User, request_id: int, data: PurchaseReque
             setattr(request, field, values[field])
     db.flush()
     _audit(db, user.id, "UPDATE", request, "更新采购申请")
-    db.commit()
-    return _require_request(db, request.id)
+    if commit:
+        db.commit()
+        return _require_request(db, request.id)
+    return request
 
 
-def submit_request(db: Session, user: User, request_id: int) -> PurchaseRequest:
+def submit_request(db: Session, user: User, request_id: int, *, commit: bool = True) -> PurchaseRequest:
     """提交采购申请并创建首个审批节点。"""
 
     request = get_request(db, user, request_id, for_update=True)
@@ -206,6 +208,7 @@ def submit_request(db: Session, user: User, request_id: int) -> PurchaseRequest:
         raise BusinessValidationError("只有草稿或已驳回的采购申请可以提交")
     if not request.items:
         raise BusinessValidationError("采购申请至少需要一条明细")
+    _validate_items(db, request.items)
     crud.delete_approvals(db, request.id)
     request.status = "APPROVING"
     request.submitted_at = _now()
@@ -222,8 +225,10 @@ def submit_request(db: Session, user: User, request_id: int) -> PurchaseRequest:
     ]
     db.flush()
     _audit(db, user.id, "SUBMIT", request, "提交采购申请审批")
-    db.commit()
-    return _require_request(db, request.id)
+    if commit:
+        db.commit()
+        return _require_request(db, request.id)
+    return request
 
 
 def act_on_request(

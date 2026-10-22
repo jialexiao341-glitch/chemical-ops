@@ -1,8 +1,6 @@
 """需要用户复核后才能创建的 AI 采购申请草稿建议。"""
 
 import json
-import hashlib
-from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -27,7 +25,6 @@ from app.modules.purchase_requests.model import Unit
 from app.modules.purchase_requests.schema import PurchaseRequestCreate
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
-from app.modules.ai.model import AIPurchaseDraftConfirmation
 
 
 def _build_prompt(question: str, units: list[Unit]) -> str:
@@ -193,33 +190,22 @@ async def propose_purchase_request_draft(
     except ValidationError as exc:
         raise BusinessValidationError("AI 草稿字段未通过采购申请格式校验，请补充用途、日期、单位或金额信息") from exc
 
-    snapshot_versions = {
-        "actor_department_id": user.department_id,
-        "products": {str(product.id): {"version_no": product.version_no, "status": product.status} for product in product_by_id.values()},
-        "units": {str(item["unit_id"]): {"unit_name": unit_by_id[item["unit_id"]].unit_name, "dimension": unit_by_id[item["unit_id"]].dimension}
-                  for item in draft_items if item["unit_id"] is not None},
-    }
     snapshot = draft.model_dump(mode="json")
-    confirmation_id = uuid4().hex
-    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
-    preview_version = 1
     if conversation_id is not None:
         from app.modules.ai.conversation_store import get_owned_conversation
         get_owned_conversation(db, user, conversation_id)
         evidence = [*evidence, {"type": "conversation", "conversation_id": conversation_id}]
-    db.add(AIPurchaseDraftConfirmation(
-        confirmation_id=confirmation_id, user_id=user.id, preview_version=preview_version,
-        request_hash=hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-        draft_payload=snapshot, object_versions=snapshot_versions, evidence=evidence,
-        status="PENDING", expires_at=expires_at,
-    ))
-    db.commit()
+    from app.modules.ai.action_proposals import propose_action
+    confirmation_id = uuid4().hex
+    generic_preview = propose_action(
+        db, user, "purchase_request.create_draft", snapshot, idempotency_key=confirmation_id
+    )
     return AIPurchaseDraftPreview(
         draft=draft.model_dump(mode="json"),
         display_items=display_items,
         warnings=warnings,
         evidence=evidence,
-        confirmation_id=confirmation_id,
-        preview_version=preview_version,
-        expires_at=expires_at.replace(tzinfo=timezone.utc),
+        confirmation_id=generic_preview.confirmation_id,
+        preview_version=generic_preview.preview_version,
+        expires_at=generic_preview.expires_at,
     )

@@ -28,6 +28,31 @@ def test_purchase_draft_intent_is_a_dedicated_preview_route():
     assert not decision.tasks and not decision.sub_tasks
 
 
+@pytest.mark.parametrize("purpose,request_no,action_fields", [
+    ("purchase_update", "PR20261022000001", {"purpose": "调整实验用途"}),
+    ("purchase_submit", "PR20261022000002", None),
+    ("rfq_draft", "PR20261022000003", {"supplier_codes": ["SUP-001"]}),
+])
+def test_write_intents_are_proposal_only_and_bind_an_exact_source_request(purpose, request_no, action_fields):
+    decision = routing.Understanding.model_validate({
+        "purpose": purpose, "execution_mode": "none", "slots": {"request_no": request_no},
+        "action_fields": action_fields,
+    })
+    assert decision.route == purpose
+    assert decision.slots.request_no == request_no
+    assert decision.tasks == []
+    assert decision.sub_tasks == []
+
+
+@pytest.mark.parametrize("purpose,action_fields", [
+    ("purchase_update", {"purpose": "x"}), ("purchase_submit", None),
+    ("rfq_draft", {"supplier_codes": ["SUP-001"]}),
+])
+def test_write_intents_without_exact_request_number_are_rejected(purpose, action_fields):
+    with pytest.raises(ValidationError):
+        routing.Understanding.model_validate({"purpose": purpose, "execution_mode": "none", "action_fields": action_fields})
+
+
 def test_inventory_aggregation_is_carried_as_a_structured_slot():
     decision = routing.Understanding.model_validate({
         "purpose": "query",

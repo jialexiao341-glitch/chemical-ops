@@ -167,6 +167,22 @@ export namespace AiApi {
     requires_user_confirmation: boolean;
     warnings: string[];
   }
+
+  export interface ActionProposalPreview {
+    confirmation_id: string;
+    action_type: string;
+    resource_type?: null | string;
+    resource_id?: null | string;
+    preview_version: number;
+    diff: Array<Record<string, unknown>>;
+    evidence: Array<Record<string, unknown>>;
+    warnings: string[];
+    blockers: string[];
+    risk_level: string;
+    status: 'PENDING' | 'EXECUTED' | 'EXPIRED' | 'CANCELLED' | 'INVALIDATED';
+    expires_at: string;
+    requires_user_confirmation: boolean;
+  }
 }
 
 /** 生成运营晨报；推送时由调用方先向用户确认接收角色。 */
@@ -193,12 +209,39 @@ export async function proposePurchaseRequestDraftApi(input: string | import('../
   );
 }
 
+export async function createActionProposalApi(actionType: string, payload: Record<string, unknown>, idempotencyKey: string) {
+  return requestClient.post<AiApi.ActionProposalPreview>('/ai/action-proposals', {
+    action_type: actionType,
+    idempotency_key: idempotencyKey,
+    payload,
+  });
+}
+
+export async function reviseActionProposalApi(confirmationId: string, previewVersion: number, payload: Record<string, unknown>) {
+  return requestClient.request<AiApi.ActionProposalPreview>(`/ai/action-proposals/${encodeURIComponent(confirmationId)}`, {
+    data: { confirmation_id: confirmationId, preview_version: previewVersion, payload },
+    method: 'PATCH',
+  });
+}
+
+export async function cancelActionProposalApi(confirmationId: string, previewVersion: number) {
+  return requestClient.post<{ cancelled: boolean }>(`/ai/action-proposals/${encodeURIComponent(confirmationId)}/cancel`, {
+    confirmation_id: confirmationId,
+    preview_version: previewVersion,
+  });
+}
+
+export async function confirmActionProposalApi<T = Record<string, unknown>>(confirmationId: string, previewVersion: number) {
+  return requestClient.post<T>(`/ai/action-proposals/${encodeURIComponent(confirmationId)}/confirm`, {
+    confirmation_id: confirmationId,
+    preview_version: previewVersion,
+    confirm: true,
+  });
+}
+
 /** 确认指定预览快照；请求不接受客户端修改后的业务字段。 */
 export async function confirmPurchaseRequestDraftApi(confirmationId: string, previewVersion: number) {
-  return requestClient.post<import('../procurement/purchase-requests').PurchaseRequestApi.PurchaseRequest>(
-    '/ai/purchase-request-draft/confirm',
-    { confirmation_id: confirmationId, preview_version: previewVersion, confirm: true },
-  );
+  return confirmActionProposalApi<import('../procurement/purchase-requests').PurchaseRequestApi.PurchaseRequest>(confirmationId, previewVersion);
 }
 
 /** 按当前页面对象提问；只提交对象引用，业务字段和权限由服务端重新读取。 */
@@ -342,7 +385,10 @@ export async function streamChatApi(
 
 /** 所有自然语言入口采用后端统一语义路由；不在浏览器猜业务意图。 */
 export function routeAiRequestApi(question: string, conversationId?: number) {
-  return requestClient.post<{ route: string; route_token: string }>('/ai/route', {
+  return requestClient.post<{ route: string; route_token: string; understanding: {
+    action_fields?: Record<string, unknown> | null;
+    slots: { request_no?: string | null };
+  } }>('/ai/route', {
     question, conversation_id: conversationId,
   });
 }

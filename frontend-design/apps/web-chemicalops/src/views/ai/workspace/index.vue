@@ -11,6 +11,9 @@ import { Button, Input, InputNumber, message, Modal, Select, Spin, Tag } from 'a
 
 import {
   cancelAgentTaskApi,
+  cancelActionProposalApi,
+  confirmActionProposalApi,
+  createActionProposalApi,
   deleteConversationApi,
   createAgentChatApi, continueAgentChatApi, continueAgentTaskApi, getAgentTaskApi,
   confirmPurchaseRequestDraftApi,
@@ -33,6 +36,7 @@ import AgentChatTask from './agent-chat-task.vue';
 import AgentSourcePopover from './agent-source-popover.vue';
 import { answerSources } from './answer-sources';
 import { createAgentPoller } from './agent-polling';
+import { canConfirmActionProposal } from './action-proposal-policy';
 import { acceptTask, primaryTaskResults } from './task-view';
 import { useConversation } from './use-conversation';
 import { useChatStream } from './use-chat-stream';
@@ -151,6 +155,7 @@ const draftProductsLoading = ref(false);
 const canReadDraftProducts = computed(() => hasAccessByCodes(['master.products.read']) || hasAccessByRoles(['SYS_ADMIN']));
 const draftFormReady = computed(() => Boolean(draftPurpose.value.trim()) && draftItems.value.length > 0 && draftItems.value.every((item, index) => item.requested_name.trim() && Number(item.quantity) > 0 && Number(item.unit_id) > 0 && (!needsDraftProductChoice(index) || Number(item.product_id) > 0 || (item.product_id === -1 && item.requested_name.trim()))));
 const creatingDraftMessageId = ref<string>();
+const actionProposalBusy = ref(false);
 const filterFieldNames = computed(() => Object.keys(filterDraft.value));
 const conversationGroups = computed(() => {
   const groups = new Map<string, AiApi.Conversation[]>();
@@ -471,7 +476,7 @@ async function removeConversation(conversation: AiApi.Conversation) {
 /** 发送消息并消费 SSE 流 */
 async function onSend(retryFailed = false) {
   const text = inputText.value.trim();
-  if ((!text && !(draftMode.value && draftFormReady.value)) || sending.value || historyLoading.value) {
+  if ((!text && !(draftMode.value && draftFormReady.value)) || sending.value || historyLoading.value || actionProposalBusy.value) {
     return;
   }
   if (currentAgent.value?.status === 'RUNNING') { message.info('正在查询，请等待结果自动更新。'); return; }
@@ -516,6 +521,12 @@ async function onSend(retryFailed = false) {
       draftMissingFields.value = [];
       draftMode.value = true;
       await previewPurchaseRequestDraft(text);
+      return;
+    }
+    if (['purchase_update', 'purchase_submit', 'rfq_draft'].includes(decision.route)) {
+      messages.value = history;
+      sending.value = false;
+      await prepareActionProposal(text, decision.route, 'understanding' in decision ? decision.understanding : { slots: {} });
       return;
     }
     if (decision.route === 'agent') {
@@ -650,6 +661,98 @@ async function onSend(retryFailed = false) {
     sending.value = false;
     scrollToBottom();
   }
+}
+
+async function prepareActionProposal(
+  question: string,
+  intent: string,
+  understanding: { action_fields?: Record<string, unknown> | null; slots: { request_no?: string | null } },
+) {
+  const requestNo = understanding.slots.request_no;
+  const userMessageId = nextId();
+  const assistantMessageId = nextId();
+  messages.value = [
+    ...messages.value,
+    { content: question, id: userMessageId, role: 'user' },
+    { content: '正在校验单据、权限和候选差异…', id: assistantMessageId, role: 'assistant', streaming: true },
+  ];
+  if (!requestNo) {
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? { ...item, content: '需要准确的采购申请编号，当前请求没有创建提案。', streaming: false }
+      : item);
+    message.warning('需要准确的采购申请编号，当前请求没有创建提案。');
+    return;
+  }
+  if (intent !== 'rfq_draft' && !canCreatePurchaseDraft) {
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? { ...item, content: '当前账号没有采购申请写入权限，未创建提案。', streaming: false }
+      : item);
+    message.error('你没有采购申请写入权限。');
+    return;
+  }
+  if (intent === 'rfq_draft' && !(hasAccessByRoles(['SYS_ADMIN']) ||
+    (hasAccessByCodes(['procurement.rfqs.write']) && hasAccessByCodes(['master.suppliers.read'])))) {
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? { ...item, content: '创建询价提案需要询价写入和供应商读取权限。', streaming: false }
+      : item);
+    message.error('创建询价提案需要询价写入和供应商读取权限。');
+    return;
+  }
+  const actionType = intent === 'purchase_update'
+    ? 'purchase_request.update_draft'
+    : intent === 'purchase_submit'
+      ? 'purchase_request.submit'
+      : 'rfq.create_draft';
+  const payload = intent === 'purchase_update'
+    ? { request_no: requestNo, changes: understanding.action_fields ?? {} }
+    : intent === 'purchase_submit'
+      ? { request_no: requestNo }
+      : { source_request_no: requestNo, ...(understanding.action_fields ?? {}) };
+  actionProposalBusy.value = true;
+  try {
+    const proposal = await createActionProposalApi(actionType, payload, makeIdempotencyKey());
+    const canConfirm = canConfirmActionProposal(proposal, proposal.preview_version, false);
+    const diff = proposal.diff.map((entry) => `${String(entry.field)}：${JSON.stringify(entry.after)}`).join('\n');
+    const suppliers = proposal.evidence.find((entry) => entry.type === 'suppliers') as any;
+    const supplierSummary = suppliers?.items?.map((item: any) => item.supplier_name).filter(Boolean).join('、');
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? { ...item, content: canConfirm ? `待确认提案已生成。\n${diff}${supplierSummary ? `\n受邀供应商：${supplierSummary}` : ''}` : proposal.blockers.join('；') || '当前提案不能确认，请补充信息后重试。', streaming: false }
+      : item);
+    if (!canConfirm) return;
+    Modal.confirm({
+      title: intent === 'purchase_update' ? '确认修改采购申请' : intent === 'purchase_submit' ? '确认提交采购申请' : '确认创建询价草稿',
+      content: `申请：${requestNo}\n${diff}${supplierSummary ? `\n供应商：${supplierSummary}` : ''}\n确认后仅执行预览所列动作。`,
+      okText: intent === 'purchase_submit' ? '确认提交' : intent === 'rfq_draft' ? '确认创建询价草稿' : '确认修改',
+      onOk: async () => {
+        actionProposalBusy.value = true;
+        try {
+          const result = await confirmActionProposalApi<Record<string, any>>(proposal.confirmation_id, proposal.preview_version);
+          const resourceNo = result.request_no || result.rfq_no || result.id;
+          const status = result.status ? `，状态：${result.status}` : '';
+          messages.value = messages.value.map((item) => item.id === assistantMessageId
+            ? { ...item, content: `${item.content}\n\n已执行提案${resourceNo ? `，单号：${resourceNo}` : ''}${status}。` }
+            : item);
+          message.success('已按确认的预览执行动作');
+        } finally {
+          actionProposalBusy.value = false;
+        }
+      },
+      onCancel: async () => {
+        await cancelActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+      },
+    });
+  } catch (error: any) {
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? { ...item, content: error?.message || '动作预览生成失败，未执行写入。', streaming: false }
+      : item);
+  } finally {
+    actionProposalBusy.value = false;
+    scrollToBottom();
+  }
+}
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function progressTask(item: UiMessage): AgentApi.Task {

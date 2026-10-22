@@ -92,7 +92,7 @@ def _replace_suppliers(rfq: RFQ, supplier_ids: list[int]) -> None:
         rfq.suppliers.append(RFQSupplier(supplier_id=supplier_id, invitation_channel="MANUAL"))
 
 
-def create_rfq(db: Session, user: User, data: RFQCreate) -> RFQ:
+def create_rfq(db: Session, user: User, data: RFQCreate, *, commit: bool = True) -> RFQ:
     """创建询价草稿。"""
 
     if data.source_request_id is not None:
@@ -113,8 +113,10 @@ def create_rfq(db: Session, user: User, data: RFQCreate) -> RFQ:
     db.flush()
     rfq.rfq_no = f"RFQ{date.today():%Y%m%d}{rfq.id:06d}"
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="RFQ", resource_id=rfq.id, request_summary="创建询价草稿", result_status="SUCCESS")
-    db.commit()
-    return crud.get_by_id(db, rfq.id)
+    if commit:
+        db.commit()
+        return crud.get_by_id(db, rfq.id)
+    return rfq
 
 
 def list_rfqs(db: Session, user: User, *, keyword: str | None, status: str | None, page: int, page_size: int):

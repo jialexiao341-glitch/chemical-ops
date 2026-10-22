@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
-from app.modules.ai.model import AIPurchaseDraftConfirmation
-from app.modules.ai.schema import AIPurchaseDraftConfirm, AIPurchaseDraftPatch, AIPurchaseDraftPreview, AIPurchaseDraftPreviewItem
+from app.modules.ai.model import AIAgentActionProposal, AIPurchaseDraftConfirmation
+from app.modules.ai.schema import (AIActionProposalConfirm, AIPurchaseDraftConfirm, AIPurchaseDraftPatch,
+                                   AIPurchaseDraftPreview, AIPurchaseDraftPreviewItem)
 from app.modules.products.model import Product
 from app.modules.purchase_requests import service as purchase_request_service
 from app.modules.purchase_requests.model import Unit
@@ -29,6 +30,15 @@ def _hash(payload: dict) -> str:
 
 def confirm_purchase_draft(db: Session, user: User, data: AIPurchaseDraftConfirm) -> dict:
     """在单个 MySQL 事务中消费确认快照并经采购领域服务创建 DRAFT。"""
+    generic = db.scalar(select(AIAgentActionProposal).where(
+        AIAgentActionProposal.confirmation_id == data.confirmation_id,
+        AIAgentActionProposal.user_id == user.id,
+    ))
+    if isinstance(generic, AIAgentActionProposal):
+        from app.modules.ai.action_proposals import confirm_action
+        return confirm_action(db, user, AIActionProposalConfirm(
+            confirmation_id=data.confirmation_id, preview_version=data.preview_version, confirm=data.confirm
+        ))
     roles = set(get_user_role_codes(db, user.id))
     permissions = set(get_user_permission_codes(db, user.id))
     if user.status != "ACTIVE" or ("SYS_ADMIN" not in roles and "procurement.requests.write" not in permissions):
@@ -90,6 +100,27 @@ def patch_purchase_draft(db: Session, user: User, data: AIPurchaseDraftPatch) ->
     allowed = {"purpose", "priority", "budget_amount", "currency_code", "expected_date", "items"}
     if set(data.changes) - allowed:
         raise BusinessValidationError("草稿修改包含不允许的字段")
+    generic = db.scalar(select(AIAgentActionProposal).where(
+        AIAgentActionProposal.confirmation_id == data.confirmation_id,
+        AIAgentActionProposal.user_id == user.id,
+    ))
+    if isinstance(generic, AIAgentActionProposal):
+        from app.modules.ai.action_proposals import revise_action
+        revised_payload = {**generic.payload, **data.changes}
+        preview = revise_action(db, user, data.confirmation_id, data.preview_version, revised_payload)
+        displays = []
+        for item in revised_payload["items"]:
+            product = db.get(Product, item.get("product_id")) if item.get("product_id") else None
+            unit = db.get(Unit, item["unit_id"])
+            displays.append(AIPurchaseDraftPreviewItem(
+                requested_name=item["requested_name"], product_name=product.product_name if product else None,
+                quantity=str(item["quantity"]), unit_name=unit.unit_name if unit else "",
+                technical_requirements=item.get("technical_requirements"),
+                budget_price=str(item["budget_price"]) if item.get("budget_price") is not None else None,
+            ))
+        return AIPurchaseDraftPreview(draft=revised_payload, display_items=displays,
+            warnings=preview.warnings, evidence=preview.evidence, confirmation_id=preview.confirmation_id,
+            preview_version=preview.preview_version, expires_at=preview.expires_at, requires_user_confirmation=True)
     confirmation = db.scalar(select(AIPurchaseDraftConfirmation).where(
         AIPurchaseDraftConfirmation.confirmation_id == data.confirmation_id,
         AIPurchaseDraftConfirmation.user_id == user.id).with_for_update())

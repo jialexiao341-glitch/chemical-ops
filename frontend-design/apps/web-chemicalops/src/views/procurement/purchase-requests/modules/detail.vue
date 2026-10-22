@@ -3,6 +3,7 @@ import type { PurchaseRequestApi } from '#/api';
 
 import { computed, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import {
@@ -13,10 +14,14 @@ import {
   Steps,
   Table,
   Tag,
+  Button,
+  Modal,
+  message,
 } from 'antdv-next';
 import type { StepItem } from 'antdv-next';
 
-import { getPurchaseRequestApi } from '#/api';
+import { createActionProposalApi, confirmActionProposalApi, getPurchaseRequestApi } from '#/api';
+import { canConfirmActionProposal } from '#/views/ai/workspace/action-proposal-policy';
 import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 import {
   PRIORITY_DICT,
@@ -26,6 +31,8 @@ import { formatAmount, formatDate, formatDateTime, formatQuantity } from '#/util
 import { getUnitNameMap } from '#/utils/lookup';
 
 const detail = ref<PurchaseRequestApi.PurchaseRequest>();
+const { hasAccessByCodes } = useAccess();
+const canSubmit = computed(() => hasAccessByCodes(['procurement.requests.write']) && ['DRAFT', 'REJECTED'].includes(detail.value?.status ?? ''));
 const loading = ref(false);
 const unitMap = ref<Map<number, string>>(new Map());
 let requestGeneration = 0;
@@ -94,6 +101,30 @@ function unitName(id?: null | number) {
   }
   return unitMap.value.get(id) ?? `#${id}`;
 }
+
+async function proposeSubmit() {
+  const request = detail.value;
+  if (!request || !canSubmit.value) return;
+  const proposal = await createActionProposalApi('purchase_request.submit', { request_id: request.id }, makeIdempotencyKey());
+  if (!canConfirmActionProposal(proposal, proposal.preview_version, false)) {
+    message.warning(proposal.blockers.join('；') || '当前申请不能提交，请检查后重试。');
+    return;
+  }
+  Modal.confirm({
+    title: '检查并提交采购申请',
+    content: `申请 ${request.request_no} 将进入审批中。${proposal.warnings.join('；')}`,
+    okText: '确认提交',
+    onOk: async () => {
+      await confirmActionProposalApi<PurchaseRequestApi.PurchaseRequest>(proposal.confirmation_id, proposal.preview_version);
+      detail.value = await getPurchaseRequestApi(request.id);
+      message.success('采购申请已提交审批');
+    },
+  });
+}
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 </script>
 
 <template>
@@ -101,6 +132,9 @@ function unitName(id?: null | number) {
     <Spin :spinning="loading">
       <Empty v-if="!detail && !loading" description="未找到该采购申请" />
       <div v-else-if="detail" class="space-y-6">
+        <div v-if="canSubmit" class="flex justify-end">
+          <Button type="primary" @click="proposeSubmit">检查并提交</Button>
+        </div>
         <Descriptions bordered :column="2" size="small">
           <DescriptionsItem label="申请编号">
             {{ detail.request_no }}

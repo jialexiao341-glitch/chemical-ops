@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.errors import BusinessValidationError
 from app.modules.ai import conversation_store
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
@@ -41,6 +42,11 @@ from app.modules.ai.schema import (
     TaskRead,
     AgentTaskPage,
     AIPurchaseDraftPatch,
+    AIActionProposalCreate,
+    AIActionProposalRevise,
+    AIActionProposalCancel,
+    AIActionProposalConfirm,
+    AIActionProposalPreview,
     Text2SQLRequest,
     Text2SQLResponse,
     ToolCall,
@@ -53,6 +59,7 @@ from app.modules.ai import service, routing, capabilities
 from app.modules.ai import agent_tools
 from app.modules.ai import agent_runtime
 from app.modules.ai import purchase_draft_confirmations
+from app.modules.ai import action_proposals
 from app.modules.ai import text2sql as text2sql_service
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection
 from app.modules.purchase_requests.schema import PurchaseRequestRead
@@ -65,6 +72,39 @@ router = APIRouter(
     dependencies=[Depends(require_permission("ai.workspace.read")), Depends(limit_ai)],
 )
 LOGGER = logging.getLogger('chemicalops.ai.http')
+
+
+@router.post("/action-proposals", response_model=AIActionProposalPreview, summary="生成待用户确认的 Agent 动作提案")
+def action_proposal_create(data: AIActionProposalCreate, db: Session = Depends(get_db),
+                           user: User = Depends(get_current_user)) -> AIActionProposalPreview:
+    return action_proposals.propose_action(db, user, data.action_type, data.payload,
+                                           idempotency_key=data.idempotency_key)
+
+
+@router.patch("/action-proposals/{confirmation_id}", response_model=AIActionProposalPreview,
+              summary="修订动作预览并递增版本")
+def action_proposal_revise(confirmation_id: str, data: AIActionProposalRevise,
+                           db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> AIActionProposalPreview:
+    if confirmation_id != data.confirmation_id:
+        raise BusinessValidationError("动作提案编号不匹配")
+    return action_proposals.revise_action(db, user, confirmation_id, data.preview_version, data.payload)
+
+
+@router.post("/action-proposals/{confirmation_id}/cancel", summary="取消待确认的动作提案")
+def action_proposal_cancel(confirmation_id: str, data: AIActionProposalCancel,
+                           db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    if confirmation_id != data.confirmation_id:
+        raise BusinessValidationError("动作提案编号不匹配")
+    action_proposals.cancel_action(db, user, confirmation_id, data.preview_version)
+    return {"cancelled": True}
+
+
+@router.post("/action-proposals/{confirmation_id}/confirm", summary="确认并执行当前动作预览")
+def action_proposal_confirm(confirmation_id: str, data: AIActionProposalConfirm,
+                            db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    if confirmation_id != data.confirmation_id:
+        raise BusinessValidationError("动作提案编号不匹配")
+    return action_proposals.confirm_action(db, user, data)
 
 
 @router.get("/agent/tools", summary="列出当前用户可用的只读 Agent 工具")

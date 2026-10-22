@@ -263,6 +263,63 @@ class AIPurchaseDraftPatch(BaseModel):
     changes: dict[str, Any] = Field(min_length=1)
 
 
+class AIActionProposalCreate(BaseModel):
+    """提交候选动作；action_type 仍需由服务端处理器白名单校验。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action_type: str = Field(min_length=1, max_length=80)
+    payload: dict[str, Any]
+    idempotency_key: str = Field(min_length=1, max_length=100)
+
+
+class AIActionProposalRevise(BaseModel):
+    """修订本人待确认的提案并递增预览版本。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation_id: str = Field(min_length=32, max_length=32, pattern="^[a-f0-9]{32}$")
+    preview_version: int = Field(strict=True, ge=1)
+    payload: dict[str, Any]
+
+
+class AIActionProposalCancel(BaseModel):
+    """取消本人当前版本的动作提案。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation_id: str = Field(min_length=32, max_length=32, pattern="^[a-f0-9]{32}$")
+    preview_version: int = Field(strict=True, ge=1)
+
+
+class AIActionProposalConfirm(BaseModel):
+    """只允许用户明确确认当前预览版本。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation_id: str = Field(min_length=32, max_length=32, pattern="^[a-f0-9]{32}$")
+    preview_version: int = Field(strict=True, ge=1)
+    confirm: Literal[True]
+
+
+class AIActionProposalPreview(BaseModel):
+    """供页面展示的动作差异、证据、阻塞项和确认状态。"""
+
+    confirmation_id: str
+    action_type: str
+    resource_type: str | None = None
+    resource_id: str | None = None
+    preview_version: int
+    diff: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    risk_level: str
+    status: Literal["PENDING", "EXECUTED", "EXPIRED", "CANCELLED", "INVALIDATED"]
+    expires_at: datetime
+    requires_user_confirmation: bool = True
+
+
 # 共享意图与状态
 
 class Intent(StrEnum):
@@ -359,7 +416,7 @@ class SubTask(BaseModel):
 class Understanding(BaseModel):
     """语义模型的严格输出契约，由程序校验后才能用于路由或拆分。"""
     model_config = ConfigDict(extra="forbid")
-    purpose: Literal["capability", "guidance", "query", "purchase_draft", "greeting", "unsupported", "clarify"]
+    purpose: Literal["capability", "guidance", "query", "purchase_draft", "purchase_update", "purchase_submit", "rfq_draft", "greeting", "unsupported", "clarify"]
     execution_mode: Literal["agent", "batch", "query", "document", "none"] = "none"
     clarification_slot: str | None = Field(default=None, min_length=1, max_length=64)
     clarification_options: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(default_factory=list, max_length=5)
@@ -367,6 +424,7 @@ class Understanding(BaseModel):
     tasks: list[Task] = Field(default_factory=list, max_length=4)
     excluded_tasks: list[Task] = Field(default_factory=list, max_length=4)
     slots: Slots = Field(default_factory=Slots)
+    action_fields: dict[str, Any] | None = None
     question: str | None = Field(default=None, max_length=1000)
     sub_tasks: list[SubTask] = Field(default_factory=list, max_length=6)
 
@@ -386,6 +444,21 @@ class Understanding(BaseModel):
         if self.purpose != "query":
             if self.execution_mode != "none" or self.tasks or self.sub_tasks:
                 raise ValueError("非查询意图必须使用 none 模式且不含查询任务")
+            if self.purpose in {"purchase_update", "purchase_submit", "rfq_draft"} and not self.slots.request_no:
+                raise ValueError("修改、提交采购申请或创建询价草稿必须提供准确申请编号")
+            if self.purpose == "purchase_update":
+                allowed = {"purpose", "priority", "budget_amount", "currency_code", "expected_date", "items", "department_id"}
+                if not self.action_fields or set(self.action_fields) - allowed:
+                    raise ValueError("申请修改意图必须提供有效的候选字段")
+            elif self.purpose == "rfq_draft":
+                allowed = {"supplier_codes", "quote_deadline", "requested_delivery_date", "delivery_requirements"}
+                codes = (self.action_fields or {}).get("supplier_codes")
+                if not isinstance(codes, list) or not codes or any(not isinstance(code, str) or not code.strip() for code in codes):
+                    raise ValueError("创建询价提案必须提供用户明确指定的供应商编码")
+                if set(self.action_fields or {}) - allowed:
+                    raise ValueError("询价提案包含不允许的候选字段")
+            elif self.action_fields is not None:
+                raise ValueError("当前意图不接受动作候选字段")
         elif self.dialogue_action == "cancel":
             if self.execution_mode != "none" or self.tasks or self.sub_tasks:
                 raise ValueError("取消操作不得携带执行模式或查询任务")

@@ -89,8 +89,15 @@ def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monk
     monkeypatch.setattr(drafts, "get_user_permission_codes", lambda *_args: ["procurement.requests.write", "master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"])
     monkeypatch.setattr(drafts, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(drafts, "chat", fake_chat)
-    from types import SimpleNamespace
+    from app.modules.ai import action_proposals
     from datetime import datetime, timezone
+    proposed_actions = []
+    def fake_propose(_db, _user, action_type, payload, *, idempotency_key):
+        proposed_actions.append((action_type, payload, idempotency_key))
+        return SimpleNamespace(confirmation_id="f" * 32, preview_version=1,
+                               expires_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    monkeypatch.setattr(action_proposals, "propose_action", fake_propose)
+    from types import SimpleNamespace
     database = _Database()
     product = SimpleNamespace(id=9, product_name="乙醇", status="ACTIVE", version_no=3, unit_id=3)
     database.get = lambda _model, _id: product
@@ -122,8 +129,10 @@ def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monk
     assert preview.display_items[0].quantity == "12"
     assert preview.display_items[0].unit_name == "升"
     assert preview.confirmation_id and preview.preview_version == 1
-    assert database.added[0].object_versions["products"]["9"]["version_no"] == 3
-    assert database.added[0].evidence == preview.evidence
+    assert proposed_actions[0][0] == "purchase_request.create_draft"
+    assert proposed_actions[0][1]["items"][0]["product_id"] == 9
+    assert proposed_actions[0][2]
+    assert database.added == []
     assert {"type": "conversation", "conversation_id": 77} in preview.evidence
 
 

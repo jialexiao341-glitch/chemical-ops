@@ -6,19 +6,20 @@ import { computed, nextTick, ref } from 'vue';
 import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
-import { message } from 'antdv-next';
+import { message, Modal } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
 import {
-  createPurchaseRequestApi,
+  createActionProposalApi,
+  confirmActionProposalApi,
   getDepartmentListApi,
   getProductApi,
   getProductListApi,
   getUnitListApi,
-  updatePurchaseRequestApi,
 } from '#/api';
 import ItemsEditor from '#/components/items-editor/index.vue';
 import { PRIORITY_DICT } from '#/constants/dictionary';
+import { canConfirmActionProposal } from '#/views/ai/workspace/action-proposal-policy';
 
 import type { RequestItemRow } from '../data';
 
@@ -220,8 +221,6 @@ const [Drawer, drawerApi] = useVbenDrawer<null | PurchaseRequestApi.PurchaseRequ
       return;
     }
     const values = await formApi.getValues<any>();
-    submitting.value = true;
-    drawerApi.lock();
     try {
       const payload = {
         ...values,
@@ -236,21 +235,34 @@ const [Drawer, drawerApi] = useVbenDrawer<null | PurchaseRequestApi.PurchaseRequ
           unit_id: Number(item.unit_id),
         })),
       };
-      if (id.value) {
-        await updatePurchaseRequestApi(id.value, payload);
-      } else {
-        await createPurchaseRequestApi(
-          payload as PurchaseRequestApi.RequestPayload,
-        );
+      const proposal = id.value
+        ? await createActionProposalApi('purchase_request.update_draft', { request_id: id.value, changes: payload }, makeIdempotencyKey())
+        : await createActionProposalApi('purchase_request.create_draft', payload, makeIdempotencyKey());
+      if (!canConfirmActionProposal(proposal, proposal.preview_version, false)) {
+        message.warning(proposal.blockers.join('；') || '当前预览不能确认，请刷新后重试。');
+        return;
       }
-      emit('success');
-      drawerApi.close();
+      const diffSummary = proposal.diff.map((entry) => `${String(entry.field)}：${JSON.stringify(entry.after)}`).join('\n');
+      Modal.confirm({
+        title: id.value ? '确认修改采购申请草稿' : '确认创建采购申请草稿',
+        content: `动作：${id.value ? '修改' : '创建'}采购申请草稿\n${diffSummary}`,
+        okText: id.value ? '确认修改' : '确认创建',
+        onOk: async () => {
+          submitting.value = true;
+          drawerApi.lock();
+          try {
+            await confirmActionProposalApi<PurchaseRequestApi.PurchaseRequest>(proposal.confirmation_id, proposal.preview_version);
+            emit('success');
+            drawerApi.close();
+          } finally {
+            submitting.value = false;
+            drawerApi.unlock();
+          }
+        },
+      });
     } catch {
       // 请求层已统一弹出后端返回的中文错误，这里保持弹窗打开，
       // 让用户修正后重新提交；不吞掉异常会产生未捕获的 Promise 拒绝。
-    } finally {
-      submitting.value = false;
-      drawerApi.unlock();
     }
   },
   async onOpenChange(isOpen) {
@@ -289,6 +301,10 @@ const [Drawer, drawerApi] = useVbenDrawer<null | PurchaseRequestApi.PurchaseRequ
     }
   },
 });
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 const title = computed(() =>
   id.value ? '编辑采购申请' : '新建采购申请',
