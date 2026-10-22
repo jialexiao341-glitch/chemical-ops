@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from contextlib import nullcontext
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -102,6 +103,23 @@ def test_default_create_order_keeps_owning_commit_behavior(source):
 
 def test_payment_terms_snapshot_is_exposed_by_order_item_schema():
     assert "payment_terms_snapshot" in PurchaseOrderItemRead.model_fields
+
+
+def test_validation_sums_quote_quantity_when_lines_share_one_request_item():
+    from app.core.errors import BusinessValidationError
+
+    request_item = SimpleNamespace(id=90, quantity=Decimal("3"), fulfilled_quantity=Decimal("1"))
+    rfq_items = {
+        11: SimpleNamespace(source_request_item_id=90),
+        12: SimpleNamespace(source_request_item_id=90),
+    }
+    quote_items = {
+        11: SimpleNamespace(quoted_quantity=Decimal("1.1")),
+        12: SimpleNamespace(quoted_quantity=Decimal("1.1")),
+    }
+
+    with pytest.raises(BusinessValidationError, match="剩余可采购数量不足"):
+        order_service._validate_request_item_quantities(rfq_items, quote_items, [request_item])
 
 
 def test_migration_058_is_discovered_and_only_adds_nullable_snapshot_column():

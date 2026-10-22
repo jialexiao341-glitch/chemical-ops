@@ -46,6 +46,29 @@ def _require_order(db: Session, order_id: int, *, for_update: bool = False) -> P
     return order
 
 
+def _validate_request_item_quantities(rfq_items, quote_items, request_items) -> None:
+    """对可能拆成多条询价行的同一申请行汇总校验剩余量。"""
+
+    quoted_by_request_item: dict[int, Decimal] = {}
+    request_item_by_id = {item.id: item for item in request_items}
+    for rfq_item_id, quote_item in quote_items.items():
+        request_item_id = rfq_items[rfq_item_id].source_request_item_id
+        if request_item_id is None:
+            continue
+        request_item = request_item_by_id.get(request_item_id)
+        if request_item is None:
+            raise BusinessValidationError("询价来源采购申请明细不存在")
+        quoted_by_request_item[request_item_id] = (
+            quoted_by_request_item.get(request_item_id, Decimal("0")) + quote_item.quoted_quantity
+        )
+
+    for request_item_id, quoted_quantity in quoted_by_request_item.items():
+        request_item = request_item_by_id[request_item_id]
+        remaining = request_item.quantity - request_item.fulfilled_quantity
+        if quoted_quantity > remaining:
+            raise BusinessValidationError(f"采购申请明细 {request_item_id} 剩余可采购数量不足")
+
+
 def _add_event(db: Session, order: PurchaseOrder, user_id: int, event_type: str, from_status: str | None, to_status: str | None, note: str) -> None:
     """向当前事务追加一条订单事件。"""
 
@@ -89,15 +112,11 @@ def _validate_source(db: Session, user: User, data: PurchaseOrderCreate, *, for_
     quote_items = {item.rfq_item_id: item for item in quote.items}
     if set(rfq_items) != set(quote_items):
         raise BusinessValidationError("中选报价必须覆盖询价单全部明细")
+    _validate_request_item_quantities(rfq_items, quote_items, source_request.items)
     for rfq_item_id, quote_item in quote_items.items():
         rfq_item = rfq_items[rfq_item_id]
         if rfq_item.product_id is None:
             raise BusinessValidationError(f"询价明细 {rfq_item.line_no} 尚未关联产品主数据，不能生成采购订单")
-        request_item = db.get(PurchaseRequestItem, rfq_item.source_request_item_id) if rfq_item.source_request_item_id else None
-        if request_item is not None:
-            remaining = request_item.quantity - request_item.fulfilled_quantity
-            if quote_item.quoted_quantity > remaining:
-                raise BusinessValidationError(f"采购申请明细 {request_item.id} 剩余可采购数量不足")
     return comparison, quote, source_request, rfq_items, quote_items
 
 
