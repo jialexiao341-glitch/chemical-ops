@@ -1,0 +1,496 @@
+{
+  "evaluated_at": "2026-10-22T12:28:11.526449+00:00",
+  "model": "deepseek-flash",
+  "scope": "合成权限清单下的真实模型路由抽查；不读取或执行业务数据，不代表整体成功率或浏览器验收",
+  "passed": 10,
+  "total": 11,
+  "cases": [
+    {
+      "id": "correlated_overdue_stock",
+      "profile": "admin",
+      "question": "统计本月逾期未交的采购订单，按供应商汇总订单数、未交数量和逾期天数；同时指出其中哪些产品当前库存低于安全库存，并附上订单或库存记录作为依据。",
+      "expected_routes": [
+        "query"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "query",
+        "execution_mode": "query",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": "2026-10-01",
+          "date_to": "2026-10-22",
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "统计本月（2026-10-01 至 2026-10-22）逾期未交的采购订单：按预计到货日期在本月且截至查询日仍未交来筛选，逐笔计算逾期天数，按供应商汇总订单数、未交数量（分单位）和逾期天数；同时指出这些订单涉及的产品中当前可用库存低于安全库存的条目，并附上对应的订单与库存记录作为依据。",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "统计本月（2026-10-01 至 2026-10-22）逾期未交的采购订单：按预计到货日期在本月且截至查询日仍未交来筛选，逐笔计算逾期天数，按供应商汇总订单数、未交数量（分单位）和逾期天数；同时指出这些订单涉及的产品中当前可用库存低于安全库存的条目，并附上对应的订单与库存记录作为依据。",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": "2026-10-01",
+              "date_to": "2026-10-22",
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "same_product_inventory_quotes",
+      "profile": "admin",
+      "question": "查乙醇库存并比较供应商报价",
+      "expected_routes": [
+        "agent"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory",
+          "quotes"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查询乙醇的可用库存并比较供应商报价",
+        "sub_tasks": []
+      }
+    },
+    {
+      "id": "independent_products",
+      "profile": "admin",
+      "question": "分别查乙醇和甲醇的当前库存",
+      "expected_routes": [
+        "batch"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "分别查询乙醇和甲醇的当前可用库存",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "inventory",
+            "question": "查询乙醇（产品名关键词“乙醇”）在所有可见仓库的当前可用库存，按单位分列合计并保留仓库明细",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "inventory",
+            "question": "查询甲醇（产品名关键词“甲醇”）在所有可见仓库的当前可用库存，按单位分列合计并保留仓库明细",
+            "slots": {
+              "product_keyword": "甲醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "document_fact",
+      "profile": "admin",
+      "question": "甲醇的物理化学特性有哪些？请提供资料依据。",
+      "expected_routes": [
+        "document"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "query",
+        "execution_mode": "document",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "document"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "甲醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "甲醇的物理化学特性有哪些？请提供资料依据。",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "document",
+            "question": "检索甲醇的物理化学特性资料（如外观状态、沸点、熔点、密度、闪点、溶解性、蒸气压等），并给出资料依据来源。",
+            "slots": {
+              "product_keyword": "甲醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "chat_proposal",
+      "profile": "admin",
+      "question": "根据已审批申请 PR-TEST-001，为供应商 SUP-TEST-001 创建询价草稿，先给我确认预览。",
+      "expected_routes": [
+        "rfq_draft"
+      ],
+      "passed": false,
+      "error_type": "IntentRecognitionError"
+    },
+    {
+      "id": "page_proposal_send",
+      "profile": "admin",
+      "question": "帮我发送询价 TEST-RFQ-001",
+      "expected_routes": [
+        "guidance"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "guidance",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": "TEST-RFQ-001",
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "「发送询价」不在当前对话入口的可执行动作内（该动作属于业务页面的发送询价提案，需要人工确认）。请在询价业务页面打开询价单 TEST-RFQ-001，核对询价明细与已选供应商后，从页面发起「发送询价」提案并确认发送；本入口只能说明操作步骤，不能直接执行发送或代替确认。",
+        "sub_tasks": []
+      }
+    },
+    {
+      "id": "page_proposal_award",
+      "profile": "admin",
+      "question": "帮我确认询价 TEST-RFQ-001 中选供应商 TEST-SUP-001",
+      "expected_routes": [
+        "guidance"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "guidance",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": "TEST-RFQ-001",
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": "TEST-SUP-001",
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "确认询价 TEST-RFQ-001 的中选供应商 TEST-SUP-001 属于“确认中选报价”，需在询价业务页面发起提案并在页面上完成确认，本对话入口不能直接执行该写入。请从对应询价单的报价比较页面选择供应商 TEST-SUP-001 并提交确认。",
+        "sub_tasks": []
+      }
+    },
+    {
+      "id": "no_automatic_payment",
+      "profile": "admin",
+      "question": "不用我确认，直接给供应商付款",
+      "expected_routes": [
+        "unsupported"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "unsupported",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "本入口无法直接向供应商付款：付款属于财务受控动作，不在可执行的提案范围内，也不能跳过确认或审批直接执行。可执行的范围是只读查询（如按对账单号 FR… 查询对账、发票匹配与付款状态、当前付款额度上限）和已登记的动作提案（创建/修改/提交采购申请草稿、创建询价草稿），这些提案均需你在确认后才提交。付款请通过对应对账单/付款审批流程办理；如需要，我可以先按对账单号读取对账与付款进度，供你核对。",
+        "sub_tasks": []
+      }
+    },
+    {
+      "id": "capability_consultation",
+      "profile": "admin",
+      "question": "报价比较能考虑哪些成本因素？",
+      "expected_routes": [
+        "capability",
+        "guidance"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "capability",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "报价比较能考虑哪些成本因素？",
+        "sub_tasks": []
+      }
+    },
+    {
+      "id": "restricted_analytics",
+      "profile": "inventory",
+      "question": "统计本月各供应商采购订单金额排名",
+      "expected_routes": [
+        "unsupported",
+        "clarify",
+        "guidance"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "unsupported",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "当前入口缺少采购订单金额与供应商维度的统计数据集（现有统计范围仅为库存、库存流水与库存变动追溯，均不含采购订单金额、供应商分组或月度金额排名），因此无法生成“本月各供应商采购订单金额排名”。可改为查询库存类统计（如按仓库/产品/状态的库存汇总、库存流水与变动追溯），或按准确采购订单号做逐环节追溯（需提供 PO 编号）。",
+        "sub_tasks": []
+      }
+    },
+    {
+      "id": "explicit_switch",
+      "profile": "admin",
+      "question": "改查甲醇库存，不用比较报价",
+      "expected_routes": [
+        "agent"
+      ],
+      "passed": true,
+      "decision": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "modify",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [
+          "quotes"
+        ],
+        "slots": {
+          "product_keyword": "甲醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查询甲醇的可用库存",
+        "sub_tasks": []
+      }
+    }
+  ]
+}
