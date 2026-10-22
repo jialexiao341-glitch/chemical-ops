@@ -247,3 +247,89 @@ def test_rfq_send_inbox_hides_reference_and_evidence_without_rfq_read_permission
     assert result.source_route is None
     assert result.diff == []
     assert result.evidence == []
+
+
+def test_rfq_select_quote_inbox_shows_rfq_reference_and_selection_reason(proposal_db, monkeypatch):
+    permissions = {1: ["procurement.rfqs.read", "procurement.rfqs.award"]}
+    monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
+    monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    from app.modules.rfqs import service as rfq_service
+    monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
+    proposal = _proposal(proposal_db, action_type="rfq.select_quote")
+    proposal.resource_type = "RFQ"
+    proposal.permission_code = "procurement.rfqs.award"
+    proposal.payload = {"rfq_id": 73, "comparison_id": 2, "quote_id": 3, "selection_reason": "综合成本合适"}
+    proposal_db.commit()
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.business_reference == "RFQ-0073"
+    assert result.source_route == "/procurement/rfqs?ai_record_id=73"
+    assert result.revision_values == {"selection_reason": "综合成本合适"}
+
+
+def test_rfq_select_quote_list_is_scoped_to_owner(proposal_db, monkeypatch):
+    permissions = {1: ["procurement.rfqs.read", "procurement.rfqs.award"]}
+    monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
+    monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    from app.modules.rfqs import service as rfq_service
+    monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
+    own = _proposal(proposal_db, owner_id=1, action_type="rfq.select_quote")
+    own.resource_type = "RFQ"
+    own.permission_code = "procurement.rfqs.award"
+    own.payload = {"rfq_id": 73, "comparison_id": 2, "quote_id": 3, "selection_reason": "综合成本合适"}
+    _proposal(proposal_db, owner_id=2, confirmation_id="b" * 32, action_type="rfq.select_quote")
+    proposal_db.commit()
+
+    result = ai_controller.action_proposal_list(
+        db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"), page=1, page_size=20, inbox_only=True)
+
+    assert result.total == 1
+    assert [item.confirmation_id for item in result.items] == [own.confirmation_id]
+
+
+def test_rfq_select_quote_inbox_disables_confirmation_after_award_permission_revoked(proposal_db, monkeypatch):
+    permissions = {1: ["procurement.rfqs.read"]}
+    monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
+    monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    from app.modules.rfqs import service as rfq_service
+    monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
+    proposal = _proposal(proposal_db, action_type="rfq.select_quote")
+    proposal.permission_code = "procurement.rfqs.award"
+    proposal.payload = {"rfq_id": 73, "comparison_id": 2, "quote_id": 3, "selection_reason": "综合成本合适"}
+    proposal_db.commit()
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.availability == "PERMISSION_REVOKED"
+    assert result.requires_user_confirmation is False
+    assert result.business_reference == "RFQ-0073"
+
+
+def test_rfq_select_quote_inbox_hides_reason_without_rfq_read_permission(proposal_db, monkeypatch):
+    permissions = {1: ["procurement.rfqs.award"]}
+    monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
+    monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    proposal = _proposal(proposal_db, action_type="rfq.select_quote")
+    proposal.permission_code = "procurement.rfqs.award"
+    proposal.payload = {"rfq_id": 73, "comparison_id": 2, "quote_id": 3, "selection_reason": "受限的商务理由"}
+    proposal_db.commit()
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.availability == "RESOURCE_UNAVAILABLE"
+    assert result.business_reference is None
+    assert result.diff == []
+    assert result.evidence == []
+    assert result.revision_values == {}

@@ -26,6 +26,7 @@ const actionLabels: Record<string, string> = {
   'purchase_request.submit': '提交采购申请',
   'rfq.create_draft': '创建询价草稿',
   'rfq.send': '发送询价',
+  'rfq.select_quote': '确认中选报价',
 };
 const statusLabels: Record<AiApi.ActionProposalRead['status'], string> = {
   CANCELLED: '已取消',
@@ -48,6 +49,9 @@ const fieldLabels: Record<string, string> = {
   purpose: '用途',
   quote_deadline: '报价截止时间',
   requested_delivery_date: '期望交付日期',
+  selected_quote: '中选报价',
+  selection_reason: '中选理由',
+  status: '询价状态',
 };
 const dateFields = new Set(['expected_date', 'requested_delivery_date', 'quote_deadline']);
 const statusColor: Record<AiApi.ActionProposalRead['status'], string> = {
@@ -151,7 +155,7 @@ function formatValue(value: unknown) {
         <Select v-if="field === 'priority'" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :options="PRIORITY_DICT.options()" class="w-full" />
         <DatePicker v-else-if="dateFields.has(field)" :aria-label="fieldLabels[field]" :show-time="field === 'quote_deadline'" :value="dateValue(value)" class="w-full" @change="updateDate(field, $event)" />
         <InputNumber v-else-if="field === 'budget_amount'" :aria-label="fieldLabels[field]" :value="typeof value === 'number' || typeof value === 'string' ? Number(value) : null" :min="0" class="w-full" @change="updateNumber(field, $event)" />
-        <Input.TextArea v-else-if="field === 'purpose' || field === 'delivery_requirements'" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :rows="2" :maxlength="1000" />
+        <Input.TextArea v-else-if="field === 'purpose' || field === 'delivery_requirements' || field === 'selection_reason'" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :rows="2" :maxlength="field === 'selection_reason' ? 2000 : 1000" />
         <Input v-else v-model:value="revisionValues[field]" :aria-label="fieldLabels[field] || field" />
       </div>
     </section>

@@ -4,9 +4,10 @@ import { computed, ref } from 'vue';
 import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
-import { Alert, Input, message } from 'antdv-next';
+import { Alert, Input, Modal as ConfirmModal, message } from 'antdv-next';
 
-import { selectQuoteApi } from '#/api';
+import { confirmActionProposalApi, createActionProposalApi } from '#/api';
+import { canConfirmActionProposal } from '#/views/ai/workspace/action-proposal-policy';
 import { formatAmount } from '#/utils/format';
 
 const { hasAccessByCodes } = useAccess();
@@ -16,8 +17,11 @@ const emit = defineEmits(['success']);
 /** 中选报价弹窗的载荷 */
 interface SelectQuotePayload {
   comparisonId: number;
+  comparisonNo: string;
   quoteId: number;
   rfqId: number;
+  rfqNo: string;
+  quoteNo: string;
   supplierName: string;
   totalAmount?: null | string;
   unitPrice?: null | string;
@@ -43,14 +47,29 @@ const [Modal, modalApi] = useVbenModal<null | SelectQuotePayload>({
     }
     modalApi.lock();
     try {
-      await selectQuoteApi(data.rfqId, {
+      const proposal = await createActionProposalApi('rfq.select_quote', {
+        rfq_id: data.rfqId,
         comparison_id: data.comparisonId,
         quote_id: data.quoteId,
         selection_reason: reason.value.trim(),
-      });
-      message.success('已确认中选报价');
-      emit('success');
+      }, makeIdempotencyKey());
+      if (!canConfirmActionProposal(proposal, proposal.preview_version, false)) {
+        message.warning(proposal.blockers.join('；') || '当前中选提案不能确认，请重新检查。');
+        return;
+      }
       modalApi.close();
+      ConfirmModal.confirm({
+        title: '确认中选报价',
+        content: `询价单 ${data.rfqNo}，比价结果 ${data.comparisonNo}。确认选择 ${data.supplierName}（${data.quoteNo}）？确认后询价单关闭，其他已提交报价会被拒绝。若暂不确认，提案会保留在 Agent Inbox。`,
+        okText: '确认中选',
+        cancelText: '稍后在 Inbox 处理',
+        onOk: async () => {
+          await confirmActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+          message.success('已确认中选报价');
+          emit('success');
+        },
+        onCancel: () => message.info('中选提案已保留在 Agent Inbox'),
+      });
     } catch {
       // 请求层已统一弹出后端返回的中文错误，这里保持弹窗打开，
       // 让用户修正后重新提交；不吞掉异常会导致未捕获的 Promise 拒绝。
@@ -65,6 +84,10 @@ const [Modal, modalApi] = useVbenModal<null | SelectQuotePayload>({
     }
   },
 });
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 const title = computed(() => `确认中选 · ${payload.value?.supplierName ?? ''}`);
 </script>

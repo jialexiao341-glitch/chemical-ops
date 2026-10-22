@@ -303,7 +303,7 @@ def get_latest_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparis
     return comparison
 
 
-def select_quote(db: Session, user: User, rfq_id: int, data: QuoteSelection) -> RFQ:
+def select_quote(db: Session, user: User, rfq_id: int, data: QuoteSelection, *, commit: bool = True) -> RFQ:
     """确认中选报价，关闭询价单并拒绝其他未中选报价。"""
 
     # 固定锁序：询价单 -> 比价单；锁定读取刷新已有 identity map。
@@ -318,7 +318,7 @@ def select_quote(db: Session, user: User, rfq_id: int, data: QuoteSelection) -> 
         raise ResourceNotFoundError("比价结果不存在")
     if comparison.status != "DRAFT":
         raise DuplicateResourceError("该比价结果已经确认或取消")
-    quote = crud.get_quote(db, data.quote_id)
+    quote = crud.get_quote(db, data.quote_id, for_update=True)
     if quote is None or quote.rfq_id != rfq.id:
         raise BusinessValidationError("中选报价不属于当前询价单")
     if quote.status != "SUBMITTED":
@@ -340,5 +340,8 @@ def select_quote(db: Session, user: User, rfq_id: int, data: QuoteSelection) -> 
     rfq.status = "CLOSED"
     rfq.closed_at = _now()
     add_audit_log(db, actor_id=user.id, action_type="SELECT_QUOTE", resource_type="RFQ", resource_id=rfq.id, request_summary=f"确认中选报价 {quote.quote_no}", result_status="SUCCESS")
-    db.commit()
-    return crud.get_by_id(db, rfq.id)
+    if commit:
+        db.commit()
+        return crud.get_by_id(db, rfq.id)
+    db.flush()
+    return rfq

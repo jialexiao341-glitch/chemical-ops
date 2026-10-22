@@ -473,3 +473,135 @@ class RFQSendHandler:
 
 
 register_handler("rfq.send", RFQSendHandler())
+
+
+def _quote_comparison_snapshot(comparison) -> dict[str, Any]:
+    return {
+        "id": comparison.id,
+        "comparison_no": comparison.comparison_no,
+        "status": comparison.status,
+        "selected_quote_id": comparison.selected_quote_id,
+        "conclusion": comparison.conclusion,
+        "items": [
+            {"id": item.id, "quote_id": item.quote_id, "rfq_item_id": item.rfq_item_id,
+             "supplier_id": item.supplier_id, "quoted_unit_price": str(item.quoted_unit_price),
+             "total_amount": str(item.total_amount) if item.total_amount is not None else None,
+             "moq_quantity": str(item.moq_quantity) if item.moq_quantity is not None else None,
+             "lead_days": item.lead_days, "payment_terms": item.payment_terms,
+             "rank_no": item.rank_no, "selection_flag": item.selection_flag}
+            for item in comparison.items
+        ],
+    }
+
+
+def _supplier_quote_snapshot(quote) -> dict[str, Any]:
+    return {
+        "id": quote.id,
+        "rfq_id": quote.rfq_id,
+        "quote_no": quote.quote_no,
+        "supplier_id": quote.supplier_id,
+        "quote_version": quote.quote_version,
+        "status": quote.status,
+        "currency_code": quote.currency_code,
+        "valid_until": quote.valid_until.isoformat() if quote.valid_until else None,
+        "items": [
+            {"id": item.id, "rfq_item_id": item.rfq_item_id, "unit_id": item.unit_id,
+             "quoted_quantity": str(item.quoted_quantity), "unit_price": str(item.unit_price),
+             "tax_rate": str(item.tax_rate) if item.tax_rate is not None else None,
+             "moq_quantity": str(item.moq_quantity) if item.moq_quantity is not None else None,
+             "moq_unit_id": item.moq_unit_id, "lead_days": item.lead_days,
+             "payment_terms": item.payment_terms}
+            for item in quote.items
+        ],
+    }
+
+
+class RFQSelectQuoteHandler:
+    permission_code = "procurement.rfqs.award"
+    resource_type = "RFQ"
+
+    def prepare(self, db, user, payload):
+        from app.modules.rfqs import crud as rfq_crud
+        from app.modules.rfqs import service as rfq_service
+        from app.modules.rfqs.schema import QuoteSelection
+
+        if not isinstance(payload, dict) or set(payload) != {"rfq_id", "comparison_id", "quote_id", "selection_reason"}:
+            raise BusinessValidationError("中选提案字段无效")
+        try:
+            rfq_id = int(payload["rfq_id"])
+        except (TypeError, ValueError):
+            raise BusinessValidationError("询价单编号无效") from None
+        selection = QuoteSelection.model_validate({key: payload[key] for key in
+            ("comparison_id", "quote_id", "selection_reason")})
+        rfq = rfq_service.get_rfq(db, user, rfq_id)
+        if rfq.status != "RESPONDING":
+            raise BusinessValidationError("只有等待报价的询价单可以确认中选")
+        comparison = rfq_crud.get_comparison(db, rfq.id, selection.comparison_id)
+        if comparison is None:
+            raise ResourceNotFoundError("比价结果不存在")
+        if comparison.status != "DRAFT":
+            raise BusinessValidationError("比价结果已变化，请重新生成提案")
+        quote = rfq_crud.get_quote(db, selection.quote_id)
+        if quote is None or quote.rfq_id != rfq.id:
+            raise BusinessValidationError("中选报价不属于当前询价单")
+        if quote.status != "SUBMITTED":
+            raise BusinessValidationError("只有已提交的报价可以中选")
+        if quote.id not in {item.quote_id for item in comparison.items}:
+            raise BusinessValidationError("中选报价不在该比价结果快照中")
+        snapshot = {"rfq": _rfq_send_snapshot(rfq),
+                    "comparison": _quote_comparison_snapshot(comparison),
+                    "quote": _supplier_quote_snapshot(quote)}
+        return {
+            "payload": {"rfq_id": rfq.id, **selection.model_dump(mode="json")},
+            "snapshot": snapshot,
+            "resource_id": rfq.id,
+            "diff": [
+                {"field": "status", "before": rfq.status, "after": "CLOSED"},
+                {"field": "selected_quote", "before": None, "after": quote.quote_no},
+                {"field": "selection_reason", "before": None, "after": selection.selection_reason},
+            ],
+            "evidence": [
+                {"type": "quote_comparison", "id": comparison.id, "comparison_no": comparison.comparison_no,
+                 "status": comparison.status, "conclusion": comparison.conclusion,
+                 "items": snapshot["comparison"]["items"]},
+                {"type": "supplier_quote", "id": quote.id, "quote_no": quote.quote_no,
+                 "supplier_id": quote.supplier_id, "status": quote.status,
+                 "currency_code": quote.currency_code, "valid_until": snapshot["quote"]["valid_until"],
+                 "items": snapshot["quote"]["items"]},
+            ],
+            "warnings": ["确认后询价单将关闭，其他已提交报价将被拒绝。"],
+            "blockers": [],
+            "risk_level": "HIGH",
+        }
+
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        from app.modules.rfqs import crud as rfq_crud
+        from app.modules.rfqs import service as rfq_service
+
+        payload = proposal.payload
+        rfq = rfq_service.get_rfq(db, user, int(proposal.resource_id or payload["rfq_id"]), for_update=for_update)
+        comparison = rfq_crud.get_comparison(db, rfq.id, int(payload["comparison_id"]), for_update=for_update)
+        quote = rfq_crud.get_quote(db, int(payload["quote_id"]), for_update=for_update)
+        if comparison is None or quote is None or quote.rfq_id != rfq.id:
+            raise BusinessValidationError("比价结果或报价已不可用，请重新生成提案")
+        current = {"rfq": _rfq_send_snapshot(rfq),
+                   "comparison": _quote_comparison_snapshot(comparison),
+                   "quote": _supplier_quote_snapshot(quote)}
+        if current != proposal.expected_resource_snapshot:
+            raise BusinessValidationError("询价单、比价结果或报价已变化，请重新核对")
+        if rfq.status != "RESPONDING" or comparison.status != "DRAFT" or quote.status != "SUBMITTED":
+            raise BusinessValidationError("询价单、比价结果或报价状态已变化，请重新核对")
+        if quote.id not in {item.quote_id for item in comparison.items}:
+            raise BusinessValidationError("中选报价已不在比价结果中")
+
+    def execute(self, db, user, proposal, *, commit=False):
+        from app.modules.rfqs import service as rfq_service
+        from app.modules.rfqs.schema import QuoteSelection, RFQRead
+
+        selection = QuoteSelection.model_validate({key: proposal.payload[key] for key in
+            ("comparison_id", "quote_id", "selection_reason")})
+        rfq = rfq_service.select_quote(db, user, int(proposal.payload["rfq_id"]), selection, commit=commit)
+        return RFQRead.model_validate(rfq).model_dump(mode="json")
+
+
+register_handler("rfq.select_quote", RFQSelectQuoteHandler())

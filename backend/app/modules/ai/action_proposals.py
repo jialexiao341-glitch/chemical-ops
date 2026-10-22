@@ -17,7 +17,7 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 
 
-INBOX_ACTION_TYPES = ("purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send")
+INBOX_ACTION_TYPES = ("purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote")
 
 
 def _now() -> datetime:
@@ -150,13 +150,13 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
     readable_reference = None
     source_route = None
     resource_visible = False
-    if proposal.action_type in {"purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send"}:
-        resource_read_permission = "procurement.rfqs.read" if proposal.action_type == "rfq.send" else "procurement.requests.read"
+    if proposal.action_type in {"purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote"}:
+        resource_read_permission = "procurement.rfqs.read" if proposal.action_type in {"rfq.send", "rfq.select_quote"} else "procurement.requests.read"
         if "SYS_ADMIN" in roles or resource_read_permission in permission_codes:
             try:
                 from app.modules.purchase_requests import service as request_service
 
-                if proposal.action_type == "rfq.send":
+                if proposal.action_type in {"rfq.send", "rfq.select_quote"}:
                     from app.modules.rfqs import service as rfq_service
 
                     rfq = rfq_service.get_rfq(db, user, int(proposal.resource_id))
@@ -173,13 +173,13 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
                     readable_reference = request.request_no
                     source_route = f"/procurement/requests?ai_record_id={request.id}"
                     resource_visible = True
-            except (KeyError, TypeError, ValueError, ResourceNotFoundError):
+            except (KeyError, TypeError, ValueError, BusinessValidationError, ResourceNotFoundError):
                 availability = "RESOURCE_UNAVAILABLE"
                 reason = "关联单据已不可访问"
         else:
             if availability != "PERMISSION_REVOKED":
                 availability = "RESOURCE_UNAVAILABLE"
-                reason = "当前账号没有查看关联询价单的权限" if proposal.action_type == "rfq.send" else "当前账号没有查看关联采购申请的权限"
+                reason = "当前账号没有查看关联询价单的权限" if proposal.action_type in {"rfq.send", "rfq.select_quote"} else "当前账号没有查看关联采购申请的权限"
 
     base = _preview(proposal).model_dump()
     if proposal.action_type == "rfq.create_draft" and "SYS_ADMIN" not in roles and "master.suppliers.read" not in permission_codes:
@@ -195,6 +195,17 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
         and proposal.expires_at > _now()
     )
     base["requires_user_confirmation"] = can_confirm
+    revision_values = {}
+    if proposal.action_type == "purchase_request.update_draft":
+        revision_values = {key: value for key, value in proposal.payload.get("changes", {}).items()
+                          if key in {"purpose", "priority", "budget_amount", "currency_code", "expected_date"}}
+    elif proposal.action_type == "rfq.create_draft":
+        revision_values = {key: proposal.payload.get(key) for key in
+                           ("quote_deadline", "requested_delivery_date", "delivery_requirements")}
+    elif proposal.action_type == "rfq.select_quote":
+        revision_values = {"selection_reason": proposal.payload.get("selection_reason")}
+    if not resource_visible:
+        revision_values = {}
     result = AIActionProposalRead(
         **base,
         created_at=proposal.created_at,
@@ -202,15 +213,7 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
         source_route=source_route,
         availability=availability,
         unavailable_reason=reason,
-        revision_values=(
-            {key: value for key, value in proposal.payload.get("changes", {}).items()
-             if key in {"purpose", "priority", "budget_amount", "currency_code", "expected_date"}}
-            if proposal.action_type == "purchase_request.update_draft"
-            else {key: proposal.payload.get(key) for key in
-                  ("quote_deadline", "requested_delivery_date", "delivery_requirements")}
-            if proposal.action_type == "rfq.create_draft"
-            else {}
-        ),
+        revision_values=revision_values,
     )
     return result, changed
 
@@ -269,9 +272,17 @@ def revise_action(db: Session, user: User, confirmation_id: str, preview_version
         "quote_deadline", "requested_delivery_date", "delivery_requirements"
     }:
         payload = {**proposal.payload, **payload}
+    elif proposal.action_type == "rfq.select_quote" and set(payload) == {"selection_reason"}:
+        payload = {**proposal.payload, **payload}
     prepared = handler.prepare(db, user, payload)
     if prepared.get("blockers"):
         raise BusinessValidationError("动作提案存在阻塞项，不能保存为可确认预览")
+    if proposal.action_type == "rfq.select_quote":
+        prepared["diff"] = [
+            {**item, "before": proposal.payload.get("selection_reason")}
+            if item.get("field") == "selection_reason" else item
+            for item in prepared.get("diff", [])
+        ]
     proposal.payload = prepared["payload"]
     proposal.payload_hash = _hash(proposal.payload)
     proposal.expected_resource_snapshot = prepared.get("snapshot", {})

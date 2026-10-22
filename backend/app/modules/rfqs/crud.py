@@ -101,24 +101,20 @@ def get_unit(db: Session, unit_id: int) -> Unit | None:
     return db.get(Unit, unit_id)
 
 
-def get_quote(db: Session, quote_id: int) -> SupplierQuote | None:
+def get_quote(db: Session, quote_id: int, *, for_update: bool = False) -> SupplierQuote | None:
     """查询报价及报价明细。"""
 
-    return db.scalar(
-        select(SupplierQuote)
-        .options(selectinload(SupplierQuote.items))
-        .where(SupplierQuote.id == quote_id)
-    )
+    query = select(SupplierQuote).options(selectinload(SupplierQuote.items)).where(SupplierQuote.id == quote_id)
+    return db.scalar(query.with_for_update() if for_update else query)
 
 
-def get_comparison(db: Session, rfq_id: int, comparison_id: int) -> QuoteComparison | None:
+def get_comparison(db: Session, rfq_id: int, comparison_id: int, *, for_update: bool = False) -> QuoteComparison | None:
     """查询指定询价单下的比价结果。"""
 
-    return db.scalar(
-        select(QuoteComparison)
-        .options(selectinload(QuoteComparison.items))
-        .where(QuoteComparison.id == comparison_id, QuoteComparison.rfq_id == rfq_id)
+    query = select(QuoteComparison).options(selectinload(QuoteComparison.items)).where(
+        QuoteComparison.id == comparison_id, QuoteComparison.rfq_id == rfq_id,
     )
+    return db.scalar(query.with_for_update() if for_update else query)
 
 
 def get_latest_comparison(db: Session, rfq_id: int) -> QuoteComparison | None:

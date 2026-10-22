@@ -191,8 +191,11 @@ function onSelectQuote(record: RfqApi.ComparisonItem) {
   selectQuoteApi
     .setData({
       comparisonId: comparison.value.id,
+      comparisonNo: comparison.value.comparison_no,
       quoteId: record.quote_id,
       rfqId: detail.value.id,
+      rfqNo: detail.value.rfq_no,
+      quoteNo: detail.value.quotes?.find((quote) => quote.id === record.quote_id)?.quote_no ?? `报价 #${record.quote_id}`,
       supplierName: supplierName(record.supplier_id),
       totalAmount: record.total_amount,
       unitPrice: record.quoted_unit_price,
