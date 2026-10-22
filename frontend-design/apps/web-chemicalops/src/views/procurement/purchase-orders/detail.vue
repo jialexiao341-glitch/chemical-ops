@@ -45,6 +45,7 @@ import ApproveModal from './modules/approve.vue';
 import CancelModal from './modules/cancel.vue';
 import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
+import { paymentTermsSnapshotLabel } from './item-display';
 
 defineOptions({ name: 'PurchaseOrderDetail' });
 
@@ -133,6 +134,7 @@ const itemColumns = [
     align: 'right' as const,
   },
   { key: 'unit_price', title: '单价', width: 130, align: 'right' as const },
+  { key: 'payment_terms_snapshot', title: '付款条件快照', minWidth: 180 },
   { key: 'planned_arrival_date', title: '计划到货', width: 120 },
   { key: 'status', title: '明细状态', width: 110 },
 ];
@@ -344,7 +346,7 @@ onBeforeUnmount(() => {
             :columns="itemColumns"
             :data-source="order.items ?? []"
             :pagination="false"
-            :scroll="{ x: 1200 }"
+            :scroll="{ x: 1400 }"
             row-key="id"
             size="small"
           >
@@ -360,6 +362,11 @@ onBeforeUnmount(() => {
               </template>
               <template v-else-if="column.key === 'unit_price'">
                 {{ formatAmount(record.unit_price, 6) }}
+              </template>
+              <template v-else-if="column.key === 'payment_terms_snapshot'">
+                <span :class="record.payment_terms_snapshot?.trim() ? '' : 'text-muted-foreground'">
+                  {{ paymentTermsSnapshotLabel(record.payment_terms_snapshot) }}
+                </span>
               </template>
               <template v-else-if="column.key === 'planned_arrival_date'">
                 {{ formatDate(record.planned_arrival_date) }}
