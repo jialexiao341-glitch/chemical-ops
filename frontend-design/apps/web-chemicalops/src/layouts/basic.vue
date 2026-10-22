@@ -18,6 +18,7 @@ import {
 } from '#/api';
 import { useAuthStore } from '#/store';
 import LoginForm from '#/views/_core/authentication/login.vue';
+import ChemicalAgentFloat from '#/views/ai/workspace/modules/chemical-agent-float.vue';
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -35,6 +36,9 @@ const canReadNotifications = computed(() =>
 );
 const canWriteNotifications = computed(() =>
   (accessStore.accessCodes ?? []).includes('system.notifications.write'),
+);
+const canUseAi = computed(() =>
+  (accessStore.accessCodes ?? []).includes('ai.workspace.read'),
 );
 
 /** 顶部用户菜单：只保留与当前系统相关的入口 */
@@ -235,4 +239,5 @@ watch(
       <LockScreen :avatar @to-login="handleLogout" />
     </template>
   </BasicLayout>
+  <ChemicalAgentFloat v-if="canUseAi" />
 </template>
