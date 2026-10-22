@@ -82,7 +82,7 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 多个产品/询价候选由服务端暂停。只读查询不需要用户提供采购用途或采购数量。
 
 # 参数与执行顺序
-采购申请查询、订单追溯与质量验收查询不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。
+采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询与供应商资料查询不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询只复述系统记录的对账、发票与付款状态/金额，不推断或建议执行付款。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险。
 根据已返回结果决定后续工具；不要重复调用同工具同参数。未授权工具不在目录中。
 用户指定返回条数时，必须在对应业务工具 arguments.limit 中保留该值（不超过工具上限）。
 库存 totals 已按全部授权余额计算，即使 limit=1 也无需扩大明细条数获取全范围合计。
@@ -447,6 +447,9 @@ _AGENT_TASK_TOOL = {
     "purchase_request": "purchase_requests.get_by_no",
     "order_trace": "purchase_orders.trace_by_no",
     "quality_acceptance": "quality_acceptances.get_by_no",
+    "delivery": "deliveries.get_by_no",
+    "finance_reconciliation": "finance_reconciliations.get_by_no",
+    "supplier": "suppliers.get_by_code",
 }
 
 
@@ -655,7 +658,10 @@ def _summary(entries: list[dict]) -> str:
     requests = [entry["result"] for entry in entries if entry.get("tool") == "purchase_requests.get_by_no"]
     orders = [entry["result"] for entry in entries if entry.get("tool") == "purchase_orders.trace_by_no"]
     acceptances = [entry["result"] for entry in entries if entry.get("tool") == "quality_acceptances.get_by_no"]
-    if requests or orders or acceptances:
+    deliveries = [entry["result"] for entry in entries if entry.get("tool") == "deliveries.get_by_no"]
+    reconciliations = [entry["result"] for entry in entries if entry.get("tool") == "finance_reconciliations.get_by_no"]
+    suppliers = [entry["result"] for entry in entries if entry.get("tool") == "suppliers.get_by_code"]
+    if requests or orders or acceptances or deliveries or reconciliations or suppliers:
         lines = []
         for result in requests:
             if not result["rows"]:
@@ -676,6 +682,38 @@ def _summary(entries: list[dict]) -> str:
             if row.get("conclusion"):
                 summary += f"；结论：{row['conclusion']}"
             lines.append(summary + "。")
+        for result in deliveries:
+            if not result["rows"]:
+                lines.append("当前可访问范围内没有找到该到货单号。")
+                continue
+            row = result["rows"][0]
+            expected = row["expected_arrival_date"] or "未登记"
+            actual = row["actual_arrival_date"] or "未登记"
+            item_text = "；".join(
+                f"第{item['line_no']}行短交 {item['short_quantity']}，单证{'齐全' if item['document_complete'] else '未齐'}"
+                for item in row["items"]
+            ) or "无到货明细"
+            lines.append(f"到货单 {row['delivery_no']}：状态 {row['status']}；预计到货 {expected}；实际到货 {actual}；{item_text}。")
+        for result in reconciliations:
+            if not result["rows"]:
+                lines.append("当前可访问范围内没有找到该对账单号。")
+                continue
+            row = result["rows"][0]
+            invoice_summary = "、".join(
+                f"{item['status']} {item['count']} 张/{item['amount']} {row['currency_code']}"
+                for item in row["invoices"]
+            ) or "无发票记录"
+            payment_summary = "、".join(
+                f"{item['status']} {item['count']} 笔/{item['amount']} {row['currency_code']}"
+                for item in row["payments"]
+            ) or "无付款记录"
+            lines.append(f"对账单 {row['reconciliation_no']}：状态 {row['status']}；金额 {row['total_amount']} {row['currency_code']}；发票 {invoice_summary}；付款 {payment_summary}。")
+        for result in suppliers:
+            if not result["rows"]:
+                lines.append("当前可访问范围内没有找到该供应商编码。")
+                continue
+            row = result["rows"][0]
+            lines.append(f"供应商 {row['supplier_code']}（{row['supplier_name']}）：状态 {row['status']}；合作级别 {row['cooperation_level'] or '未登记'}；地区 {row['region'] or '未登记'}；默认交期 {row['default_lead_days'] if row['default_lead_days'] is not None else '未登记'} 天。")
         return "\n".join(lines)
     from app.modules.ai.product_query_summary import summarize_product_evidence
     return summarize_product_evidence(entries)
@@ -688,7 +726,10 @@ def _validate_finish_evidence(intent: str, entries: list[dict]) -> None:
                 {"supplier_quotes.compare"} if intent == "supplier_quote_query" else
                 {"purchase_requests.get_by_no"} if intent == "purchase_request_query" else
                 {"purchase_orders.trace_by_no"} if intent == "purchase_order_trace" else
-                {"quality_acceptances.get_by_no"} if intent == "quality_acceptance_query" else set())
+                {"quality_acceptances.get_by_no"} if intent == "quality_acceptance_query" else
+                {"deliveries.get_by_no"} if intent == "delivery_query" else
+                {"finance_reconciliations.get_by_no"} if intent == "finance_reconciliation_query" else
+                {"suppliers.get_by_code"} if intent == "supplier_query" else set())
     locators = {"catalog.search_products", "supplier_quotes.find_rfq_items"}
     if any(entry["tool"] not in required and not (
         entry["tool"] in locators and entry.get("result", {}).get("total_rows") == 0
@@ -981,13 +1022,19 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                     (action.tool == "inventory.query_available" and "inventory" not in tasks) or
                     (action.tool == "purchase_requests.get_by_no" and "purchase_request" not in tasks) or
                     (action.tool == "purchase_orders.trace_by_no" and "order_trace" not in tasks) or
-                    (action.tool == "quality_acceptances.get_by_no" and "quality_acceptance" not in tasks)):
+                    (action.tool == "quality_acceptances.get_by_no" and "quality_acceptance" not in tasks) or
+                    (action.tool == "deliveries.get_by_no" and "delivery" not in tasks) or
+                    (action.tool == "finance_reconciliations.get_by_no" and "finance_reconciliation" not in tasks) or
+                    (action.tool == "suppliers.get_by_code" and "supplier" not in tasks)):
                     entry["error_code"] = "INTENT_MISMATCH"
                     raise BusinessValidationError("INTENT_MISMATCH")
                 slots = understanding.get("slots") or {}
                 if ((action.tool == "purchase_requests.get_by_no" and action.arguments.get("request_no") != slots.get("request_no")) or
                     (action.tool == "purchase_orders.trace_by_no" and action.arguments.get("po_no") != slots.get("po_no")) or
-                    (action.tool == "quality_acceptances.get_by_no" and action.arguments.get("acceptance_no") != slots.get("acceptance_no"))):
+                    (action.tool == "quality_acceptances.get_by_no" and action.arguments.get("acceptance_no") != slots.get("acceptance_no")) or
+                    (action.tool == "deliveries.get_by_no" and action.arguments.get("delivery_no") != slots.get("delivery_no")) or
+                    (action.tool == "finance_reconciliations.get_by_no" and action.arguments.get("reconciliation_no") != slots.get("reconciliation_no")) or
+                    (action.tool == "suppliers.get_by_code" and action.arguments.get("supplier_code") != slots.get("supplier_code"))):
                     raise BusinessValidationError("工具编号必须与本轮已确认的准确编号一致")
             if action.tool == "catalog.search_products" and current.verified_product is not None:
                 keyword = action.arguments.get("keyword")

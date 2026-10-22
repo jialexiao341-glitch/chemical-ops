@@ -136,6 +136,15 @@ def get_delivery(db: Session, user: User, delivery_id: int) -> Delivery:
     return delivery
 
 
+def get_delivery_by_no(db: Session, user: User, delivery_no: str) -> Delivery | None:
+    """按精确到货单号读取记录，并复用详情服务校验关联订单的数据范围。"""
+
+    delivery_id = db.scalar(select(Delivery.id).where(Delivery.delivery_no == delivery_no))
+    if delivery_id is None:
+        return None
+    return get_delivery(db, user, delivery_id)
+
+
 def receive_delivery(db: Session, user: User, delivery_id: int, data: DeliveryReceive) -> Delivery:
     """确认到货，累计采购订单收货数量并更新订单状态。"""
 

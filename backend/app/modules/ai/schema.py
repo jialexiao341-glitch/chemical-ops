@@ -317,7 +317,7 @@ TASK_STATUS_LABELS = {
 
 # 语义理解与路由
 
-Task = Literal["inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "analytics", "document"]
+Task = Literal["inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "analytics", "document"]
 
 
 class Slots(BaseModel):
@@ -328,6 +328,9 @@ class Slots(BaseModel):
     request_no: str | None = Field(default=None, max_length=32)
     po_no: str | None = Field(default=None, max_length=32)
     acceptance_no: str | None = Field(default=None, max_length=32)
+    delivery_no: str | None = Field(default=None, max_length=32)
+    reconciliation_no: str | None = Field(default=None, max_length=32)
+    supplier_code: str | None = Field(default=None, max_length=64)
     warehouse_keyword: str | None = Field(default=None, max_length=128)
     date_from: date | None = None
     date_to: date | None = None
@@ -407,12 +410,18 @@ class Understanding(BaseModel):
 
         if self.purpose == "query" and self.dialogue_action != "cancel":
             if self.execution_mode == "agent":
-                if not set(self.tasks) <= {"inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance"} or self.sub_tasks:
-                    raise ValueError("agent 模式仅支持未拆分的库存、报价、采购申请、订单追溯或质量验收目标")
-                if set(self.tasks) & {"purchase_request", "order_trace", "quality_acceptance"} and len(self.tasks) != 1:
-                    raise ValueError("按编号读取采购申请、订单追溯和质量验收必须作为单一 Agent 目标执行")
+                if not set(self.tasks) <= {"inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier"} or self.sub_tasks:
+                    raise ValueError("agent 模式仅支持未拆分的库存、报价、采购申请、订单追溯、质量验收、到货、财务对账或供应商查询目标")
+                if set(self.tasks) & {"purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier"} and len(self.tasks) != 1:
+                    raise ValueError("按编号读取采购申请、订单追溯、质量验收、到货单、对账单和供应商必须作为单一 Agent 目标执行")
                 if "quality_acceptance" in self.tasks and not self.slots.acceptance_no:
                     raise ValueError("质量验收 Agent 目标必须提供准确验收编号")
+                if "delivery" in self.tasks and not self.slots.delivery_no:
+                    raise ValueError("到货 Agent 目标必须提供准确到货单号")
+                if "finance_reconciliation" in self.tasks and not self.slots.reconciliation_no:
+                    raise ValueError("财务对账 Agent 目标必须提供准确对账单号")
+                if "supplier" in self.tasks and not self.slots.supplier_code:
+                    raise ValueError("供应商 Agent 目标必须提供准确供应商编码")
             elif self.execution_mode == "batch":
                 if not 2 <= len(self.sub_tasks) <= 6:
                     raise ValueError("batch 模式必须包含 2 至 6 个原子任务")
@@ -442,7 +451,9 @@ class Understanding(BaseModel):
         """将单一 Agent 类别映射到服务端完成条件。"""
         return ({"inventory": "inventory_query", "quotes": "supplier_quote_query",
                  "purchase_request": "purchase_request_query", "order_trace": "purchase_order_trace",
-                 "quality_acceptance": "quality_acceptance_query"}.get(self.tasks[0], "unknown")
+                 "quality_acceptance": "quality_acceptance_query", "delivery": "delivery_query",
+                 "finance_reconciliation": "finance_reconciliation_query",
+                 "supplier": "supplier_query"}.get(self.tasks[0], "unknown")
                 if len(self.tasks) == 1 else "inventory_and_quotes_query" if set(self.tasks) == {"inventory", "quotes"} else "unknown")
 
 
@@ -594,6 +605,18 @@ class QualityAcceptanceInput(ToolSchema):
     acceptance_no: str = Field(min_length=4, max_length=32, pattern=r"^QA[A-Za-z0-9_-]+$")
 
 
+class DeliveryInput(ToolSchema):
+    delivery_no: str = Field(min_length=4, max_length=32, pattern=r"^DL[A-Za-z0-9_-]+$")
+
+
+class FinanceReconciliationInput(ToolSchema):
+    reconciliation_no: str = Field(min_length=4, max_length=32, pattern=r"^FR[A-Za-z0-9_-]+$")
+
+
+class SupplierInput(ToolSchema):
+    supplier_code: str = Field(min_length=1, max_length=64)
+
+
 class ProductCandidate(ToolSchema):
     product_id: int
     product_code: str
@@ -652,6 +675,69 @@ class QualityAcceptanceResult(ToolSchema):
     tool: Literal["quality_acceptances.get_by_no"] = "quality_acceptances.get_by_no"
     total_rows: int
     rows: list[QualityAcceptanceRow]
+    sources: list["Source"]
+
+
+class DeliveryItemRow(ToolSchema):
+    line_no: int
+    planned_quantity: Decimal
+    actual_quantity: Decimal
+    short_quantity: Decimal
+    document_complete: bool
+
+
+class DeliveryRow(ToolSchema):
+    delivery_no: str
+    status: str
+    expected_arrival_date: date | None
+    actual_arrival_date: date | None
+    items: list[DeliveryItemRow]
+
+
+class DeliveryResult(ToolSchema):
+    tool: Literal["deliveries.get_by_no"] = "deliveries.get_by_no"
+    total_rows: int
+    rows: list[DeliveryRow]
+    sources: list["Source"]
+
+
+class FinanceStatusCount(ToolSchema):
+    status: str
+    count: int
+    amount: Decimal
+
+
+class FinanceReconciliationRow(ToolSchema):
+    reconciliation_no: str
+    status: str
+    currency_code: str
+    total_amount: Decimal
+    invoices: list[FinanceStatusCount]
+    payments: list[FinanceStatusCount]
+
+
+class FinanceReconciliationResult(ToolSchema):
+    tool: Literal["finance_reconciliations.get_by_no"] = "finance_reconciliations.get_by_no"
+    total_rows: int
+    rows: list[FinanceReconciliationRow]
+    sources: list["Source"]
+
+
+class SupplierRow(ToolSchema):
+    supplier_code: str
+    supplier_name: str
+    status: str
+    region: str | None
+    business_scope: str | None
+    cooperation_level: str | None
+    payment_terms: str | None
+    default_lead_days: int | None
+
+
+class SupplierResult(ToolSchema):
+    tool: Literal["suppliers.get_by_code"] = "suppliers.get_by_code"
+    total_rows: int
+    rows: list[SupplierRow]
     sources: list["Source"]
 
 

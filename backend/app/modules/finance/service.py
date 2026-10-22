@@ -151,6 +151,17 @@ def get_reconciliation(db: Session, user: User, reconciliation_id: int) -> Finan
     return reconciliation
 
 
+def get_reconciliation_by_no(db: Session, user: User, reconciliation_no: str) -> FinanceReconciliation | None:
+    """按精确对账单号读取，并复用详情服务校验关联采购订单范围。"""
+
+    reconciliation_id = db.scalar(select(FinanceReconciliation.id).where(
+        FinanceReconciliation.reconciliation_no == reconciliation_no
+    ))
+    if reconciliation_id is None:
+        return None
+    return get_reconciliation(db, user, reconciliation_id)
+
+
 def confirm_reconciliation(db: Session, user: User, reconciliation_id: int, reason: str | None) -> FinanceReconciliation:
     """确认对账单，允许后续发起付款申请。"""
 

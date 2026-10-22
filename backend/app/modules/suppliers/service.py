@@ -17,6 +17,12 @@ def get_supplier(db: Session, supplier_id: int) -> Supplier:
     return supplier
 
 
+def get_supplier_by_code(db: Session, supplier_code: str) -> Supplier | None:
+    """按准确供应商编码读取主数据记录。"""
+
+    return crud.get_by_code(db, supplier_code)
+
+
 def list_suppliers(
     db: Session,
     *,

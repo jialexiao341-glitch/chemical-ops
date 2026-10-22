@@ -797,13 +797,21 @@ def test_agent_entry_rejects_missing_tool_permission(task_db, monkeypatch):
      "purchase_orders.trace_by_no", "purchase_order_trace"),
     ("quality_acceptance", "acceptance_no", "QA20261022000031", "quality.acceptances.read",
      "quality_acceptances.get_by_no", "quality_acceptance_query"),
+    ("delivery", "delivery_no", "DL20261022000031", "warehouse.deliveries.read",
+     "deliveries.get_by_no", "delivery_query"),
+    ("finance_reconciliation", "reconciliation_no", "FR20261022000031",
+     ("finance.reconciliations.read", "finance.invoices.read", "finance.payments.read"),
+     "finance_reconciliations.get_by_no", "finance_reconciliation_query"),
+    ("supplier", "supplier_code", "SUP-0001", "master.suppliers.read",
+     "suppliers.get_by_code", "supplier_query"),
 ])
 def test_numbered_agent_task_starts_with_only_its_read_permission(
     task_db, monkeypatch, kind, slot, number, permission, tool_name, intent,
 ):
     from app.modules.ai import routing
 
-    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: [permission])
+    permissions = list(permission) if isinstance(permission, tuple) else [permission]
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: permissions)
     decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=[kind], slots={slot: number})
     monkeypatch.setattr(routing, "read_ticket", lambda *_args: decision)
     monkeypatch.setattr(routing, "read_ticket_pending_state_id", lambda *_args: None)
@@ -820,7 +828,11 @@ def test_agent_capability_mapping_requires_only_the_task_tool():
     for kind, tool_name, slots in (("purchase_request", "purchase_requests.get_by_no", {}),
                                    ("order_trace", "purchase_orders.trace_by_no", {}),
                                    ("quality_acceptance", "quality_acceptances.get_by_no",
-                                    {"acceptance_no": "QA20261022000031"})):
+                                    {"acceptance_no": "QA20261022000031"}),
+                                   ("delivery", "deliveries.get_by_no", {"delivery_no": "DL20261022000031"}),
+                                   ("finance_reconciliation", "finance_reconciliations.get_by_no",
+                                    {"reconciliation_no": "FR20261022000031"}),
+                                   ("supplier", "suppliers.get_by_code", {"supplier_code": "SUP-0001"})):
         decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=[kind], slots=slots)
         runtime._ensure_agent_capabilities(decision, {tool_name})
         with pytest.raises(AuthorizationError):
@@ -836,15 +848,34 @@ def test_numbered_agent_summaries_are_deterministic_and_use_trace_answer():
         "total_rows": 1, "rows": [{"acceptance_no": "QA20261022000031", "result": "PENDING",
                                      "certificate_complete": True, "report_available": False,
                                      "conclusion": "等待检验"}]}}])
+    delivery_reply = runtime._summary([{"tool": "deliveries.get_by_no", "result": {
+        "total_rows": 1, "rows": [{"delivery_no": "DL20261022000031", "status": "RECEIVED",
+            "expected_arrival_date": "2026-10-22", "actual_arrival_date": None,
+            "items": [{"line_no": 1, "short_quantity": 2, "document_complete": False}]}]}}])
+    finance_reply = runtime._summary([{"tool": "finance_reconciliations.get_by_no", "result": {
+        "total_rows": 1, "rows": [{"reconciliation_no": "FR20261022000031", "status": "CONFIRMED",
+            "currency_code": "CNY", "total_amount": 100,
+            "invoices": [{"status": "VERIFIED", "count": 1, "amount": 80}],
+            "payments": [{"status": "PAID", "count": 1, "amount": 30}]}]}}])
+    supplier_reply = runtime._summary([{"tool": "suppliers.get_by_code", "result": {
+        "total_rows": 1, "rows": [{"supplier_code": "SUP-0001", "supplier_name": "示例供应商",
+            "status": "ACTIVE", "cooperation_level": "STRATEGIC", "region": "华东",
+            "default_lead_days": 12}]}}])
     assert request_reply == "采购申请 PR20261022000031：APPROVING；用途：乙醇采购；明细 1 项。"
     assert order_reply == "追溯结论"
     assert acceptance_reply == "质量验收 QA20261022000031：状态 PENDING；证书齐全；报告未上传；结论：等待检验。"
+    assert delivery_reply == "到货单 DL20261022000031：状态 RECEIVED；预计到货 2026-10-22；实际到货 未登记；第1行短交 2，单证未齐。"
+    assert finance_reply == "对账单 FR20261022000031：状态 CONFIRMED；金额 100 CNY；发票 VERIFIED 1 张/80 CNY；付款 PAID 1 笔/30 CNY。"
+    assert supplier_reply == "供应商 SUP-0001（示例供应商）：状态 ACTIVE；合作级别 STRATEGIC；地区 华东；默认交期 12 天。"
 
 
 @pytest.mark.parametrize("intent,tool_name,result", [
     ("purchase_request_query", "purchase_requests.get_by_no", {"total_rows": 0, "rows": []}),
     ("purchase_order_trace", "purchase_orders.trace_by_no", {"stages": [], "source_records": []}),
     ("quality_acceptance_query", "quality_acceptances.get_by_no", {"total_rows": 0, "rows": []}),
+    ("delivery_query", "deliveries.get_by_no", {"total_rows": 0, "rows": []}),
+    ("finance_reconciliation_query", "finance_reconciliations.get_by_no", {"total_rows": 0, "rows": []}),
+    ("supplier_query", "suppliers.get_by_code", {"total_rows": 0, "rows": []}),
 ])
 def test_numbered_agent_completion_requires_its_tool_evidence(intent, tool_name, result):
     entry = {"tool": tool_name, "result": result}
@@ -856,7 +887,8 @@ def test_numbered_agent_completion_requires_its_tool_evidence(intent, tool_name,
 
 
 @pytest.mark.parametrize("tool_name", ["purchase_requests.get_by_no", "purchase_orders.trace_by_no",
-                                       "quality_acceptances.get_by_no"])
+                                       "quality_acceptances.get_by_no", "deliveries.get_by_no",
+                                       "finance_reconciliations.get_by_no", "suppliers.get_by_code"])
 def test_revoked_numbered_tool_permission_blocks_historical_evidence(monkeypatch, tool_name):
     monkeypatch.setattr(tools, "list_tools", lambda *_args: [])
     monkeypatch.setattr(tools, "accessible_warehouse_ids", lambda *_args: None)

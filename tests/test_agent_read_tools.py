@@ -30,7 +30,7 @@ def allow_ai_workspace_permission(app):
 def tool_db(monkeypatch):
     """建立隔离业务样本和角色权限替身；查询执行真实 SQL，测试后销毁数据库。"""
     roles = {9: ["SYS_ADMIN"], 10: ["PROCUREMENT_MANAGER"]}
-    permissions = {7: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read", "procurement.requests.read", "procurement.orders.read"],
+    permissions = {7: ["master.products.read", "master.suppliers.read", "warehouse.inventory.read", "procurement.rfqs.read", "procurement.requests.read", "procurement.orders.read", "warehouse.deliveries.read", "finance.reconciliations.read", "finance.invoices.read", "finance.payments.read"],
                    8: ["warehouse.inventory.read"], 10: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"]}
     monkeypatch.setattr(tools, "get_settings", lambda: SimpleNamespace(agent_enabled=True, agent_tool_timeout_seconds=15))
     monkeypatch.setattr(tools, "get_user_role_codes", lambda _db, uid: roles.get(uid, []))
@@ -368,6 +368,142 @@ def test_quality_acceptance_tool_requires_permission_and_strict_number(tool_db, 
         call(tool_db, name="quality_acceptances.get_by_no", acceptance_no="QA20261022000044", acceptance_id=44)
     with pytest.raises(BusinessValidationError, match="参数"):
         call(tool_db, name="quality_acceptances.get_by_no", acceptance_no="QA?")
+
+
+def test_delivery_tool_returns_exact_visible_receiving_facts(tool_db, monkeypatch):
+    from app.modules.deliveries import service as delivery_service
+
+    delivery = SimpleNamespace(
+        id=51, delivery_no="DL20261022000051", status="RECEIVED",
+        expected_arrival_date="2026-10-22", actual_arrival_date="2026-10-22",
+        items=[SimpleNamespace(line_no=1, planned_quantity=10, actual_quantity=8,
+                                short_quantity=2, document_complete=0)],
+    )
+    seen = []
+    monkeypatch.setattr(delivery_service, "get_delivery_by_no",
+        lambda _db, _user, number: seen.append(number) or (delivery if number == delivery.delivery_no else None))
+
+    result = call(tool_db, name="deliveries.get_by_no", delivery_no=delivery.delivery_no)
+
+    assert result.total_rows == 1
+    assert result.rows[0].status == "RECEIVED"
+    assert result.rows[0].items[0].short_quantity == 2
+    assert result.rows[0].items[0].document_complete is False
+    assert result.sources[0].resource == "deliveries"
+    assert seen == [delivery.delivery_no]
+    assert call(tool_db, name="deliveries.get_by_no", delivery_no="DL20261022000052").total_rows == 0
+
+
+def test_delivery_tool_requires_permission_and_strict_number(tool_db, monkeypatch):
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: [])
+    with pytest.raises(AuthorizationError):
+        call(tool_db, name="deliveries.get_by_no", delivery_no="DL20261022000051")
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: ["warehouse.deliveries.read"])
+    with pytest.raises(BusinessValidationError, match="参数"):
+        call(tool_db, name="deliveries.get_by_no", delivery_no="DL?")
+    with pytest.raises(BusinessValidationError, match="参数"):
+        call(tool_db, name="deliveries.get_by_no", delivery_no="DL20261022000051", delivery_id=51)
+
+
+def test_delivery_service_lookup_reuses_detail_scope_check(monkeypatch):
+    from app.modules.deliveries import service as delivery_service
+
+    user = SimpleNamespace(id=7)
+    delivery = SimpleNamespace(id=51)
+    scope_calls = []
+    monkeypatch.setattr(delivery_service, "get_delivery",
+        lambda _db, actor, delivery_id: scope_calls.append((actor, delivery_id)) or delivery)
+    db = SimpleNamespace(scalar=lambda _query: 51)
+
+    assert delivery_service.get_delivery_by_no(db, user, "DL20261022000051") is delivery
+    assert scope_calls == [(user, 51)]
+
+
+def test_finance_reconciliation_tool_returns_status_grouped_amounts(tool_db, monkeypatch):
+    from app.modules.finance import service as finance_service
+
+    reconciliation = SimpleNamespace(id=71, reconciliation_no="FR20261022000071",
+        status="CONFIRMED", currency_code="CNY", total_amount=100)
+    monkeypatch.setattr(finance_service, "get_reconciliation_by_no",
+        lambda _db, _user, number: reconciliation if number == reconciliation.reconciliation_no else None)
+    grouped = [
+        [{"status": "VERIFIED", "count": 1, "amount": 80}],
+        [{"status": "PAID", "count": 1, "amount": 30}],
+    ]
+
+    class QueryRows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return self.rows
+
+    seen_queries = []
+    monkeypatch.setattr(tool_db, "execute", lambda query: seen_queries.append(query) or QueryRows(grouped.pop(0)))
+    result = call(tool_db, name="finance_reconciliations.get_by_no",
+        reconciliation_no=reconciliation.reconciliation_no)
+
+    assert result.total_rows == 1
+    assert result.rows[0].status == "CONFIRMED"
+    assert result.rows[0].invoices[0].amount == 80
+    assert result.rows[0].payments[0].amount == 30
+    assert result.sources[0].resource == "finance_reconciliations"
+    assert len(seen_queries) == 2
+
+
+def test_finance_reconciliation_tool_requires_all_read_permissions(tool_db, monkeypatch):
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: ["finance.reconciliations.read"])
+    assert "finance_reconciliations.get_by_no" not in {
+        item["name"] for item in tools.list_tools(tool_db, SimpleNamespace(id=7))
+    }
+    with pytest.raises(AuthorizationError):
+        call(tool_db, name="finance_reconciliations.get_by_no", reconciliation_no="FR20261022000071")
+
+
+def test_finance_reconciliation_lookup_reuses_detail_scope_check(monkeypatch):
+    from app.modules.finance import service as finance_service
+
+    user = SimpleNamespace(id=7)
+    reconciliation = SimpleNamespace(id=71)
+    scope_calls = []
+    monkeypatch.setattr(finance_service, "get_reconciliation",
+        lambda _db, actor, reconciliation_id: scope_calls.append((actor, reconciliation_id)) or reconciliation)
+    db = SimpleNamespace(scalar=lambda _query: 71)
+
+    assert finance_service.get_reconciliation_by_no(db, user, "FR20261022000071") is reconciliation
+    assert scope_calls == [(user, 71)]
+
+
+def test_supplier_tool_returns_exact_code_and_business_fields(tool_db, monkeypatch):
+    from app.modules.suppliers import service as supplier_service
+
+    supplier = SimpleNamespace(id=91, supplier_code="SUP-0001", supplier_name="示例供应商",
+        status="ACTIVE", region="华东", business_scope="溶剂", cooperation_level="STRATEGIC",
+        payment_terms="月结30天", default_lead_days=12)
+    seen = []
+    monkeypatch.setattr(supplier_service, "get_supplier_by_code",
+        lambda _db, code: seen.append(code) or (supplier if code == supplier.supplier_code else None))
+
+    result = call(tool_db, name="suppliers.get_by_code", supplier_code=supplier.supplier_code)
+
+    assert result.total_rows == 1
+    assert result.rows[0].supplier_name == "示例供应商"
+    assert result.rows[0].payment_terms == "月结30天"
+    assert result.sources[0].resource == "suppliers"
+    assert seen == [supplier.supplier_code]
+    assert call(tool_db, name="suppliers.get_by_code", supplier_code="SUP-UNKNOWN").total_rows == 0
+
+
+def test_supplier_tool_requires_permission_and_rejects_extra_fields(tool_db, monkeypatch):
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: [])
+    with pytest.raises(AuthorizationError):
+        call(tool_db, name="suppliers.get_by_code", supplier_code="SUP-0001")
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: ["master.suppliers.read"])
+    with pytest.raises(BusinessValidationError, match="参数"):
+        call(tool_db, name="suppliers.get_by_code", supplier_code="SUP-0001", supplier_id=91)
 
 
 def test_quality_acceptance_service_reuses_inspector_scope(tool_db, monkeypatch):

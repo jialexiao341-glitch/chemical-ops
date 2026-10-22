@@ -26,6 +26,12 @@ from app.modules.ai.schema import (
     PurchaseOrderTraceResult,
     QualityAcceptanceInput,
     QualityAcceptanceResult,
+    DeliveryInput,
+    DeliveryResult,
+    FinanceReconciliationInput,
+    FinanceReconciliationResult,
+    SupplierInput,
+    SupplierResult,
     PurchaseRequestInput,
     PurchaseRequestResult,
     QuoteInput,
@@ -46,6 +52,7 @@ from app.modules.ai.tool_sql_timeout import (
 )
 from app.modules.chemicals.model import Chemical
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
+from app.modules.finance.model import FinanceInvoice, FinancePayment
 from app.modules.inventory.service import accessible_warehouse_ids
 from app.modules.products.model import Product
 from app.modules.purchase_requests.model import Unit
@@ -340,6 +347,81 @@ def get_quality_acceptance(db: Session, user: User, arguments: QualityAcceptance
         sources=[Source(resource="quality_acceptances", record_id=acceptance.id)])
 
 
+def get_delivery(db: Session, user: User, arguments: DeliveryInput) -> DeliveryResult:
+    """按精确到货单号读取收货事实，数据范围由到货详情服务校验。"""
+    from app.modules.deliveries import service as delivery_service
+
+    delivery = delivery_service.get_delivery_by_no(db, user, arguments.delivery_no)
+    if delivery is None:
+        return DeliveryResult(total_rows=0, rows=[], sources=[])
+    row = {
+        "delivery_no": delivery.delivery_no,
+        "status": delivery.status,
+        "expected_arrival_date": delivery.expected_arrival_date,
+        "actual_arrival_date": delivery.actual_arrival_date,
+        "items": [{
+            "line_no": item.line_no,
+            "planned_quantity": item.planned_quantity,
+            "actual_quantity": item.actual_quantity,
+            "short_quantity": item.short_quantity,
+            "document_complete": bool(item.document_complete),
+        } for item in delivery.items],
+    }
+    return DeliveryResult(total_rows=1, rows=[row],
+        sources=[Source(resource="deliveries", record_id=delivery.id)])
+
+
+def get_finance_reconciliation(db: Session, user: User,
+                               arguments: FinanceReconciliationInput) -> FinanceReconciliationResult:
+    """按精确对账单号读取状态与发票/付款汇总；范围由财务详情服务校验。"""
+    from app.modules.finance import service as finance_service
+
+    reconciliation = finance_service.get_reconciliation_by_no(db, user, arguments.reconciliation_no)
+    if reconciliation is None:
+        return FinanceReconciliationResult(total_rows=0, rows=[], sources=[])
+    invoice_rows = db.execute(select(
+        FinanceInvoice.status.label("status"), func.count(FinanceInvoice.id).label("count"),
+        func.coalesce(func.sum(FinanceInvoice.amount_incl_tax), 0).label("amount"),
+    ).where(FinanceInvoice.reconciliation_id == reconciliation.id).group_by(FinanceInvoice.status)
+    ).mappings().all()
+    payment_rows = db.execute(select(
+        FinancePayment.status.label("status"), func.count(FinancePayment.id).label("count"),
+        func.coalesce(func.sum(FinancePayment.amount), 0).label("amount"),
+    ).where(FinancePayment.reconciliation_id == reconciliation.id).group_by(FinancePayment.status)
+    ).mappings().all()
+    row = {
+        "reconciliation_no": reconciliation.reconciliation_no,
+        "status": reconciliation.status,
+        "currency_code": reconciliation.currency_code,
+        "total_amount": reconciliation.total_amount,
+        "invoices": invoice_rows,
+        "payments": payment_rows,
+    }
+    return FinanceReconciliationResult(total_rows=1, rows=[row],
+        sources=[Source(resource="finance_reconciliations", record_id=reconciliation.id)])
+
+
+def get_supplier(db: Session, user: User, arguments: SupplierInput) -> SupplierResult:
+    """按准确供应商编码读取经主数据权限保护的有限业务信息。"""
+    from app.modules.suppliers import service as supplier_service
+
+    supplier = supplier_service.get_supplier_by_code(db, arguments.supplier_code)
+    if supplier is None:
+        return SupplierResult(total_rows=0, rows=[], sources=[])
+    row = {
+        "supplier_code": supplier.supplier_code,
+        "supplier_name": supplier.supplier_name,
+        "status": supplier.status,
+        "region": supplier.region,
+        "business_scope": supplier.business_scope,
+        "cooperation_level": supplier.cooperation_level,
+        "payment_terms": supplier.payment_terms,
+        "default_lead_days": supplier.default_lead_days,
+    }
+    return SupplierResult(total_rows=1, rows=[row],
+        sources=[Source(resource="suppliers", record_id=supplier.id)])
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """静态工具契约：Schema 与处理函数由代码登记，禁止按模型文本动态查找函数。"""
@@ -355,6 +437,7 @@ class ToolSpec:
     idempotent: bool
     cost_class: str
     quota_class: str
+    additional_permissions: tuple[str, ...] = ()
 
     def governance_metadata(self) -> dict[str, str | bool]:
         """返回目录与路由能力清单共用的工具治理元数据。"""
@@ -398,6 +481,20 @@ TOOLS = {
                  "quality.acceptances.read", QualityAcceptanceInput, QualityAcceptanceResult, get_quality_acceptance,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
+        ToolSpec("deliveries.get_by_no", "按精确到货单号读取当前用户可见的收货状态、预计/实际日期、短交及单证状态",
+                 "warehouse.deliveries.read", DeliveryInput, DeliveryResult, get_delivery,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+        ToolSpec("finance_reconciliations.get_by_no", "按精确对账单号读取当前用户可见的对账状态、币种/金额及发票与付款状态汇总",
+                 "finance.reconciliations.read", FinanceReconciliationInput, FinanceReconciliationResult,
+                 get_finance_reconciliation,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED",
+                 additional_permissions=("finance.invoices.read", "finance.payments.read")),
+        ToolSpec("suppliers.get_by_code", "按准确供应商编码读取当前用户可见的供应商合作状态与基本业务资料",
+                 "master.suppliers.read", SupplierInput, SupplierResult, get_supplier,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
     )
 }
 
@@ -426,9 +523,10 @@ def list_tools(db: Session, user: User) -> list[dict[str, object]]:
     admin, permissions = _permissions(db, user)
     return [{"name": spec.name, "description": spec.description, **spec.governance_metadata(),
              "permission": spec.permission,
+             "required_permissions": [spec.permission, *spec.additional_permissions],
              "input_schema": spec.input_schema.model_json_schema(),
              "output_schema": spec.output_schema.model_json_schema()}
-            for spec in TOOLS.values() if admin or spec.permission in permissions]
+            for spec in TOOLS.values() if admin or {spec.permission, *spec.additional_permissions} <= permissions]
 
 
 def execute_tool(db: Session, user: User, call: ToolCall) -> ToolSchema:
@@ -460,7 +558,7 @@ def _execute_tool_with_deadline(db: Session, user: User, call: ToolCall) -> Tool
     spec = TOOLS.get(call.tool)
     if spec is None:
         raise BusinessValidationError("未注册的只读工具")
-    if not admin and spec.permission not in permissions:
+    if not admin and not {spec.permission, *spec.additional_permissions} <= permissions:
         raise AuthorizationError("没有执行该工具的权限")
     try:
         arguments = spec.input_schema.model_validate(call.arguments)
