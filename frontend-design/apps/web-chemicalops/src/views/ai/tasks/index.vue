@@ -87,6 +87,7 @@ const proposalActionLabels: Record<string, string> = {
   'purchase_request.update_draft': '修改采购申请',
   'purchase_request.submit': '提交采购申请',
   'rfq.create_draft': '询价草稿',
+  'rfq.send': '发送询价',
 };
 const proposalColumns = [
   { field: 'confirmation_id', title: '提案编号', minWidth: 190 },

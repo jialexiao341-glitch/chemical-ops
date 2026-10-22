@@ -13,6 +13,7 @@ import {
   DescriptionsItem,
   Empty,
   InputNumber,
+  Modal,
   Spin,
   TabPane,
   Table,
@@ -26,8 +27,10 @@ import {
   createPurchaseOrderApi,
   getComparisonApi,
   getRfqApi,
-  sendRfqApi,
+  createActionProposalApi,
+  confirmActionProposalApi,
 } from '#/api';
+import { canConfirmActionProposal } from '#/views/ai/workspace/action-proposal-policy';
 import {
   COMPARISON_STATUS_DICT,
   QUOTE_STATUS_DICT,
@@ -116,20 +119,37 @@ function quoteSupplierId(quoteId: number) {
 }
 
 async function onSend() {
-  if (!detail.value?.id) {
+  const rfq = detail.value;
+  if (!rfq?.id) {
     return;
   }
   acting.value = true;
   try {
-    await sendRfqApi(detail.value.id);
-    message.success('询价单已发送');
-    await reload();
-    emit('success');
+    const proposal = await createActionProposalApi('rfq.send', { rfq_id: rfq.id }, makeIdempotencyKey());
+    if (!canConfirmActionProposal(proposal, proposal.preview_version, false)) {
+      message.warning(proposal.blockers.join('；') || '当前询价单不能发送，请检查后重试。');
+      return;
+    }
+    Modal.confirm({
+      title: '检查并发送询价单',
+      content: `确认将询价单 ${rfq.rfq_no} 发送给已邀请供应商？发送后供应商即可报价，询价单不可再编辑。`,
+      okText: '确认发送',
+      onOk: async () => {
+        await confirmActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+        message.success('询价单已发送');
+        await reload();
+        emit('success');
+      },
+    });
   } catch {
     // 请求层已统一弹出后端返回的中文错误；不吞掉异常会导致未捕获的 Promise 拒绝。
   } finally {
     acting.value = false;
   }
+}
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 async function onBuildComparison() {

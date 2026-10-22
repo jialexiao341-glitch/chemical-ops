@@ -25,6 +25,7 @@ const actionLabels: Record<string, string> = {
   'purchase_request.update_draft': '修改采购申请',
   'purchase_request.submit': '提交采购申请',
   'rfq.create_draft': '创建询价草稿',
+  'rfq.send': '发送询价',
 };
 const statusLabels: Record<AiApi.ActionProposalRead['status'], string> = {
   CANCELLED: '已取消',

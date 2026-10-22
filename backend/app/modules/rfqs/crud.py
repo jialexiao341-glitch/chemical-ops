@@ -27,10 +27,11 @@ def detail_options():
     )
 
 
-def get_by_id(db: Session, rfq_id: int) -> RFQ | None:
+def get_by_id(db: Session, rfq_id: int, *, for_update: bool = False) -> RFQ | None:
     """按主键查询询价单及其嵌套数据。"""
 
-    return db.scalar(select(RFQ).options(*detail_options()).where(RFQ.id == rfq_id))
+    query = select(RFQ).options(*detail_options()).where(RFQ.id == rfq_id)
+    return db.scalar(query.with_for_update() if for_update else query)
 
 
 def list_page(

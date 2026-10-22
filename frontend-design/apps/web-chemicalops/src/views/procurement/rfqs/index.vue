@@ -15,7 +15,8 @@ import { Plus } from '@vben/icons';
 import { Button, message, Modal } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getRfqListApi, sendRfqApi } from '#/api';
+import { confirmActionProposalApi, createActionProposalApi, getRfqListApi } from '#/api';
+import { canConfirmActionProposal } from '#/views/ai/workspace/action-proposal-policy';
 
 import { useColumns, useGridFormSchema } from './data';
 import DetailDrawer from './modules/detail.vue';
@@ -84,16 +85,33 @@ function onActionClick({ code, row }: OnActionClickParams<RfqApi.Rfq>) {
 }
 
 function onSend(row: RfqApi.Rfq) {
-  Modal.confirm({
-    content: `发送后供应商即可报价，询价单不可再编辑：${row.rfq_no}`,
-    onOk: async () => {
-      await sendRfqApi(row.id);
-      message.success('询价单已发送');
-      gridApi.query();
-    },
-    okText: '发送',
-    title: '发送询价单',
-  });
+  void createRfqSendProposal(row);
+}
+
+async function createRfqSendProposal(row: RfqApi.Rfq) {
+  try {
+    const proposal = await createActionProposalApi('rfq.send', { rfq_id: row.id }, makeIdempotencyKey());
+    if (!canConfirmActionProposal(proposal, proposal.preview_version, false)) {
+      message.warning(proposal.blockers.join('；') || '当前询价单不能发送，请检查后重试。');
+      return;
+    }
+    Modal.confirm({
+      content: `确认将询价单 ${row.rfq_no} 发送给已邀请供应商？发送后供应商即可报价，询价单不可再编辑。`,
+      onOk: async () => {
+        await confirmActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+        message.success('询价单已发送');
+        gridApi.query();
+      },
+      okText: '确认发送',
+      title: '检查并发送询价单',
+    });
+  } catch {
+    // 请求层已展示后端错误；用户可检查状态后重新发起。
+  }
+}
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function openAiRfq(rawId: unknown) {

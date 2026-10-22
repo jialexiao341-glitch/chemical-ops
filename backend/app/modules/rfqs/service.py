@@ -126,10 +126,10 @@ def list_rfqs(db: Session, user: User, *, keyword: str | None, status: str | Non
     return crud.list_page(db, requester_id=requester_id, keyword=keyword, status=status, page=page, page_size=page_size)
 
 
-def get_rfq(db: Session, user: User, rfq_id: int) -> RFQ:
+def get_rfq(db: Session, user: User, rfq_id: int, *, for_update: bool = False) -> RFQ:
     """查询询价详情并执行基础数据范围校验。"""
 
-    rfq = crud.get_by_id(db, rfq_id)
+    rfq = crud.get_by_id(db, rfq_id, for_update=for_update)
     if rfq is None:
         raise ResourceNotFoundError("询价单不存在")
     if rfq.requester_id != user.id:
@@ -162,10 +162,10 @@ def update_rfq(db: Session, user: User, rfq_id: int, data: RFQUpdate) -> RFQ:
     return crud.get_by_id(db, rfq.id)
 
 
-def send_rfq(db: Session, user: User, rfq_id: int) -> RFQ:
+def send_rfq(db: Session, user: User, rfq_id: int, *, commit: bool = True) -> RFQ:
     """发送询价并进入等待报价状态。"""
 
-    rfq = get_rfq(db, user, rfq_id)
+    rfq = get_rfq(db, user, rfq_id, for_update=True)
     if rfq.status != "DRAFT":
         raise BusinessValidationError("只有草稿状态的询价单可以发送")
     if not rfq.items or not rfq.suppliers:
@@ -173,8 +173,11 @@ def send_rfq(db: Session, user: User, rfq_id: int) -> RFQ:
     rfq.status = "SENT"
     rfq.sent_at = _now()
     add_audit_log(db, actor_id=user.id, action_type="SEND", resource_type="RFQ", resource_id=rfq.id, request_summary="发送询价单", result_status="SUCCESS")
-    db.commit()
-    return crud.get_by_id(db, rfq.id)
+    if commit:
+        db.commit()
+        return crud.get_by_id(db, rfq.id)
+    db.flush()
+    return rfq
 
 
 def create_quote(db: Session, user: User, rfq_id: int, data: SupplierQuoteCreate) -> RFQ:

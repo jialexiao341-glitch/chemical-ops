@@ -404,3 +404,72 @@ class RFQCreateDraftHandler:
 
 
 register_handler("rfq.create_draft", RFQCreateDraftHandler())
+
+
+def _rfq_send_snapshot(rfq) -> dict[str, Any]:
+    return {
+        "id": rfq.id,
+        "rfq_no": rfq.rfq_no,
+        "requester_id": rfq.requester_id,
+        "status": rfq.status,
+        "quote_deadline": rfq.quote_deadline.isoformat() if rfq.quote_deadline else None,
+        "requested_delivery_date": rfq.requested_delivery_date.isoformat() if rfq.requested_delivery_date else None,
+        "delivery_requirements": rfq.delivery_requirements,
+        "items": [
+            {"id": item.id, "requested_name": item.requested_name, "quantity": str(item.quantity),
+             "unit_id": item.unit_id, "required_delivery_date": item.required_delivery_date.isoformat()
+             if item.required_delivery_date else None, "technical_requirements": item.technical_requirements}
+            for item in rfq.items
+        ],
+        "supplier_ids": sorted(supplier.supplier_id for supplier in rfq.suppliers),
+    }
+
+
+class RFQSendHandler:
+    permission_code = "procurement.rfqs.write"
+    resource_type = "RFQ"
+
+    def prepare(self, db, user, payload):
+        from app.modules.rfqs import service as rfq_service
+
+        if not isinstance(payload, dict) or set(payload) != {"rfq_id"}:
+            raise BusinessValidationError("发送询价提案只接受询价单编号")
+        try:
+            rfq_id = int(payload["rfq_id"])
+        except (TypeError, ValueError):
+            raise BusinessValidationError("询价单编号无效") from None
+        rfq = rfq_service.get_rfq(db, user, rfq_id)
+        if rfq.status != "DRAFT":
+            raise BusinessValidationError("只有草稿状态的询价单可以发送")
+        if not rfq.items or not rfq.suppliers:
+            raise BusinessValidationError("询价单必须包含明细和邀请供应商")
+        snapshot = _rfq_send_snapshot(rfq)
+        return {
+            "payload": {"rfq_id": rfq.id}, "snapshot": snapshot, "resource_id": rfq.id,
+            "diff": [{"field": "status", "before": "DRAFT", "after": "SENT"}],
+            "evidence": [{"type": "rfq", "id": rfq.id, "rfq_no": rfq.rfq_no,
+                          "status": rfq.status, "item_count": len(rfq.items),
+                          "supplier_count": len(rfq.suppliers),
+                          "quote_deadline": snapshot["quote_deadline"]}],
+            "warnings": [], "blockers": [], "risk_level": "MEDIUM",
+        }
+
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        from app.modules.rfqs import service as rfq_service
+
+        rfq_id = int(proposal.resource_id or proposal.payload["rfq_id"])
+        rfq = rfq_service.get_rfq(db, user, rfq_id, for_update=for_update)
+        if rfq.status != "DRAFT" or not rfq.items or not rfq.suppliers:
+            raise BusinessValidationError("询价单状态或内容已变化，请重新生成提案")
+        if _rfq_send_snapshot(rfq) != proposal.expected_resource_snapshot:
+            raise BusinessValidationError("询价单内容已变化，请重新生成提案")
+
+    def execute(self, db, user, proposal, *, commit=False):
+        from app.modules.rfqs import service as rfq_service
+        from app.modules.rfqs.schema import RFQRead
+
+        rfq = rfq_service.send_rfq(db, user, int(proposal.payload["rfq_id"]), commit=commit)
+        return RFQRead.model_validate(rfq).model_dump(mode="json")
+
+
+register_handler("rfq.send", RFQSendHandler())

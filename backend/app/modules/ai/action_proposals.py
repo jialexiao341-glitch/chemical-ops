@@ -17,7 +17,7 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 
 
-INBOX_ACTION_TYPES = ("purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft")
+INBOX_ACTION_TYPES = ("purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send")
 
 
 def _now() -> datetime:
@@ -150,26 +150,36 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
     readable_reference = None
     source_route = None
     resource_visible = False
-    if proposal.action_type in {"purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft"}:
-        if "SYS_ADMIN" in roles or "procurement.requests.read" in permission_codes:
+    if proposal.action_type in {"purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send"}:
+        resource_read_permission = "procurement.rfqs.read" if proposal.action_type == "rfq.send" else "procurement.requests.read"
+        if "SYS_ADMIN" in roles or resource_read_permission in permission_codes:
             try:
                 from app.modules.purchase_requests import service as request_service
 
-                if proposal.action_type == "rfq.create_draft":
+                if proposal.action_type == "rfq.send":
+                    from app.modules.rfqs import service as rfq_service
+
+                    rfq = rfq_service.get_rfq(db, user, int(proposal.resource_id))
+                    readable_reference = rfq.rfq_no
+                    source_route = f"/procurement/rfqs?ai_record_id={rfq.id}"
+                    resource_visible = True
+                    request_id = None
+                elif proposal.action_type == "rfq.create_draft":
                     request_id = int(proposal.payload["source_request_id"])
                 else:
                     request_id = int(proposal.resource_id or proposal.payload["request_id"])
-                request = request_service.get_request(db, user, request_id)
-                readable_reference = request.request_no
-                source_route = f"/procurement/requests?ai_record_id={request.id}"
-                resource_visible = True
+                if request_id is not None:
+                    request = request_service.get_request(db, user, request_id)
+                    readable_reference = request.request_no
+                    source_route = f"/procurement/requests?ai_record_id={request.id}"
+                    resource_visible = True
             except (KeyError, TypeError, ValueError, ResourceNotFoundError):
                 availability = "RESOURCE_UNAVAILABLE"
                 reason = "关联单据已不可访问"
         else:
             if availability != "PERMISSION_REVOKED":
                 availability = "RESOURCE_UNAVAILABLE"
-                reason = "当前账号没有查看关联采购申请的权限"
+                reason = "当前账号没有查看关联询价单的权限" if proposal.action_type == "rfq.send" else "当前账号没有查看关联采购申请的权限"
 
     base = _preview(proposal).model_dump()
     if proposal.action_type == "rfq.create_draft" and "SYS_ADMIN" not in roles and "master.suppliers.read" not in permission_codes:
@@ -184,6 +194,7 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
         and not proposal.blockers
         and proposal.expires_at > _now()
     )
+    base["requires_user_confirmation"] = can_confirm
     result = AIActionProposalRead(
         **base,
         created_at=proposal.created_at,
@@ -200,7 +211,6 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
             if proposal.action_type == "rfq.create_draft"
             else {}
         ),
-        requires_user_confirmation=can_confirm,
     )
     return result, changed
 
