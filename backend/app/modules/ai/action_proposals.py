@@ -30,10 +30,7 @@ def _hash(payload: dict) -> str:
 
 
 def _required_permission_codes(action_type: str, permission_code: str) -> set[str]:
-    required = {permission_code}
-    if action_type == "rfq.create_draft":
-        required.add("master.suppliers.read")
-    return required
+    return action_handlers.required_permissions(action_type)
 
 
 def _authorize(db: Session, user: User, permission_code: str, *, action_type: str | None = None) -> None:

@@ -49,6 +49,14 @@ def registered_action_types() -> tuple[str, ...]:
     return tuple(sorted(_HANDLERS))
 
 
+def required_permissions(action_type: str) -> set[str]:
+    """能力声明与提案执行共用的动作权限集合。"""
+    required = {get_handler(action_type).permission_code}
+    if action_type == "rfq.create_draft":
+        required.add("master.suppliers.read")
+    return required
+
+
 def _request_snapshot(request: PurchaseRequest) -> dict[str, Any]:
     return {
         "id": request.id,
