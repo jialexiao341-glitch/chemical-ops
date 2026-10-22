@@ -187,31 +187,32 @@ def test_structured_model_result_controls_route_and_keeps_context(monkeypatch, q
     '{"purpose":"query","tasks":["sql"]}',
     '{"purpose":"query","tasks":["inventory"],"slots":{"product_id":1}}',
     '{"purpose":"query","tasks":["inventory"],"slots":{"limit":-1}}'])
-def test_invalid_model_output_clarifies_without_keyword_fallback(monkeypatch, value):
+def test_invalid_model_output_fails_without_keyword_fallback(monkeypatch, value):
     async def model(*args, **kwargs):
         return SimpleNamespace(message=SimpleNamespace(content=value))
     monkeypatch.setattr(llm, "chat", model)
-    decision = _run_immediate(routing.understand("查乙醇库存"))
-    assert decision.route == "clarify" and decision.tasks == [] and decision.question
+    with pytest.raises(routing.IntentRecognitionError) as failure:
+        _run_immediate(routing.understand("查乙醇库存"))
+    assert failure.value.code == "INTENT_SCHEMA_ERROR"
 
 
-def test_model_failure_clarifies(monkeypatch):
+def test_model_failure_does_not_become_business_clarification(monkeypatch):
     async def unavailable(*args, **kwargs):
         raise TimeoutError()
     monkeypatch.setattr(llm, "chat", unavailable)
-    result = _run_immediate(routing.understand("查乙醇库存"))
-    assert result.route == "clarify"
-    assert "无需补充" in result.question and "尚未执行" in result.question
+    with pytest.raises(routing.IntentRecognitionError) as failure:
+        _run_immediate(routing.understand("查乙醇库存"))
+    assert failure.value.code == "INTENT_SERVICE_ERROR"
+    assert "无需补充" in str(failure.value) and "尚未执行" in str(failure.value)
 
 
 def test_provider_rejection_is_reported_as_technical_failure(monkeypatch):
     async def rejected(*args, **kwargs):
         raise BusinessValidationError("AI 服务拒绝了请求（HTTP 400），请检查模型接口、请求参数和结构化输出配置")
     monkeypatch.setattr(llm, "chat", rejected)
-    result = _run_immediate(routing.understand("统计本月逾期未交订单及关联库存"))
-    assert "HTTP 400" in result.question
-    assert "技术故障" in result.question and "尚未执行查询" in result.question
-    assert result.tasks == [] and result.sub_tasks == []
+    with pytest.raises(routing.IntentRecognitionError) as failure:
+        _run_immediate(routing.understand("统计本月逾期未交订单及关联库存"))
+    assert "HTTP 400" in str(failure.value) and "尚未执行查询" in str(failure.value)
 
 
 def test_root_contract_repair_explains_the_violated_rule(monkeypatch):

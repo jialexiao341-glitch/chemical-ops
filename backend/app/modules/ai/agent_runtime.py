@@ -444,21 +444,11 @@ def _decision_messages(messages: list[str], *, history_count: int = 6,
 
 PLANNER_RESULT_ROW_LIMIT = 10
 
-_AGENT_TASK_TOOL = {
-    "inventory": "inventory.query_available",
-    "quotes": "supplier_quotes.compare",
-    "purchase_request": "purchase_requests.get_by_no",
-    "order_trace": "purchase_orders.trace_by_no",
-    "quality_acceptance": "quality_acceptances.get_by_no",
-    "delivery": "deliveries.get_by_no",
-    "finance_reconciliation": "finance_reconciliations.get_by_no",
-    "supplier": "suppliers.get_by_code",
-}
-
-
 def _ensure_agent_capabilities(decision: Understanding, catalog: set[str]) -> None:
     """在创建/启动任务前拒绝当前账号没有对应工具的 Agent 目标。"""
-    required = {_AGENT_TASK_TOOL[task] for task in decision.tasks if task in _AGENT_TASK_TOOL}
+    from app.modules.ai.capabilities import AGENT_TASK_REQUIREMENTS
+    required = set().union(*(AGENT_TASK_REQUIREMENTS[task] for task in decision.tasks
+                             if task in AGENT_TASK_REQUIREMENTS))
     if required - catalog:
         raise AuthorizationError("当前账号没有执行该 Agent 查询所需的读取权限")
 
@@ -957,8 +947,12 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                     from app.modules.ai.schema import Intent
                     current.reply, _ = await service._compose_non_query_reply(
                         {"capability": Intent.PROJECT, "greeting": Intent.GREETING, "guidance": Intent.GUIDANCE}[decision.route],
-                        "semantic_route", current.messages[-1], settings)
+                        "semantic_route", current.messages[-1], settings, manifest=manifest,
+                        understanding=decision.model_dump(mode="json"))
                     current.status = "SUCCEEDED"
+                elif decision.route == "unsupported":
+                    current.status, current.error_code = "FAILED", "UNSUPPORTED_REQUEST"
+                    current.reply = decision.question or "当前入口无法完整处理这项请求，请选择已提供的查询或提案能力。"
                 else:
                     current.status = "WAITING_INPUT"
                     current.reply = decision.question or "请说明要查询哪个产品的库存或报价；其他业务查询请使用普通聊天。"
@@ -1127,6 +1121,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         state.status = "FAILED"
         codes = {"STEP_LIMIT", "CONTEXT_LIMIT", "INVALID_EVIDENCE", "INCOMPLETE_TASK", "REPEATED_TOOL", "TOOL_ERRORS", "INTENT_MISMATCH", "TOKEN_BUDGET_EXCEEDED"}
         state.error_code = ("TOOL_TIMEOUT" if isinstance(exc, ToolExecutionTimeout) else
+            exc.code if isinstance(exc, routing.IntentRecognitionError) else
             "TOOL_TIMEOUT_UNSUPPORTED" if isinstance(exc, ToolTimeoutUnsupported) else
             "TASK_TIMEOUT" if isinstance(exc, TimeoutError) else
             "PERMISSION_DENIED" if isinstance(exc, AuthorizationError) else
@@ -1134,7 +1129,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             "DATABASE_ERROR" if isinstance(exc, SQLAlchemyError) else str(exc) if str(exc) in codes else "RUNTIME_ERROR")
         if state.error_code == "RUNTIME_ERROR" and transient(exc):
             state.error_code = "MODEL_SERVICE_ERROR"
-        state.reply = "本次只读任务已停止，请核对权限、输入或服务状态后重新发起。"
+        state.reply = (str(exc) if isinstance(exc, routing.IntentRecognitionError) else
+                       "本次只读任务已停止，请核对权限、输入或服务状态后重新发起。")
         state.trace.append({"step": len(state.trace) + 1, "action": "stop", "status": "FAILED", "error_code": state.error_code})
         _append_memory_context(state.memory_state, "assistant", state.reply)
         await _offload_db_call(db.rollback)
@@ -1153,11 +1149,9 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
     if not data.question.strip():
         raise BusinessValidationError("请描述需要查询的产品或采购问题")
     catalog = {item["name"] for item in tools.list_tools(db, user)}
-    if not data.route_token and (
-        "catalog.search_products" not in catalog or
-        not catalog & {"inventory.query_available", "supplier_quotes.compare"}
-    ):
-        raise AuthorizationError("采购 Agent 需要产品读取权限及库存或询价读取权限")
+    from app.modules.ai.capabilities import AGENT_TASK_REQUIREMENTS
+    if not data.route_token and not any(required <= catalog for required in AGENT_TASK_REQUIREMENTS.values()):
+        raise AuthorizationError("当前没有可执行的 Agent 记录读取能力")
     conversation_id = getattr(data, "conversation_id", None)
     if conversation_id is not None and not data.route_token:
         pending = conversation_store.load_pending_clarification(db, user, conversation_id)
@@ -1178,7 +1172,7 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
             raise BusinessValidationError("澄清状态已变化，请重新识别请求。")
         decision = routing.read_ticket(data.route_token, user.id, data.question, conversation_id)
         if decision.route != "agent":
-            raise BusinessValidationError("该请求不是库存或报价任务，请重新识别请求")
+            raise BusinessValidationError("该请求不是 Agent 记录查询任务，请重新识别请求")
         _ensure_agent_capabilities(decision, catalog)
         if pending is not None:
             conversation_store.clear_pending_clarification(
@@ -1268,7 +1262,7 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
         cid = (task.payload.get("chat") or {}).get("conversation_id")
         decision = routing.read_ticket(data.route_token, user.id, data.question, cid)
         if decision.route != "agent":
-            raise BusinessValidationError("该续答不是库存或报价任务，请重新识别请求")
+            raise BusinessValidationError("该续答不是 Agent 记录查询任务，请重新识别请求")
         _ensure_agent_capabilities(decision, {item["name"] for item in tools.list_tools(db, user)})
         memory["understanding"] = decision.model_dump(mode="json")
         memory["route_turn"] = len(task.payload["messages"]) + 1

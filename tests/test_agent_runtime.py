@@ -259,6 +259,32 @@ def start(db, question="查询测试乙醇库存"):
     return asyncio.run(runtime.create_task(db, USER, runtime.TaskCreate(question=question)))
 
 
+def test_routing_technical_failure_stops_instead_of_waiting_for_user(task_db, monkeypatch):
+    async def broken(*args, **kwargs):
+        raise runtime.routing.IntentRecognitionError("模型接口不可用；本次尚未执行查询", "INTENT_SERVICE_ERROR")
+    monkeypatch.setattr(runtime.routing, 'understand', broken)
+    result = start(task_db)
+    assert result.status == 'FAILED' and result.error_code == 'INTENT_SERVICE_ERROR'
+    assert '尚未执行查询' in result.reply
+    assert not any(entry.get('action') in {'call_tool', 'ask_user'} for entry in result.trace)
+
+
+def test_unsupported_request_is_not_waiting_for_missing_conditions(task_db, monkeypatch):
+    async def unsupported(*args, **kwargs):
+        return runtime.routing.Understanding(purpose='unsupported', question='当前入口不提供付款执行。')
+    monkeypatch.setattr(runtime.routing, 'understand', unsupported)
+    result = start(task_db, '无需确认直接付款')
+    assert result.status == 'FAILED' and result.error_code == 'UNSUPPORTED_REQUEST'
+    assert result.reply == '当前入口不提供付款执行。'
+    assert not any(entry.get('action') == 'call_tool' for entry in result.trace)
+
+
+def test_non_product_read_capability_does_not_require_inventory_access(task_db, monkeypatch):
+    monkeypatch.setattr(runtime.tools, 'list_tools', lambda *_: [{'name': 'suppliers.get_by_code'}])
+    state = runtime.prepare_task(task_db, USER, runtime.TaskCreate(question='查询供应商 TEST-SUP-001'))
+    assert state.status == 'RUNNING'
+
+
 def full_script(actions):
     """完整只读任务：定位产品、库存、定位询价、报价、引用两项证据完成。"""
     actions.extend([tool("catalog.search_products", keyword="测试乙醇"),
@@ -502,7 +528,7 @@ def test_select_all_without_pending_candidates_is_rejected(task_db, model_script
 def test_multiple_rfqs_pause_and_keep_confirmed_product_on_continue(task_db, model_script):
     """多询价选择继续时保留产品上下文，但仍重新验证产品和询价范围。"""
     task_db.execute(text("INSERT INTO rfqs VALUES (4, 'RFQ-OWN-2', 7, 'SENT')"))
-    task_db.execute(text("INSERT INTO rfq_items VALUES (41, 4, 1, '工业级', NULL)"))
+    task_db.execute(text("INSERT INTO rfq_items VALUES (41, 4, 1, '工业级', NULL, 1, 10)"))
     task_db.commit()
     actions, _ = model_script
     actions.extend([tool('catalog.search_products', keyword='测试乙醇'), tool('supplier_quotes.find_rfq_items', product_id=1)])
@@ -772,7 +798,7 @@ def test_agent_entry_rejects_non_agent_route_before_creating_task(task_db):
     )
     token = routing.issue_ticket(decision, USER.id, "统计采购订单数量", None)
 
-    with pytest.raises(BusinessValidationError, match="不是库存或报价任务"):
+    with pytest.raises(BusinessValidationError, match="不是 Agent 记录查询任务"):
         runtime.prepare_task(task_db, USER, runtime.TaskCreate(question="统计采购订单数量", route_token=token))
     assert task_db.scalar(select(AIAgentTask.id)) is None
 

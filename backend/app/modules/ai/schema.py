@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 from typing_extensions import TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 from app.modules.ai.catalog import CATALOG, slot_description
 from app.modules.purchase_requests.schema import PurchaseRequestCreate, PurchaseRequestItemCreate
@@ -433,8 +433,8 @@ class SubTask(BaseModel):
     depends_on: list[str] = Field(default_factory=list, max_length=5)
 
 
-class RouteActionFields(TypedDict, total=False):
-    """路由候选动作字段；保留字典接口并向模型提供明确字段。"""
+class PurchaseRequestActionFields(TypedDict, total=False):
+    """采购申请修改候选；不与询价字段混用。"""
     purpose: str | None
     priority: str | None
     budget_amount: Decimal | None
@@ -442,13 +442,18 @@ class RouteActionFields(TypedDict, total=False):
     expected_date: str | None
     department_id: int | None
     items: list[PurchaseRequestItemCreate] | None
+
+
+class RfqDraftActionFields(TypedDict, total=False):
+    """询价草稿候选；仅含当前入口实际接受的字段。"""
     supplier_codes: list[str] | None
     quote_deadline: str | None
     requested_delivery_date: str | None
     delivery_requirements: str | None
 
 
-RouteActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
+PurchaseRequestActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
+RfqDraftActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
 
 
 class Understanding(BaseModel):
@@ -462,7 +467,7 @@ class Understanding(BaseModel):
     tasks: list[Task] = Field(default_factory=list, max_length=4)
     excluded_tasks: list[Task] = Field(default_factory=list, max_length=4)
     slots: Slots = Field(default_factory=Slots)
-    action_fields: RouteActionFields | None = None
+    action_fields: PurchaseRequestActionFields | RfqDraftActionFields | None = None
     question: str | None = Field(default=None, max_length=1000)
     sub_tasks: list[SubTask] = Field(default_factory=list, max_length=6)
 
@@ -471,6 +476,8 @@ class Understanding(BaseModel):
         """校验任务一致性、执行模式和无环依赖，再移除明确排除的类别。"""
         if self.action_fields is not None:
             self.action_fields = {key: value for key, value in self.action_fields.items() if value is not None}
+            if self.purpose not in {"purchase_update", "rfq_draft"}:
+                raise ValueError("当前意图不接受动作候选字段，action_fields 必须为 null")
         if self.purpose == "clarify":
             if self.clarification_options and not self.clarification_slot:
                 raise ValueError("澄清选项必须绑定待回答槽位")
@@ -496,7 +503,7 @@ class Understanding(BaseModel):
                 if not isinstance(codes, list) or not codes or any(not isinstance(code, str) or not code.strip() for code in codes):
                     raise ValueError("创建询价提案必须提供用户明确指定的供应商编码")
                 if set(self.action_fields or {}) - allowed:
-                    raise ValueError("询价提案包含不允许的候选字段")
+                    raise ValueError("询价提案包含不允许的候选字段：" + ", ".join(sorted(set(self.action_fields) - allowed)))
             elif self.action_fields is not None:
                 raise ValueError("当前意图不接受动作候选字段")
         elif self.dialogue_action == "cancel":
@@ -581,6 +588,8 @@ class CapabilityManifest(BaseModel):
     analytics_datasets: list[dict[str, Any]]
     document_search: bool
     resource_scopes: list[str]
+    action_proposals: list[dict[str, Any]] = Field(default_factory=list)
+    agent_tasks: list[str] = Field(default_factory=list)
 
 
 class PendingClarification(BaseModel):
@@ -1186,6 +1195,16 @@ class _DraftProposal(BaseModel):
 
 # 严格模型输出格式由契约生成，避免维护第二份字段定义。
 
+def schema_error_details(exc: ValidationError) -> list[dict]:
+    """反馈结构位置与本地根校验规则，不包含输入值或模型原文。"""
+    details = []
+    for error in exc.errors()[:6]:
+        detail = {"type": error["type"], "loc": error["loc"]}
+        if error["type"] == "value_error" and not error["loc"]:
+            detail["rule"] = error["msg"]
+        details.append(detail)
+    return details
+
 def schema_response_format(model: type[BaseModel], name: str) -> dict:
     schema = model.model_json_schema()
 
@@ -1204,6 +1223,8 @@ def schema_response_format(model: type[BaseModel], name: str) -> dict:
                 node.pop("format")
                 node["pattern"] = r"^\d{4}-\d{2}-\d{2}$"
             if node.get("type") == "object":
+                if not node.get("properties"):
+                    raise ValueError("严格模型输出 Schema 必须声明非空对象字段，不能使用开放字典")
                 node["additionalProperties"] = False
                 node["required"] = list(node.get("properties", {}))
             for value in list(node.values()):

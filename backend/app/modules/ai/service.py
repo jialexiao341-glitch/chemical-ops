@@ -132,7 +132,7 @@ async def _classify_chat_intent(db: Session, question: str, *, user: User, data:
         return IntentResult(Intent.MULTI, "semantic_route", decision.model_dump(mode="json"))
     if route == "agent":
         # 普通聊天 API 不静默把 Agent 任务降级为另一种查询。
-        return IntentResult(Intent.CLARIFY, "请使用只读查询任务入口继续该库存或报价查询。")
+        return IntentResult(Intent.CLARIFY, "请使用工作台的 Agent 任务入口继续该记录查询。")
     if route in {"clarify", "cancel"}:
         return IntentResult(Intent.CLARIFY, "已取消本次请求。" if route == "cancel" else
                             decision.question or "这次请求包含不同处理流程，请先选择要查询的业务数据或化学品资料。",
@@ -407,8 +407,15 @@ async def _rewrite_text2sql_answer(result: object, dataset_label: str, settings:
         return None
 
 
+async def _reply_capabilities(db: Session, user: User, intent: Intent):
+    if intent not in {Intent.PROJECT, Intent.GUIDANCE}:
+        return None
+    from app.modules.ai.capabilities import build_capability_manifest
+    return await asyncio.to_thread(build_capability_manifest, db, user)
+
+
 async def _compose_non_query_reply(
-    intent: Intent, reason: str, question: str, settings: Settings | None = None
+    intent: Intent, reason: str, question: str, settings: Settings | None = None, *, manifest=None, understanding=None
 ) -> tuple[str, str]:
     """非查询意图的回复组装，返回 (内容, model 标签)。
 
@@ -420,19 +427,29 @@ async def _compose_non_query_reply(
     if intent is Intent.CLARIFY:
         return reason, "semantic-router"
     if intent is Intent.GUIDANCE:
-        response = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=question)]), settings,
+        payload = {"question": question, "capabilities": manifest.model_dump(mode="json") if manifest else None}
+        response = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False))]), settings,
                               system_prompt="""# 任务
 回答 ChemicalOps 业务操作指导，不查询或执行真实业务。
 # 约束
 不编造产品现有按钮、实际状态、单据、库存或价格。不确定系统是否支持时明确说明，必要时询问具体页面。
+能力判断只依据 capabilities 中当前提供的工具、统计数据集和 action_proposals。数据集 outputs/derived_outputs 是可回答结果，不等同独立工具。
+action_proposals 中 chat 入口可以整理待确认提案，business_page 入口需引导到业务页面；准备提案、用户确认和业务执行是不同阶段。
+未列出的能力只说明当前入口未提供，不据此断言整个项目没有该功能。没有能力清单时不得承诺具体系统功能。
 # 输出
 用自然中文说明操作原则和所需信息；不得声称已经执行任何操作。
 """ + REPLY_STYLE, interpret_only=True)
         return response.message.content, "guidance"
     if intent is Intent.PROJECT:
+        if manifest is not None:
+            from app.modules.ai.capabilities import describe_capabilities
+            return describe_capabilities(manifest), "capability-manifest"
         return build_project_reply(question), "rule-based"
     if intent is Intent.GREETING:
         return greeting_reply(), "rule-based"
+    if intent is Intent.UNSUPPORTED and understanding and understanding.get("purpose") == "unsupported":
+        detail = understanding.get("question") or "当前入口无法完整处理这项请求。"
+        return detail, "semantic-router"
     # 空消息与明确的范围外话题保持固定拒绝，不浪费模型调用
     if reason != "no_supported_marker":
         return UNSUPPORTED_REPLY, "rule-based"
@@ -700,7 +717,9 @@ async def _chat_for_user_impl(db: Session, user: User, data: AIChatRequest) -> A
         )
     if intent_result.intent != Intent.QUERY and not data.attachment_file_ids:
         fixed_content, model_tag = await _compose_non_query_reply(
-            intent_result.intent, intent_result.reason, user_message.content
+            intent_result.intent, intent_result.reason, user_message.content,
+            manifest=await _reply_capabilities(db, user, intent_result.intent),
+            understanding=intent_result.understanding,
         )
         LOGGER.info("AI 非查询回复 user_id=%s intent=%s reason=%s model=%s answer_length=%s", user.id, intent_result.intent, intent_result.reason, model_tag, len(fixed_content))
         conversation_store.save_chat_turn(db, conversation, user_message.content, fixed_content)
@@ -870,7 +889,9 @@ async def _stream_chat_for_user_impl(db: Session, user: User, data: AIChatReques
         return
     if stream_intent_result.intent != Intent.QUERY and not data.attachment_file_ids:
         fixed_content, model_tag = await _compose_non_query_reply(
-            stream_intent_result.intent, stream_intent_result.reason, user_message.content
+            stream_intent_result.intent, stream_intent_result.reason, user_message.content,
+            manifest=await _reply_capabilities(db, user, stream_intent_result.intent),
+            understanding=stream_intent_result.understanding,
         )
         LOGGER.info("AI 流式非查询回复开始 user_id=%s intent=%s reason=%s model=%s query_hash=%s", user.id, stream_intent_result.intent, stream_intent_result.reason, model_tag, _text_fingerprint(user_message.content))
         chunk_count = 0

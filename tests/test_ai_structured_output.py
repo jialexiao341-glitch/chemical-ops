@@ -5,7 +5,7 @@ import json
 
 import httpx
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
@@ -36,10 +36,13 @@ def test_generated_schema_closes_every_object_and_requires_explicit_fields(model
 
 def test_routing_action_schema_has_explicit_properties_and_nullable_branch_types():
     schema = schema_response_format(routing.Understanding, "route")["json_schema"]["schema"]
-    fields = schema["properties"]["action_fields"]["anyOf"][0]
-    assert fields["type"] == "object"
-    assert {"supplier_codes", "quote_deadline", "purpose", "items"} <= fields["properties"].keys()
-    assert all("type" in branch for branch in schema["properties"]["action_fields"]["anyOf"])
+    branches = schema["properties"]["action_fields"]["anyOf"]
+    objects = [branch for branch in branches if branch.get('type') == 'object']
+    assert len(objects) == 2
+    fields = set().union(*(branch['properties'].keys() for branch in objects))
+    assert {"supplier_codes", "quote_deadline", "purpose", "items"} <= fields
+    assert all("type" in branch for branch in branches)
+    assert all(not ({"purpose", "supplier_codes"} <= branch['properties'].keys()) for branch in objects)
     with pytest.raises(ValidationError):
         routing.Understanding.model_validate({
             "purpose": "purchase_update", "slots": {"request_no": "PR-001"},
@@ -50,9 +53,30 @@ def test_routing_action_schema_has_explicit_properties_and_nullable_branch_types
 def test_routing_strict_action_null_placeholders_do_not_expand_a_proposal():
     decision = routing.Understanding.model_validate({
         "purpose": "rfq_draft", "slots": {"request_no": "PR-001"},
-        "action_fields": {"supplier_codes": ["SUP-001"], "purpose": None, "items": None},
+        "action_fields": {"supplier_codes": ["SUP-001"], "quote_deadline": None, "delivery_requirements": None},
     })
     assert decision.action_fields == {"supplier_codes": ["SUP-001"]}
+
+
+def test_routing_strict_json_preserves_date_validation_with_action_union():
+    decision = routing.Understanding.model_validate_json(json.dumps({
+        'purpose': 'query', 'execution_mode': 'query', 'tasks': ['analytics'],
+        'slots': {'date_from': '2026-10-01', 'date_to': '2026-10-22'}, 'action_fields': None,
+        'sub_tasks': [{'id':'t1', 'kind':'analytics', 'question':'统计本月订单',
+                       'slots': {'date_from':'2026-10-01', 'date_to':'2026-10-22'}}],
+    }), strict=True)
+    assert decision.slots.date_from.isoformat() == '2026-10-01'
+    assert decision.sub_tasks[0].slots.date_to.isoformat() == '2026-10-22'
+    with pytest.raises(ValidationError, match='不接受动作候选字段'):
+        routing.Understanding.model_validate({'purpose':'query', 'execution_mode':'agent', 'tasks':['inventory'],
+                                             'action_fields': {'purpose':'夹带修改'}})
+
+
+def test_strict_schema_rejects_open_maps_before_a_provider_request():
+    class OpenMap(BaseModel):
+        fields: dict[str, object]
+    with pytest.raises(ValueError, match='不能使用开放字典'):
+        schema_response_format(OpenMap, 'bad_contract')
 
 
 def test_json_object_uses_chat_completions_response_format(monkeypatch):

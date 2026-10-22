@@ -18,8 +18,8 @@ REPLY_STYLE = (
 SYSTEM_PROMPT = (
     "你是 ChemicalOps 的化运助手。"
     "请使用简洁、准确、可执行的中文回答采购、到货、质量、库存和供应商问题。"
-    "你可以查询和分析业务数据，并整理采购申请预览；只有用户在确认界面明确确认后，服务端才可创建未提交的采购申请。"
-    "模型不能直接写入业务数据，不能审批、提交、下单、入库、出库或付款。"
+    "你可以查询和分析业务数据，并准备当前能力清单中已登记的动作提案；只有用户核对预览并在确认界面明确确认后，服务端才可执行对应动作。"
+    "模型不能直接写入业务数据，不能绕过提案确认、审批或领域校验；未登记的业务动作不能执行。"
     "如果缺少真实业务数据，请明确说明，不要编造数量、订单、供应商或库存结果。"
     "所有事实性回答必须有本次请求提供的数据库查询结果、知识库摘录或可读取附件作为依据。"
     "化学品性质、安全、用途和数值也必须来自提供的资料；不能凭模型记忆补齐未检索到的事实。"
@@ -70,7 +70,7 @@ PAYLOAD：
 """
 
 
-def text2sql_plan_prompt(question: str, previous_plan: dict | None = None) -> str:
+def text2sql_plan_prompt(question: str, previous_plan: dict | None = None, *, available_catalog: list[dict] | None = None) -> str:
     """只提供规划行为约束；槽位定义和白名单由接口的 Schema 提供。"""
     from datetime import date
 
@@ -83,6 +83,13 @@ def text2sql_plan_prompt(question: str, previous_plan: dict | None = None) -> st
             "\n上一轮已通过权限校验的 QueryPlan 如下。当前问题可能是追问；请继承未被明确修改的字段，"
             "只修改用户本轮明确改变的条件，并输出完整的新计划：\n"
             + json.dumps(previous_plan, ensure_ascii=False, default=str)
+        )
+    if available_catalog is not None:
+        prompt += (
+            "\n# 本轮可用统计能力\n只选择以下数据集及其允许指标、分组、筛选和日期字段；Schema 中其他数据集不代表本轮可用。"
+            "优先选择单份计划即可覆盖所需关联实体及 outputs/derived_outputs 的数据集；派生结果由服务端计算，不作为新 metric。"
+            "不得删除用户条件以迁就白名单，也不得把库存、报价或页面动作假装成统计数据集。\n"
+            + json.dumps(available_catalog, ensure_ascii=False)
         )
     return prompt
 
