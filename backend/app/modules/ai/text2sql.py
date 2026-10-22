@@ -20,6 +20,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import Select, and_, case, desc, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.orm import Session, aliased
+from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
@@ -32,6 +33,7 @@ from app.modules.ai.schema import (
     Text2SQLRequest,
     Text2SQLResponse,
     schema_response_format,
+    schema_error_details,
 )
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
@@ -1241,27 +1243,33 @@ async def _understand_question(question: str, settings: Settings, db: Session, u
     fixed_plan = await asyncio.to_thread(_fixed_plan_before_model, question, db, user, previous_plan)
     if fixed_plan is not None:
         return fixed_plan
-    prompt = text2sql_plan_prompt("")
+    from app.modules.ai.capabilities import analytics_catalog
+    available = await asyncio.to_thread(analytics_catalog, db, user)
+    prompt = text2sql_plan_prompt("", available_catalog=available)
     payload = json.dumps({"question": question, "today": date.today().isoformat(), "previous_plan": previous_plan.model_dump(mode="json") if previous_plan else None}, ensure_ascii=False)
     # Planning performs only reads before this point; do not hold its SQL connection
     # while an external model generates the structured query plan.
-    db.commit()
-    result = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
-                        response_format=schema_response_format(QueryPlan, "query_plan"), system_prompt=prompt, interpret_only=True)
-    raw = result.message.content
-    LOGGER.info("AI 查询计划原始输出 question_hash=%s raw_length=%s raw_hash=%s", _query_hash(question), len(raw), _query_hash(raw))
-    try:
-        return QueryPlan.model_validate_json(raw, strict=True)
-    except (BusinessValidationError, ValueError, TypeError) as exc:
-        LOGGER.warning("AI 查询计划解析失败 question_hash=%s error_type=%s raw_length=%s", _query_hash(question), exc.__class__.__name__, len(raw))
-        fallback = _fallback_query_plan(question)
-        if fallback is not None:
-            LOGGER.info("AI 查询计划使用安全兜底 question_hash=%s dataset=%s metric=%s", _query_hash(question), fallback.dataset, fallback.metric)
-            return fallback
-        if previous_plan is not None:
-            LOGGER.info("AI 查询计划追问使用上一轮安全计划 question_hash=%s dataset=%s", _query_hash(question), previous_plan.dataset)
-            return _merge_follow_up_plan(question, previous_plan)
-        raise BusinessValidationError("AI 返回的查询计划格式不正确") from exc
+    await asyncio.to_thread(db.commit)
+    if not available:
+        raise BusinessValidationError("当前没有可用的统计数据集，尚未执行查询")
+    return await _generate_query_plan(payload, settings, prompt)
+
+
+async def _generate_query_plan(payload: str, settings: Settings, prompt: str) -> QueryPlan:
+    """单项和依赖规划共用的契约重试；失败时不猜测近似查询或复用旧计划。"""
+    repair = ""
+    for attempt in range(2):
+        result = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
+                            response_format=schema_response_format(QueryPlan, "query_plan"),
+                            system_prompt=prompt + repair, interpret_only=True)
+        try:
+            return QueryPlan.model_validate_json(result.message.content, strict=True)
+        except ValidationError as exc:
+            errors = schema_error_details(exc)
+            LOGGER.warning("AI 查询计划结构校验失败 attempt=%s errors=%s", attempt + 1, errors)
+            repair = ("\n上次计划未通过结构校验。保留原请求的全部条件及关联关系，修正以下问题："
+                      + json.dumps(errors, ensure_ascii=False))
+    raise BusinessValidationError("AI 返回的查询计划格式不正确，尚未执行查询；请重试，无需重复已有条件")
 
 
 class Text2SQLState(TypedDict, total=False):
@@ -1371,9 +1379,11 @@ async def run_text2sql(
     """执行 Query Understanding -> Slot Filling -> Planning -> Validation -> Execution。"""
 
     if planned_query is None and not intent_verified:
-        from app.modules.ai import routing
+        from app.modules.ai import routing, capabilities
         context = {"query_plan": previous_plan.model_dump(mode="json")} if previous_plan else {}
-        decision = await routing.understand(request.question, context, settings)
+        manifest = await asyncio.to_thread(capabilities.build_capability_manifest, db, user)
+        await asyncio.to_thread(db.commit)
+        decision = await routing.understand(request.question, context, settings, manifest=manifest)
         if decision.route != "query":
             raise BusinessValidationError("该入口只支持单项业务统计查询；多项查询请使用聊天入口。")
 

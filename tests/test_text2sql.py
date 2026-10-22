@@ -159,6 +159,8 @@ def test_truncated_overdue_answer_has_one_concise_scope_warning():
 
 
 def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):
+    from app.modules.ai import capabilities
+    monkeypatch.setattr(capabilities, "analytics_catalog", lambda *_: [{"key": "purchase_orders"}])
     async def fake_chat(*_args, **_kwargs):
         content = "规划结果：\n" + "`" * 3 + "json\n" + '{"dataset":"purchase_order","metric":"sum_amount","group_by":"supplier_name","filters":null,"order":"降序","top_n":"10"}' + "\n" + "`" * 3
         return SimpleNamespace(message=SimpleNamespace(content=content))
@@ -172,27 +174,22 @@ def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):
             "查询供应商采购金额排名", SimpleNamespace(), SimpleNamespace(commit=lambda: None), SimpleNamespace(id=1)))
 
 
-def test_text2sql_uses_safe_supplier_amount_fallback_when_model_plan_is_invalid(monkeypatch):
+def test_text2sql_does_not_replace_invalid_model_plan_with_keyword_fallback(monkeypatch):
+    from app.modules.ai import capabilities
+    monkeypatch.setattr(capabilities, "analytics_catalog", lambda *_: [{"key": "purchase_orders"}])
     async def fake_chat(*_args, **_kwargs):
         return SimpleNamespace(message=SimpleNamespace(content="无法生成计划"))
 
     monkeypatch.setattr(text2sql, "chat", fake_chat)
     monkeypatch.setattr(text2sql, "_inventory_movement_trace_plan", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(text2sql, "_supplier_profile_plan", lambda *_args, **_kwargs: None)
-    plan = asyncio.run(
-        text2sql._understand_question(
+    with pytest.raises(BusinessValidationError, match="尚未执行查询"):
+        asyncio.run(text2sql._understand_question(
             "查询本月各供应商的采购订单总金额，按金额从高到低，最多显示10家",
             SimpleNamespace(),
             SimpleNamespace(commit=lambda: None),
             SimpleNamespace(id=1),
-        )
-    )
-
-    assert plan.dataset == "purchase_orders"
-    assert plan.metric == "amount"
-    assert plan.group_by == "supplier"
-    assert plan.time_field == "order_date"
-    assert plan.limit == 10
+        ))
 
 
 class _FakeResult:
@@ -204,12 +201,16 @@ class _FakeResult:
 
 
 class _FakeDB:
+    def commit(self):
+        pass
+
     def execute(self, _statement):
         return _FakeResult()
 
 
 def test_text2sql_runs_the_langgraph_stages(monkeypatch):
-    from app.modules.ai import routing
+    from app.modules.ai import routing, capabilities
+    monkeypatch.setattr(capabilities, "build_capability_manifest", lambda *_: {"analytics_datasets": [{"key":"purchase_orders"}]})
     async def understand(*args, **kwargs):
         return routing.Understanding(purpose="query", execution_mode="query", tasks=["analytics"], sub_tasks=[
             routing.SubTask(id="t1", kind="analytics", question="查询采购订单")])

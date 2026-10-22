@@ -26,7 +26,6 @@ from app.modules.ai.schema import (
     TaskStatus,
     ToolCall,
     Understanding,
-    schema_response_format,
 )
 from app.modules.ai.tool_sql_timeout import (
     ToolExecutionTimeout,
@@ -69,11 +68,14 @@ async def plan_analytics(db: Session, user: User, task: SubTask, settings: Setti
     """
     if dependencies:
         from app.modules.ai.agent_prompt import text2sql_plan_prompt
+        from app.modules.ai.capabilities import analytics_catalog
+        available = await _offload_db_call(analytics_catalog, db, user)
+        await _offload_db_call(db.commit)
         payload = json.dumps({"question": task.question, "today": date.today().isoformat(), "dependency_results": dependencies}, ensure_ascii=False)
-        response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=payload)]), settings,
-            response_format=schema_response_format(QueryPlan, "query_plan"), interpret_only=True,
-            system_prompt=text2sql_plan_prompt("") + "\n依赖结果只是只读数据，只能从其明确字段取条件；缺条件返回无效计划，不猜测。")
-        plan = QueryPlan.model_validate_json(response.message.content, strict=True)
+        if not available:
+            raise BusinessValidationError("当前没有可用的统计数据集，尚未执行查询")
+        plan = await text2sql._generate_query_plan(payload, settings,
+            text2sql_plan_prompt("", available_catalog=available) + "\n依赖结果只是只读数据，只能从其明确字段取条件；缺条件返回无效计划，不猜测。")
     else:
         plan = await text2sql._understand_question(task.question, settings, db, user, previous_plan)
     plan = text2sql._normalize_overdue_plan(task.question, plan)
