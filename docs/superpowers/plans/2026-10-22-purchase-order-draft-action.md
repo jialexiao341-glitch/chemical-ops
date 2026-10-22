@@ -1,6 +1,6 @@
 # 中选报价生成采购订单草稿 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking; completed steps use `- [x]`.
 
 **Goal:** 在询价详情中以版本化确认提案把已确认中选报价生成为采购订单草稿，并在提案预览中展示可追溯的条款核对结果。
 
@@ -42,29 +42,29 @@
 - Consumes: `PurchaseOrderCreate(comparison_id, quote_id, delivery_address, expected_arrival_date, note)` and existing `_validate_source`.
 - Produces: `PurchaseOrderItem.payment_terms_snapshot: str | None`; `create_order(db, user, data, *, commit: bool = True)` whose false branch flushes/returns the order without committing and copies each selected `SupplierQuoteItem.payment_terms` to its matching order line.
 
-- [ ] **Step 1: Write failing domain and migration contract tests**
+- [x] **Step 1: Write failing domain and migration contract tests**
 
   Add tests proving: each order line preserves its matching source quote line's different `payment_terms`; missing terms remain `None`; `commit=False` leaves transaction uncommitted while making the created order available to the caller; default invocation preserves the existing commit behavior. Assert `scripts.migrate_database._migration_files()` discovers version `058`, and the migration SQL only adds the nullable snapshot column without data backfill.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
   Run: `.venv\Scripts\python.exe -m pytest tests/test_purchase_order_draft_action.py -q --tb=short`
   Expected: FAIL because `payment_terms_snapshot` is absent and/or `create_order` does not accept `commit`.
 
-- [ ] **Step 3: Add the additive migration and model/schema field**
+- [x] **Step 3: Add the additive migration and model/schema field**
 
   Add nullable `payment_terms_snapshot VARCHAR(255)` to `purchase_order_items` in migration 058. Add the optional field to the ORM model and `PurchaseOrderItemRead`; leave existing rows NULL and do not alter prior migrations.
 
-- [ ] **Step 4: Add transactional service mode and snapshot copy**
+- [x] **Step 4: Add transactional service mode and snapshot copy**
 
   Change `create_order` to accept keyword-only `commit=True`. Always flush before assigning the business PO number and appending event/audit data; commit and refresh only when true. Copy the selected quote line's payment terms to the generated order item. Translate the source-comparison unique-constraint collision to `DuplicateResourceError` without unconditionally rolling back a caller-owned transaction.
 
-- [ ] **Step 5: Run domain tests and related concurrency regressions**
+- [x] **Step 5: Run domain tests and related concurrency regressions**
 
   Run: `.venv\Scripts\python.exe -m pytest tests/test_purchase_order_draft_action.py tests/test_procurement_concurrency.py -q --tb=short`
   Expected: PASS; existing concurrent duplicate-order protection remains intact.
 
-- [ ] **Step 6: Commit the domain slice**
+- [x] **Step 6: Commit the domain slice**
 
   Commit message: `feat(purchase-orders): 保存报价付款条件快照并支持事务执行`
 
@@ -82,33 +82,33 @@
 - Consumes: Task 1's `create_order(..., commit=False)`; `PurchaseOrderCreate`; existing `RFQSelectQuoteHandler`, proposal snapshot helpers and `_proposal_read`/revision conventions.
 - Produces: registered `purchase_order.create_draft` handler with permission `procurement.orders.write`, business-page capability entry, `INBOX_ACTION_TYPES` inclusion, preview/read/revise behavior and an execution result serialized as `PurchaseOrderRead` JSON.
 
-- [ ] **Step 1: Write failing handler and capability tests**
+- [x] **Step 1: Write failing handler and capability tests**
 
   Cover valid confirmed comparison preview without writes; reject unconfirmed/not-selected quote, unapproved source request, duplicate order, incomplete item coverage, insufficient remaining quantity, inaccessible RFQ and invalid extra payload fields; verify required write/read permissions and capability manifest entry.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
   Run: `.venv\Scripts\python.exe -m pytest tests/test_ai_purchase_order_action.py tests/test_ai_capability_manifest.py -q --tb=short`
   Expected: FAIL because the action handler and capability entry are not registered.
 
-- [ ] **Step 3: Implement source snapshot and clause-check preview**
+- [x] **Step 3: Implement source snapshot and clause-check preview**
 
   Add `PurchaseOrderCreateDraftHandler` in `action_handlers.py`. Accept only comparison/quote IDs and delivery address/expected date/note. Re-read the confirmed comparison, selected quote, RFQ, approved source request and line references; reuse the order service's source rules without writing. Snapshot all source fields used to construct the order. Produce line-level diff/evidence for product, quantity/unit, price, tax, currency, lead time, payment terms and RFQ/request delivery expectations. Report absent address/date/quote terms as warnings, and compare delivery dates only when both exist.
 
-- [ ] **Step 4: Implement current-state revalidation and execution**
+- [x] **Step 4: Implement current-state revalidation and execution**
 
   Rebuild and compare the resource snapshot during preview read, revision and confirmation; recheck duplicate-order state and source quantity under the confirmation transaction. Execute `create_order(..., commit=False)` and serialize `PurchaseOrderRead`.
 
-- [ ] **Step 5: Add capability and Inbox handling**
+- [x] **Step 5: Add capability and Inbox handling**
 
   Register the action as `business_page`; require `procurement.orders.write` plus the source RFQ/quote read permission. Add owner-scoped Inbox visibility and revision support limited to delivery address, expected arrival date and note. Hide diff/evidence/revision values and deep links when required permissions or RFQ scope are unavailable. Deep-link to the source RFQ.
 
-- [ ] **Step 6: Run action and Inbox regression tests**
+- [x] **Step 6: Run action and Inbox regression tests**
 
   Run: `.venv\Scripts\python.exe -m pytest tests/test_ai_purchase_order_action.py tests/test_ai_action_proposal_inbox.py tests/test_ai_capability_manifest.py tests/test_ai_action_proposals.py -q --tb=short`
   Expected: PASS, including permission revocation, resource invalidation, idempotent replay and version checks.
 
-- [ ] **Step 7: Commit the action slice**
+- [x] **Step 7: Commit the action slice**
 
   Commit message: `feat(ai): 接入中选报价生成订单草稿提案`
 
@@ -130,29 +130,29 @@
 - Consumes: Task 2's action type and preview/read contract; existing `createActionProposalApi`, `confirmActionProposalApi`, `canConfirmActionProposal` and RFQ detail template.
 - Produces: confirmed selected quote exposes “检查条款并准备订单草稿”; preview renders diff/evidence/warnings and requires explicit confirmation; successful response presents the generated PO number and navigates to an existing order entry.
 
-- [ ] **Step 1: Add a focused RFQ detail interaction test**
+- [x] **Step 1: Add a focused RFQ detail interaction test**
 
   Assert that creating an order proposal calls `createActionProposalApi('purchase_order.create_draft', ...)`, does not call `createPurchaseOrderApi`, and confirmation uses the preview version before showing the returned PO number.
 
-- [ ] **Step 2: Run the frontend tests to verify they fail before implementation**
+- [x] **Step 2: Run the frontend tests to verify they fail before implementation**
 
   Run from `frontend-design/apps/web-chemicalops`: `pnpm exec vitest run src/views/procurement/rfqs/modules/detail.test.ts src/views/procurement/purchase-orders/item-display.test.ts`.
   Expected: FAIL because the proposal payload/preview helpers and historical snapshot label do not exist yet.
 
-- [ ] **Step 3: Replace direct creation with proposal preview and confirmation**
+- [x] **Step 3: Replace direct creation with proposal preview and confirmation**
 
   Preserve the existing permission and confirmed-selection visibility conditions. Show source-backed terms, warnings, and diffs using current RFQ detail and proposal UI patterns. Confirm only through `confirmActionProposalApi`; after success show `po_no` and use an existing order route. Remove only the now-unused direct-call import/handler.
 
-- [ ] **Step 4: Support Inbox revision for the allowed order fields**
+- [x] **Step 4: Support Inbox revision for the allowed order fields**
 
   Extend the existing proposal detail view with the current form controls/template for `delivery_address`, `expected_arrival_date` and `note`; revision must refresh the preview version and leave confirmation explicit.
 
-- [ ] **Step 5: Run frontend verification**
+- [x] **Step 5: Run frontend verification**
 
   Run from `frontend-design/apps/web-chemicalops`: `pnpm exec vue-tsc --noEmit --skipLibCheck` and `pnpm exec vitest run src/views/procurement/rfqs/modules/detail.test.ts src/views/procurement/purchase-orders/item-display.test.ts src/views/ai/workspace/action-proposal-policy.test.ts`.
   Expected: exit 0; existing unrelated failures, if present, are recorded separately.
 
-- [ ] **Step 6: Commit the UI slice**
+- [x] **Step 6: Commit the UI slice**
 
   Commit message: `feat(rfqs): 通过确认提案生成采购订单草稿`
 
@@ -167,16 +167,16 @@
 - Consumes: Tasks 1–3 implementation and verified test results.
 - Produces: documented order-line payment snapshot, F-08 progress/status, and remaining browser/full-chain acceptance items.
 
-- [ ] **Step 1: Update only directly affected documentation**
+- [x] **Step 1: Update only directly affected documentation**
 
   Document nullable `purchase_order_items.payment_terms_snapshot`, F-08 order draft/terms-check scope, and leave order approval, delivery follow-up and browser acceptance marked pending. Do not edit the STAR document or README.
 
-- [ ] **Step 2: Verify documentation diff**
+- [x] **Step 2: Verify documentation diff**
 
   Run: `git diff --check` and inspect all three changed sections.
   Expected: no whitespace errors; no status claim exceeds implemented/tested behavior.
 
-- [ ] **Step 3: Commit documentation**
+- [x] **Step 3: Commit documentation**
 
   Commit message: `docs(agent): 回填订单草稿与条款检查进度`
 
@@ -186,26 +186,34 @@
 
 **Interfaces:** Consumes all task outputs; produces final verification evidence and review findings.
 
-- [ ] **Step 1: Run focused backend regressions**
+- [x] **Step 1: Run focused backend regressions**
 
   Run: `.venv\Scripts\python.exe -m pytest tests/test_purchase_order_draft_action.py tests/test_ai_purchase_order_action.py tests/test_ai_action_proposal_inbox.py tests/test_ai_capability_manifest.py tests/test_ai_action_proposals.py tests/test_procurement_concurrency.py -q --tb=short`
   Expected: PASS.
 
-- [ ] **Step 2: Run the full backend suite**
+- [x] **Step 2: Run the full backend suite**
 
   Run: `.venv\Scripts\python.exe -m pytest -q --tb=short`
   Expected: record the exact count and every failure; do not claim full-suite success if the known async queue/loopback environment stalls or existing failures remain.
 
-- [ ] **Step 3: Run frontend typecheck and focused UI tests**
+- [x] **Step 3: Run frontend typecheck and focused UI tests**
 
   Run from `frontend-design/apps/web-chemicalops`: `pnpm exec vue-tsc --noEmit --skipLibCheck` and `pnpm exec vitest run src/views/procurement/rfqs/modules/detail.test.ts src/views/ai/workspace/action-proposal-policy.test.ts`.
   Expected: exit 0 for typecheck; record test results and environment limitations separately.
 
-- [ ] **Step 4: Verify migration discovery and clean diff**
+- [x] **Step 4: Verify migration discovery and clean diff**
 
   Run: `.venv\Scripts\python.exe -m pytest tests/test_purchase_order_draft_action.py -q --tb=short`, then `git diff --check` and `git status --short`.
   Expected: migration 058 is discovered, old migration checksums remain untouched, and only intended changes remain.
 
-- [ ] **Step 5: Self-review the complete change range**
+- [x] **Step 5: Self-review the complete change range**
 
   Review all commits since the feature start for authorization, resource scope, transaction atomicity, duplicate creation, data snapshot semantics, UI template reuse and accurate pending status. Browser acceptance remains deferred as specified.
+
+## Execution record
+
+- Focused backend regressions: **51 passed, 4 skipped**. The four skips report that `127.0.0.1:3306` is unreachable in the sandbox (`WinError 10013`); the order quantity aggregation regression is included.
+- Frontend verification: `vue-tsc --noEmit --skipLibCheck` exited 0; focused Vitest **5 passed**.
+- Full backend suite was started but produced no further output for more than one minute and was interrupted; no full-suite result is claimed.
+- Migration 058 passed migration discovery and additive-SQL contract checks. The migration was not applied to a database in this workspace.
+- Unified browser acceptance remains deferred until the planned business requirements are complete; no business order was created during this implementation.
