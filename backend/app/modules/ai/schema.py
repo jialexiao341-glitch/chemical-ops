@@ -707,6 +707,34 @@ class FinanceStatusCount(ToolSchema):
     amount: Decimal
 
 
+class FinanceReconciliationLine(ToolSchema):
+    reconciliation_item_id: int
+    line_no: int
+    product_name: str
+    unit_name: str
+    ordered_quantity: Decimal
+    received_quantity: Decimal
+    accepted_quantity: Decimal
+    returned_quantity: Decimal
+    reconciliation_quantity: Decimal
+    amount_incl_tax: Decimal
+    invoiced_reserved_amount: Decimal
+    verified_invoice_amount: Decimal
+    unmatched_invoice_capacity: Decimal
+    warnings: list[str]
+
+
+class FinancePaymentPrecheck(ToolSchema):
+    reconciliation_confirmed: bool
+    verified_invoice_amount: Decimal
+    active_payment_amount: Decimal
+    remaining_reconciliation_amount: Decimal
+    max_new_payment_amount: Decimal
+    currency_code: str
+    blockers: list[str]
+    limitation: str
+
+
 class FinanceReconciliationRow(ToolSchema):
     reconciliation_no: str
     status: str
@@ -714,6 +742,12 @@ class FinanceReconciliationRow(ToolSchema):
     total_amount: Decimal
     invoices: list[FinanceStatusCount]
     payments: list[FinanceStatusCount]
+    reconciliation_version: int
+    source_changed: bool
+    line_warnings: list[str]
+    lines: list[FinanceReconciliationLine]
+    unallocated_invoices: list[str]
+    payment_precheck: FinancePaymentPrecheck
 
 
 class FinanceReconciliationResult(ToolSchema):

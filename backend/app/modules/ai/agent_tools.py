@@ -30,6 +30,9 @@ from app.modules.ai.schema import (
     DeliveryResult,
     FinanceReconciliationInput,
     FinanceReconciliationResult,
+    FinanceReconciliationLine,
+    FinancePaymentPrecheck,
+    FinanceStatusCount,
     SupplierInput,
     SupplierResult,
     PurchaseRequestInput,
@@ -52,7 +55,6 @@ from app.modules.ai.tool_sql_timeout import (
 )
 from app.modules.chemicals.model import Chemical
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
-from app.modules.finance.model import FinanceInvoice, FinancePayment
 from app.modules.inventory.service import accessible_warehouse_ids
 from app.modules.products.model import Product
 from app.modules.purchase_requests.model import Unit
@@ -373,22 +375,20 @@ def get_delivery(db: Session, user: User, arguments: DeliveryInput) -> DeliveryR
 
 def get_finance_reconciliation(db: Session, user: User,
                                arguments: FinanceReconciliationInput) -> FinanceReconciliationResult:
-    """按精确对账单号读取状态与发票/付款汇总；范围由财务详情服务校验。"""
+    """按精确对账单号读取行级核对、发票匹配与付款额度事实。"""
     from app.modules.finance import service as finance_service
+    from app.modules.ai.finance_read_model import read_reconciliation
 
     reconciliation = finance_service.get_reconciliation_by_no(db, user, arguments.reconciliation_no)
     if reconciliation is None:
         return FinanceReconciliationResult(total_rows=0, rows=[], sources=[])
-    invoice_rows = db.execute(select(
-        FinanceInvoice.status.label("status"), func.count(FinanceInvoice.id).label("count"),
-        func.coalesce(func.sum(FinanceInvoice.amount_incl_tax), 0).label("amount"),
-    ).where(FinanceInvoice.reconciliation_id == reconciliation.id).group_by(FinanceInvoice.status)
-    ).mappings().all()
-    payment_rows = db.execute(select(
-        FinancePayment.status.label("status"), func.count(FinancePayment.id).label("count"),
-        func.coalesce(func.sum(FinancePayment.amount), 0).label("amount"),
-    ).where(FinancePayment.reconciliation_id == reconciliation.id).group_by(FinancePayment.status)
-    ).mappings().all()
+    summary = read_reconciliation(db, user, reconciliation)
+    lines = [FinanceReconciliationLine(**row) for row in summary["lines"]]
+    invoice_rows = [FinanceStatusCount(**row) for row in summary["invoices"]]
+    payment_rows = [FinanceStatusCount(**row) for row in summary["payments"]]
+    sources = [Source(resource="finance_reconciliations", record_id=reconciliation.id)]
+    sources.extend(Source(resource="finance_reconciliation_items", record_id=row.reconciliation_item_id,
+        parent_id=reconciliation.id) for row in lines)
     row = {
         "reconciliation_no": reconciliation.reconciliation_no,
         "status": reconciliation.status,
@@ -396,9 +396,15 @@ def get_finance_reconciliation(db: Session, user: User,
         "total_amount": reconciliation.total_amount,
         "invoices": invoice_rows,
         "payments": payment_rows,
+        "reconciliation_version": summary["version_no"],
+        "source_changed": summary["source_changed"],
+        "line_warnings": summary["line_warnings"],
+        "lines": lines,
+        "unallocated_invoices": summary["unallocated_invoices"],
+        "payment_precheck": FinancePaymentPrecheck(**summary["payment_precheck"]),
     }
     return FinanceReconciliationResult(total_rows=1, rows=[row],
-        sources=[Source(resource="finance_reconciliations", record_id=reconciliation.id)])
+        sources=sources)
 
 
 def get_supplier(db: Session, user: User, arguments: SupplierInput) -> SupplierResult:
@@ -485,7 +491,7 @@ TOOLS = {
                  "warehouse.deliveries.read", DeliveryInput, DeliveryResult, get_delivery,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
-        ToolSpec("finance_reconciliations.get_by_no", "按精确对账单号读取当前用户可见的对账状态、币种/金额及发票与付款状态汇总",
+        ToolSpec("finance_reconciliations.get_by_no", "按精确对账单号读取当前用户可见的对账行级数量/金额、发票匹配与来源差异、付款状态和当前付款额度上限",
                  "finance.reconciliations.read", FinanceReconciliationInput, FinanceReconciliationResult,
                  get_finance_reconciliation,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,

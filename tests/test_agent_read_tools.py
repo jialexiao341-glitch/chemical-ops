@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -421,15 +422,62 @@ def test_delivery_service_lookup_reuses_detail_scope_check(monkeypatch):
 
 def test_finance_reconciliation_tool_returns_status_grouped_amounts(tool_db, monkeypatch):
     from app.modules.finance import service as finance_service
+    from app.modules.ai import finance_read_model
 
     reconciliation = SimpleNamespace(id=71, reconciliation_no="FR20261022000071",
         status="CONFIRMED", currency_code="CNY", total_amount=100)
     monkeypatch.setattr(finance_service, "get_reconciliation_by_no",
         lambda _db, _user, number: reconciliation if number == reconciliation.reconciliation_no else None)
-    grouped = [
-        [{"status": "VERIFIED", "count": 1, "amount": 80}],
-        [{"status": "PAID", "count": 1, "amount": 30}],
-    ]
+    monkeypatch.setattr(finance_read_model, "read_reconciliation", lambda *_args: {
+        "version_no": 2, "source_changed": True, "line_warnings": ["来源已变化"],
+        "lines": [{"reconciliation_item_id": 501, "line_no": 1, "product_name": "测试乙醇",
+            "unit_name": "千克", "ordered_quantity": Decimal("10"), "received_quantity": Decimal("8"),
+            "accepted_quantity": Decimal("8"), "returned_quantity": Decimal("0"),
+            "reconciliation_quantity": Decimal("8"), "amount_incl_tax": Decimal("100"),
+            "invoiced_reserved_amount": Decimal("80"), "verified_invoice_amount": Decimal("60"),
+            "unmatched_invoice_capacity": Decimal("20"), "warnings": ["来源数量待核查"]}],
+        "unallocated_invoices": ["FI20261022000001"],
+        "invoices": [{"status": "VERIFIED", "count": 1, "amount": Decimal("80")}],
+        "payments": [{"status": "PAID", "count": 1, "amount": Decimal("30")}],
+        "payment_precheck": {"reconciliation_confirmed": True, "verified_invoice_amount": Decimal("60"),
+            "active_payment_amount": Decimal("30"), "remaining_reconciliation_amount": Decimal("70"),
+            "max_new_payment_amount": Decimal("60"), "currency_code": "CNY", "blockers": [],
+            "limitation": "提交与审批仍会重新校验。"},
+    })
+    result = call(tool_db, name="finance_reconciliations.get_by_no",
+        reconciliation_no=reconciliation.reconciliation_no)
+
+    assert result.total_rows == 1
+    assert result.rows[0].status == "CONFIRMED"
+    assert result.rows[0].invoices[0].amount == 80
+    assert result.rows[0].payments[0].amount == 30
+    assert result.rows[0].lines[0].accepted_quantity == Decimal("8")
+    assert result.rows[0].lines[0].verified_invoice_amount == Decimal("60")
+    assert result.rows[0].source_changed is True
+    assert result.rows[0].unallocated_invoices == ["FI20261022000001"]
+    assert result.rows[0].payment_precheck.max_new_payment_amount == Decimal("60")
+    assert result.sources[0].resource == "finance_reconciliations"
+
+
+def test_finance_read_model_checks_permissions_and_caps_payment(tool_db, monkeypatch):
+    from app.modules.ai import finance_read_model
+
+    monkeypatch.setattr(finance_read_model, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(finance_read_model, "get_user_permission_codes", lambda *_args: [
+        "finance.reconciliations.read", "finance.invoices.read", "finance.payments.read",
+    ])
+    monkeypatch.setattr(finance_read_model, "get_reconciliation", lambda _db, _user, _id:
+        SimpleNamespace(id=71, status="CONFIRMED", total_amount=Decimal("100"), currency_code="CNY"))
+    line = SimpleNamespace(id=501, line_no=1, product_name="乙醇", unit_name="千克",
+        ordered_quantity=Decimal("10"), received_quantity=Decimal("8"), accepted_quantity=Decimal("8"),
+        returned_quantity=Decimal("0"), reconciliation_quantity=Decimal("8"),
+        amount_incl_tax=Decimal("100"), warnings=[])
+    monkeypatch.setattr(finance_read_model.reconciliation_items, "read_items", lambda *_args:
+        SimpleNamespace(version_no=3, source_changed=True, warnings=["来源已变化"], items=[line]))
+    monkeypatch.setattr(finance_read_model.invoice_matches, "line_summary", lambda *_args: ([{
+        "reconciliation_item_id": 501, "reserved_amount": "80", "verified_amount": "60",
+        "remaining_amount": "20",
+    }], ["FI-UNALLOCATED"]))
 
     class QueryRows:
         def __init__(self, rows):
@@ -441,17 +489,52 @@ def test_finance_reconciliation_tool_returns_status_grouped_amounts(tool_db, mon
         def all(self):
             return self.rows
 
-    seen_queries = []
-    monkeypatch.setattr(tool_db, "execute", lambda query: seen_queries.append(query) or QueryRows(grouped.pop(0)))
-    result = call(tool_db, name="finance_reconciliations.get_by_no",
-        reconciliation_no=reconciliation.reconciliation_no)
+    grouped = [
+        [{"status": "VERIFIED", "count": 1, "amount": Decimal("80")}],
+        [{"status": "REQUESTED", "count": 1, "amount": Decimal("40")}],
+    ]
+    monkeypatch.setattr(tool_db, "execute", lambda _query: QueryRows(grouped.pop(0)))
+    result = finance_read_model.read_reconciliation(tool_db, SimpleNamespace(id=7), SimpleNamespace(id=71))
 
-    assert result.total_rows == 1
-    assert result.rows[0].status == "CONFIRMED"
-    assert result.rows[0].invoices[0].amount == 80
-    assert result.rows[0].payments[0].amount == 30
-    assert result.sources[0].resource == "finance_reconciliations"
-    assert len(seen_queries) == 2
+    assert result["source_changed"] is True
+    assert result["unallocated_invoices"] == ["FI-UNALLOCATED"]
+    assert result["payment_precheck"]["remaining_reconciliation_amount"] == Decimal("60")
+    assert result["payment_precheck"]["max_new_payment_amount"] == Decimal("60")
+
+
+def test_finance_read_model_handles_legacy_reconciliation_without_saved_lines(tool_db, monkeypatch):
+    from app.modules.ai import finance_read_model
+
+    monkeypatch.setattr(finance_read_model, "get_user_role_codes", lambda *_args: ["SYS_ADMIN"])
+    monkeypatch.setattr(finance_read_model, "get_user_permission_codes", lambda *_args: [])
+    monkeypatch.setattr(finance_read_model, "get_reconciliation", lambda _db, _user, _id:
+        SimpleNamespace(id=72, status="DRAFT", total_amount=Decimal("100"), currency_code="CNY"))
+    monkeypatch.setattr(finance_read_model.reconciliation_items, "read_items", lambda *_args:
+        SimpleNamespace(version_no=0, source_changed=False, warnings=["历史对账单尚未建立明细"], items=[]))
+    monkeypatch.setattr(finance_read_model.invoice_matches, "line_summary", lambda *_args: ([], []))
+
+    class QueryRows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return self.rows
+
+    grouped = [
+        [{"status": "DRAFT", "count": 1, "amount": Decimal("50")}],
+        [],
+    ]
+    monkeypatch.setattr(tool_db, "execute", lambda _query: QueryRows(grouped.pop(0)))
+    result = finance_read_model.read_reconciliation(tool_db, SimpleNamespace(id=7), SimpleNamespace(id=72))
+
+    assert result["version_no"] == 0
+    assert result["lines"] == []
+    assert result["line_warnings"] == ["历史对账单尚未建立明细"]
+    assert result["payment_precheck"]["max_new_payment_amount"] == Decimal("0")
+    assert result["payment_precheck"]["blockers"] == ["对账单尚未确认", "当前没有已核验发票"]
 
 
 def test_finance_reconciliation_tool_requires_all_read_permissions(tool_db, monkeypatch):

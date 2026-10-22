@@ -7,6 +7,7 @@ import { useVbenDrawer } from '@vben/common-ui';
 import { Alert, Button, Empty, Input, InputNumber, message, Select, Spin, Table } from 'antdv-next';
 import { getReconciliationApi, getReconciliationItemsApi, refreshReconciliationItemsApi } from '#/api';
 import { formatAmount, formatQuantity } from '#/utils/format';
+import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 
 const emit = defineEmits(['success']);
 const { hasAccessByCodes } = useAccess();
@@ -51,11 +52,17 @@ function quantityText(row: ReconciliationItem, key: unknown) {
 async function load(version?: number) {
   const id = drawerApi.getData();
   if (!id) return;
+  clearPageCopilotContext('finance_reconciliation', id);
   loading.value = true;
   failed.value = false;
   try {
     const [header, items] = await Promise.all([getReconciliationApi(id), getReconciliationItemsApi(id, version)]);
     record.value = header;
+    setPageCopilotContext({
+      objectType: 'finance_reconciliation',
+      objectId: header.id,
+      question: '这张对账单的状态、发票和付款进展如何？',
+    });
     basis.value = items;
     precision.value = items.amount_precision;
     selectedVersion.value = items.version_no || undefined;
@@ -79,7 +86,11 @@ async function save() {
     message.success('已保存新版本，对账金额已更新');
   } catch { /* 请求层显示错误，保留输入 */ } finally { saving.value = false; drawerApi.unlock(); }
 }
-const [Drawer, drawerApi] = useVbenDrawer<number>({ onOpenChange(open) { if (open) { basis.value = undefined; record.value = undefined; void load(); } } });
+const [Drawer, drawerApi] = useVbenDrawer<number>({ onOpenChange(open) {
+  const id = record.value?.id;
+  if (id) clearPageCopilotContext('finance_reconciliation', id);
+  if (open) { basis.value = undefined; record.value = undefined; void load(); }
+} });
 </script>
 
 <template>

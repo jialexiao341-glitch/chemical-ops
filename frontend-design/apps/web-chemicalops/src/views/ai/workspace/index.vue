@@ -1242,7 +1242,7 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
             <div>
               <span class="ai-toolbar-title">化运 AI 助手</span>
             </div>
-            <Button size="small" @click="router.push('/ai/tasks')">任务记录</Button>
+            <Button size="small" @click="router.push('/ai/tasks')">Agent Inbox</Button>
           </div>
           <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
             <div class="mb-2 flex items-center justify-between">

@@ -1,13 +1,14 @@
 <script lang="ts" setup>
 import type { SupplierApi } from '#/api';
 
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { useVbenForm } from '#/adapter/form';
 import { createSupplierApi, updateSupplierApi } from '#/api';
+import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 
 import { useFormSchema } from '../data';
 
@@ -50,17 +51,30 @@ const [Drawer, drawerApi] = useVbenDrawer<null | SupplierApi.Supplier>({
   },
   async onOpenChange(isOpen) {
     if (!isOpen) {
+      if (id.value) clearPageCopilotContext('supplier', id.value);
       return;
     }
+    if (id.value) clearPageCopilotContext('supplier', id.value);
     const data = drawerApi.getData();
     formApi.reset();
     id.value = data?.id;
+    if (id.value) {
+      setPageCopilotContext({
+        objectType: 'supplier',
+        objectId: id.value,
+        question: '这家供应商的合作状态和基本资料是什么？',
+      });
+    }
 
     await nextTick();
     if (data) {
       formApi.setValues(data);
     }
   },
+});
+
+onBeforeUnmount(() => {
+  if (id.value) clearPageCopilotContext('supplier', id.value);
 });
 
 const title = computed(() => (id.value ? '编辑供应商' : '新增供应商'));

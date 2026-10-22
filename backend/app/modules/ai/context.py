@@ -14,6 +14,7 @@ from app.modules.ai.schema import (
     AIContextAskResponse,
     AIContextSnapshot,
 )
+from app.modules.finance import service as finance_service
 from app.modules.deliveries import service as delivery_service
 from app.modules.deliveries.model import Delivery
 from app.modules.inventory import service as inventory_service
@@ -28,6 +29,8 @@ from app.modules.quality_acceptances import service as quality_acceptance_servic
 from app.modules.rfqs.model import RFQ
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
+from app.modules.suppliers import service as supplier_service
+from app.modules.suppliers.model import Supplier
 
 # 问题只用来在既有追溯结果中定位环节，不参与权限判断或数据读取；
 # 词表取自追溯的固定环节名及其业务同义词，避免为单句问法增加分支。
@@ -502,6 +505,124 @@ def _quality_acceptance_answer(trace: dict) -> str:
     return "\n".join(lines)
 
 
+def _finance_reconciliation_context(db: Session, user: User, object_id: int) -> tuple[AIContextSnapshot, dict]:
+    """读取当前用户可见的对账单及发票、付款状态汇总。"""
+    reconciliation = finance_service.get_reconciliation(db, user, object_id)
+    from app.modules.ai.finance_read_model import read_reconciliation
+
+    read_model = read_reconciliation(db, user, reconciliation)
+    supplier = db.get(Supplier, reconciliation.supplier_id)
+    invoice_summary = read_model["invoices"]
+    payment_summary = read_model["payments"]
+    payment_precheck = read_model["payment_precheck"]
+    summary = [
+        f"对账状态：{reconciliation.status}",
+        f"对账金额：{reconciliation.total_amount} {reconciliation.currency_code}",
+        f"发票状态汇总：{len(invoice_summary)} 种状态，{sum(int(row['count']) for row in invoice_summary)} 张",
+        f"付款状态汇总：{len(payment_summary)} 种状态，{sum(int(row['count']) for row in payment_summary)} 笔",
+        f"当前付款理论上限：{payment_precheck['max_new_payment_amount']} {reconciliation.currency_code}",
+    ]
+    summary.extend(
+        f"第 {line['line_no']} 行 {line['product_name']}：验收 {line['accepted_quantity']}，对账 {line['reconciliation_quantity']} {line['unit_name']}；发票已核验 {line['verified_invoice_amount']}/{line['amount_incl_tax']} {reconciliation.currency_code}。"
+        for line in read_model["lines"]
+    )
+    if read_model["source_changed"]:
+        summary.append("对账来源已变化，当前明细反映保存版本。")
+    summary.extend(read_model["line_warnings"])
+    if read_model["unallocated_invoices"]:
+        summary.append("有效发票尚未行级匹配：" + "、".join(read_model["unallocated_invoices"]))
+    if supplier:
+        summary.append(f"供应商：{supplier.supplier_name}（{supplier.supplier_code}）")
+    source_records = [{
+        "dataset": "finance_reconciliations", "record_id": reconciliation.id,
+        "label": f"财务对账单 {reconciliation.reconciliation_no}",
+    }]
+    snapshot = AIContextSnapshot(
+        object_type="finance_reconciliation", object_id=reconciliation.id,
+        title=f"财务对账单 {reconciliation.reconciliation_no}",
+        reference_no=reconciliation.reconciliation_no, status=reconciliation.status,
+        summary=summary, source_records=source_records + [{
+            "dataset": "finance_reconciliation_items", "record_id": line["reconciliation_item_id"],
+            "label": f"对账明细第 {line['line_no']} 行",
+        } for line in read_model["lines"]],
+        suggested_questions=["这张对账单目前是什么状态？", "发票和付款分别进展到哪一步？", "对账金额是多少？"],
+    )
+    return snapshot, {"reconciliation": reconciliation, "supplier": supplier, "read_model": read_model}
+
+
+def _supplier_context(db: Session, user: User, object_id: int) -> tuple[AIContextSnapshot, dict]:
+    """读取有供应商主数据权限的合作信息。"""
+    roles = set(get_user_role_codes(db, user.id))
+    permissions = set(get_user_permission_codes(db, user.id))
+    if "SYS_ADMIN" not in roles and "master.suppliers.read" not in permissions:
+        raise AuthorizationError("当前账号没有供应商读取权限")
+
+    supplier = supplier_service.get_supplier(db, object_id)
+    summary = [
+        f"供应商状态：{supplier.status}",
+        f"所在地区：{supplier.region or '未登记'}",
+        f"经营范围：{supplier.business_scope or '未登记'}",
+        f"合作等级：{supplier.cooperation_level or '未登记'}",
+        f"付款条件：{supplier.payment_terms or '未登记'}",
+        f"默认交货天数：{supplier.default_lead_days if supplier.default_lead_days is not None else '未登记'}",
+    ]
+    snapshot = AIContextSnapshot(
+        object_type="supplier", object_id=supplier.id,
+        title=f"供应商 {supplier.supplier_name}", reference_no=supplier.supplier_code,
+        status=supplier.status, summary=summary,
+        source_records=[{"dataset": "suppliers", "record_id": supplier.id,
+                         "label": f"供应商 {supplier.supplier_code}"}],
+        suggested_questions=["这家供应商的合作状态和等级是什么？", "供应商经营范围是什么？", "默认交货天数和付款条件是什么？"],
+    )
+    return snapshot, {"supplier": supplier}
+
+
+def _finance_reconciliation_answer(trace: dict) -> str:
+    reconciliation = trace["reconciliation"]
+    supplier = trace["supplier"]
+    read_model = trace["read_model"]
+    lines = [
+        f"财务对账单 {reconciliation.reconciliation_no}：{reconciliation.status}。",
+        f"对账金额：{reconciliation.total_amount} {reconciliation.currency_code}。",
+        f"供应商：{supplier.supplier_name if supplier else '未登记'}。",
+    ]
+    for label, rows in (("发票", read_model["invoices"]), ("付款", read_model["payments"])):
+        detail = "、".join(f"{row['status']} {row['count']} 笔 / {row['amount']} {reconciliation.currency_code}" for row in rows) or "暂无记录"
+        lines.append(f"{label}状态汇总：{detail}。")
+    for row in read_model["lines"]:
+        lines.append(
+            f"第 {row['line_no']} 行 {row['product_name']}：订购 {row['ordered_quantity']}，已收 {row['received_quantity']}，验收 {row['accepted_quantity']}，退货 {row['returned_quantity']}，对账 {row['reconciliation_quantity']} {row['unit_name']}；"
+            f"发票已占用 {row['invoiced_reserved_amount']}，已核验 {row['verified_invoice_amount']}/{row['amount_incl_tax']} {reconciliation.currency_code}。"
+        )
+        lines.extend(f"第 {row['line_no']} 行核查提示：{warning}。" for warning in row["warnings"])
+    if read_model["source_changed"]:
+        lines.append("订单、到货或退货来源与对账保存版本相比已变化，请按当前财务页面核对版本。")
+    lines.extend(f"对账核查提示：{warning}。" for warning in read_model["line_warnings"])
+    if read_model["unallocated_invoices"]:
+        lines.append("有效发票尚未行级匹配：" + "、".join(read_model["unallocated_invoices"]) + "。")
+    precheck = read_model["payment_precheck"]
+    lines.append(
+        f"付款前置数据：已核验发票 {precheck['verified_invoice_amount']} {reconciliation.currency_code}，"
+        f"有效付款占用 {precheck['active_payment_amount']} {reconciliation.currency_code}，"
+        f"当前单笔付款理论上限 {precheck['max_new_payment_amount']} {reconciliation.currency_code}。"
+    )
+    lines.extend(f"付款前置条件未满足：{blocker}。" for blocker in precheck["blockers"])
+    lines.append(precheck["limitation"])
+    lines.append("本回答复述系统保存的对账和匹配数据，不替代人工复核或付款服务的提交、审批校验。")
+    return "\n".join(lines)
+
+
+def _supplier_answer(trace: dict) -> str:
+    supplier = trace["supplier"]
+    return "\n".join([
+        f"供应商 {supplier.supplier_code}：{supplier.supplier_name}，状态为{supplier.status}。",
+        f"地区：{supplier.region or '未登记'}；经营范围：{supplier.business_scope or '未登记'}。",
+        f"合作等级：{supplier.cooperation_level or '未登记'}；付款条件：{supplier.payment_terms or '未登记'}。",
+        f"默认交货天数：{supplier.default_lead_days if supplier.default_lead_days is not None else '未登记'}。",
+        "本回答仅复述供应商主数据，不包含履约绩效或风险判断。",
+    ])
+
+
 def resolve_context(db: Session, user: User, request: AIContextAskRequest) -> tuple[AIContextSnapshot, dict]:
     """按页面对象类型读取当前用户可见的业务上下文。"""
     if request.context.object_type == "purchase_order":
@@ -518,6 +639,12 @@ def resolve_context(db: Session, user: User, request: AIContextAskRequest) -> tu
     if request.context.object_type == "quality_acceptance":
         snapshot, trace = _quality_acceptance_context(db, user, request.context.object_id)
         return snapshot, {**trace, "context_type": "quality_acceptance"}
+    if request.context.object_type == "finance_reconciliation":
+        snapshot, trace = _finance_reconciliation_context(db, user, request.context.object_id)
+        return snapshot, {**trace, "context_type": "finance_reconciliation"}
+    if request.context.object_type == "supplier":
+        snapshot, trace = _supplier_context(db, user, request.context.object_id)
+        return snapshot, {**trace, "context_type": "supplier"}
     raise BusinessValidationError("当前页面对象暂不支持 AI 上下文问答，请使用已接入的详情页或 AI 工作台")
 
 
@@ -550,6 +677,18 @@ def ask_context(db: Session, user: User, request: AIContextAskRequest) -> AICont
             answer=_quality_acceptance_answer(trace), context=snapshot,
             citations=[{"type": "quality-acceptance-context", "source_records": snapshot.source_records}],
             model="quality-acceptance-context",
+        )
+    if snapshot.object_type == "finance_reconciliation":
+        return AIContextAskResponse(
+            answer=_finance_reconciliation_answer(trace), context=snapshot,
+            citations=[{"type": "finance-reconciliation-context", "source_records": snapshot.source_records}],
+            model="finance-reconciliation-context",
+        )
+    if snapshot.object_type == "supplier":
+        return AIContextAskResponse(
+            answer=_supplier_answer(trace), context=snapshot,
+            citations=[{"type": "supplier-context", "source_records": snapshot.source_records}],
+            model="supplier-context",
         )
     return AIContextAskResponse(
         answer=_answer_for_question(request.question, trace),

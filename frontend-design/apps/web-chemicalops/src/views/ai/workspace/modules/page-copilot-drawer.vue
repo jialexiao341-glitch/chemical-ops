@@ -31,7 +31,16 @@ const expanded = ref(false);
 const resizeHandle = ref<HTMLElement>();
 let resizeStart: { x: number; width: number } | undefined;
 
-const contextTypeLabel = computed(() => targetType.value === 'purchase_order' ? '采购订单' : '采购申请');
+const contextTypeLabel = computed(() => ({
+  delivery: '到货单',
+  finance_reconciliation: '财务对账单',
+  inventory_balance: '库存余额',
+  purchase_order: '采购订单',
+  purchase_request: '采购申请',
+  quality_acceptance: '质量验收单',
+  rfq: '询价单',
+  supplier: '供应商',
+})[targetType.value]);
 const contextTitle = computed(() => turns.value.at(-1)?.result.context.title ?? contextTypeLabel.value);
 const maxPanelWidth = computed(() => Math.min(920, window.innerWidth - 8));
 const widthStyle = computed(() => ({
@@ -90,7 +99,17 @@ const [Drawer, drawerApi] = useVbenDrawer<{
     if (!target) return;
     targetType.value = target.objectType;
     targetId.value = target.objectId;
-    question.value = target.question ?? (target.objectType === 'purchase_order' ? '这单当前进展和卡点是什么？' : '这份申请当前是什么状态？');
+    const defaultQuestions: Record<AiApi.ContextObjectType, string> = {
+      delivery: '这张到货单当前的收货进展是什么？',
+      finance_reconciliation: '这张对账单的状态、发票和付款进展如何？',
+      inventory_balance: '这笔库存余额当前是什么状态？',
+      purchase_order: '这单当前进展和卡点是什么？',
+      purchase_request: '这份申请当前是什么状态？',
+      quality_acceptance: '这张验收单的检测结果和结论是什么？',
+      rfq: '这份询价当前进展如何？',
+      supplier: '这家供应商的合作状态和基本资料是什么？',
+    };
+    question.value = target.question ?? defaultQuestions[target.objectType];
     await ask();
   },
 });

@@ -82,7 +82,7 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 多个产品/询价候选由服务端暂停。只读查询不需要用户提供采购用途或采购数量。
 
 # 参数与执行顺序
-采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询与供应商资料查询不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询只复述系统记录的对账、发票与付款状态/金额，不推断或建议执行付款。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险。
+采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询与供应商资料查询不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询可以复述系统保存的订单/到货/验收/退货/对账行、发票行占用与核验金额、来源变化提示及付款状态和理论上限。必须保留来源未匹配、旧版本或已变化等核查提示；理论付款上限不等于对任一具体金额的审批通过，不得建议或执行付款，付款服务在提交/审批时仍会重新校验。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险。
 根据已返回结果决定后续工具；不要重复调用同工具同参数。未授权工具不在目录中。
 用户指定返回条数时，必须在对应业务工具 arguments.limit 中保留该值（不超过工具上限）。
 库存 totals 已按全部授权余额计算，即使 limit=1 也无需扩大明细条数获取全范围合计。
@@ -287,13 +287,16 @@ def get_task(db: Session, user: User, task_id: str) -> TaskRead:
         conversation_id=(task.payload.get("chat") or {}).get("conversation_id"))
 
 
-def list_tasks(db: Session, user: User, *, page: int = 1, page_size: int = 20, status: str | None = None):
+def list_tasks(db: Session, user: User, *, page: int = 1, page_size: int = 20,
+               status: str | None = None, inbox_only: bool = False):
     """分页返回本人任务；逐条重验权限，失效证据以清空内容呈现。"""
     from sqlalchemy import func
     from app.modules.ai.schema import AgentTaskPage
     page_size = min(100, max(1, page_size))
     conditions = [AIAgentTask.user_id == user.id]
-    if status:
+    if inbox_only:
+        conditions.append(AIAgentTask.status.in_(("WAITING_INPUT", "FAILED")))
+    elif status:
         conditions.append(AIAgentTask.status == status)
     total = db.scalar(select(func.count(AIAgentTask.id)).where(*conditions)) or 0
     rows = list(db.scalars(select(AIAgentTask).where(*conditions)
@@ -708,6 +711,24 @@ def _summary(entries: list[dict]) -> str:
                 for item in row["payments"]
             ) or "无付款记录"
             lines.append(f"对账单 {row['reconciliation_no']}：状态 {row['status']}；金额 {row['total_amount']} {row['currency_code']}；发票 {invoice_summary}；付款 {payment_summary}。")
+            for item in row.get("lines", []):
+                lines.append(
+                    f"第 {item['line_no']} 行 {item['product_name']}：验收 {item['accepted_quantity']}，对账 {item['reconciliation_quantity']}；"
+                    f"发票已核验 {item['verified_invoice_amount']}/{item['amount_incl_tax']} {row['currency_code']}。"
+                )
+                lines.extend(f"第 {item['line_no']} 行核查提示：{warning}。" for warning in item.get("warnings", []))
+            if row.get("source_changed"):
+                lines.append("对账来源已变化，当前明细反映保存版本。")
+            lines.extend(f"对账核查提示：{warning}。" for warning in row.get("line_warnings", []))
+            if row.get("unallocated_invoices"):
+                lines.append("有效发票尚未行级匹配：" + "、".join(row["unallocated_invoices"]) + "。")
+            precheck = row.get("payment_precheck")
+            if precheck:
+                lines.append(
+                    f"当前数据下单笔付款理论上限 {precheck['max_new_payment_amount']} {precheck['currency_code']}；"
+                    f"已核验发票 {precheck['verified_invoice_amount']}，有效付款占用 {precheck['active_payment_amount']}。"
+                )
+                lines.extend(f"付款前置条件未满足：{blocker}。" for blocker in precheck.get("blockers", []))
         for result in suppliers:
             if not result["rows"]:
                 lines.append("当前可访问范围内没有找到该供应商编码。")

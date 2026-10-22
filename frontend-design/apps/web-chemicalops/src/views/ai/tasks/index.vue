@@ -23,6 +23,7 @@ import { retryQuestion, taskActionFeedback, taskActions } from './task-actions';
 defineOptions({ name: 'AiTaskHistory' });
 
 const status = ref<AgentApi.Task['status']>();
+const inboxOnly = ref(true);
 const selectedTask = ref<AgentApi.Task>();
 const detailOpen = ref(false);
 const selectedLoading = ref(false);
@@ -72,7 +73,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     proxyConfig: {
       ajax: {
         query: async ({ page }) => {
-          const result = await getAgentTaskPageApi(page.currentPage, page.pageSize, status.value);
+          const result = await getAgentTaskPageApi(page.currentPage, page.pageSize, status.value, inboxOnly.value);
           return { items: result.items, total: result.total };
         },
       },
@@ -83,6 +84,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
 });
 
 function search() { void gridApi.query(); }
+
+function showInbox(inbox: boolean) {
+  inboxOnly.value = inbox;
+  status.value = undefined;
+  void gridApi.query();
+}
 
 async function refreshTask(taskId: string) {
   try {
@@ -238,15 +245,19 @@ async function onActionClick({ code, row }: { code: string; row: AgentApi.Task }
     <div class="flex h-full flex-col gap-3">
       <section class="rounded bg-card p-4">
         <div class="flex w-full flex-wrap items-center justify-between gap-3">
-          <span class="font-medium">本人 AI 只读查询任务；导出前会重新检查当前数据权限。</span>
+          <span class="font-medium">{{ inboxOnly ? '待补充或失败待处理的本人任务。' : '本人 AI 只读查询任务。' }}导出前会重新检查当前数据权限。</span>
           <div class="ml-auto flex items-center gap-2">
-            <Select v-model:value="status" :options="statusOptions" allow-clear placeholder="全部状态" class="w-40" />
-            <Button @click="status = undefined; search()">重置</Button>
-            <Button type="primary" @click="search">搜索</Button>
+            <Button :type="inboxOnly ? 'primary' : 'default'" @click="showInbox(true)">Agent Inbox</Button>
+            <Button :type="inboxOnly ? 'default' : 'primary'" @click="showInbox(false)">全部任务</Button>
+            <template v-if="!inboxOnly">
+              <Select v-model:value="status" :options="statusOptions" allow-clear placeholder="全部状态" class="w-40" />
+              <Button @click="status = undefined; search()">重置</Button>
+              <Button type="primary" @click="search">搜索</Button>
+            </template>
           </div>
         </div>
       </section>
-      <Grid table-title="AI 任务记录" />
+      <Grid :table-title="inboxOnly ? 'Agent Inbox · 待处理任务' : 'AI 任务记录'" />
     </div>
   </Page>
 </template>

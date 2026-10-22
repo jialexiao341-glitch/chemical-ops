@@ -127,6 +127,44 @@ def test_purchase_request_context_reads_authorized_request_and_returns_lines(mon
     ]
 
 
+def test_finance_reconciliation_context_shows_line_matching_and_payment_cap(monkeypatch) -> None:
+    from app.modules.ai import finance_read_model
+
+    reconciliation = SimpleNamespace(
+        id=71, reconciliation_no="FR-71", status="CONFIRMED", total_amount=Decimal("100.00"),
+        currency_code="CNY", supplier_id=9,
+    )
+    read_model = {
+        "invoices": [{"status": "VERIFIED", "count": 1, "amount": Decimal("80")}],
+        "payments": [{"status": "REQUESTED", "count": 1, "amount": Decimal("30")}],
+        "lines": [{"reconciliation_item_id": 501, "line_no": 1, "product_name": "乙醇",
+            "unit_name": "千克", "ordered_quantity": Decimal("10"), "received_quantity": Decimal("8"),
+            "accepted_quantity": Decimal("8"), "returned_quantity": Decimal("0"),
+            "reconciliation_quantity": Decimal("8"), "amount_incl_tax": Decimal("100"),
+            "invoiced_reserved_amount": Decimal("80"), "verified_invoice_amount": Decimal("80"),
+            "warnings": []}],
+        "source_changed": True, "line_warnings": ["历史来源版本已变化"],
+        "unallocated_invoices": ["FI-UNMATCHED"],
+        "payment_precheck": {"verified_invoice_amount": Decimal("80"), "active_payment_amount": Decimal("30"),
+            "remaining_reconciliation_amount": Decimal("70"), "max_new_payment_amount": Decimal("70"),
+            "currency_code": "CNY", "blockers": [], "limitation": "付款服务提交时重新校验。"},
+    }
+    monkeypatch.setattr(context.finance_service, "get_reconciliation", lambda *_args: reconciliation)
+    monkeypatch.setattr(finance_read_model, "read_reconciliation", lambda *_args: read_model)
+    db = SimpleNamespace(get=lambda *_args: SimpleNamespace(supplier_name="示例供应商", supplier_code="SUP-9"))
+
+    response = context.ask_context(db, SimpleNamespace(id=7), AIContextAskRequest(
+        question="对账明细和付款前置是什么？",
+        context={"object_type": "finance_reconciliation", "object_id": 71},
+    ))
+
+    assert "第 1 行 乙醇" in response.answer
+    assert "当前单笔付款理论上限 70 CNY" in response.answer
+    assert "保存版本相比已变化" in response.answer
+    assert "FI-UNMATCHED" in response.answer
+    assert "付款服务提交时重新校验" in response.answer
+
+
 def test_purchase_request_context_answers_the_asked_field_and_only_suggests_supported_questions(monkeypatch) -> None:
     request = SimpleNamespace(
         id=21, request_no="PR20261022000021", status="PENDING_APPROVAL", purpose="实验室补充溶剂",

@@ -124,9 +124,14 @@ export function createAgentTaskApi(question: string) {
 export function getAgentTaskApi(id: string) {
   return requestClient.get<AgentApi.Task>(`/ai/agent/tasks/${encodeURIComponent(id)}`);
 }
-export function getAgentTaskPageApi(page: number, pageSize: number, status?: AgentApi.Task['status']) {
+export function getAgentTaskPageApi(
+  page: number,
+  pageSize: number,
+  status?: AgentApi.Task['status'],
+  inboxOnly = false,
+) {
   return requestClient.get<AgentApi.TaskPage>('/ai/agent/tasks', {
-    params: { page, page_size: pageSize, status },
+    params: { page, page_size: pageSize, status, inbox_only: inboxOnly },
   });
 }
 export function exportAgentTaskApi(id: string) {

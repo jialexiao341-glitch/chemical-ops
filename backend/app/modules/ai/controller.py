@@ -114,8 +114,10 @@ async def agent_task_create(data: TaskCreate, db: Session = Depends(get_db),
 @router.get("/agent/tasks", response_model=AgentTaskPage, summary="分页查询本人 Agent 任务")
 def agent_task_list(page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100),
                     status: str | None = Query(default=None, pattern="^(RUNNING|WAITING_INPUT|SUCCEEDED|FAILED|CANCELLED)$"),
+                    inbox_only: bool = Query(default=False),
                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return agent_runtime.list_tasks(db, user, page=page, page_size=page_size, status=status)
+    return agent_runtime.list_tasks(db, user, page=page, page_size=page_size,
+                                    status=status, inbox_only=inbox_only)
 
 
 @router.get("/agent/tasks/{task_id}/export", summary="导出本人且当前仍可访问的任务结果")

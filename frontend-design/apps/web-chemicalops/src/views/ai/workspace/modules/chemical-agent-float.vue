@@ -23,9 +23,17 @@ let suppressClick = false;
 const label = computed(() => {
   const context = activePageCopilotContext.value;
   if (!context) return '化工助手';
-  const type = context.objectType === 'purchase_order' ? '采购订单'
-    : context.objectType === 'purchase_request' ? '采购申请'
-      : '当前单据';
+  const labels: Record<AiApi.ContextObjectType, string> = {
+    delivery: '到货单',
+    finance_reconciliation: '财务对账单',
+    inventory_balance: '库存余额',
+    purchase_order: '采购订单',
+    purchase_request: '采购申请',
+    quality_acceptance: '质量验收单',
+    rfq: '询价单',
+    supplier: '供应商',
+  };
+  const type = labels[context.objectType] ?? '当前单据';
   return `化工助手 · ${type}`;
 });
 const isWorkspace = computed(() => route.name === 'AiWorkspace');
