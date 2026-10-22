@@ -1,11 +1,13 @@
 """询价与供应商报价的 HTTP 接口。"""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
 from app.core.db import get_db
-from app.modules.rfqs import service
+from app.core.rate_limit import limit_document
+from app.modules.files import service as file_service
+from app.modules.rfqs import quote_extraction, service
 from app.modules.rfqs.schema import (
     QuoteComparisonRead,
     QuoteSelection,
@@ -13,6 +15,7 @@ from app.modules.rfqs.schema import (
     RFQPage,
     RFQRead,
     RFQUpdate,
+    QuoteParseCandidate,
     SupplierQuoteCreate,
 )
 from app.modules.system.model import User
@@ -91,6 +94,31 @@ def create_quote(
     """录入供应商报价明细并更新供应商响应状态。"""
 
     return service.create_quote(db, user, rfq_id, data)
+
+
+@router.post(
+    "/{rfq_id}/quotes/parse-file",
+    response_model=QuoteParseCandidate,
+    summary="解析报价文件为待复核候选",
+    dependencies=[Depends(limit_document)],
+)
+async def parse_quote_file(
+    rfq_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("procurement.rfqs.quote")),
+) -> QuoteParseCandidate:
+    """提取带原文依据的报价候选；仅保存来源文件，不创建报价业务记录。"""
+    settings = file_service.get_settings()
+    content = await file.read(settings.document_max_size_mb * 1024 * 1024 + 1)
+    return await quote_extraction.parse_quote_file(
+        db,
+        user,
+        rfq_id,
+        file_name=file.filename or "",
+        mime_type=file.content_type or "application/octet-stream",
+        content=content,
+    )
 
 
 @router.post("/{rfq_id}/comparison", response_model=QuoteComparisonRead, summary="生成报价比较")

@@ -23,10 +23,10 @@ def evaluation_db():
             "CREATE TABLE inventory_batches (id INTEGER PRIMARY KEY, batch_no TEXT, expiry_date DATE)",
             "CREATE TABLE inventory_balances (id INTEGER PRIMARY KEY, warehouse_id INTEGER, batch_id INTEGER, product_id INTEGER, unit_id INTEGER, status TEXT, quantity NUMERIC, locked_quantity NUMERIC)",
             "CREATE TABLE rfqs (id INTEGER PRIMARY KEY, rfq_no TEXT, requester_id INTEGER, status TEXT)",
-            "CREATE TABLE rfq_items (id INTEGER PRIMARY KEY, rfq_id INTEGER, product_id INTEGER, specification TEXT, technical_requirements TEXT)",
+            "CREATE TABLE rfq_items (id INTEGER PRIMARY KEY, rfq_id INTEGER, product_id INTEGER, specification TEXT, technical_requirements TEXT, unit_id INTEGER)",
             "CREATE TABLE suppliers (id INTEGER PRIMARY KEY, supplier_name TEXT, status TEXT)",
             "CREATE TABLE supplier_quotes (id INTEGER PRIMARY KEY, rfq_id INTEGER, supplier_id INTEGER, quote_no TEXT, quote_version INTEGER, quote_date DATE, valid_until DATE, currency_code TEXT, status TEXT)",
-            "CREATE TABLE supplier_quote_items (id INTEGER PRIMARY KEY, quote_id INTEGER, rfq_item_id INTEGER, unit_id INTEGER, supplier_model TEXT, tax_rate NUMERIC, unit_price NUMERIC, quoted_quantity NUMERIC, moq_quantity NUMERIC, moq_unit_id INTEGER, lead_days INTEGER)",
+            "CREATE TABLE supplier_quote_items (id INTEGER PRIMARY KEY, quote_id INTEGER, rfq_item_id INTEGER, unit_id INTEGER, supplier_model TEXT, tax_rate NUMERIC, tax_included INTEGER, unit_price NUMERIC, quoted_quantity NUMERIC, moq_quantity NUMERIC, moq_unit_id INTEGER, lead_days INTEGER)",
         ):
             conn.exec_driver_sql(ddl)
         for sql in (
@@ -37,10 +37,10 @@ def evaluation_db():
             "INSERT INTO inventory_batches VALUES (1, '批次A', '2020-01-01'), (2, '批次B', NULL)",
             "INSERT INTO inventory_balances VALUES (1, 1, 1, 1, 1, 'AVAILABLE', 100, 20), (2, 1, 2, 1, 1, 'FROZEN', 50, 0), (3, 2, 2, 1, 1, 'AVAILABLE', 999, 0), (4, 3, 2, 1, 2, 'AVAILABLE', 5, 0), (5, 4, 2, 1, 1, 'AVAILABLE', 888, 0)",
             "INSERT INTO rfqs VALUES (1, 'RFQ-OWN', 7, 'RESPONDING'), (2, 'RFQ-OTHER', 8, 'RESPONDING'), (3, 'RFQ-CLOSED', 7, 'CLOSED')",
-            "INSERT INTO rfq_items VALUES (11, 1, 1, '分析纯', '原始条件'), (21, 2, 1, '分析纯', NULL), (31, 3, 1, '分析纯', NULL)",
+            "INSERT INTO rfq_items VALUES (11, 1, 1, '分析纯', '原始条件', 1), (21, 2, 1, '分析纯', NULL, 1), (31, 3, 1, '分析纯', NULL, 1)",
         ):
             conn.exec_driver_sql(sql)
-        for sid in range(1, 13):
+        for sid in range(1, 14):
             conn.exec_driver_sql("INSERT INTO suppliers VALUES (?, ?, ?)",
                                  (sid, f"测试供应商{sid}", "INACTIVE" if sid == 11 else "ACTIVE"))
         future, past = today + timedelta(days=5), today - timedelta(days=1)
@@ -60,12 +60,14 @@ def evaluation_db():
             (12, 10, 1, 1, 'CNY', 1, 'A', 13, future, 'SUBMITTED', future),
             (13, 11, 1, 1, 'CNY', 1, 'A', 13, future, 'SUBMITTED', today),
             (14, 12, 1, 1, 'CNY', 3, 'A', 13, future, 'SUBMITTED', today),
+            (15, 12, 1, 1, 'CNY', 1, 'A', 13, future, 'SUBMITTED', today),
+            (16, 13, 1, 1, 'CNY', 1, 'A', 13, future, 'SUBMITTED', today),
         ]
         for qid, sid, version, price, currency, unit, model, tax, valid, status, quoted in samples:
             conn.exec_driver_sql("INSERT INTO supplier_quotes VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)",
                                  (qid, sid, f"Q-{qid}", version, quoted, valid, currency, status))
-            conn.exec_driver_sql("INSERT INTO supplier_quote_items VALUES (?, ?, 11, ?, ?, ?, ?, 20, 5, 1, 3)",
-                                 (qid, qid, unit, model, tax, price))
+            conn.exec_driver_sql("INSERT INTO supplier_quote_items VALUES (?, ?, 11, ?, ?, ?, ?, ?, 20, 5, 1, 3)",
+                                 (qid, qid, unit, model, tax, None if qid == 16 else 0 if qid == 15 else 1, price))
     from app.modules.ai.model import AIAgentTask
     AIAgentTask.__table__.create(engine)
     with engine.begin() as conn:

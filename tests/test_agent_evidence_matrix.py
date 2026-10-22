@@ -25,7 +25,7 @@ CASES = (
     ("I14", "inventory.query_available", 7, {"warehouse_id": 1}, "visible_ids", [1, 2]),
     ("I15", "inventory.query_available", 8, {}, "unit_total", (1, 999)),
     # 报价：版本、状态、有效期、可比口径、来源及截断。
-    ("Q16", "supplier_quotes.compare", 7, {}, "quote_ids", [2, 3, 5, 6, 7, 8, 9]),
+    ("Q16", "supplier_quotes.compare", 7, {}, "quote_ids", [2, 3, 5, 6, 7, 8, 9, 15, 16]),
     ("Q17", "supplier_quotes.compare", 7, {}, "rank", (2, 2)),
     ("Q18", "supplier_quotes.compare", 7, {}, "rank", (3, 1)),
     ("Q19", "supplier_quotes.compare", 7, {}, "rank", (5, None)),
@@ -33,11 +33,13 @@ CASES = (
     ("Q21", "supplier_quotes.compare", 7, {}, "rank", (7, None)),
     ("Q22", "supplier_quotes.compare", 7, {}, "rank", (8, None)),
     ("Q23", "supplier_quotes.compare", 7, {}, "rank", (9, None)),
+    ("Q31", "supplier_quotes.compare", 7, {}, "rank", (15, None)),
+    ("Q32", "supplier_quotes.compare", 7, {}, "rank", (16, None)),
     ("Q24", "supplier_quotes.compare", 7, {}, "excluded_quote", 4),
     ("Q25", "supplier_quotes.compare", 7, {}, "excluded_quote", 12),
     ("Q26", "supplier_quotes.compare", 7, {}, "excluded_quote", 13),
     ("Q27", "supplier_quotes.compare", 7, {}, "excluded_quote", 14),
-    ("Q28", "supplier_quotes.compare", 7, {}, "source_ids", [2, 3, 5, 6, 7, 8, 9]),
+    ("Q28", "supplier_quotes.compare", 7, {}, "source_ids", [2, 3, 5, 6, 7, 8, 9, 15, 16]),
     ("Q29", "supplier_quotes.compare", 7, {}, "source_parent", 1),
     ("Q30", "supplier_quotes.compare", 7, {"limit": 1}, "all_unranked", True),
 )

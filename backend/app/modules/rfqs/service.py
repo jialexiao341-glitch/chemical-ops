@@ -20,6 +20,7 @@ from app.modules.rfqs.schema import (
 )
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_role_codes
+from app.modules.system.file_model import SysFile
 from app.modules.system.model import User
 
 
@@ -198,6 +199,10 @@ def create_quote_for_supplier(
 
     if rfq.status not in {"SENT", "RESPONDING"}:
         raise BusinessValidationError("当前询价单不接受供应商报价")
+    if data.source_file_id is not None:
+        source_file = db.get(SysFile, data.source_file_id)
+        if source_file is None or source_file.uploader_id != user.id or source_file.file_category != "SUPPLIER_QUOTE":
+            raise BusinessValidationError("报价来源文件不存在或不属于当前报价人")
     supplier = crud.get_supplier(db, supplier_id)
     if supplier is None:
         raise ResourceNotFoundError("供应商不存在")
@@ -250,7 +255,7 @@ def create_quote_for_supplier(
 
 
 def build_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
-    """按各明细最低报价生成一份比价快照。"""
+    """按统一币种、单位和税务口径生成可解释的报价比价快照。"""
 
     rfq = get_rfq(db, user, rfq_id)
     quotes = [quote for quote in rfq.quotes if quote.status == "SUBMITTED"]
@@ -260,34 +265,103 @@ def build_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
         comparison_no=f"TEMP-C-{rfq.id}-{int(_now().timestamp())}",
         rfq_id=rfq.id,
         created_by=user.id,
-        conclusion="按每个询价明细的供应商含税前单价从低到高排序，最终以定标原因为准。",
+        conclusion="仅在币种、计量单位、税率及含税口径一致的报价组内按单价排序；不做汇率或单位换算。不可比报价保留并说明原因，最终中选仍需人工确认。",
         status="DRAFT",
     )
     db.add(comparison)
     db.flush()
     comparison.comparison_no = f"QC{date.today():%Y%m%d}{comparison.id:06d}"
+    rfq_items = {item.id: item for item in rfq.items}
     candidates = defaultdict(list)
+    incomplete_quote_ids = set()
     for quote in quotes:
+        quoted_item_ids = {item.rfq_item_id for item in quote.items}
+        if quoted_item_ids != set(rfq_items):
+            incomplete_quote_ids.add(quote.id)
         for item in quote.items:
-            candidates[item.rfq_item_id].append((quote, item))
+            if item.rfq_item_id in rfq_items:
+                candidates[item.rfq_item_id].append((quote, item))
+    for quote in quotes:
+        quoted_item_ids = {item.rfq_item_id for item in quote.items}
+        for rfq_item_id in set(rfq_items) - quoted_item_ids:
+            candidates[rfq_item_id].append((quote, None))
+
     for rfq_item_id, entries in candidates.items():
-        entries.sort(key=lambda pair: pair[1].unit_price)
-        for rank, (quote, item) in enumerate(entries, start=1):
-            comparison.items.append(
-                QuoteComparisonItem(
-                    quote_id=quote.id,
-                    rfq_item_id=rfq_item_id,
-                    supplier_id=quote.supplier_id,
-                    quoted_unit_price=item.unit_price,
-                    total_amount=item.unit_price * item.quoted_quantity,
-                    moq_quantity=item.moq_quantity,
-                    lead_days=item.lead_days,
-                    payment_terms=item.payment_terms,
-                    rank_no=rank,
-                    selection_flag=1 if rank == 1 else 0,
-                    note=item.note,
-                )
+        rfq_item = rfq_items[rfq_item_id]
+        rows = []
+        for quote, item in entries:
+            reasons = []
+            if quote.id in incomplete_quote_ids:
+                reasons.append("报价未覆盖全部询价明细")
+            if item is None:
+                reasons.append("缺少该询价明细报价")
+            else:
+                if item.unit_id != rfq_item.unit_id:
+                    reasons.append("报价计量单位与询价单位不一致")
+                if item.tax_rate is None:
+                    reasons.append("税率缺失")
+                if item.tax_included is None:
+                    reasons.append("含税口径缺失")
+            row = QuoteComparisonItem(
+                quote_id=quote.id,
+                rfq_item_id=rfq_item_id,
+                supplier_id=quote.supplier_id,
+                quoted_unit_price=item.unit_price if item else None,
+                total_amount=item.unit_price * item.quoted_quantity if item else None,
+                currency_code=quote.currency_code,
+                unit_id=item.unit_id if item else None,
+                tax_rate=item.tax_rate if item else None,
+                tax_included=item.tax_included if item else None,
+                moq_quantity=item.moq_quantity if item else None,
+                lead_days=item.lead_days if item else None,
+                payment_terms=item.payment_terms if item else None,
+                rank_no=None,
+                selection_flag=0,
+                comparison_status="NOT_COMPARABLE",
+                comparison_reasons=reasons,
+                note=item.note if item else None,
             )
+            comparison.items.append(row)
+            rows.append((quote, item, row, reasons))
+
+        eligible = [entry for entry in rows if not entry[3]]
+        groups = defaultdict(list)
+        for entry in eligible:
+            quote, item, _row, _reasons = entry
+            groups[(quote.currency_code, item.tax_rate, item.tax_included)].append(entry)
+        if not groups:
+            continue
+        largest_group_size = max(map(len, groups.values()))
+        largest_groups = [group for group in groups.values() if len(group) == largest_group_size]
+        if len(largest_groups) != 1:
+            signatures = list(groups)
+            for _quote, _item, row, reasons in eligible:
+                if len({signature[0] for signature in signatures}) > 1:
+                    reasons.append("币种存在差异")
+                if len({signature[1] for signature in signatures}) > 1:
+                    reasons.append("税率存在差异")
+                if len({signature[2] for signature in signatures}) > 1:
+                    reasons.append("含税口径存在差异")
+                row.comparison_reasons = [*reasons, "多种报价口径数量相同，无法确定统一比较组"]
+            continue
+        winning_group = largest_groups[0]
+        benchmark = winning_group[0]
+        benchmark_quote, benchmark_item = benchmark[0], benchmark[1]
+        for entry in eligible:
+            quote, item, row, reasons = entry
+            if entry not in winning_group:
+                if quote.currency_code != benchmark_quote.currency_code:
+                    reasons.append(f"币种与主要比较组不一致（{quote.currency_code} / {benchmark_quote.currency_code}）")
+                if item.tax_rate != benchmark_item.tax_rate:
+                    reasons.append("税率与主要比较组不一致")
+                if item.tax_included != benchmark_item.tax_included:
+                    reasons.append("含税口径与主要比较组不一致")
+                row.comparison_reasons = reasons
+                continue
+            row.comparison_status = "COMPARABLE"
+        ranked = sorted(winning_group, key=lambda entry: (entry[1].unit_price, entry[0].id))
+        for rank, (_quote, _item, row, _reasons) in enumerate(ranked, start=1):
+            row.rank_no = rank
     add_audit_log(db, actor_id=user.id, action_type="COMPARE", resource_type="RFQ", resource_id=rfq.id, request_summary="生成供应商报价比较结果", result_status="SUCCESS")
     db.commit()
     return crud.get_comparison(db, rfq.id, comparison.id)

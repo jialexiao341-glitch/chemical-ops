@@ -136,6 +136,7 @@ export interface QuoteItemRow {
   rfq_item_id?: null | number;
   supplier_model?: null | string;
   tax_rate?: null | number | string;
+  tax_basis?: 'EXCLUDED' | 'INCLUDED' | null;
   unit_id?: null | number;
   unitName: string;
   unit_price?: null | number | string;

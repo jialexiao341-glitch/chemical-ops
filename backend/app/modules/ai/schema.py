@@ -936,12 +936,15 @@ class QuoteRow(ToolSchema):
     unit_name: str
     supplier_model: str | None
     tax_rate: Decimal | None
+    tax_included: bool | None
     unit_price: Decimal
     quoted_quantity: Decimal
     moq_quantity: Decimal | None
     moq_unit_id: int | None
     lead_days: int | None
     rank: int | None = None
+    comparison_status: Literal["COMPARABLE", "NOT_COMPARABLE"] = "NOT_COMPARABLE"
+    comparison_reasons: list[str] = Field(default_factory=list)
 
 
 class QuoteResult(ToolSchema):
@@ -955,7 +958,7 @@ class QuoteResult(ToolSchema):
     specification: str | None
     technical_requirements: str | None
     scope: str = "同一询价明细；普通用户仅本人询价，采购经理/管理员全部询价"
-    comparison_basis: str = "未税单价；仅在币种、单位、税率、供应商型号相同且明确时排序"
+    comparison_basis: str = "报价单价；仅在币种、单位、税率、含税口径、供应商型号相同且明确时排序"
     total_rows: int
     truncated: bool
     rows: list[QuoteRow]

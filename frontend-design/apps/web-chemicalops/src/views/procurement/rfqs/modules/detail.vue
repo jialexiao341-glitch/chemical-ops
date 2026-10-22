@@ -37,7 +37,7 @@ import {
   RFQ_STATUS_DICT,
 } from '#/constants/dictionary';
 import { formatAmount, formatDate, formatDateTime, formatQuantity } from '#/utils/format';
-import { getSupplierNameMap } from '#/utils/lookup';
+import { getSupplierNameMap, getUnitNameMap } from '#/utils/lookup';
 
 import QuoteModal from './quote.vue';
 import SelectQuoteModal from './select-quote.vue';
@@ -52,6 +52,7 @@ const comparison = ref<RfqApi.QuoteComparison>();
 const loading = ref(false);
 const acting = ref(false);
 const supplierMap = ref<Map<number, string>>(new Map());
+const unitMap = ref<Map<number, string>>(new Map());
 const activeTab = ref('items');
 const scenarioPriceWeight = ref(70);
 
@@ -93,12 +94,14 @@ async function reload(rfqId?: number) {
   if (!id) {
     return;
   }
-  const [rfq, suppliers] = await Promise.all([
+  const [rfq, suppliers, units] = await Promise.all([
     getRfqApi(id),
     getSupplierNameMap(),
+    getUnitNameMap(),
   ]);
   detail.value = rfq;
   supplierMap.value = suppliers;
+  unitMap.value = units;
   // 比价单可能尚未生成，404 不作为错误处理
   try {
     comparison.value = await getComparisonApi(id);
@@ -112,6 +115,11 @@ function supplierName(id?: null | number) {
     return '-';
   }
   return supplierMap.value.get(id) ?? `供应商 #${id}`;
+}
+
+function unitName(id?: null | number) {
+  if (!id) return '-';
+  return unitMap.value.get(id) ?? `#${id}`;
 }
 
 function quoteSupplierId(quoteId: number) {
@@ -278,11 +286,13 @@ const comparisonColumns = [
     width: 140,
     align: 'right' as const,
   },
-  { key: 'total_amount', dataIndex: 'total_amount', title: '金额', width: 140, align: 'right' as const },
+  { key: 'total_amount', dataIndex: 'total_amount', title: '报价行金额', width: 140, align: 'right' as const },
   { key: 'lead_days', dataIndex: 'lead_days', title: '交期(天)', width: 100 },
   { key: 'moq_quantity', dataIndex: 'moq_quantity', title: '最小起订量', width: 120 },
   { key: 'payment_terms', dataIndex: 'payment_terms', title: '付款条件', width: 140 },
   { key: 'rank_no', dataIndex: 'rank_no', title: '排名', width: 90 },
+  { key: 'comparison_basis', title: '比较口径', width: 220 },
+  { key: 'comparison_reasons', title: '不可比原因', minWidth: 260 },
   { key: 'selection_flag', dataIndex: 'selection_flag', title: '中选', width: 90 },
   { key: '__action', dataIndex: '__action', title: '操作', width: 120 },
 ];
@@ -299,7 +309,9 @@ const scenarioCurrencyConflict = computed(() => {
 
 const scenarioRanking = computed(() => {
   if (scenarioCurrencyConflict.value) return [];
-  const rows = comparison.value?.items ?? [];
+  const rows = (comparison.value?.items ?? []).filter(
+    (row) => row.comparison_status === 'COMPARABLE',
+  );
   const groups = new Map<number, RfqApi.ComparisonItem[]>();
   for (const row of rows) {
     const group = groups.get(row.rfq_item_id) ?? [];
@@ -533,7 +545,7 @@ defineExpose({ drawerApi });
                     {{ supplierName(record.supplier_id) }}
                   </template>
                   <template v-else-if="column.key === 'quoted_unit_price'">
-                    {{ formatAmount(record.quoted_unit_price, 6) }}
+                    {{ record.quoted_unit_price == null ? '-' : formatAmount(record.quoted_unit_price, 6) }}
                   </template>
                   <template v-else-if="column.key === 'total_amount'">
                     {{ formatAmount(record.total_amount) }}
@@ -548,9 +560,21 @@ defineExpose({ drawerApi });
                     {{ record.payment_terms || '-' }}
                   </template>
                   <template v-else-if="column.key === 'rank_no'">
-                    <Tag :color="record.rank_no === 1 ? 'success' : 'default'">
-                      第 {{ record.rank_no ?? '-' }} 名
+                    <Tag :color="record.comparison_status === 'COMPARABLE' ? (record.rank_no === 1 ? 'success' : 'default') : 'warning'">
+                      {{ record.comparison_status === 'COMPARABLE' ? `第 ${record.rank_no ?? '-'} 名` : '不可直接比较' }}
                     </Tag>
+                  </template>
+                  <template v-else-if="column.key === 'comparison_basis'">
+                    <span v-if="record.comparison_status === 'COMPARABLE'">
+                      {{ record.currency_code }} · {{ unitName(record.unit_id) }} · 税率 {{ record.tax_rate }}% · {{ record.tax_included ? '含税' : '未税' }}
+                    </span>
+                    <span v-else class="text-muted-foreground">-</span>
+                  </template>
+                  <template v-else-if="column.key === 'comparison_reasons'">
+                    <span v-if="record.comparison_reasons?.length" class="text-amber-700">
+                      {{ record.comparison_reasons.join('；') }}
+                    </span>
+                    <span v-else class="text-muted-foreground">-</span>
                   </template>
                   <template v-else-if="column.key === 'selection_flag'">
                     <Tag v-if="record.selection_flag" color="success">已中选</Tag>

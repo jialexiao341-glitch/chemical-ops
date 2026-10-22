@@ -38,6 +38,7 @@ interface QuoteLineForm {
   unit_id: number;
   unit_price: null | number;
   tax_rate: null | number;
+  tax_basis: 'EXCLUDED' | 'INCLUDED' | null;
   moq_quantity: null | number;
   moq_unit_id: null | number;
   lead_days: null | number;
@@ -69,13 +70,16 @@ const canSubmitQuote = computed(
   () =>
     canEditQuote.value &&
     quoteLines.value.length > 0 &&
+    /^[A-Z]{3}$/.test(currencyCode.value) &&
     quoteLines.value.every(
       (line) =>
         line.quoted_quantity !== null &&
         line.quoted_quantity > 0 &&
         line.unit_id > 0 &&
         line.unit_price !== null &&
-        line.unit_price >= 0,
+        line.unit_price >= 0 &&
+        line.tax_rate !== null &&
+        line.tax_basis !== null,
     ),
 );
 
@@ -106,7 +110,8 @@ function initializeQuoteForm(detail: SupplierPortalApi.RfqDetail) {
       quoted_quantity: Number(previous?.quoted_quantity ?? item.quantity),
       unit_id: previous?.unit_id ?? item.unit_id,
       unit_price: previous ? Number(previous.unit_price) : null,
-      tax_rate: previous?.tax_rate ? Number(previous.tax_rate) : null,
+      tax_rate: previous?.tax_rate != null ? Number(previous.tax_rate) : null,
+      tax_basis: previous?.tax_included == null ? null : previous.tax_included ? 'INCLUDED' : 'EXCLUDED',
       moq_quantity: previous?.moq_quantity ? Number(previous.moq_quantity) : null,
       moq_unit_id: previous?.moq_unit_id ?? item.unit_id,
       lead_days: previous?.lead_days ?? null,
@@ -115,7 +120,7 @@ function initializeQuoteForm(detail: SupplierPortalApi.RfqDetail) {
   });
   quoteDate.value = latest?.quote_date ?? localDate();
   validUntil.value = latest?.valid_until ?? '';
-  currencyCode.value = latest?.currency_code ?? 'CNY';
+  currencyCode.value = latest?.currency_code ?? '';
   quoteNote.value = latest?.note ?? '';
 }
 
@@ -153,6 +158,7 @@ async function submitQuote() {
         unit_price: String(line.unit_price),
         supplier_model: line.supplier_model || undefined,
         tax_rate: line.tax_rate ?? undefined,
+        tax_included: line.tax_basis === 'INCLUDED',
         moq_quantity: line.moq_quantity ?? undefined,
         moq_unit_id: line.moq_quantity ? (line.moq_unit_id ?? undefined) : undefined,
         lead_days: line.lead_days ?? undefined,
@@ -276,12 +282,25 @@ onMounted(load);
                   <Select v-model:value="quoteLines[index]!.unit_id" :disabled="!canEditQuote" :options="unitOptions" class="w-full" />
                 </label>
                 <label class="field-block">
-                  <span>未税单价</span>
+                  <span>单价</span>
                   <InputNumber v-model:value="quoteLines[index]!.unit_price" :disabled="!canEditQuote" :min="0" :precision="6" class="w-full" />
                 </label>
                 <label class="field-block">
                   <span>税率（%）</span>
-                  <InputNumber v-model:value="quoteLines[index]!.tax_rate" :disabled="!canEditQuote" :min="0" :max="100" :precision="2" class="w-full" placeholder="选填" />
+                  <InputNumber v-model:value="quoteLines[index]!.tax_rate" :disabled="!canEditQuote" :min="0" :max="100" :precision="2" class="w-full" />
+                </label>
+                <label class="field-block">
+                  <span>价格口径</span>
+                  <Select
+                    v-model:value="quoteLines[index]!.tax_basis"
+                    :disabled="!canEditQuote"
+                    :options="[
+                      { label: '含税价', value: 'INCLUDED' },
+                      { label: '未税价', value: 'EXCLUDED' },
+                    ]"
+                    class="w-full"
+                    placeholder="请选择"
+                  />
                 </label>
                 <label class="field-block">
                   <span>交货周期（天）</span>
@@ -324,6 +343,7 @@ onMounted(load);
                   { label: '欧元 EUR', value: 'EUR' },
                   { label: '日元 JPY', value: 'JPY' },
                 ]"
+                placeholder="请选择"
                 class="w-full"
               />
             </label>
@@ -336,7 +356,7 @@ onMounted(load);
             class="mt-4"
             show-icon
             type="info"
-            :message="rfq.latest_quote ? `再次提交会保存为第 ${rfq.latest_quote.quote_version + 1} 版，不覆盖已提交记录。` : '提交后采购方即可查看本次报价。所有物料均需填写报价数量和未税单价。'"
+            :message="rfq.latest_quote ? `再次提交会保存为第 ${rfq.latest_quote.quote_version + 1} 版，不覆盖已提交记录。` : '提交后采购方即可查看本次报价。所有物料均需填写报价数量、单价、税率并选择含税口径。'"
           />
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
             <span class="text-sm leading-6 text-muted-foreground">

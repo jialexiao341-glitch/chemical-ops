@@ -226,7 +226,7 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
     """读取指定询价明细的最新可见报价，按明确的可比条件计算展示排名。
 
     由 execute_tool 先检查询价读取权限；这里按发起人/管理角色限制资源范围。
-    先排除旧版本，再过滤有效期、状态和停用对象。异币种、单位、税率或
+    先排除旧版本，再过滤有效期、状态和停用对象。异币种、单位、税率、含税口径或
     型号不得混排；条件未知和结果截断时不排序，不保存比价或变更定标。
     """
     _product(db, arguments.product_id)
@@ -234,6 +234,7 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
     statement = select(
         RFQ.id.label("rfq_id"), RFQ.rfq_no, RFQ.status,
         RFQItem.specification, RFQItem.technical_requirements,
+        RFQItem.unit_id.label("requested_unit_id"),
     ).join(RFQItem, RFQItem.rfq_id == RFQ.id).where(
         RFQItem.id == arguments.rfq_item_id, RFQItem.product_id == arguments.product_id
     )
@@ -258,7 +259,7 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
         SupplierQuote.supplier_id, Supplier.supplier_name, SupplierQuote.quote_no,
         SupplierQuote.quote_version, SupplierQuote.quote_date, SupplierQuote.valid_until,
         SupplierQuote.currency_code, SupplierQuoteItem.unit_id, Unit.unit_name,
-        SupplierQuoteItem.supplier_model, SupplierQuoteItem.tax_rate,
+        SupplierQuoteItem.supplier_model, SupplierQuoteItem.tax_rate, SupplierQuoteItem.tax_included,
         SupplierQuoteItem.unit_price, SupplierQuoteItem.quoted_quantity,
         SupplierQuoteItem.moq_quantity, SupplierQuoteItem.moq_unit_id, SupplierQuoteItem.lead_days,
     ).select_from(SupplierQuote).join(SupplierQuoteItem, SupplierQuoteItem.quote_id == SupplierQuote.id).join(
@@ -277,19 +278,44 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
     warnings = ["报价数量、起订量和交期仅展示原值；不推断目标数量可成交，不自动选定供应商。"]
     groups: dict[tuple, list[QuoteRow]] = {}
     for row in rows:
-        if truncated or row.valid_until is None or row.tax_rate is None or not row.supplier_model:
+        if row.unit_id != context.requested_unit_id:
+            row.comparison_reasons.append("报价单位与询价单位不一致")
+        if truncated:
+            row.comparison_reasons.append("候选报价已截断，无法确认完整的可比组")
             continue
-        key = (row.currency_code, row.unit_id, row.tax_rate, row.supplier_model)
+        if row.valid_until is None:
+            row.comparison_reasons.append("报价有效期未登记")
+        if row.tax_rate is None:
+            row.comparison_reasons.append("税率未登记")
+        if row.tax_included is None:
+            row.comparison_reasons.append("含税口径未登记")
+        if not row.supplier_model:
+            row.comparison_reasons.append("供应商型号未登记")
+        if row.comparison_reasons:
+            continue
+        key = (row.currency_code, row.unit_id, row.tax_rate, row.tax_included, row.supplier_model)
         groups.setdefault(key, []).append(row)
     for group in groups.values():
         if len(group) > 1:
             prices = sorted({row.unit_price for row in group})
             for row in group:
                 row.rank = prices.index(row.unit_price) + 1
+                row.comparison_status = "COMPARABLE"
+    signatures = list(groups)
+    for signature, group in groups.items():
+        if len(group) > 1:
+            continue
+        row = group[0]
+        if len(signatures) == 1:
+            row.comparison_reasons.append("没有其他同口径报价可形成组内排名")
+            continue
+        for index, label in enumerate(("币种", "计量单位", "税率", "含税口径", "供应商型号")):
+            if any(other[index] != signature[index] for other in signatures if other != signature):
+                row.comparison_reasons.append(f"{label}与其他报价口径不同")
     if not rows:
         warnings.append("可见询价明细没有符合条件的最新报价；不代表没有供应商或历史报价。")
-    if any(row.valid_until is None or row.tax_rate is None or not row.supplier_model for row in rows):
-        warnings.append("有效期、税率或型号未明确的报价仅展示，不参与排序。")
+    if any(row.unit_id != context.requested_unit_id or row.valid_until is None or row.tax_rate is None or row.tax_included is None or not row.supplier_model for row in rows):
+        warnings.append("报价单位、有效期、税率、含税口径或型号未明确/不一致的报价仅展示，不参与排序。")
     if truncated:
         warnings.append("报价已截断，全部候选不排序；请缩小范围或在原询价页面核对。")
     return QuoteResult(

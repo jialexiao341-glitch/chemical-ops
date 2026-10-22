@@ -76,6 +76,7 @@ class SupplierQuoteItemCreate(BaseModel):
     unit_id: int = Field(gt=0)
     unit_price: Decimal = Field(ge=0)
     tax_rate: Decimal | None = Field(default=None, ge=0, le=100)
+    tax_included: bool | None = None
     moq_quantity: Decimal | None = Field(default=None, gt=0)
     moq_unit_id: int | None = Field(default=None, gt=0)
     lead_days: int | None = Field(default=None, ge=0)
@@ -89,10 +90,52 @@ class SupplierQuoteCreate(BaseModel):
     supplier_id: int = Field(gt=0)
     quote_date: date | None = None
     valid_until: date | None = None
-    currency_code: str = Field(default="CNY", min_length=3, max_length=3, pattern="^[A-Z]{3}$")
+    currency_code: str = Field(min_length=3, max_length=3, pattern="^[A-Z]{3}$")
     source_file_id: int | None = Field(default=None, gt=0)
     note: str | None = Field(default=None, max_length=1000)
     items: list[SupplierQuoteItemCreate] = Field(min_length=1, max_length=100)
+
+
+class QuoteCandidateEvidence(BaseModel):
+    """报价候选字段的原文依据。"""
+
+    field: str = Field(min_length=1, max_length=32)
+    value: str = Field(min_length=1, max_length=500)
+    source_quote: str = Field(min_length=1, max_length=600)
+    source_location: str = Field(min_length=1, max_length=120)
+
+
+class QuoteCandidateItem(BaseModel):
+    """报价文件中一条待人工复核的明细候选。"""
+
+    rfq_item_id: int | None = None
+    product_label: str | None = None
+    supplier_model: str | None = None
+    quoted_quantity: str | None = None
+    unit_name: str | None = None
+    unit_price: str | None = None
+    tax_rate: str | None = None
+    tax_included: bool | None = None
+    moq_quantity: str | None = None
+    lead_days: int | None = None
+    payment_terms: str | None = None
+    source_quote: str
+    source_location: str
+
+
+class QuoteParseCandidate(BaseModel):
+    """报价文件的可编辑候选结果，不代表已录入报价。"""
+
+    file_id: int
+    file_name: str
+    supplier_name: str | None = None
+    currency_code: str | None = None
+    quote_date: str | None = None
+    valid_until: str | None = None
+    note: str | None = None
+    items: list[QuoteCandidateItem]
+    evidence: list[QuoteCandidateEvidence] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SupplierQuoteItemRead(SupplierQuoteItemCreate):
@@ -136,8 +179,14 @@ class QuoteComparisonItemRead(BaseModel):
     quote_id: int
     rfq_item_id: int
     supplier_id: int
-    quoted_unit_price: Decimal
+    quoted_unit_price: Decimal | None
     total_amount: Decimal | None
+    currency_code: str | None
+    unit_id: int | None
+    tax_rate: Decimal | None
+    tax_included: bool | None
+    comparison_status: str
+    comparison_reasons: list[str] | None
     moq_quantity: Decimal | None
     lead_days: int | None
     payment_terms: str | None

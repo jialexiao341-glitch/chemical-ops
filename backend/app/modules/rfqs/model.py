@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, Date, ForeignKey, Integer, JSON, Numeric, SmallInteger, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -133,6 +133,7 @@ class SupplierQuoteItem(Base):
     unit_id: Mapped[int] = mapped_column(ForeignKey("md_units.id"), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    tax_included: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     moq_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     moq_unit_id: Mapped[int | None] = mapped_column(ForeignKey("md_units.id"), nullable=True)
     lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -179,8 +180,14 @@ class QuoteComparisonItem(Base):
     quote_id: Mapped[int] = mapped_column(ForeignKey("supplier_quotes.id"), nullable=False)
     rfq_item_id: Mapped[int] = mapped_column(ForeignKey("rfq_items.id"), nullable=False)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), nullable=False)
-    quoted_unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    quoted_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     total_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    currency_code: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    unit_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    tax_included: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    comparison_status: Mapped[str] = mapped_column(String(20), nullable=False, default="NOT_COMPARABLE")
+    comparison_reasons: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     moq_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payment_terms: Mapped[str | None] = mapped_column(String(255), nullable=True)

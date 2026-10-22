@@ -40,6 +40,7 @@ export namespace RfqApi {
     supplier_model?: null | string;
     supplier_product_id?: null | number;
     tax_rate?: null | string;
+    tax_included?: boolean | null;
     unit_id: number;
     unit_price: string;
   }
@@ -73,7 +74,13 @@ export namespace RfqApi {
     moq_quantity?: null | string;
     note?: null | string;
     payment_terms?: null | string;
-    quoted_unit_price: string;
+    quoted_unit_price: null | string;
+    currency_code?: null | string;
+    unit_id?: null | number;
+    tax_rate?: null | string;
+    tax_included?: boolean | null;
+    comparison_status?: string;
+    comparison_reasons?: null | string[];
     quote_id: number;
     rank_no?: null | number;
     rfq_item_id: number;
@@ -150,18 +157,55 @@ export namespace RfqApi {
     supplier_model?: null | string;
     supplier_product_id?: null | number;
     tax_rate?: null | number | string;
+    tax_included?: boolean | null;
     unit_id: number;
     unit_price: number | string;
   }
 
   export interface QuotePayload {
-    currency_code?: string;
+    currency_code: string;
     items: QuoteItemPayload[];
     note?: null | string;
     quote_date?: null | string;
     source_file_id?: null | number;
     supplier_id: number;
     valid_until?: null | string;
+  }
+
+  export interface QuoteCandidateEvidence {
+    field: string;
+    source_location: string;
+    source_quote: string;
+    value: string;
+  }
+
+  export interface QuoteCandidateItem {
+    lead_days?: null | number;
+    moq_quantity?: null | string;
+    payment_terms?: null | string;
+    product_label?: null | string;
+    quoted_quantity?: null | string;
+    rfq_item_id?: null | number;
+    source_location: string;
+    source_quote: string;
+    supplier_model?: null | string;
+    tax_rate?: null | string;
+    tax_included?: boolean | null;
+    unit_name?: null | string;
+    unit_price?: null | string;
+  }
+
+  export interface QuoteParseCandidate {
+    currency_code?: null | string;
+    evidence: QuoteCandidateEvidence[];
+    file_id: number;
+    file_name: string;
+    items: QuoteCandidateItem[];
+    note?: null | string;
+    quote_date?: null | string;
+    supplier_name?: null | string;
+    valid_until?: null | string;
+    warnings: string[];
   }
 
   export interface ListParams extends PageQuery {
@@ -198,6 +242,17 @@ export async function sendRfqApi(id: number) {
 /** 录入供应商报价 */
 export async function createQuoteApi(id: number, data: RfqApi.QuotePayload) {
   return requestClient.post<RfqApi.Rfq>(`/rfqs/${id}/quotes`, data);
+}
+
+/** 将询价报价文件解析为待人工复核的候选值。 */
+export async function parseQuoteFileApi(id: number, file: File) {
+  const data = new FormData();
+  data.append('file', file);
+  return requestClient.post<RfqApi.QuoteParseCandidate>(
+    `/rfqs/${id}/quotes/parse-file`,
+    data,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  );
 }
 
 /** 生成报价比较快照 */

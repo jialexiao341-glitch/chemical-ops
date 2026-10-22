@@ -19,6 +19,7 @@ class SupplierOrderItemRead(BaseModel):
     unit_id: int
     unit_price: Decimal
     tax_rate: Decimal | None
+    tax_included: bool | None
     planned_arrival_date: date | None
     received_quantity: Decimal
     status: str
@@ -136,6 +137,7 @@ class SupplierPortalQuoteItemCreate(BaseModel):
     unit_id: int = Field(gt=0)
     unit_price: Decimal = Field(ge=0)
     tax_rate: Decimal | None = Field(default=None, ge=0, le=100)
+    tax_included: bool | None = None
     moq_quantity: Decimal | None = Field(default=None, gt=0)
     moq_unit_id: int | None = Field(default=None, gt=0)
     lead_days: int | None = Field(default=None, ge=0)
@@ -148,7 +150,7 @@ class SupplierPortalQuoteCreate(BaseModel):
 
     quote_date: date | None = None
     valid_until: date | None = None
-    currency_code: str = Field(default="CNY", min_length=3, max_length=3, pattern="^[A-Z]{3}$")
+    currency_code: str = Field(min_length=3, max_length=3, pattern="^[A-Z]{3}$")
     note: str | None = Field(default=None, max_length=1000)
     items: list[SupplierPortalQuoteItemCreate] = Field(min_length=1, max_length=100)
 

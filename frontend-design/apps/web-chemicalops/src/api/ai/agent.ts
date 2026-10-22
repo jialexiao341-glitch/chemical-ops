@@ -43,7 +43,10 @@ export namespace AgentApi {
     unit_price: string;
     unit_name: string;
     tax_rate: null | string;
+    tax_included: boolean | null;
     rank: null | number;
+    comparison_status: 'COMPARABLE' | 'NOT_COMPARABLE';
+    comparison_reasons: string[];
     quoted_quantity: string;
     moq_quantity: null | string;
     lead_days: null | number;

@@ -37,6 +37,7 @@ export namespace SupplierPortalApi {
     unit_id: number;
     unit_price: string;
     tax_rate: null | string;
+    tax_included: boolean | null;
     moq_quantity: null | string;
     moq_unit_id: null | number;
     lead_days: null | number;
@@ -92,6 +93,7 @@ export namespace SupplierPortalApi {
     unit_id: number;
     unit_price: number | string;
     tax_rate?: null | number | string;
+    tax_included?: boolean | null;
     moq_quantity?: null | number | string;
     moq_unit_id?: null | number;
     lead_days?: null | number;
@@ -102,7 +104,7 @@ export namespace SupplierPortalApi {
   export interface QuotePayload {
     quote_date?: null | string;
     valid_until?: null | string;
-    currency_code?: string;
+    currency_code: string;
     note?: null | string;
     items: QuoteItemPayload[];
   }
