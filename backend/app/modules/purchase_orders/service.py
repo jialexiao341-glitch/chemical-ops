@@ -100,7 +100,7 @@ def _validate_source(db: Session, user: User, data: PurchaseOrderCreate):
     return comparison, quote, source_request, rfq_items, quote_items
 
 
-def create_order(db: Session, user: User, data: PurchaseOrderCreate) -> PurchaseOrder:
+def create_order(db: Session, user: User, data: PurchaseOrderCreate, *, commit: bool = True) -> PurchaseOrder:
     """根据已确认的中选报价生成采购订单草稿。"""
 
     comparison, quote, source_request, rfq_items, quote_items = _validate_source(db, user, data)
@@ -139,21 +139,27 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate) -> Purchase
                 unit_id=quote_item.unit_id,
                 unit_price=quote_item.unit_price,
                 tax_rate=quote_item.tax_rate,
+                payment_terms_snapshot=quote_item.payment_terms,
                 planned_arrival_date=data.expected_arrival_date or rfq_item.required_delivery_date,
             )
         )
     order.order_amount = total
-    db.add(order)
     try:
-        db.flush()
+        # The savepoint lets proposal execution translate a concurrent unique-key
+        # collision without rolling back the proposal framework's outer transaction.
+        with db.begin_nested():
+            db.add(order)
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         if "uk_purchase_order_comparison" in str(exc.orig):
             raise DuplicateResourceError("该比价结果已经生成采购订单，不能重复下单") from exc
         raise
     order.po_no = f"PO{date.today():%Y%m%d}{order.id:06d}"
     _add_event(db, order, user.id, "CREATED", None, "DRAFT", "由中选报价生成采购订单草稿")
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary="根据中选报价生成采购订单", result_status="SUCCESS")
+    db.flush()
+    if not commit:
+        return order
     db.commit()
     return _require_order(db, order.id)
 
