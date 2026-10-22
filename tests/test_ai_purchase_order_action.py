@@ -65,7 +65,7 @@ def test_handler_is_registered_and_requires_order_write_plus_rfq_read():
 
 def test_prepare_builds_source_backed_line_preview_without_writes(handler_source):
     handler = action_handlers.get_handler("purchase_order.create_draft")
-    db = SimpleNamespace(scalar=lambda _query: None, added=[])
+    db = SimpleNamespace(scalar=lambda _query: None, get=lambda *_args: SimpleNamespace(unit_name="升"), added=[])
     user = SimpleNamespace(id=5)
 
     prepared = handler.prepare(db, user, {"comparison_id": 71, "quote_id": 51})
@@ -143,7 +143,7 @@ def test_validate_current_rebuilds_snapshot_and_execute_uses_commit_false(handle
     from app.modules.purchase_orders.schema import PurchaseOrderRead
 
     handler = action_handlers.get_handler("purchase_order.create_draft")
-    db = SimpleNamespace(scalar=lambda _query: None)
+    db = SimpleNamespace(scalar=lambda _query: None, get=lambda *_args: SimpleNamespace(unit_name="升"))
     user = SimpleNamespace(id=5)
     payload = {"comparison_id": 71, "quote_id": 51, "delivery_address": "仓库 A",
                "expected_arrival_date": None, "note": None}

@@ -686,6 +686,7 @@ class PurchaseOrderCreateDraftHandler:
         for rfq_item_id in sorted(quote_items, key=lambda value: rfq_items[value].line_no):
             rfq_item = rfq_items[rfq_item_id]
             quote_item = quote_items[rfq_item_id]
+            unit = db.get(Unit, quote_item.unit_id)
             request_item = request_items.get(rfq_item.source_request_item_id)
             remaining = request_item.quantity - request_item.fulfilled_quantity if request_item else None
             source_lines.append({
@@ -703,6 +704,7 @@ class PurchaseOrderCreateDraftHandler:
                 "supplier_model": quote_item.supplier_model,
                 "quoted_quantity": str(quote_item.quoted_quantity),
                 "unit_id": quote_item.unit_id,
+                "unit_name": unit.unit_name if unit else None,
                 "unit_price": str(quote_item.unit_price),
                 "tax_rate": str(quote_item.tax_rate) if quote_item.tax_rate is not None else None,
                 "lead_days": quote_item.lead_days,
@@ -716,6 +718,7 @@ class PurchaseOrderCreateDraftHandler:
                 "product_id": rfq_item.product_id,
                 "quantity": str(quote_item.quoted_quantity),
                 "unit_id": quote_item.unit_id,
+                "unit_name": unit.unit_name if unit else None,
                 "unit_price": str(quote_item.unit_price),
                 "tax_rate": str(quote_item.tax_rate) if quote_item.tax_rate is not None else None,
                 "currency_code": quote.currency_code,
