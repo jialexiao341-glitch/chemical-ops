@@ -2,20 +2,33 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { AgentApi } from '#/api';
 
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { Button, Modal, Select, message } from 'antdv-next';
+import { Button, Input, Modal, Select, message } from 'antdv-next';
 
-import { exportAgentTaskApi, getAgentTaskPageApi } from '#/api';
+import {
+  cancelAgentTaskApi,
+  continueAgentTaskApi,
+  createAgentTaskApi,
+  exportAgentTaskApi,
+  getAgentTaskApi,
+  getAgentTaskPageApi,
+} from '#/api';
 import AgentChatTask from '../workspace/agent-chat-task.vue';
+import { acceptTask } from '../workspace/task-view';
+import { retryQuestion, taskActionFeedback, taskActions } from './task-actions';
 
 defineOptions({ name: 'AiTaskHistory' });
 
 const status = ref<AgentApi.Task['status']>();
 const selectedTask = ref<AgentApi.Task>();
 const detailOpen = ref(false);
+const selectedLoading = ref(false);
+const busyTaskId = ref<string>();
+const followUpQuestion = ref('');
+const selectedBusy = computed(() => Boolean(selectedTask.value && busyTaskId.value === selectedTask.value.id));
 const statusOptions = [
   { label: '运行中', value: 'RUNNING' },
   { label: '等待补充', value: 'WAITING_INPUT' },
@@ -42,6 +55,9 @@ const columns = [
       options: [
         { code: 'view', text: '查看' },
         { code: 'export', text: '导出 CSV', auth: 'ai.workspace.read' },
+        { code: 'continue', text: '继续查询', show: (row: AgentApi.Task) => taskActions(row.status).includes('continue'), disabled: () => Boolean(busyTaskId.value) },
+        { code: 'cancel', text: '取消任务', danger: true, show: (row: AgentApi.Task) => taskActions(row.status).includes('cancel'), disabled: () => Boolean(busyTaskId.value) },
+        { code: 'retry', text: '重新查询', show: (row: AgentApi.Task) => taskActions(row.status).includes('retry') && Boolean(retryQuestion(row)), disabled: () => Boolean(busyTaskId.value) },
       ],
       props: { renderMode: 'menu' },
     },
@@ -68,10 +84,119 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 function search() { void gridApi.query(); }
 
+async function refreshTask(taskId: string) {
+  try {
+    const latest = await getAgentTaskApi(taskId);
+    if (selectedTask.value?.id === taskId && acceptTask(selectedTask.value, latest)) selectedTask.value = latest;
+  } catch {
+    message.error('任务状态无法读取，请刷新列表后重试');
+  }
+}
+
+async function openTask(row: AgentApi.Task) {
+  selectedTask.value = row;
+  followUpQuestion.value = '';
+  detailOpen.value = true;
+  selectedLoading.value = true;
+  try {
+    const latest = await getAgentTaskApi(row.id);
+    if (acceptTask(selectedTask.value, latest)) selectedTask.value = latest;
+  } catch {
+    message.error('任务详情无法读取，请刷新列表后重试');
+  } finally {
+    if (selectedTask.value?.id === row.id) selectedLoading.value = false;
+  }
+}
+
+async function refreshSelectedTask() {
+  const task = selectedTask.value;
+  if (!task || selectedLoading.value || selectedBusy.value) return;
+  selectedLoading.value = true;
+  await refreshTask(task.id);
+  selectedLoading.value = false;
+}
+
+async function withTaskBusy(task: AgentApi.Task, operation: () => Promise<AgentApi.Task>, action: 'continue' | 'cancel') {
+  if (busyTaskId.value) return;
+  busyTaskId.value = task.id;
+  try {
+    const latest = await operation();
+    if (acceptTask(selectedTask.value, latest)) selectedTask.value = latest;
+    message.info(taskActionFeedback(action, latest.status));
+    void gridApi.query();
+  } catch {
+    message.error('任务操作未完成，正在重新读取服务端状态');
+    await refreshTask(task.id);
+    void gridApi.query();
+  } finally {
+    busyTaskId.value = undefined;
+  }
+}
+
+function continueTask(data: AgentApi.Continue) {
+  const task = selectedTask.value;
+  if (!task || !taskActions(task.status).includes('continue') || busyTaskId.value) return;
+  void withTaskBusy(task, () => continueAgentTaskApi(task.id, data), 'continue');
+  followUpQuestion.value = '';
+}
+
+function continueWithText() {
+  const task = selectedTask.value;
+  const question = followUpQuestion.value.trim();
+  if (!task || task.status !== 'WAITING_INPUT' || !question) return;
+  continueTask({ question, revision: task.revision });
+}
+
+function cancelTask(task: AgentApi.Task) {
+  if (!taskActions(task.status).includes('cancel')) return;
+  Modal.confirm({
+    title: '取消 Agent 任务',
+    content: `确认取消任务 ${task.id}？`,
+    okText: '取消任务',
+    cancelText: '继续运行',
+    onOk: () => withTaskBusy(task, () => cancelAgentTaskApi(task.id), 'cancel'),
+  });
+}
+
+function retryTask(task: AgentApi.Task) {
+  const question = retryQuestion(task);
+  if (!taskActions(task.status).includes('retry') || !question) return;
+  Modal.confirm({
+    title: '重新发起查询',
+    content: '将使用首次查询内容创建一个新任务，不会复制原任务的结果或执行步骤。',
+    okText: '创建新任务',
+    cancelText: '返回',
+    onOk: async () => {
+      if (busyTaskId.value) return;
+      busyTaskId.value = task.id;
+      try {
+        const created = await createAgentTaskApi(question);
+        message.success(`已创建新任务 ${created.id}`);
+        void gridApi.query();
+      } catch {
+        message.error('新任务创建失败，请核对查询条件后重试');
+      } finally {
+        busyTaskId.value = undefined;
+      }
+    },
+  });
+}
+
 async function onActionClick({ code, row }: { code: string; row: AgentApi.Task }) {
   if (code === 'view') {
-    selectedTask.value = row;
-    detailOpen.value = true;
+    await openTask(row);
+    return;
+  }
+  if (code === 'continue') {
+    await openTask(row);
+    return;
+  }
+  if (code === 'cancel') {
+    cancelTask(row);
+    return;
+  }
+  if (code === 'retry') {
+    retryTask(row);
     return;
   }
   if (code !== 'export') return;
@@ -91,8 +216,24 @@ async function onActionClick({ code, row }: { code: string; row: AgentApi.Task }
 
 <template>
   <Page auto-content-height>
-    <Modal v-model:open="detailOpen" title="AI 任务结果" :footer="null" width="760px">
-      <AgentChatTask v-if="selectedTask" :task="selectedTask" :busy="false" :show-actions="false" />
+    <Modal v-model:open="detailOpen" title="AI 任务结果与操作" :footer="null" width="760px">
+      <div v-if="selectedLoading" role="status" aria-live="polite" class="py-4 text-center text-muted-foreground">正在读取最新任务状态…</div>
+      <template v-else-if="selectedTask">
+        <AgentChatTask :task="selectedTask" :busy="selectedBusy" :show-actions="true" @continue="continueTask" />
+        <div v-if="selectedTask.status === 'WAITING_INPUT'" class="mt-4 border-t border-border pt-4">
+          <Input.TextArea v-model:value="followUpQuestion" :rows="3" :maxlength="1000" :disabled="selectedBusy" placeholder="补充查询条件，继续当前任务" />
+          <div class="mt-3 flex justify-end">
+            <Button type="primary" :disabled="!followUpQuestion.trim() || selectedBusy" :loading="selectedBusy" @click="continueWithText">继续查询</Button>
+          </div>
+        </div>
+        <div v-else-if="selectedTask.status === 'RUNNING'" class="mt-4 flex justify-end gap-2 border-t border-border pt-4">
+          <Button :disabled="selectedBusy" @click="refreshSelectedTask">刷新状态</Button>
+          <Button danger :loading="selectedBusy" :disabled="selectedBusy" @click="cancelTask(selectedTask)">取消任务</Button>
+        </div>
+        <div v-else-if="selectedTask.status === 'FAILED' && retryQuestion(selectedTask)" class="mt-4 flex justify-end border-t border-border pt-4">
+          <Button :loading="selectedBusy" :disabled="selectedBusy" @click="retryTask(selectedTask)">重新查询</Button>
+        </div>
+      </template>
     </Modal>
     <div class="flex h-full flex-col gap-3">
       <section class="rounded bg-card p-4">
