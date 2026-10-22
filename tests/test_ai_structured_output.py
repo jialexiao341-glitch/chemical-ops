@@ -34,6 +34,27 @@ def test_generated_schema_closes_every_object_and_requires_explicit_fields(model
     check(format["json_schema"]["schema"])
 
 
+def test_routing_action_schema_has_explicit_properties_and_nullable_branch_types():
+    schema = schema_response_format(routing.Understanding, "route")["json_schema"]["schema"]
+    fields = schema["properties"]["action_fields"]["anyOf"][0]
+    assert fields["type"] == "object"
+    assert {"supplier_codes", "quote_deadline", "purpose", "items"} <= fields["properties"].keys()
+    assert all("type" in branch for branch in schema["properties"]["action_fields"]["anyOf"])
+    with pytest.raises(ValidationError):
+        routing.Understanding.model_validate({
+            "purpose": "purchase_update", "slots": {"request_no": "PR-001"},
+            "action_fields": {"arbitrary_write": "forbidden"},
+        })
+
+
+def test_routing_strict_action_null_placeholders_do_not_expand_a_proposal():
+    decision = routing.Understanding.model_validate({
+        "purpose": "rfq_draft", "slots": {"request_no": "PR-001"},
+        "action_fields": {"supplier_codes": ["SUP-001"], "purpose": None, "items": None},
+    })
+    assert decision.action_fields == {"supplier_codes": ["SUP-001"]}
+
+
 def test_json_object_uses_chat_completions_response_format(monkeypatch):
     payloads = []
 

@@ -218,6 +218,8 @@ async def _chat_impl(data: AIChatRequest, settings: Settings | None = None, atta
             LOGGER.warning("AI 服务返回 HTTP status=%s retries=%s", status_code, attempt)
             if _retryable_status(status_code):
                 raise SafeFailoverError("AI 服务暂时不可用，请稍后重试") from exc
+            if status_code == 400:
+                raise BusinessValidationError("AI 服务拒绝了请求（HTTP 400），请检查模型接口、请求参数和结构化输出配置") from exc
             raise BusinessValidationError("AI 服务拒绝了请求，请检查 API key、模型和额度配置") from exc
 
     if response is None:

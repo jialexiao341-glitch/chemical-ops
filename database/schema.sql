@@ -638,6 +638,9 @@ CREATE TABLE supplier_quote_items (
       tax_included TINYINT(1) NULL COMMENT '报价是否含税，未知时为空',
     moq_quantity DECIMAL(18,6) NULL COMMENT '该报价对应的最小起订量',
     moq_unit_id BIGINT UNSIGNED NULL COMMENT 'MOQ 单位',
+    freight_amount DECIMAL(18,6) NULL COMMENT '报价明细运费金额；未知时为空',
+    freight_tax_rate DECIMAL(5,2) NULL COMMENT '运费税率百分比；未知时为空',
+    freight_tax_included TINYINT(1) NULL COMMENT '运费是否含税；未知时为空',
     lead_days INT UNSIGNED NULL COMMENT '交期天数',
     payment_terms VARCHAR(255) NULL COMMENT '付款条件',
     note VARCHAR(1000) NULL COMMENT '报价明细备注',
@@ -652,7 +655,8 @@ CREATE TABLE supplier_quote_items (
     CONSTRAINT fk_quote_item_unit FOREIGN KEY (unit_id) REFERENCES md_units (id),
     CONSTRAINT fk_quote_item_moq_unit FOREIGN KEY (moq_unit_id) REFERENCES md_units (id),
     CONSTRAINT chk_quote_item_values CHECK (quoted_quantity > 0 AND unit_price >= 0 AND (moq_quantity IS NULL OR moq_quantity > 0)),
-    CONSTRAINT chk_quote_item_tax CHECK (tax_rate IS NULL OR tax_rate BETWEEN 0 AND 100)
+    CONSTRAINT chk_quote_item_tax CHECK (tax_rate IS NULL OR tax_rate BETWEEN 0 AND 100),
+    CONSTRAINT chk_quote_item_freight CHECK ((freight_amount IS NULL OR freight_amount >= 0) AND (freight_tax_rate IS NULL OR freight_tax_rate BETWEEN 0 AND 100))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='供应商报价明细';
 
 CREATE TABLE quote_comparisons (
@@ -695,6 +699,10 @@ CREATE TABLE quote_comparison_items (
     moq_quantity DECIMAL(18,6) NULL COMMENT 'MOQ 快照',
     lead_days INT UNSIGNED NULL COMMENT '交期快照',
     payment_terms VARCHAR(255) NULL COMMENT '付款条件快照',
+    freight_amount DECIMAL(18,6) NULL COMMENT '比较时运费快照',
+    freight_tax_rate DECIMAL(5,2) NULL COMMENT '比较时运费税率快照',
+    freight_tax_included TINYINT(1) NULL COMMENT '比较时运费含税口径快照',
+    analysis_json JSON NULL COMMENT '确定性总成本拆分快照',
     historical_score DECIMAL(5,2) NULL COMMENT '历史表现得分',
     composite_score DECIMAL(8,3) NULL COMMENT '综合比较得分',
     rank_no SMALLINT UNSIGNED NULL COMMENT '排序名次',

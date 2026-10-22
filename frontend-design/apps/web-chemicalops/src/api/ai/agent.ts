@@ -49,6 +49,12 @@ export namespace AgentApi {
     comparison_reasons: string[];
     quoted_quantity: string;
     moq_quantity: null | string;
+    moq_unit_id: null | number;
+    payment_terms: null | string;
+    freight_amount: null | string;
+    freight_tax_rate: null | string;
+    freight_tax_included: boolean | null;
+    cost_analysis: null | { complete: boolean; currency_code: string; goods_amount: null | string; goods_tax: null | string; freight_amount: null | string; freight_tax: null | string; total_cost: null | string; purchase_quantity: null | string; moq_extra_quantity: null | string; reasons: string[] };
     lead_days: null | number;
   }
   interface ResultBase {

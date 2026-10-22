@@ -136,6 +136,9 @@ class SupplierQuoteItem(Base):
     tax_included: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     moq_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     moq_unit_id: Mapped[int | None] = mapped_column(ForeignKey("md_units.id"), nullable=True)
+    freight_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    freight_tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    freight_tax_included: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payment_terms: Mapped[str | None] = mapped_column(String(255), nullable=True)
     note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -191,10 +194,18 @@ class QuoteComparisonItem(Base):
     moq_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payment_terms: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    freight_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    freight_tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    freight_tax_included: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    analysis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     historical_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     composite_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     rank_no: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     selection_flag: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    @property
+    def cost_analysis(self) -> dict | None:
+        return self.analysis_json
 
     comparison: Mapped[QuoteComparison] = relationship(back_populates="items")

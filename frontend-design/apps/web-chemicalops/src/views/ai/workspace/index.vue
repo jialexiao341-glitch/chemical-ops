@@ -1459,7 +1459,7 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
                         <ul v-if="entry.rows?.length" class="list-disc pl-5 text-muted-foreground">
                           <li v-for="(row, rowIndex) in entry.rows" :key="rowIndex">
                             <template v-if="entry.tool === 'catalog.search_products'">{{ row.product_name }} · {{ row.product_code }} · {{ row.model || '未登记型号' }} / {{ row.packaging_spec || '未登记包装' }}</template>
-                            <template v-else-if="entry.tool === 'supplier_quotes.compare'">{{ row.supplier_name }}：{{ formatAmount(row.unit_price, 6) }} {{ row.currency_code }}/{{ row.unit_name }} · {{ row.rank ? `可比组排名 ${row.rank}` : '不可比，不排序' }}<span v-if="row.valid_until"> · 有效至 {{ row.valid_until }}</span></template>
+                            <template v-else-if="entry.tool === 'supplier_quotes.compare'">{{ row.supplier_name }}：{{ formatAmount(row.unit_price, 6) }} {{ row.currency_code }}/{{ row.unit_name }} · {{ row.cost_analysis?.complete ? `总成本 ${formatAmount(row.cost_analysis.total_cost)} ${row.currency_code}` : `总成本不完整：${row.cost_analysis?.reasons.join('；') || '缺少信息'}` }} · {{ row.rank ? `可比组排名 ${row.rank}` : '不可比，不排序' }}<span v-if="row.valid_until"> · 有效至 {{ row.valid_until }}</span></template>
                             <template v-else>{{ row.rfq_no }} · 询价明细 #{{ row.rfq_item_id }} · {{ row.specification || '未登记规格' }}</template>
                           </li>
                         </ul>

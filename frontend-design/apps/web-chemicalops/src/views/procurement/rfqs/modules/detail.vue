@@ -287,6 +287,7 @@ const comparisonColumns = [
     align: 'right' as const,
   },
   { key: 'total_amount', dataIndex: 'total_amount', title: '报价行金额', width: 140, align: 'right' as const },
+  { key: 'cost_analysis', title: '总成本拆分', minWidth: 260 },
   { key: 'lead_days', dataIndex: 'lead_days', title: '交期(天)', width: 100 },
   { key: 'moq_quantity', dataIndex: 'moq_quantity', title: '最小起订量', width: 120 },
   { key: 'payment_terms', dataIndex: 'payment_terms', title: '付款条件', width: 140 },
@@ -479,6 +480,7 @@ defineExpose({ drawerApi });
               description="还没有生成比价，请先点击「生成比价」"
             />
             <div v-else class="space-y-3">
+              <Alert class="mb-3" type="info" show-icon message="总成本按询价数量与 MOQ 计算，并拆分货款、税费和运费；缺少运费或税务信息时标记为未完整。MOQ、交期、账期和可见的历史验收情况作为独立事实展示，不合并成分数。" />
               <div class="flex items-center gap-3">
                 <span class="text-sm">比价单：{{ comparison.comparison_no }}</span>
                 <Tag :color="COMPARISON_STATUS_DICT.color(comparison.status)">
@@ -549,6 +551,16 @@ defineExpose({ drawerApi });
                   </template>
                   <template v-else-if="column.key === 'total_amount'">
                     {{ formatAmount(record.total_amount) }}
+                  </template>
+                  <template v-else-if="column.key === 'cost_analysis'">
+                    <template v-if="record.cost_analysis?.complete">
+                      <div>货款 {{ formatAmount(record.cost_analysis.goods_amount) }} + 税 {{ formatAmount(record.cost_analysis.goods_tax) }}</div>
+                      <div>运费 {{ formatAmount(record.cost_analysis.freight_amount) }} + 税 {{ formatAmount(record.cost_analysis.freight_tax) }}</div>
+                      <div class="font-medium">合计 {{ record.cost_analysis.currency_code }} {{ formatAmount(record.cost_analysis.total_cost) }}</div>
+                      <div class="text-xs text-muted-foreground">采购数量 {{ formatQuantity(record.cost_analysis.purchase_quantity) }}</div>
+                    </template>
+                    <span v-else class="text-amber-600">未完整：{{ (record.cost_analysis?.reasons ?? []).join('；') || '缺少计算所需数据' }}</span>
+                    <div class="text-xs text-muted-foreground">历史验收：{{ record.quality_history?.status === 'OBSERVED' ? `样本 ${record.quality_history.sample_count} · 合格 ${record.quality_history.passed} · 部分 ${record.quality_history.partial} · 不合格 ${record.quality_history.failed}` : record.quality_history?.reason ?? '未知' }}</div>
                   </template>
                   <template v-else-if="column.key === 'moq_quantity'">
                     {{ formatQuantity(record.moq_quantity) }}

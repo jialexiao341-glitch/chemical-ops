@@ -79,6 +79,9 @@ class SupplierQuoteItemCreate(BaseModel):
     tax_included: bool | None = None
     moq_quantity: Decimal | None = Field(default=None, gt=0)
     moq_unit_id: int | None = Field(default=None, gt=0)
+    freight_amount: Decimal | None = Field(default=None, ge=0)
+    freight_tax_rate: Decimal | None = Field(default=None, ge=0, le=100)
+    freight_tax_included: bool | None = None
     lead_days: int | None = Field(default=None, ge=0)
     payment_terms: str | None = Field(default=None, max_length=255)
     note: str | None = Field(default=None, max_length=1000)
@@ -117,6 +120,10 @@ class QuoteCandidateItem(BaseModel):
     tax_rate: str | None = None
     tax_included: bool | None = None
     moq_quantity: str | None = None
+    moq_unit_name: str | None = None
+    freight_amount: str | None = None
+    freight_tax_rate: str | None = None
+    freight_tax_included: bool | None = None
     lead_days: int | None = None
     payment_terms: str | None = None
     source_quote: str
@@ -190,6 +197,11 @@ class QuoteComparisonItemRead(BaseModel):
     moq_quantity: Decimal | None
     lead_days: int | None
     payment_terms: str | None
+    freight_amount: Decimal | None
+    freight_tax_rate: Decimal | None
+    freight_tax_included: bool | None
+    cost_analysis: dict | None = None
+    quality_history: dict | None = None
     historical_score: Decimal | None
     composite_score: Decimal | None
     rank_no: int | None

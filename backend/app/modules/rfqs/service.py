@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
@@ -18,8 +18,13 @@ from app.modules.rfqs.schema import (
     RFQUpdate,
     SupplierQuoteCreate,
 )
+from app.modules.rfqs.total_cost import calculate_total_cost
+from app.modules.deliveries.model import Delivery
+from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.quality_acceptances.model import QualityAcceptance
+from app.modules.quality_acceptances.scope import acceptance_read_condition
 from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_role_codes
+from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.file_model import SysFile
 from app.modules.system.model import User
 
@@ -265,7 +270,7 @@ def build_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
         comparison_no=f"TEMP-C-{rfq.id}-{int(_now().timestamp())}",
         rfq_id=rfq.id,
         created_by=user.id,
-        conclusion="仅在币种、计量单位、税率及含税口径一致的报价组内按单价排序；不做汇率或单位换算。不可比报价保留并说明原因，最终中选仍需人工确认。",
+        conclusion="仅在币种、计量单位、税率及含税口径一致的报价组内按单价排序；不做汇率或单位换算。总成本按询价量/同单位 MOQ、商品税与已登记运费拆分；缺项不生成完整总额。MOQ、交期、账期和当前用户可见的历史验收结果作为独立事实展示，不合成评分；最终中选仍需人工确认。",
         status="DRAFT",
     )
     db.add(comparison)
@@ -315,6 +320,9 @@ def build_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
                 moq_quantity=item.moq_quantity if item else None,
                 lead_days=item.lead_days if item else None,
                 payment_terms=item.payment_terms if item else None,
+                freight_amount=item.freight_amount if item else None,
+                freight_tax_rate=item.freight_tax_rate if item else None,
+                freight_tax_included=item.freight_tax_included if item else None,
                 rank_no=None,
                 selection_flag=0,
                 comparison_status="NOT_COMPARABLE",
@@ -362,9 +370,51 @@ def build_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
         ranked = sorted(winning_group, key=lambda entry: (entry[1].unit_price, entry[0].id))
         for rank, (_quote, _item, row, _reasons) in enumerate(ranked, start=1):
             row.rank_no = rank
+    for row in comparison.items:
+        quote = next((quote for quote in quotes if quote.id == row.quote_id), None)
+        rfq_item = rfq_items.get(row.rfq_item_id)
+        quote_item = next((item for item in quote.items if item.rfq_item_id == row.rfq_item_id), None) if quote else None
+        if rfq_item is None or quote_item is None:
+            row.analysis_json = {
+                "complete": False,
+                "total_cost": None,
+                "reasons": ["缺少询价或报价明细"],
+            }
+            continue
+        costs = calculate_total_cost(
+            requested_quantity=rfq_item.quantity,
+            requested_unit_id=rfq_item.unit_id,
+            quoted_unit_id=quote_item.unit_id,
+            unit_price=quote_item.unit_price,
+            tax_rate=quote_item.tax_rate,
+            tax_included=quote_item.tax_included,
+            moq_quantity=quote_item.moq_quantity,
+            moq_unit_id=quote_item.moq_unit_id,
+            freight_amount=quote_item.freight_amount,
+            freight_tax_rate=quote_item.freight_tax_rate,
+            freight_tax_included=quote_item.freight_tax_included,
+        )
+        row.analysis_json = {
+            "currency_code": row.currency_code,
+            "purchase_quantity": str(costs.purchase_quantity) if costs.purchase_quantity is not None else None,
+            "moq_extra_quantity": str(costs.moq_extra_quantity) if costs.moq_extra_quantity is not None else None,
+            "goods_amount": str(costs.goods_amount) if costs.goods_amount is not None else None,
+            "goods_tax": str(costs.goods_tax) if costs.goods_tax is not None else None,
+            "freight_amount": str(costs.freight_amount) if costs.freight_amount is not None else None,
+            "freight_tax": str(costs.freight_tax) if costs.freight_tax is not None else None,
+            "total_cost": str(costs.total_cost) if costs.total_cost is not None else None,
+            "complete": costs.complete,
+            "reasons": costs.reasons,
+            "lead_days": row.lead_days,
+            "payment_terms": row.payment_terms,
+        }
     add_audit_log(db, actor_id=user.id, action_type="COMPARE", resource_type="RFQ", resource_id=rfq.id, request_summary="生成供应商报价比较结果", result_status="SUCCESS")
     db.commit()
-    return crud.get_comparison(db, rfq.id, comparison.id)
+    saved_comparison = crud.get_comparison(db, rfq.id, comparison.id)
+    quality_history = quality_history_by_supplier(db, user, {row.supplier_id for row in saved_comparison.items})
+    for row in saved_comparison.items:
+        row.quality_history = quality_history.get(row.supplier_id)
+    return saved_comparison
 
 
 def get_latest_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
@@ -374,7 +424,50 @@ def get_latest_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparis
     comparison = crud.get_latest_comparison(db, rfq_id)
     if comparison is None:
         raise ResourceNotFoundError("当前询价单还没有比价结果")
+    quality_history = quality_history_by_supplier(db, user, {row.supplier_id for row in comparison.items})
+    for row in comparison.items:
+        row.quality_history = quality_history.get(row.supplier_id)
     return comparison
+
+
+def quality_history_by_supplier(db: Session, user: User, supplier_ids: set[int]) -> dict[int, dict]:
+    """只在当前用户有质量读取权限时，按质量模块现有范围汇总已完成验收事实。"""
+    if not supplier_ids or "quality.acceptances.read" not in set(get_user_permission_codes(db, user.id)):
+        return {
+            supplier_id: {"status": "UNKNOWN", "reason": "当前账号无质量验收读取权限"}
+            for supplier_id in supplier_ids
+        }
+    roles = get_user_role_codes(db, user.id)
+    rows = db.execute(
+        select(PurchaseOrder.supplier_id, QualityAcceptance.result, func.count().label("count"))
+        .join(Delivery, Delivery.po_id == PurchaseOrder.id)
+        .join(QualityAcceptance, QualityAcceptance.delivery_id == Delivery.id)
+        .where(
+            PurchaseOrder.supplier_id.in_(supplier_ids),
+            QualityAcceptance.result.in_(["PASSED", "PARTIAL", "FAILED"]),
+            acceptance_read_condition(user, roles),
+        )
+        .group_by(PurchaseOrder.supplier_id, QualityAcceptance.result)
+    ).all()
+    counts: dict[int, dict[str, int]] = {}
+    for supplier_id, result, count in rows:
+        counts.setdefault(supplier_id, {})[result] = int(count)
+    summaries = {}
+    for supplier_id in supplier_ids:
+        outcomes = counts.get(supplier_id, {})
+        sample_count = sum(outcomes.values())
+        if not sample_count:
+            summaries[supplier_id] = {"status": "UNKNOWN", "reason": "没有可见的已完成质量验收记录"}
+        else:
+            summaries[supplier_id] = {
+                "status": "OBSERVED",
+                "sample_count": sample_count,
+                "passed": outcomes.get("PASSED", 0),
+                "partial": outcomes.get("PARTIAL", 0),
+                "failed": outcomes.get("FAILED", 0),
+                "description": "可见的历史验收结果；仅为事实统计，不等同供应商风险评分",
+            }
+    return summaries
 
 
 def select_quote(db: Session, user: User, rfq_id: int, data: QuoteSelection, *, commit: bool = True) -> RFQ:

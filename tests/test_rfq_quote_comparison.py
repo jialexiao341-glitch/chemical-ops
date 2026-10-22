@@ -16,7 +16,9 @@ def _quote(quote_id, supplier_id, *, currency="CNY", items=None):
     )
 
 
-def _item(rfq_item_id=31, *, unit_id=1, price="10", tax_rate="13", tax_included=True):
+def _item(rfq_item_id=31, *, unit_id=1, price="10", tax_rate="13", tax_included=True,
+          freight_amount=None, freight_tax_rate=None, freight_tax_included=None,
+          moq_quantity=None, moq_unit_id=None):
     return SimpleNamespace(
         rfq_item_id=rfq_item_id,
         unit_id=unit_id,
@@ -24,7 +26,11 @@ def _item(rfq_item_id=31, *, unit_id=1, price="10", tax_rate="13", tax_included=
         quoted_quantity=Decimal("10"),
         tax_rate=Decimal(tax_rate) if tax_rate is not None else None,
         tax_included=tax_included,
-        moq_quantity=None,
+        moq_quantity=Decimal(moq_quantity) if moq_quantity is not None else None,
+        moq_unit_id=moq_unit_id,
+        freight_amount=Decimal(freight_amount) if freight_amount is not None else None,
+        freight_tax_rate=Decimal(freight_tax_rate) if freight_tax_rate is not None else None,
+        freight_tax_included=freight_tax_included,
         lead_days=5,
         payment_terms="月结30天",
         note=None,
@@ -45,9 +51,10 @@ class _Db:
 def _build(monkeypatch, quotes):
     rfq = SimpleNamespace(
         id=14,
-        items=[SimpleNamespace(id=31, unit_id=1)],
+        items=[SimpleNamespace(id=31, unit_id=1, quantity=Decimal("10"))],
         quotes=quotes,
     )
+    monkeypatch.setattr(service, "get_user_permission_codes", lambda *_args: [])
     monkeypatch.setattr(service, "get_rfq", lambda *_args, **_kwargs: rfq)
     result = {"comparison": None}
     monkeypatch.setattr(service.crud, "get_comparison", lambda *_args, **_kwargs: result["comparison"])
@@ -110,11 +117,12 @@ def test_comparison_excludes_incomplete_quote_from_every_item_ranking(monkeypatc
         _quote(51, 8, items=[_item()]),
         _quote(52, 9, items=[_item(), _item(rfq_item_id=32)]),
     ]
-    rfq = SimpleNamespace(id=14, items=[SimpleNamespace(id=31, unit_id=1), SimpleNamespace(id=32, unit_id=1)], quotes=quotes)
+    rfq = SimpleNamespace(id=14, items=[SimpleNamespace(id=31, unit_id=1, quantity=Decimal("10")), SimpleNamespace(id=32, unit_id=1, quantity=Decimal("5"))], quotes=quotes)
     monkeypatch.setattr(service, "get_rfq", lambda *_args, **_kwargs: rfq)
     result = {"comparison": None}
     monkeypatch.setattr(service.crud, "get_comparison", lambda *_args, **_kwargs: result["comparison"])
     monkeypatch.setattr(service, "add_audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(service, "get_user_permission_codes", lambda *_args: [])
     db = _Db()
 
     def flush():
@@ -129,6 +137,25 @@ def test_comparison_excludes_incomplete_quote_from_every_item_ranking(monkeypatc
     assert all(row.rank_no is None for row in quote_rows)
     assert all(row.comparison_status == "NOT_COMPARABLE" for row in quote_rows)
     assert all("未覆盖全部询价明细" in row.comparison_reasons[0] for row in quote_rows)
+
+
+def test_comparison_includes_explainable_cost_breakdown_and_quality_unknown(monkeypatch):
+    quotes = [_quote(51, 8, items=[_item(
+        price="100", tax_rate="13", tax_included=False, moq_quantity="12", moq_unit_id=1,
+        freight_amount="20", freight_tax_rate="6", freight_tax_included=False,
+    )])]
+
+    comparison = _build(monkeypatch, quotes)
+
+    row = comparison.items[0]
+    assert row.cost_analysis["purchase_quantity"] == "12"
+    assert row.cost_analysis["goods_amount"] == "1200.000000"
+    assert row.cost_analysis["goods_tax"] == "156.000000"
+    assert row.cost_analysis["freight_tax"] == "1.200000"
+    assert row.cost_analysis["total_cost"] == "1377.200000"
+    assert row.cost_analysis["complete"] is True
+    assert row.quality_history["status"] == "UNKNOWN"
+    assert "权限" in row.quality_history["reason"]
 
 
 def test_comparison_does_not_choose_a_basis_when_signature_groups_are_tied(monkeypatch):

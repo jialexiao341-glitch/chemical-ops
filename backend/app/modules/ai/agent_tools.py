@@ -53,6 +53,7 @@ from app.modules.ai.tool_sql_timeout import (
     current_task_deadline,
     tool_deadline_context,
 )
+from app.modules.rfqs.total_cost import calculate_total_cost
 from app.modules.chemicals.model import Chemical
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.inventory.service import accessible_warehouse_ids
@@ -234,7 +235,7 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
     statement = select(
         RFQ.id.label("rfq_id"), RFQ.rfq_no, RFQ.status,
         RFQItem.specification, RFQItem.technical_requirements,
-        RFQItem.unit_id.label("requested_unit_id"),
+        RFQItem.unit_id.label("requested_unit_id"), RFQItem.quantity.label("requested_quantity"),
     ).join(RFQItem, RFQItem.rfq_id == RFQ.id).where(
         RFQItem.id == arguments.rfq_item_id, RFQItem.product_id == arguments.product_id
     )
@@ -262,6 +263,8 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
         SupplierQuoteItem.supplier_model, SupplierQuoteItem.tax_rate, SupplierQuoteItem.tax_included,
         SupplierQuoteItem.unit_price, SupplierQuoteItem.quoted_quantity,
         SupplierQuoteItem.moq_quantity, SupplierQuoteItem.moq_unit_id, SupplierQuoteItem.lead_days,
+        SupplierQuoteItem.freight_amount, SupplierQuoteItem.freight_tax_rate, SupplierQuoteItem.freight_tax_included,
+        SupplierQuoteItem.payment_terms,
     ).select_from(SupplierQuote).join(SupplierQuoteItem, SupplierQuoteItem.quote_id == SupplierQuote.id).join(
         Supplier, Supplier.id == SupplierQuote.supplier_id
     ).join(Unit, Unit.id == SupplierQuoteItem.unit_id).where(
@@ -274,6 +277,34 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
     rows = [QuoteRow(**row) for row in db.execute(
         base.order_by(SupplierQuote.id, SupplierQuoteItem.id).limit(arguments.limit)
     ).mappings().all()]
+    for row in rows:
+        costs = calculate_total_cost(
+            requested_quantity=context.requested_quantity,
+            requested_unit_id=context.requested_unit_id,
+            quoted_unit_id=row.unit_id,
+            unit_price=row.unit_price,
+            tax_rate=row.tax_rate,
+            tax_included=row.tax_included,
+            moq_quantity=row.moq_quantity,
+            moq_unit_id=row.moq_unit_id,
+            freight_amount=row.freight_amount,
+            freight_tax_rate=row.freight_tax_rate,
+            freight_tax_included=row.freight_tax_included,
+        )
+        row.cost_analysis = {
+            "currency_code": row.currency_code,
+            "purchase_quantity": str(costs.purchase_quantity) if costs.purchase_quantity is not None else None,
+            "moq_extra_quantity": str(costs.moq_extra_quantity) if costs.moq_extra_quantity is not None else None,
+            "goods_amount": str(costs.goods_amount) if costs.goods_amount is not None else None,
+            "goods_tax": str(costs.goods_tax) if costs.goods_tax is not None else None,
+            "freight_amount": str(costs.freight_amount) if costs.freight_amount is not None else None,
+            "freight_tax": str(costs.freight_tax) if costs.freight_tax is not None else None,
+            "total_cost": str(costs.total_cost) if costs.total_cost is not None else None,
+            "complete": costs.complete,
+            "reasons": costs.reasons,
+            "lead_days": row.lead_days,
+            "payment_terms": row.payment_terms,
+        }
     truncated = total > arguments.limit
     warnings = ["报价数量、起订量和交期仅展示原值；不推断目标数量可成交，不自动选定供应商。"]
     groups: dict[tuple, list[QuoteRow]] = {}
@@ -318,6 +349,8 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
         warnings.append("报价单位、有效期、税率、含税口径或型号未明确/不一致的报价仅展示，不参与排序。")
     if truncated:
         warnings.append("报价已截断，全部候选不排序；请缩小范围或在原询价页面核对。")
+    if any(not row.cost_analysis["complete"] for row in rows):
+        warnings.append("至少一条报价缺少成本组成或单位口径；该行不生成完整总额。MOQ、交期、账期与质量验收事实独立展示，不合成推荐分数。")
     return QuoteResult(
         observed_at=datetime.now(timezone.utc), as_of=today, product_id=arguments.product_id,
         rfq_id=context.rfq_id, rfq_no=context.rfq_no, rfq_item_id=arguments.rfq_item_id,

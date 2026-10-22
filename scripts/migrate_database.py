@@ -31,6 +31,15 @@ MIGRATION_LOCK = "chemicalops_schema_migrations"
 LEDGER_TABLE = "schema_migrations"
 ATTEMPT_TABLE = "schema_migration_attempts"
 CORE_TABLES = {"sys_users", "md_products", "suppliers", "deliveries", "purchase_orders"}
+# 056 was applied before its freight CHECK constraint was added to the file.
+# 057 installs that constraint and re-baselines only this known ledger entry.
+MIGRATION_CHECKSUM_REPAIRS = {
+    "056": {
+        "ledger_checksum": "6661e70d6d3b52534087fcc0cafb4d5226b0a16dc60f3528a39c0333e25c0933",
+        "file_checksum": "8e851b0be5cdd75eae85deb28c3c4373fd2e0821f72fd144071579515ad72b6f",
+        "repair_version": "057",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -274,8 +283,59 @@ def _apply_migration(connection, migration: Migration) -> None:
         _apply_return_reconciliation_items(connection, migration)
     elif migration.version == "053":
         _apply_purchase_order_source_guard(connection, migration)
+    elif migration.version == "057":
+        _apply_rfq_total_cost_repair(connection)
     else:
         _execute_sql_file(connection, migration)
+
+
+def _apply_rfq_total_cost_repair(connection) -> None:
+    """Apply the missing 056 constraint, then reconcile its known checksum drift."""
+    required_columns = {
+        "supplier_quote_items": {"freight_amount", "freight_tax_rate", "freight_tax_included"},
+        "quote_comparison_items": {"freight_amount", "freight_tax_rate", "freight_tax_included", "analysis_json"},
+    }
+    for table, columns in required_columns.items():
+        missing = sorted(column for column in columns if not _column_exists(connection, table, column))
+        if missing:
+            raise RuntimeError(f"迁移 056 的结构未完整应用，{table} 缺少列：" + ", ".join(missing))
+
+    constraint = connection.execute(
+        text(
+            "SELECT cc.CHECK_CLAUSE FROM information_schema.TABLE_CONSTRAINTS tc "
+            "JOIN information_schema.CHECK_CONSTRAINTS cc "
+            "ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME "
+            "WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'supplier_quote_items' "
+            "AND tc.CONSTRAINT_NAME = 'chk_quote_item_freight'"
+        )
+    ).scalar()
+    if constraint is None:
+        connection.exec_driver_sql(
+            "ALTER TABLE supplier_quote_items ADD CONSTRAINT chk_quote_item_freight CHECK ("
+            "(freight_amount IS NULL OR freight_amount >= 0) AND "
+            "(freight_tax_rate IS NULL OR freight_tax_rate BETWEEN 0 AND 100))"
+        )
+        connection.commit()
+    else:
+        normalized = " ".join(str(constraint).lower().replace("`", "").split())
+        if not all(token in normalized for token in ("freight_amount", ">= 0", "freight_tax_rate", "between 0 and 100")):
+            raise RuntimeError("chk_quote_item_freight 已存在但定义不匹配；停止迁移以保留现有约束")
+
+    repair = MIGRATION_CHECKSUM_REPAIRS["056"]
+    result = connection.execute(
+        text(
+            f"UPDATE {LEDGER_TABLE} SET checksum = :file_checksum "
+            "WHERE version = '056' AND name = 'rfq_total_cost_analysis' AND checksum = :ledger_checksum"
+        ),
+        {"file_checksum": repair["file_checksum"], "ledger_checksum": repair["ledger_checksum"]},
+    )
+    if result.rowcount != 1:
+        current = connection.execute(
+            text(f"SELECT checksum FROM {LEDGER_TABLE} WHERE version = '056' AND name = 'rfq_total_cost_analysis'")
+        ).scalar()
+        if current != repair["file_checksum"]:
+            raise RuntimeError("迁移 056 台账校验和与预期修复源不符；停止迁移")
+    connection.commit()
 
 
 def _apply_purchase_order_source_guard(connection, migration: Migration) -> None:
@@ -359,7 +419,8 @@ def status() -> int:
             if row is None:
                 state = "PENDING"
             elif row["checksum"] != migration.checksum:
-                state = "CHECKSUM_MISMATCH"
+                repair = _checksum_repair_for(migration, row, migrations, applied)
+                state = f"CHECKSUM_REPAIR_PENDING {repair['repair_version']}" if repair else "CHECKSUM_MISMATCH"
             else:
                 state = f"APPLIED {row['applied_at']}"
             print(f"{migration.version} {migration.name} {state}")
@@ -384,6 +445,16 @@ def _validate_ledger_state(migrations: list[Migration], applied: dict[str, dict[
     applied_versions = sorted(int(version) for version in applied)
     if applied_versions and applied_versions != list(range(1, applied_versions[-1] + 1)):
         raise RuntimeError("迁移台账版本不连续；请先人工核对数据库结构和迁移记录")
+
+
+def _checksum_repair_for(migration: Migration, row: dict[str, str], migrations: list[Migration], applied: dict[str, dict[str, str]]) -> dict | None:
+    repair = MIGRATION_CHECKSUM_REPAIRS.get(migration.version)
+    if repair is None or repair["ledger_checksum"] != row["checksum"] or repair["file_checksum"] != migration.checksum:
+        return None
+    repair_migration = next((item for item in migrations if item.version == repair["repair_version"]), None)
+    if repair_migration is None or repair["repair_version"] in applied:
+        return None
+    return repair
 
 
 def upgrade_database(
@@ -422,6 +493,8 @@ def upgrade_database(
                 if row is None:
                     pending.append(migration)
                 elif row["checksum"] != migration.checksum:
+                    if _checksum_repair_for(migration, row, migrations, applied):
+                        continue
                     raise RuntimeError(
                         f"迁移 {migration.version} 已应用，但文件校验和变化；"
                         "请新增迁移修复，不要修改已发布迁移文件"

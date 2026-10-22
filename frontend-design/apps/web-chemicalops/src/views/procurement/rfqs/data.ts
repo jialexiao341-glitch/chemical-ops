@@ -126,8 +126,12 @@ export interface RfqItemRow {
 
 /** 报价明细的编辑行，含用于展示的只读字段 */
 export interface QuoteItemRow {
+  freight_amount?: null | number | string;
+  freight_tax_rate?: null | number | string;
+  freight_tax_basis?: 'EXCLUDED' | 'INCLUDED' | null;
   lead_days?: null | number;
   moq_quantity?: null | number | string;
+  moq_unit_id?: null | number;
   note?: null | string;
   payment_terms?: null | string;
   quoted_quantity?: null | number | string;

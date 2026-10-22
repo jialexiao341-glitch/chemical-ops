@@ -75,7 +75,11 @@ const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
         currency_code: currencyCode.value.trim().toUpperCase(),
         items: rows.value.map((row) => ({
           lead_days: row.lead_days ?? undefined,
+          freight_amount: row.freight_amount ?? undefined,
+          freight_tax_rate: row.freight_tax_rate ?? undefined,
+          freight_tax_included: row.freight_tax_basis == null ? undefined : row.freight_tax_basis === 'INCLUDED',
           moq_quantity: row.moq_quantity ?? undefined,
+          moq_unit_id: row.moq_unit_id ?? undefined,
           note: row.note || undefined,
           payment_terms: row.payment_terms || undefined,
           quoted_quantity: Number(row.quoted_quantity),
@@ -138,7 +142,11 @@ const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
       }));
       rows.value = (rfq.items ?? []).map((item) => ({
         lead_days: undefined,
+        freight_amount: undefined,
+        freight_tax_rate: undefined,
+        freight_tax_basis: null,
         moq_quantity: undefined,
+        moq_unit_id: item.unit_id,
         note: '',
         payment_terms: '',
         quoted_quantity: Number(item.quantity),
@@ -181,6 +189,13 @@ async function parseQuoteFile(event: Event) {
       if (item.tax_rate != null && Number.isFinite(Number(item.tax_rate))) row.tax_rate = Number(item.tax_rate);
       if (item.tax_included !== null && item.tax_included !== undefined) row.tax_basis = item.tax_included ? 'INCLUDED' : 'EXCLUDED';
       if (item.moq_quantity && Number.isFinite(Number(item.moq_quantity))) row.moq_quantity = Number(item.moq_quantity);
+      if (item.moq_unit_name) {
+        const matchingMoqUnit = unitOptions.value.find((unit) => unit.label.trim().toLowerCase() === item.moq_unit_name?.trim().toLowerCase());
+        if (matchingMoqUnit) row.moq_unit_id = matchingMoqUnit.value;
+      }
+      if (item.freight_amount != null && Number.isFinite(Number(item.freight_amount))) row.freight_amount = Number(item.freight_amount);
+      if (item.freight_tax_rate != null && Number.isFinite(Number(item.freight_tax_rate))) row.freight_tax_rate = Number(item.freight_tax_rate);
+      if (item.freight_tax_included != null) row.freight_tax_basis = item.freight_tax_included ? 'INCLUDED' : 'EXCLUDED';
       if (item.lead_days !== null && item.lead_days !== undefined) row.lead_days = item.lead_days;
       if (item.payment_terms) row.payment_terms = item.payment_terms;
       if (item.unit_name) {
@@ -220,6 +235,10 @@ const columns = [
   { key: 'tax_included', title: '价格口径', width: 120 },
   { key: 'lead_days', title: '交期(天)', width: 110 },
   { key: 'moq_quantity', title: '最小起订量', width: 130 },
+  { key: 'moq_unit_id', title: 'MOQ单位', width: 120 },
+  { key: 'freight_amount', title: '运费', width: 130 },
+  { key: 'freight_tax_rate', title: '运费税率(%)', width: 120 },
+  { key: 'freight_tax_included', title: '运费税口径', width: 130 },
   { key: 'payment_terms', title: '付款条件', width: 150 },
 ];
 
@@ -231,7 +250,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
     <Spin :spinning="loading">
       <div class="space-y-4 px-1">
         <Alert
-          message="请核对所有询价明细；比价时服务端会复核报价覆盖情况，并将不完整报价排除出排名。"
+          message="请核对报价、运费、税费和 MOQ 单位。未提供运费按未知处理；填写 0 表示明确无运费。"
           type="info"
           show-icon
         />
@@ -354,6 +373,18 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
                 :min="0"
                 class="w-full"
               />
+            </template>
+            <template v-else-if="column.key === 'freight_amount'">
+              <InputNumber v-model:value="record.freight_amount" :min="0" :precision="6" class="w-full" />
+            </template>
+            <template v-else-if="column.key === 'freight_tax_rate'">
+              <InputNumber v-model:value="record.freight_tax_rate" :min="0" :max="100" class="w-full" />
+            </template>
+            <template v-else-if="column.key === 'freight_tax_included'">
+              <Select v-model:value="record.freight_tax_basis" :options="[{ label: '含税', value: 'INCLUDED' }, { label: '未税', value: 'EXCLUDED' }]" class="w-full" placeholder="请选择" />
+            </template>
+            <template v-else-if="column.key === 'moq_unit_id'">
+              <Select v-model:value="record.moq_unit_id" :options="unitOptions" class="w-full" />
             </template>
             <template v-else-if="column.key === 'supplier_model'">
               <Input v-model:value="record.supplier_model" :maxlength="100" />

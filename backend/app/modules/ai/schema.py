@@ -5,15 +5,17 @@
 """
 
 from dataclasses import dataclass
+from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any, Literal
+from typing_extensions import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from app.modules.ai.catalog import CATALOG, slot_description
-from app.modules.purchase_requests.schema import PurchaseRequestCreate
+from app.modules.purchase_requests.schema import PurchaseRequestCreate, PurchaseRequestItemCreate
 
 
 class AIChatMessage(BaseModel):
@@ -431,6 +433,24 @@ class SubTask(BaseModel):
     depends_on: list[str] = Field(default_factory=list, max_length=5)
 
 
+class RouteActionFields(TypedDict, total=False):
+    """路由候选动作字段；保留字典接口并向模型提供明确字段。"""
+    purpose: str | None
+    priority: str | None
+    budget_amount: Decimal | None
+    currency_code: str | None
+    expected_date: str | None
+    department_id: int | None
+    items: list[PurchaseRequestItemCreate] | None
+    supplier_codes: list[str] | None
+    quote_deadline: str | None
+    requested_delivery_date: str | None
+    delivery_requirements: str | None
+
+
+RouteActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
+
+
 class Understanding(BaseModel):
     """语义模型的严格输出契约，由程序校验后才能用于路由或拆分。"""
     model_config = ConfigDict(extra="forbid")
@@ -442,13 +462,15 @@ class Understanding(BaseModel):
     tasks: list[Task] = Field(default_factory=list, max_length=4)
     excluded_tasks: list[Task] = Field(default_factory=list, max_length=4)
     slots: Slots = Field(default_factory=Slots)
-    action_fields: dict[str, Any] | None = None
+    action_fields: RouteActionFields | None = None
     question: str | None = Field(default=None, max_length=1000)
     sub_tasks: list[SubTask] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode="after")
     def normalize(self):
         """校验任务一致性、执行模式和无环依赖，再移除明确排除的类别。"""
+        if self.action_fields is not None:
+            self.action_fields = {key: value for key, value in self.action_fields.items() if value is not None}
         if self.purpose == "clarify":
             if self.clarification_options and not self.clarification_slot:
                 raise ValueError("澄清选项必须绑定待回答槽位")
@@ -942,6 +964,11 @@ class QuoteRow(ToolSchema):
     moq_quantity: Decimal | None
     moq_unit_id: int | None
     lead_days: int | None
+    freight_amount: Decimal | None
+    freight_tax_rate: Decimal | None
+    freight_tax_included: bool | None
+    payment_terms: str | None
+    cost_analysis: dict | None = None
     rank: int | None = None
     comparison_status: Literal["COMPARABLE", "NOT_COMPARABLE"] = "NOT_COMPARABLE"
     comparison_reasons: list[str] = Field(default_factory=list)
@@ -958,7 +985,7 @@ class QuoteResult(ToolSchema):
     specification: str | None
     technical_requirements: str | None
     scope: str = "同一询价明细；普通用户仅本人询价，采购经理/管理员全部询价"
-    comparison_basis: str = "报价单价；仅在币种、单位、税率、含税口径、供应商型号相同且明确时排序"
+    comparison_basis: str = "仅在币种、单位、税率、含税口径和供应商型号相同的组内按单价排名；总成本按询价量/同单位 MOQ 拆分商品税与已登记运费，账期和交期独立展示；不做汇率换算或综合评分"
     total_rows: int
     truncated: bool
     rows: list[QuoteRow]
@@ -1164,6 +1191,13 @@ def schema_response_format(model: type[BaseModel], name: str) -> dict:
 
     def strict(node):
         if isinstance(node, dict):
+            # 兼容服务要求 anyOf 分支显式声明 type，不能只含本地引用。
+            for branch in node.get("anyOf", []):
+                reference = branch.get("$ref", "") if isinstance(branch, dict) else ""
+                if reference.startswith("#/$defs/"):
+                    definition = deepcopy(schema["$defs"][reference.removeprefix("#/$defs/")])
+                    branch.pop("$ref")
+                    branch.update(definition)
             node.pop("default", None)
             # 当前服务的 Schema 子集不接受 format=date；模型约束 ISO 外形，Pydantic 校验真实日期。
             if node.get("format") == "date":

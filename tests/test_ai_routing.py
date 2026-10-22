@@ -204,6 +204,30 @@ def test_model_failure_clarifies(monkeypatch):
     assert "无需补充" in result.question and "尚未执行" in result.question
 
 
+def test_provider_rejection_is_reported_as_technical_failure(monkeypatch):
+    async def rejected(*args, **kwargs):
+        raise BusinessValidationError("AI 服务拒绝了请求（HTTP 400），请检查模型接口、请求参数和结构化输出配置")
+    monkeypatch.setattr(llm, "chat", rejected)
+    result = _run_immediate(routing.understand("统计本月逾期未交订单及关联库存"))
+    assert "HTTP 400" in result.question
+    assert "技术故障" in result.question and "尚未执行查询" in result.question
+    assert result.tasks == [] and result.sub_tasks == []
+
+
+def test_root_contract_repair_explains_the_violated_rule(monkeypatch):
+    calls = []
+    async def model(*args, **kwargs):
+        calls.append(kwargs['system_prompt'])
+        subtasks = [] if len(calls) == 1 else [{"id": "t1", "kind": "analytics", "question": "统计订单及关联库存"}]
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "purpose": "query", "execution_mode": "query", "tasks": ["analytics"], "sub_tasks": subtasks,
+        })))
+    monkeypatch.setattr(llm, "chat", model)
+    result = _run_immediate(routing.understand("统计订单及关联库存"))
+    assert result.route == "query"
+    assert "query 模式必须包含一个 analytics 子任务" in calls[1]
+
+
 def test_invalid_six_task_contract_is_regenerated_before_execution(monkeypatch):
     calls = []
     async def model(request, settings, **kwargs):

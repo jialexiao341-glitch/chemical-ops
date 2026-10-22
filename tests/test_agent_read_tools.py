@@ -53,10 +53,10 @@ def tool_db(monkeypatch):
             "CREATE TABLE inventory_batches (id INTEGER PRIMARY KEY, batch_no TEXT, expiry_date DATE)",
             "CREATE TABLE inventory_balances (id INTEGER PRIMARY KEY, warehouse_id INTEGER, batch_id INTEGER, product_id INTEGER, unit_id INTEGER, status TEXT, quantity NUMERIC, locked_quantity NUMERIC)",
             "CREATE TABLE rfqs (id INTEGER PRIMARY KEY, rfq_no TEXT, requester_id INTEGER, status TEXT)",
-            "CREATE TABLE rfq_items (id INTEGER PRIMARY KEY, rfq_id INTEGER, product_id INTEGER, specification TEXT, technical_requirements TEXT, unit_id INTEGER)",
+            "CREATE TABLE rfq_items (id INTEGER PRIMARY KEY, rfq_id INTEGER, product_id INTEGER, specification TEXT, technical_requirements TEXT, unit_id INTEGER, quantity NUMERIC)",
             "CREATE TABLE suppliers (id INTEGER PRIMARY KEY, supplier_name TEXT, status TEXT)",
             "CREATE TABLE supplier_quotes (id INTEGER PRIMARY KEY, rfq_id INTEGER, supplier_id INTEGER, quote_no TEXT, quote_version INTEGER, quote_date DATE, valid_until DATE, currency_code TEXT, status TEXT)",
-            "CREATE TABLE supplier_quote_items (id INTEGER PRIMARY KEY, quote_id INTEGER, rfq_item_id INTEGER, unit_id INTEGER, supplier_model TEXT, tax_rate NUMERIC, tax_included INTEGER, unit_price NUMERIC, quoted_quantity NUMERIC, moq_quantity NUMERIC, moq_unit_id INTEGER, lead_days INTEGER)",
+            "CREATE TABLE supplier_quote_items (id INTEGER PRIMARY KEY, quote_id INTEGER, rfq_item_id INTEGER, unit_id INTEGER, supplier_model TEXT, tax_rate NUMERIC, tax_included INTEGER, unit_price NUMERIC, quoted_quantity NUMERIC, moq_quantity NUMERIC, moq_unit_id INTEGER, lead_days INTEGER, freight_amount NUMERIC, freight_tax_rate NUMERIC, freight_tax_included INTEGER, payment_terms TEXT)",
         ):
             conn.exec_driver_sql(ddl)
         for sql in (
@@ -67,7 +67,7 @@ def tool_db(monkeypatch):
             "INSERT INTO inventory_batches VALUES (1, '批次A', '2020-01-01'), (2, '批次B', NULL)",
             "INSERT INTO inventory_balances VALUES (1, 1, 1, 1, 1, 'AVAILABLE', 100, 20), (2, 1, 2, 1, 1, 'FROZEN', 50, 0), (3, 2, 2, 1, 1, 'AVAILABLE', 999, 0), (4, 3, 2, 1, 2, 'AVAILABLE', 5, 0), (5, 4, 2, 1, 1, 'AVAILABLE', 888, 0)",
             "INSERT INTO rfqs VALUES (1, 'RFQ-OWN', 7, 'RESPONDING'), (2, 'RFQ-OTHER', 8, 'RESPONDING'), (3, 'RFQ-CLOSED', 7, 'CLOSED')",
-            "INSERT INTO rfq_items VALUES (11, 1, 1, '分析纯', '原始条件', 1), (21, 2, 1, '分析纯', NULL, 1), (31, 3, 1, '分析纯', NULL, 1)",
+            "INSERT INTO rfq_items VALUES (11, 1, 1, '分析纯', '原始条件', 1, 10), (21, 2, 1, '分析纯', NULL, 1, 10), (31, 3, 1, '分析纯', NULL, 1, 10)",
         ):
             conn.exec_driver_sql(sql)
         for sid in range(1, 14):
@@ -96,8 +96,9 @@ def tool_db(monkeypatch):
         for qid, sid, version, price, currency, unit, model, tax, valid, status, quoted in samples:
             conn.exec_driver_sql("INSERT INTO supplier_quotes VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)",
                                  (qid, sid, f"Q-{qid}", version, quoted, valid, currency, status))
-            conn.exec_driver_sql("INSERT INTO supplier_quote_items VALUES (?, ?, 11, ?, ?, ?, ?, ?, 20, 5, 1, 3)",
-                                 (qid, qid, unit, model, tax, None if qid == 16 else 0 if qid == 15 else 1, price))
+            conn.exec_driver_sql("INSERT INTO supplier_quote_items VALUES (?, ?, 11, ?, ?, ?, ?, ?, 20, 5, 1, 3, ?, ?, ?, '月结30天')",
+                                 (qid, qid, unit, model, tax, None if qid == 16 else 0 if qid == 15 else 1, price,
+                                  20 if qid == 2 else None, 6 if qid == 2 else None, 0 if qid == 2 else None))
     with Session(engine) as session:
         yield session
     engine.dispose()
@@ -250,6 +251,9 @@ def test_quote_revision_expiry_currency_unit_tax_and_model_boundaries(tool_db):
     assert result.model_dump(mode="json")["rows"][0]["unit_price"] == "10.000000"
     assert next(row for row in result.rows if row.quote_id == 15).tax_included is False
     assert next(row for row in result.rows if row.quote_id == 16).tax_included is None
+    cost_row = next(row for row in result.rows if row.quote_id == 2)
+    assert cost_row.cost_analysis["total_cost"] == "121.200000"
+    assert cost_row.cost_analysis["complete"] is True
     assert any("含税口径" in warning for warning in result.warnings)
 
 

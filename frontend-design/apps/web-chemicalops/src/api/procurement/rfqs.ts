@@ -30,6 +30,9 @@ export namespace RfqApi {
   export interface QuoteItem {
     id: number;
     lead_days?: null | number;
+    freight_amount?: null | string;
+    freight_tax_rate?: null | string;
+    freight_tax_included?: boolean | null;
     moq_quantity?: null | string;
     moq_unit_id?: null | number;
     note?: null | string;
@@ -87,6 +90,21 @@ export namespace RfqApi {
     selection_flag?: number;
     supplier_id: number;
     total_amount?: null | string;
+    freight_amount?: null | string;
+    freight_tax_rate?: null | string;
+    freight_tax_included?: boolean | null;
+    cost_analysis?: null | {
+      complete: boolean;
+      currency_code: string;
+      freight_amount: null | string;
+      freight_tax: null | string;
+      goods_amount: null | string;
+      goods_tax: null | string;
+      purchase_quantity: null | string;
+      total_cost: null | string;
+      reasons: string[];
+    };
+    quality_history?: null | { status: string; sample_count?: number; passed?: number; partial?: number; failed?: number; reason?: string };
   }
 
   /** 比价单 */
@@ -148,6 +166,9 @@ export namespace RfqApi {
 
   export interface QuoteItemPayload {
     lead_days?: null | number;
+    freight_amount?: null | number | string;
+    freight_tax_rate?: null | number | string;
+    freight_tax_included?: boolean | null;
     moq_quantity?: null | number | string;
     moq_unit_id?: null | number;
     note?: null | string;
@@ -181,7 +202,11 @@ export namespace RfqApi {
 
   export interface QuoteCandidateItem {
     lead_days?: null | number;
+    freight_amount?: null | string;
+    freight_tax_rate?: null | string;
+    freight_tax_included?: boolean | null;
     moq_quantity?: null | string;
+    moq_unit_name?: null | string;
     payment_terms?: null | string;
     product_label?: null | string;
     quoted_quantity?: null | string;

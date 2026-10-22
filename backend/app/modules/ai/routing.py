@@ -88,6 +88,7 @@ ROUTING_PROMPT = """# 角色与任务
 
 # 输出契约
 只输出 JSON 对象，字段限于：purpose, execution_mode, clarification_slot, clarification_options, dialogue_action, tasks, excluded_tasks, slots, action_fields, question, sub_tasks。
+action_fields 遵循结构化 Schema 的明确字段；没有动作候选时整个字段为 null。有动作候选时只为用户明确指定的字段填写值，其他字段用 null 占位，服务端会移除这些占位；不得猜测数据库 ID。
 slots 字段限于 product_keyword, rfq_no, request_no, po_no, acceptance_no, delivery_no, reconciliation_no, supplier_code, warehouse_keyword, date_from, date_to, limit, unit, aggregate_products。
 询价号只填入 rfq_no，不填 product_keyword；编号前缀和格式不能决定对象类型。返回条数填 limit，仓库条件填用户给出的准确仓库名称或编码 warehouse_keyword；续答继承未修改的槽位。执行器不会用关键词正则重新解析这些条件。
 只有用户明确要求汇总全部匹配的产品规格时，aggregate_products 才为 true；明确排除全部、只查某个规格或未提出全规格汇总时为 false。不要仅因句子出现“全部/汇总”等字样就设为 true。
@@ -189,6 +190,7 @@ async def understand(question: str, context: dict | None = None, settings=None, 
         + catalog_prompt({item["key"] for item in manifest_payload["analytics_datasets"]})
     )
     repair = ""
+    failure_reason = "请求识别服务发生技术故障"
     for attempt in range(2):
         try:
             response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
@@ -197,18 +199,31 @@ async def understand(question: str, context: dict | None = None, settings=None, 
         except ValidationError as exc:
             # 只反馈结构错误位置，不把模型原始输出或用户数据写入日志。
             errors = [{"type": error["type"], "loc": error["loc"]} for error in exc.errors()[:6]]
+            # 根节点错误来自本地契约校验器；反馈规则本身，帮助模型纠正执行模式。
+            for detail, error in zip(errors, exc.errors()[:6]):
+                if error["type"] == "value_error" and not error["loc"]:
+                    detail["rule"] = error["msg"]
+            failure_reason = "请求识别结果未通过任务结构校验"
             LOGGER.warning("AI 意图结构校验失败 attempt=%s errors=%s", attempt + 1, errors)
-            repair = "\n上次输出未通过结构校验，请从原问题重新理解并修正，不改变用户范围。错误位置：" + json.dumps(errors)
+            repair = "\n上次输出未通过结构校验，请从原问题重新理解并修正，不改变用户范围。错误位置：" + json.dumps(errors, ensure_ascii=False)
         except Exception as exc:
             if str(exc) == "TOKEN_BUDGET_EXCEEDED":
                 raise
             LOGGER.warning("AI 意图理解服务失败 error_type=%s", type(exc).__name__)
+            # 只传递通信层已定义的安全提示，不向用户回显任意异常或模型原文。
+            if isinstance(exc, BusinessValidationError) and str(exc) in {
+                "AI 服务拒绝了请求（HTTP 400），请检查模型接口、请求参数和结构化输出配置",
+                "AI 服务拒绝了请求，请检查 API key、模型和额度配置",
+                "AI 服务响应超时，请稍后重试",
+                "AI 服务暂时不可用，请稍后重试",
+            }:
+                failure_reason = str(exc)
             # 截断/空响应允许重新生成一次；网络错误已有通信层重试。
             if attempt == 0 and isinstance(exc, BusinessValidationError) and str(exc) in {"AI 服务返回了无法识别的结果", "AI 服务返回了空答案"}:
                 continue
             break
     # 技术失败不能伪装成用户条件不明确，也不能回退关键词猜测执行工具。
-    return Understanding(purpose="clarify", question="本次请求暂未完成识别，尚未执行查询。请稍后重试，无需补充已有的查询条件。")
+    return Understanding(purpose="clarify", question=f"{failure_reason}；本次尚未执行查询。这是技术故障，不能据此判断该业务请求不受支持，无需补充已有的查询条件。")
 
 
 def issue_ticket(decision: Understanding, user_id: int, question: str, conversation_id: int | None,

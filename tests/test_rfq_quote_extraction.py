@@ -15,7 +15,9 @@ def _rfq(status="RESPONDING"):
     )
 
 
-def _model_result(*, item_id=31, quote="物料：乙醇，数量：10 L，单价：12.5 CNY/L", tax_included=None):
+def _model_result(*, item_id=31, quote="物料：乙醇，数量：10 L，单价：12.5 CNY/L", tax_included=None,
+                  freight_amount=None, freight_tax_rate=None, freight_tax_included=None,
+                  moq_quantity=None, moq_unit_name=None):
     return {
         "supplier_name": "甲公司",
         "currency_code": "CNY",
@@ -37,7 +39,11 @@ def _model_result(*, item_id=31, quote="物料：乙醇，数量：10 L，单价
             "unit_price": "12.5",
             "tax_rate": "13",
             "tax_included": tax_included,
-            "moq_quantity": None,
+            "moq_quantity": moq_quantity,
+            "moq_unit_name": moq_unit_name,
+            "freight_amount": freight_amount,
+            "freight_tax_rate": freight_tax_rate,
+            "freight_tax_included": freight_tax_included,
             "lead_days": 7,
             "payment_terms": "月结30天",
             "quote": quote,
@@ -75,7 +81,10 @@ def _run_immediate(coroutine):
 
 
 def test_quote_file_extracts_candidates_with_verifiable_source_and_stores_only_file(monkeypatch):
-    _configure(monkeypatch, _model_result())
+    quote = "乙醇：10 L，单价 12.5 CNY/L；运费 25.50 元，税率 6%，未税。"
+    _configure(monkeypatch, _model_result(
+        quote=quote, freight_amount="25.50", freight_tax_rate="6", freight_tax_included=False,
+    ))
 
     result = _run_immediate(quote_extraction.parse_quote_file(
         SimpleNamespace(),
@@ -83,7 +92,7 @@ def test_quote_file_extracts_candidates_with_verifiable_source_and_stores_only_f
         14,
         file_name="报价.csv",
         mime_type="text/csv",
-        content="供应商：甲公司\n币种：CNY\n报价日期：2026-10-20\n有效期至：2026-11-20\n物料：乙醇，数量：10 L，单价：12.5 CNY/L".encode(),
+        content=f"供应商：甲公司\n币种：CNY\n报价日期：2026-10-20\n有效期至：2026-11-20\n{quote}".encode(),
     ))
 
     assert result.file_id == 72
@@ -91,6 +100,9 @@ def test_quote_file_extracts_candidates_with_verifiable_source_and_stores_only_f
     assert result.currency_code == "CNY"
     assert result.items[0].rfq_item_id == 31
     assert result.items[0].unit_price == "12.5"
+    assert result.items[0].freight_amount == "25.50"
+    assert result.items[0].freight_tax_rate == "6"
+    assert result.items[0].freight_tax_included is False
     assert result.items[0].source_location == "正文"
     assert result.evidence[0].source_quote == "供应商：甲公司"
 
@@ -111,6 +123,19 @@ def test_quote_file_preserves_explicit_tax_basis_for_manual_review(monkeypatch):
     ))
 
     assert result.items[0].tax_included is False
+
+
+def test_quote_file_preserves_moq_unit_for_manual_review(monkeypatch):
+    quote = "乙醇报价 12.5 CNY/L，MOQ 20 L。"
+    _configure(monkeypatch, _model_result(quote=quote, moq_quantity="20", moq_unit_name="L"))
+
+    result = _run_immediate(quote_extraction.parse_quote_file(
+        SimpleNamespace(), SimpleNamespace(id=5), 14,
+        file_name="报价.csv", mime_type="text/csv", content=quote.encode(),
+    ))
+
+    assert result.items[0].moq_quantity == "20"
+    assert result.items[0].moq_unit_name == "L"
 
 
 def test_quote_file_discards_items_without_exact_source_quote(monkeypatch):
