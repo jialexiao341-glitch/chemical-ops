@@ -370,7 +370,7 @@ async def chat(
     finally:
         if task_budget is not None and reservation is not None:
             try:
-                task_budget.settle(reservation, result.usage if result is not None else None)
+                await task_budget.settle_async(reservation, result.usage if result is not None else None)
             except Exception as exc:
                 if isinstance(exc, TaskTokenBudgetExceeded):
                     raise BusinessValidationError(str(exc)) from exc

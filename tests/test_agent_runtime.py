@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from threading import get_ident
+from time import sleep
 from types import SimpleNamespace
 
 import pytest
@@ -107,6 +109,63 @@ def test_planner_view_compacts_large_results_without_mutating_evidence():
     assert "planner_truncated" not in entry["result"]
 
 
+def test_planner_view_limits_sources_even_when_rows_are_small():
+    entry = _large_inventory_entry(count=1)
+    entry["result"]["sources"] = [{"resource": "inventory_balances", "record_id": index}
+                                   for index in range(100)]
+
+    compact = runtime._planner_view(entry)
+
+    assert len(compact["result"]["rows"]) == 1
+    assert len(compact["result"]["sources"]) == runtime.PLANNER_RESULT_ROW_LIMIT
+    assert compact["result"]["planner_sources_truncated"] is True
+    assert len(entry["result"]["sources"]) == 100
+
+
+def test_planner_context_budget_keeps_goal_question_and_step_evidence():
+    payload = {
+        "messages": ["旧问题" + "x" * 6000 for _ in range(5)] + ["查询本轮目标乙醇库存"],
+        "tools": [{"name": "inventory.query_available", "description": "只读查询库存"}],
+        "current_turn_steps": [
+            {"step": index, "action": "call_tool", "tool": "inventory.query_available",
+             "status": "SUCCEEDED", "arguments": {"product_id": index},
+             "result": {"product_id": index, "product_name": "测试乙醇", "total_rows": 100,
+                        "truncated": False, "totals": [{"unit_id": 1, "unit_name": "千克",
+                                                            "available_quantity": "100.000000"}],
+                        "rows": [{"batch_no": "B-" + "x" * 3000} for _ in range(10)],
+                        "sources": [{"record_id": source} for source in range(100)],
+                        "debug_payload": "z" * 12000}}
+            for index in range(1, 5)
+        ],
+        "recent_task_memory": {
+            "goal": {"intent": "inventory_query", "description": "查询测试乙醇库存"},
+            "recent_context": [{"role": "assistant", "text": "历史" + "y" * 5000} for _ in range(8)],
+        },
+        "workflow": {"pending": None, "all_products": False},
+        "verified_product_id": 1,
+    }
+    original = json.loads(json.dumps(payload, ensure_ascii=False))
+
+    context = runtime._fit_planner_context(payload, 6000)
+    decoded = json.loads(context)
+
+    assert len(context) <= 6000
+    assert decoded["messages"][-1] == "查询本轮目标乙醇库存"
+    assert decoded["recent_task_memory"]["goal"]["intent"] == "inventory_query"
+    assert [step["step"] for step in decoded["current_turn_steps"]] == [1, 2, 3, 4]
+    assert all(step["result"]["totals"][0]["available_quantity"] == "100.000000"
+               for step in decoded["current_turn_steps"])
+    assert payload == original
+
+
+def test_planner_context_budget_fails_safely_when_mandatory_context_cannot_fit():
+    payload = {"messages": ["查询库存"], "tools": [], "current_turn_steps": [],
+               "recent_task_memory": {"goal": {"intent": "inventory_query"}}, "workflow": {}}
+
+    with pytest.raises(BusinessValidationError, match="CONTEXT_LIMIT"):
+        runtime._fit_planner_context(payload, 10)
+
+
 def test_planner_context_uses_compacted_tool_view(monkeypatch):
     captured = []
 
@@ -129,6 +188,62 @@ def test_planner_context_uses_compacted_tool_view(monkeypatch):
     context = captured[0]
     assert len(context["current_turn_steps"][0]["result"]["rows"]) == runtime.PLANNER_RESULT_ROW_LIMIT
     assert context["current_turn_steps"][0]["result"]["total_rows"] == 100
+
+
+def test_decide_completes_large_multiturn_context_within_configured_budget(monkeypatch):
+    captured = []
+
+    async def fake_chat(request, settings, **kwargs):
+        captured.append(request.messages[0].content)
+        return SimpleNamespace(message=SimpleNamespace(content='{"action":"finish","evidence_steps":[1]}'))
+
+    monkeypatch.setattr(runtime.llm, "chat", fake_chat)
+    state = runtime.RunState(
+        task_id="planner-budget", revision=0,
+        messages=["历史问题" + "x" * 2000 for _ in range(5)] + ["查询测试乙醇库存"],
+        trace=[_large_inventory_entry()], turn_start=0,
+        memory_state={
+            "goal": {"intent": "inventory_query", "description": "查询测试乙醇库存"},
+            "recent_context": [{"role": "assistant", "text": "历史答复" + "y" * 2000} for _ in range(8)],
+        },
+        workflow=runtime.Workflow(),
+    )
+    settings = Settings(_env_file=None, openai_api_key="test", agent_context_max_chars=6000)
+
+    action = asyncio.run(runtime._decide(state, [], settings))
+
+    assert action.action == "finish"
+    assert len(captured) == 1 and len(captured[0]) <= settings.agent_context_max_chars
+    context = json.loads(captured[0])
+    assert context["messages"][-1] == "查询测试乙醇库存"
+    assert context["current_turn_steps"][0]["result"]["total_rows"] == 100
+    assert context["current_turn_steps"][0]["result"]["totals"][0]["available_quantity"] == "1000.000000"
+
+
+def test_planner_schema_correction_is_fitted_again_within_budget(monkeypatch):
+    captured = []
+    responses = ["not json", '{"action":"finish","evidence_steps":[1]}']
+
+    async def fake_chat(request, settings, **kwargs):
+        captured.append(request.messages[0].content)
+        return SimpleNamespace(message=SimpleNamespace(content=responses.pop(0)))
+
+    monkeypatch.setattr(runtime.llm, "chat", fake_chat)
+    state = runtime.RunState(
+        task_id="planner-correction-budget", revision=0,
+        messages=["历史问题" + "x" * 2000 for _ in range(5)] + ["查询测试乙醇库存"],
+        trace=[_large_inventory_entry()], turn_start=0,
+        memory_state={"goal": {"intent": "inventory_query", "description": "查询测试乙醇库存"}},
+        workflow=runtime.Workflow(),
+    )
+    settings = Settings(_env_file=None, openai_api_key="test", agent_context_max_chars=6000)
+
+    action = asyncio.run(runtime._decide(state, [], settings))
+
+    assert action.action == "finish"
+    assert len(captured) == 2
+    assert all(len(context) <= settings.agent_context_max_chars for context in captured)
+    assert "format_correction" in json.loads(captured[1])
 
 
 def start(db, question="查询测试乙醇库存"):
@@ -159,9 +274,98 @@ def test_full_goal_drives_four_tools_with_evidence_and_persisted_trace(task_db, 
     assert result.trace[-1]['evidence_steps'] == [2, 4]
 
 
+@pytest.mark.parametrize("task_kind", ["inventory", "quotes"])
+@pytest.mark.parametrize("unsupported_slots", [
+    {"date_from": "2026-10-01"},
+    {"unit": "升"},
+])
+def test_agent_waits_before_tools_for_unsupported_product_slots(task_db, model_script, monkeypatch, task_kind, unsupported_slots):
+    from app.modules.ai.product_query_policy import unsupported_product_slot_prompt
+
+    actions, _ = model_script
+    actions.extend([
+        tool('catalog.search_products', keyword='测试乙醇'),
+        tool('inventory.query_available', product_id=1),
+        {'action': 'finish', 'evidence_steps': [2]},
+    ])
+    question = "查询测试乙醇库存"
+    decision = runtime.routing.Understanding(
+        purpose="query", execution_mode="agent", tasks=[task_kind],
+        slots={"product_keyword": "测试乙醇", **unsupported_slots},
+    )
+    route_token = runtime.routing.issue_ticket(decision, USER.id, question, None)
+    calls = []
+    execute_tool = runtime.tools.execute_tool
+
+    def record_tool_call(db, user, call):
+        calls.append(call.tool)
+        return execute_tool(db, user, call)
+
+    monkeypatch.setattr(runtime.tools, "execute_tool", record_tool_call)
+    result = asyncio.run(runtime.create_task(
+        task_db, USER, runtime.TaskCreate(question=question, route_token=route_token)
+    ))
+
+    assert result.status == "WAITING_INPUT", result.model_dump()
+    assert result.reply == unsupported_product_slot_prompt(tuple(unsupported_slots))
+    assert calls == []
+
+
+def test_agent_sync_tool_runs_off_event_loop_and_keeps_heartbeat_responsive(task_db, model_script, monkeypatch):
+    actions, _ = model_script
+    actions.extend([
+        tool("catalog.search_products", keyword="测试乙醇"),
+        tool("inventory.query_available", product_id=1),
+        {"action": "finish", "evidence_steps": [2]},
+    ])
+    question = "查询测试乙醇库存"
+    decision = runtime.routing.Understanding(
+        purpose="query", execution_mode="agent", tasks=["inventory"],
+        slots={"product_keyword": "测试乙醇"},
+    )
+    route_token = runtime.routing.issue_ticket(decision, USER.id, question, None)
+    main_thread = get_ident()
+    database_threads = []
+    execute_tool = runtime.tools.execute_tool
+
+    def slow_execute_tool(db, user, call):
+        database_threads.append(get_ident())
+        sleep(0.12)
+        return execute_tool(db, user, call)
+
+    monkeypatch.setattr(runtime.tools, "execute_tool", slow_execute_tool)
+
+    async def run_with_heartbeat():
+        ticks = 0
+
+        async def heartbeat():
+            nonlocal ticks
+            while not task.done():
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        task = asyncio.create_task(runtime.create_task(
+            task_db, USER, runtime.TaskCreate(question=question, route_token=route_token)
+        ))
+        monitor = asyncio.create_task(heartbeat())
+        result = await task
+        await monitor
+        return result, ticks
+
+    result, ticks = asyncio.run(run_with_heartbeat())
+
+    assert result.status == "SUCCEEDED"
+    assert database_threads and all(thread_id != main_thread for thread_id in database_threads)
+    assert ticks >= 10
+
+
 def test_multiple_products_pause_and_selected_candidate_continues(task_db, model_script):
     """C18：多规格结果强制暂停；选择有效候选后重新查询并继续库存工具。"""
-    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
+    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇工业级', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
+    task_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
+    task_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
+    task_db.execute(text("INSERT INTO md_chemicals VALUES (1, 'ACTIVE'), (2, 'ACTIVE')"))
+    task_db.execute(text("UPDATE md_products SET chemical_id = CASE id WHEN 1 THEN 1 ELSE 2 END WHERE id IN (1, 3)"))
     task_db.commit()
     actions, _ = model_script
     actions.append(tool('catalog.search_products', keyword='测试乙醇'))
@@ -192,7 +396,7 @@ def test_inventory_summary_queries_all_specs_and_keeps_units_separate(task_db, m
 @pytest.mark.parametrize(
     "question,aggregate_products,expected_aggregate",
     [
-        ("不要全部，只查分析纯库存", False, False),
+        ("不要全部，只查分析纯库存", False, True),
         ("查乙醇库存", True, True),
     ],
 )
@@ -201,7 +405,7 @@ def test_candidate_aggregation_uses_structured_understanding_slot(
 ):
     from app.modules.ai.schema import Workflow
 
-    monkeypatch.setattr("app.modules.ai.multi_intent._inventory_family", lambda *_args: True)
+    monkeypatch.setattr("app.modules.ai.candidate_resolution.inventory_family", lambda *_args: True)
     state = runtime.RunState(
         task_id="test",
         revision=0,
@@ -229,7 +433,11 @@ def test_candidate_aggregation_uses_structured_understanding_slot(
 
 
 def test_select_all_rechecks_candidates_and_queries_each_spec(task_db, model_script):
-    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
+    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇工业级', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
+    task_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
+    task_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
+    task_db.execute(text("INSERT INTO md_chemicals VALUES (1, 'ACTIVE'), (2, 'ACTIVE')"))
+    task_db.execute(text("UPDATE md_products SET chemical_id = CASE id WHEN 1 THEN 1 ELSE 2 END WHERE id IN (1, 3)"))
     task_db.commit()
     actions, _ = model_script
     actions.append(tool('catalog.search_products', keyword='测试乙醇'))

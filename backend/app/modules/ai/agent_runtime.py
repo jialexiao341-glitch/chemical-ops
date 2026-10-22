@@ -1,11 +1,11 @@
 """受约束的采购 Agent 循环：只读工具、服务端消歧、持久化轨迹和补充信息。"""
 
 import asyncio
+import copy
 import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
 from time import perf_counter
 from typing import TypedDict
 from uuid import uuid4
@@ -406,6 +406,31 @@ def _assert_running(db: Session, user: User, state: RunState) -> None:
         raise TaskInterrupted()
 
 
+async def _offload_db_call(function, *args, **kwargs):
+    """等待同步数据库工作线程收尾，避免阻塞事件循环或取消后并发复用 Session。"""
+    worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        try:
+            await worker
+        except Exception:
+            pass
+        raise
+
+
+def _resolve_agent_warehouse(db: Session, user: User, warehouse_name: str) -> int:
+    """按当前用户可见范围核验仓库名称，返回唯一 ID。"""
+    visible = tools.accessible_warehouse_ids(db, user)
+    query = select(Warehouse.id).where(Warehouse.status == "ACTIVE", Warehouse.warehouse_name == warehouse_name)
+    if visible is not None:
+        query = query.where(Warehouse.id.in_(visible))
+    matches = list(db.scalars(query))
+    if len(matches) != 1:
+        raise BusinessValidationError("请提供当前可访问仓库的准确名称")
+    return matches[0]
+
+
 def _decision_messages(messages: list[str], *, history_count: int = 6,
                        old_message_limit: int = 1200) -> list[str]:
     """限制送入模型的冗余对话；完整目标、待选项和证据仍由结构化状态保留。"""
@@ -436,38 +461,172 @@ def _planner_view(entry: dict) -> dict:
     if entry.get("action") != "call_tool" or not isinstance(result, dict):
         return entry
     rows = result.get("rows")
-    if not isinstance(rows, list) or len(rows) <= PLANNER_RESULT_ROW_LIMIT:
+    sources = result.get("sources")
+    rows_truncated = isinstance(rows, list) and len(rows) > PLANNER_RESULT_ROW_LIMIT
+    sources_truncated = isinstance(sources, list) and len(sources) > PLANNER_RESULT_ROW_LIMIT
+    if not rows_truncated and not sources_truncated:
         return entry
     compact = {
         **entry,
         "result": {
             **result,
-            "rows": rows[:PLANNER_RESULT_ROW_LIMIT],
-            "planner_truncated": True,
-            "planner_note": (
-                f"仅向规划器展示前 {PLANNER_RESULT_ROW_LIMIT} 条明细；"
-                "完整结果已保存在任务证据中，不要为获取同一批数据重复调用工具。"
-            ),
         },
     }
-    sources = result.get("sources")
-    if isinstance(sources, list) and len(sources) > PLANNER_RESULT_ROW_LIMIT:
+    if rows_truncated:
+        compact["result"]["rows"] = rows[:PLANNER_RESULT_ROW_LIMIT]
+        compact["result"]["planner_truncated"] = True
+        compact["result"]["planner_note"] = (
+            f"仅向规划器展示前 {PLANNER_RESULT_ROW_LIMIT} 条明细；"
+            "完整结果已保存在任务证据中，不要为获取同一批数据重复调用工具。"
+        )
+    if sources_truncated:
         compact["result"]["sources"] = sources[:PLANNER_RESULT_ROW_LIMIT]
+        compact["result"]["planner_sources_truncated"] = True
     return compact
+
+
+def _clip_planner_text(value: str, limit: int) -> str:
+    """压缩规划输入文本并保留首尾，尽量保住实体名、条件和末尾补充。"""
+    if len(value) <= limit:
+        return value
+    marker = "…[上下文已裁剪]…"
+    available = max(0, limit - len(marker))
+    head = available // 2
+    return value[:head] + marker + value[-(available - head):]
+
+
+def _compact_planner_step(step: dict, *, keep_rows: int, text_limit: int) -> dict:
+    """保留证据步骤及摘要字段，缩减该步骤对规划上下文的占用。"""
+    compact = {key: value for key, value in step.items() if key != "result"}
+    for key in ("tool", "status", "step", "action"):
+        if key in step:
+            compact[key] = step[key]
+    arguments = step.get("arguments")
+    if isinstance(arguments, dict):
+        compact["arguments"] = arguments
+    result = step.get("result")
+    if not isinstance(result, dict):
+        if result is not None:
+            compact["result"] = _clip_planner_text(str(result), text_limit)
+        return compact
+    keys = (
+        "tool", "product_id", "product_name", "keyword", "rfq_item_id", "rfq_no",
+        "total_rows", "truncated", "totals", "planner_truncated", "planner_note",
+        "planner_sources_truncated", "scope", "warnings", "rows", "sources",
+    )
+    compact_result = {key: result[key] for key in keys if key in result}
+    for key in ("rows", "sources", "warnings"):
+        values = compact_result.get(key)
+        if isinstance(values, list):
+            compact_result[key] = values[:keep_rows]
+    compact_result = _clip_planner_tree(compact_result, text_limit)
+    if isinstance(result.get("rows"), list) and len(result["rows"]) > len(compact_result.get("rows", [])):
+        compact_result["planner_truncated"] = True
+        compact_result.setdefault("planner_note", "规划上下文已压缩明细；完整结果仍保存在任务证据中。")
+    if isinstance(result.get("sources"), list) and len(result["sources"]) > len(compact_result.get("sources", [])):
+        compact_result["planner_sources_truncated"] = True
+    compact["result"] = compact_result
+    return compact
+
+
+def _clip_planner_tree(value, text_limit: int):
+    """递归限制非关键说明和数组，避免单个字段绕过行数限制。"""
+    if isinstance(value, str):
+        return _clip_planner_text(value, text_limit)
+    if isinstance(value, list):
+        return [_clip_planner_tree(item, text_limit) for item in value]
+    if isinstance(value, dict):
+        return {key: _clip_planner_tree(item, text_limit) for key, item in value.items()}
+    return value
+
+
+def _fit_planner_context(payload: dict, max_chars: int) -> str:
+    """按固定层级压缩临时规划 payload，保留目标、当前问题和证据步骤。"""
+    if max_chars < 1:
+        raise BusinessValidationError("CONTEXT_LIMIT")
+    fitted = copy.deepcopy(payload)
+
+    def serialize() -> str:
+        return json.dumps(fitted, ensure_ascii=False)
+
+    context = serialize()
+    if len(context) <= max_chars:
+        return context
+
+    # 先缩历史文本和记忆；最近输入与结构化目标单独保留。
+    messages = fitted.get("messages")
+    if isinstance(messages, list) and messages:
+        fitted["messages"] = [*(_clip_planner_text(str(item), 320) for item in messages[-3:-1]),
+                               _clip_planner_text(str(messages[-1]), 1800)]
+    memory = fitted.get("recent_task_memory")
+    if isinstance(memory, dict):
+        recent = memory.get("recent_context")
+        if isinstance(recent, list):
+            memory["recent_context"] = [
+                {**item, "text": _clip_planner_text(str(item.get("text", "")), 320)}
+                if isinstance(item, dict) else _clip_planner_text(str(item), 320)
+                for item in recent[-3:]
+            ]
+        goal = memory.get("goal")
+        if isinstance(goal, dict):
+            for key in ("description", "last_user_input"):
+                if isinstance(goal.get(key), str):
+                    goal[key] = _clip_planner_text(goal[key], 700)
+        focus = memory.get("focus")
+        if isinstance(focus, dict) and isinstance(focus.get("candidates"), list):
+            focus["candidates"] = focus["candidates"][:PLANNER_RESULT_ROW_LIMIT]
+        pending = memory.get("pending")
+        if isinstance(pending, dict) and isinstance(pending.get("candidates"), list):
+            pending["candidates"] = pending["candidates"][:PLANNER_RESULT_ROW_LIMIT]
+    context = serialize()
+    if len(context) <= max_chars:
+        return context
+
+    # 保留全部步骤编号和完整 totals，只为规划保留少量明细/来源。
+    steps = fitted.get("current_turn_steps")
+    if isinstance(steps, list):
+        fitted["current_turn_steps"] = [_compact_planner_step(step, keep_rows=3, text_limit=500)
+                                        if isinstance(step, dict) else step for step in steps]
+    context = serialize()
+    if len(context) <= max_chars:
+        return context
+
+    # 最后压成目标、当前输入、已核验对象和逐步证据摘要；不改原始 RunState。
+    if isinstance(messages, list) and messages:
+        fitted["messages"] = [_clip_planner_text(str(messages[-1]), 1200)]
+    if isinstance(memory, dict):
+        goal = memory.get("goal")
+        if isinstance(goal, dict):
+            memory["goal"] = {key: goal[key] for key in ("intent", "description", "last_user_input", "status")
+                               if key in goal}
+        focus = memory.get("focus")
+        if isinstance(focus, dict):
+            memory["focus"] = {key: focus[key] for key in
+                                ("entity_type", "product_name", "product_code", "resolution") if key in focus}
+        memory.pop("recent_context", None)
+        memory.pop("pending", None)
+        memory.pop("evidence_ref", None)
+    if isinstance(steps, list):
+        fitted["current_turn_steps"] = [_compact_planner_step(step, keep_rows=0, text_limit=180)
+                                        if isinstance(step, dict) else step for step in steps]
+    # Arbitrary debug/extension payloads are omitted from this last-resort planner view.
+    context = serialize()
+    if len(context) > max_chars:
+        raise BusinessValidationError("CONTEXT_LIMIT")
+    return context
 
 
 async def _decide(state: RunState, catalog: list[dict], settings: Settings):
     """复用模型 HTTP 超时/错误处理，严格解析一种下一步动作，不解析自由文本指令。"""
-    context = json.dumps({"messages": _decision_messages(state.messages),
+    payload = {"messages": _decision_messages(state.messages),
         "tools": [{k: item[k] for k in ("name", "description", "input_schema")} for item in catalog],
         "current_turn_steps": [_planner_view(entry) for entry in state.trace[state.turn_start:]],
         "recent_task_memory": state.memory_state,
         "workflow": state.workflow.model_dump(mode="json"),
         "selected_product_id": state.selected_product, "selected_rfq_item_id": state.selected_rfq_item,
         "verified_product_id": state.verified_product, "verified_rfq_item_id": state.verified_rfq_item,
-    }, ensure_ascii=False)
-    if len(context) > settings.agent_context_max_chars:
-        raise BusinessValidationError("CONTEXT_LIMIT")
+    }
+    context = _fit_planner_context(payload, settings.agent_context_max_chars)
     model_settings = settings.model_copy(update={"llm_max_tokens": min(settings.llm_max_tokens, 2048),
         "llm_max_retries": 0})
     for attempt in range(2):
@@ -481,42 +640,16 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
             # 格式修复发生在执行工具之前，不重试任何业务调用。
             correction = json.loads(context)
             correction["format_correction"] = "上一动作未通过严格 JSON schema 校验；请仅输出符合 action schema 的 JSON，不添加身份字段。"
-            context = json.dumps(correction, ensure_ascii=False)
-            if len(context) > settings.agent_context_max_chars:
+            try:
+                context = _fit_planner_context(correction, settings.agent_context_max_chars)
+            except BusinessValidationError:
                 raise BusinessValidationError("CONTEXT_LIMIT") from None
 
 
 def _summary(entries: list[dict]) -> str:
     """从后端已验证数据生成数值摘要，避免模型自由改写金额、数量或来源。"""
-    lines = []
-    inventory = [e['result'] for e in entries if e['tool'] == 'inventory.query_available']
-    if len(inventory) > 1:
-        totals = {}
-        for result in inventory:
-            for row in result['totals']:
-                key = (row['unit_id'], row['unit_name'])
-                totals[key] = totals.get(key, Decimal(0)) + Decimal(str(row['available_quantity']))
-        amounts = '、'.join(f'{value.normalize():f} {unit}' for (_, unit), value in totals.items())
-        lines.append(f'查到这 {len(inventory)} 个规格的可用库存合计为 {amounts}。下面是各规格的库存明细。' if amounts else
-                     f'查询了这 {len(inventory)} 个规格，暂时没有找到库存记录。')
-        if len(totals) > 1:
-            lines.append('库存使用不同计量单位，以下分别列出，不直接相加。')
-    for entry in entries:
-        result = entry["result"]
-        if entry["tool"] == "inventory.query_available":
-            totals = "、".join(f"{Decimal(str(row['available_quantity'])).normalize():f} {row['unit_name']}" for row in result["totals"])
-            label = f"{result['product_name']}（规格 #{result['product_id']}）" if len(inventory) > 1 else result['product_name']
-            lines.append(f"{label}：可用库存为 {totals}。" if totals else f"{label}：暂时没有找到库存记录。")
-        elif entry["tool"] == "supplier_quotes.compare":
-            lines.append(f"询价 {result['rfq_no']}：找到 {result['total_rows']} 条符合条件的最新报价。")
-            lines.extend(f"{row['supplier_name']}：{row['unit_price']} {row['currency_code']}/{row['unit_name']}"
-                         f"，可比组排名 {row['rank'] if row['rank'] is not None else '不排序'}。" for row in result["rows"])
-        else:
-            lines.append("暂时没有找到匹配的产品或询价明细，请核对名称或单号。")
-        # 通用口径说明保留在工具证据中，不逐项重复到聊天正文。
-        if result.get("truncated"):
-            lines.append('下方明细仅展示部分记录，库存合计仍包含全部匹配记录。' if entry['tool'] == 'inventory.query_available' else '下方仅展示部分报价记录。')
-    return "\n".join(dict.fromkeys(lines))
+    from app.modules.ai.product_query_summary import summarize_product_evidence
+    return summarize_product_evidence(entries)
 
 
 def _resolve_candidates(state: RunState, result: dict, db: Session) -> None:
@@ -529,10 +662,16 @@ def _resolve_candidates(state: RunState, result: dict, db: Session) -> None:
     ids = {row[key] for row in result["rows"]}
     aggregate = state.workflow.all_products
     understanding_slots = (state.memory_state.get("understanding") or {}).get("slots", {})
-    if product and state.selected_product is None and understanding_slots.get("aggregate_products"):
-        from app.modules.ai.multi_intent import _inventory_family
-        aggregate = aggregate or (not result['truncated'] and bool(ids) and
-                                 _inventory_family(db, result['rows'], result['keyword']))
+    if product and state.selected_product is None:
+        from app.modules.ai.candidate_resolution import inventory_family
+        from app.modules.ai.product_query_policy import can_aggregate_inventory
+        same_family = (not result['truncated'] and bool(ids) and
+                       inventory_family(db, result['rows'], result['keyword']))
+        aggregate = aggregate or can_aggregate_inventory(
+            total_rows=result["total_rows"], truncated=result["truncated"],
+            explicit_aggregate=bool(understanding_slots.get("aggregate_products")),
+            same_product_family=same_family,
+        )
     if product and aggregate and state.memory_state.get('goal', {}).get('intent') == 'inventory_query':
         if result['truncated'] or not ids:
             raise BusinessValidationError('全选查询需要完整的当前产品候选，请缩小检索范围')
@@ -627,10 +766,8 @@ def _constrain_action(state: RunState, action):
 async def _drive(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
     """绑定任务所有者，确保后台 Agent 的模型请求遵循用户并发配额。"""
 
-    def persist_budget(snapshot: dict[str, int]) -> None:
-        state.llm_tokens_used = snapshot["used_tokens"]
-        state.llm_tokens_estimated = snapshot["estimated_tokens"]
-        state.llm_calls = snapshot["calls"]
+    def persist_budget_db(snapshot: dict[str, int]) -> None:
+        """在数据库工作线程中原子写入预算快照和队列检查点。"""
         try:
             execution = execution_context.guard(db)
             task = db.scalar(select(AIAgentTask).where(
@@ -649,6 +786,12 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
         except Exception:
             db.rollback()
             raise
+
+    async def persist_budget(snapshot: dict[str, int]) -> None:
+        state.llm_tokens_used = snapshot["used_tokens"]
+        state.llm_tokens_estimated = snapshot["estimated_tokens"]
+        state.llm_calls = snapshot["calls"]
+        await _offload_db_call(persist_budget_db, snapshot)
 
     budget = TaskTokenBudget(state.llm_token_limit or settings.agent_max_total_tokens,
         used_tokens=state.llm_tokens_used, estimated_tokens=state.llm_tokens_estimated,
@@ -674,18 +817,18 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
     async def plan(graph_state: GraphState) -> GraphState:
         """每步重新鉴权、检查预算并调用模型；追问与完成均由后端记录公开动作。"""
         current = graph_state["data"]
-        _assert_running(db, user, current)
+        await _offload_db_call(_assert_running, db, user, current)
         if current.decisions >= settings.agent_max_steps:
             raise BusinessValidationError("STEP_LIMIT")
-        catalog = _check_trace_access(db, user, current.trace)
+        catalog = await _offload_db_call(_check_trace_access, db, user, current.trace)
         if execution_context.identity() and not catalog:
             raise AuthorizationError("当前没有可用的任务工具权限")
         if current.memory_state.get("route_turn") != len(current.messages):
             context = {"memory": current.memory_state, "messages": current.messages[:-1]}
             from app.modules.ai import capabilities
-            manifest = capabilities.build_capability_manifest(db, user)
+            manifest = await _offload_db_call(capabilities.build_capability_manifest, db, user)
             decision = await routing.understand(current.messages[-1], context, settings, manifest=manifest)
-            _assert_running(db, user, current)
+            await _offload_db_call(_assert_running, db, user, current)
             current.memory_state["understanding"] = decision.model_dump(mode="json")
             current.memory_state["route_turn"] = len(current.messages)
             current.memory_state.pop("understanding_applied_turn", None)
@@ -706,7 +849,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                 current.trace.append({"step": len(current.trace) + 1, "action": "route", "status": current.status,
                                       "route": decision.route, "understanding": decision.model_dump(mode="json")})
                 _append_memory_context(current.memory_state, "assistant", current.reply)
-                _persist(db, user, current)
+                await _offload_db_call(_persist, db, user, current)
                 return {"data": current}
         if current.memory_state.get("understanding_applied_turn") != len(current.messages):
             decision = Understanding.model_validate(current.memory_state["understanding"])
@@ -722,27 +865,31 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             if decision.slots.rfq_no:
                 current.workflow.rfq_no = decision.slots.rfq_no
             if decision.slots.warehouse_keyword:
-                visible = tools.accessible_warehouse_ids(db, user)
-                query = select(Warehouse.id).where(Warehouse.status == "ACTIVE",
-                    Warehouse.warehouse_name == decision.slots.warehouse_keyword)
-                if visible is not None:
-                    query = query.where(Warehouse.id.in_(visible))
-                matches = list(db.scalars(query))
-                if len(matches) != 1:
-                    raise BusinessValidationError("请提供当前可访问仓库的准确名称")
-                current.memory_state.setdefault("slots", {})["warehouse"] = matches[0]
+                warehouse_id = await _offload_db_call(
+                    _resolve_agent_warehouse, db, user, decision.slots.warehouse_keyword)
+                current.memory_state.setdefault("slots", {})["warehouse"] = warehouse_id
             current.memory_state["understanding_applied_turn"] = len(current.messages)
+        understanding = Understanding.model_validate(current.memory_state["understanding"])
+        from app.modules.ai.product_query_policy import unsupported_product_slot_prompt, unsupported_product_slots
+        unsupported = tuple(dict.fromkeys(
+            slot for task in understanding.tasks
+            for slot in unsupported_product_slots(task, understanding.slots)
+        ))
+        if unsupported:
+            current.action = AskAction(action="ask_user", question=unsupported_product_slot_prompt(unsupported))
+        else:
+            current.action = None
         current.decisions += 1
         metrics.increment("agent_steps", labels={"step": "plan"})
-        current.action = _resume_action(current) or _constrain_action(current, await _decide(current, catalog, settings))
-        _assert_running(db, user, current)
+        current.action = current.action or _resume_action(current) or _constrain_action(current, await _decide(current, catalog, settings))
+        await _offload_db_call(_assert_running, db, user, current)
         if isinstance(current.action, AskAction):
             current.status, current.reply = "WAITING_INPUT", current.action.question
             current.workflow.pending = None
             current.trace.append({"step": len(current.trace) + 1, "action": "ask_user", "status": "WAITING_INPUT",
                                   "question": current.reply})
             _append_memory_context(current.memory_state, "assistant", current.reply)
-            _persist(db, user, current)
+            await _offload_db_call(_persist, db, user, current)
         elif isinstance(current.action, FinishAction):
             entries = [entry for entry in current.trace[current.turn_start:]
                        if entry["step"] in current.action.evidence_steps and entry.get("status") == "SUCCEEDED"
@@ -765,13 +912,13 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             current.trace.append({"step": len(current.trace) + 1, "action": "finish", "status": "SUCCEEDED",
                                   "evidence_steps": current.action.evidence_steps})
             _append_memory_context(current.memory_state, "assistant", current.reply)
-            _persist(db, user, current)
+            await _offload_db_call(_persist, db, user, current)
         return {"data": current}
 
-    def execute(graph_state: GraphState) -> GraphState:
+    async def execute(graph_state: GraphState) -> GraphState:
         """核验 ID 的本轮来源后执行静态工具，保存结果；重复请求和越权均停止。"""
         current = graph_state["data"]
-        _assert_running(db, user, current)
+        await _offload_db_call(_assert_running, db, user, current)
         action = current.action
         metrics.increment("agent_steps", labels={"step": "tool"})
         tool_started = perf_counter()
@@ -804,12 +951,13 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                 raise BusinessValidationError("询价明细 ID 必须来自本轮定位或用户选择")
             from app.core.telemetry import trace_span
             with trace_span("agent.tool", {"chemicalops.agent.tool": action.tool}):
-                result = tools.execute_tool(db, user, ToolCall(tool=action.tool, arguments=action.arguments))
+                result = await _offload_db_call(
+                    tools.execute_tool, db, user, ToolCall(tool=action.tool, arguments=action.arguments))
             if perf_counter() > deadline:
                 raise TimeoutError()
             entry.update(status="SUCCEEDED", result=result.model_dump(mode="json"))
             current.failures = 0
-            _resolve_candidates(current, entry["result"], db)
+            await _offload_db_call(_resolve_candidates, current, entry["result"], db)
         except AuthorizationError:
             entry["error_code"] = "PERMISSION_DENIED"
             raise
@@ -825,7 +973,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                                                              "result": entry["status"].lower()})
             metrics.observe("agent_tool_duration_seconds", perf_counter() - tool_started,
                             labels={"tool": action.tool})
-        _persist(db, user, current)
+        await _offload_db_call(_persist, db, user, current)
         return {"data": current}
 
     def route(graph_state: GraphState) -> str:
@@ -843,11 +991,11 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         async with asyncio.timeout(settings.agent_task_timeout_seconds):
             await graph.compile().ainvoke({"data": state}, config={"recursion_limit": settings.agent_max_steps * 2 + 6})
     except TaskInterrupted:
-        return get_task(db, user, state.task_id)
+        return await _offload_db_call(get_task, db, user, state.task_id)
     except Exception as exc:
         from app.modules.task_queue.errors import transient
         if execution_context.identity() and transient(exc):
-            db.rollback()
+            await _offload_db_call(db.rollback)
             raise  # Queue adapter persists a bounded retry from the last checkpoint.
         state.status = "FAILED"
         codes = {"STEP_LIMIT", "CONTEXT_LIMIT", "INVALID_EVIDENCE", "INCOMPLETE_TASK", "REPEATED_TOOL", "TOOL_ERRORS", "INTENT_MISMATCH", "TOKEN_BUDGET_EXCEEDED"}
@@ -860,12 +1008,12 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         state.reply = "本次只读任务已停止，请核对权限、输入或服务状态后重新发起。"
         state.trace.append({"step": len(state.trace) + 1, "action": "stop", "status": "FAILED", "error_code": state.error_code})
         _append_memory_context(state.memory_state, "assistant", state.reply)
-        db.rollback()
+        await _offload_db_call(db.rollback)
         try:
-            _persist(db, user, state)
+            await _offload_db_call(_persist, db, user, state)
         except TaskInterrupted:
             pass
-    result = get_task(db, user, state.task_id)
+    result = await _offload_db_call(get_task, db, user, state.task_id)
     metrics.observe("agent_execution_duration_seconds", perf_counter() - execution_started,
                     labels={"status": result.status.lower()})
     return result
@@ -921,7 +1069,8 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
 
 async def create_task(db: Session, user: User, data: TaskCreate) -> TaskRead:
     """保留等待本轮完成的原 API 行为。"""
-    return await _drive(db, user, prepare_task(db, user, data), get_settings())
+    state = await _offload_db_call(prepare_task, db, user, data)
+    return await _drive(db, user, state, get_settings())
 
 
 def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, *, commit: bool = True) -> RunState:
@@ -1102,41 +1251,50 @@ def prepare_chat_continue(db: Session, user: User, task_id: str, data: TaskConti
 
 async def continue_task(db: Session, user: User, task_id: str, data: TaskContinue) -> TaskRead:
     """保留同步等待续跑结果的原 API。"""
-    state = prepare_continue(db, user, task_id, data)
+    state = await _offload_db_call(prepare_continue, db, user, task_id, data)
     return await _drive(db, user, state, get_settings())
+
+
+def _restore_prepared_state(db: Session, task_id: str, user_id: int, revision: int):
+    """从持久化任务恢复运行状态并读取最新用户状态。"""
+    user = User(id=user_id)
+    task = _load(db, user, task_id)
+    if task.status != "RUNNING" or task.revision != revision:
+        return None, user, True
+    state = RunState(task_id, revision, task.payload["messages"], list(task.payload["trace"]),
+        task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"),
+        chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {},
+        workflow=Workflow.model_validate(task.payload.get("workflow") or {}),
+        llm_token_limit=(task.payload.get("token_budget") or {}).get("limit", get_settings().agent_max_total_tokens),
+        llm_tokens_used=(task.payload.get("token_budget") or {}).get("used_tokens", 0),
+        llm_tokens_estimated=(task.payload.get("token_budget") or {}).get("estimated_tokens", 0),
+        llm_calls=(task.payload.get("token_budget") or {}).get("calls", 0))
+    execution = execution_context.guard(db)
+    if execution:
+        state.decisions = execution.checkpoint.get("decisions", 0)
+        state.failures = execution.checkpoint.get("failures", 0)
+        state.seen_calls = set(execution.checkpoint.get("seen_calls", []))
+        state.verified_product = execution.checkpoint.get("verified_product")
+        state.verified_rfq_item = execution.checkpoint.get("verified_rfq_item")
+        budget_checkpoint = execution.checkpoint.get("token_budget") or {}
+        state.llm_tokens_used = max(state.llm_tokens_used, budget_checkpoint.get("used_tokens", 0))
+        state.llm_tokens_estimated = max(state.llm_tokens_estimated, budget_checkpoint.get("estimated_tokens", 0))
+        state.llm_calls = max(state.llm_calls, budget_checkpoint.get("calls", 0))
+        db.commit()
+    active = db.scalar(select(User.status).where(User.id == user_id)) == "ACTIVE"
+    return state, user, active
 
 
 async def run_prepared_task(task_id: str, user_id: int, revision: int) -> None:
     """进程内后台执行使用独立会话；版本/状态变化后不启动旧工作，不自动恢复。"""
     with SessionLocal() as db:
-        user = User(id=user_id)
-        task = _load(db, user, task_id)
-        if task.status != "RUNNING" or task.revision != revision:
+        state, user, active = await _offload_db_call(_restore_prepared_state, db, task_id, user_id, revision)
+        if state is None:
             return
-        state = RunState(task_id, revision, task.payload["messages"], list(task.payload["trace"]),
-            task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"),
-            chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {},
-            workflow=Workflow.model_validate(task.payload.get("workflow") or {}),
-            llm_token_limit=(task.payload.get("token_budget") or {}).get("limit", get_settings().agent_max_total_tokens),
-            llm_tokens_used=(task.payload.get("token_budget") or {}).get("used_tokens", 0),
-            llm_tokens_estimated=(task.payload.get("token_budget") or {}).get("estimated_tokens", 0),
-            llm_calls=(task.payload.get("token_budget") or {}).get("calls", 0))
-        execution = execution_context.guard(db)
-        if execution:
-            state.decisions = execution.checkpoint.get("decisions", 0)
-            state.failures = execution.checkpoint.get("failures", 0)
-            state.seen_calls = set(execution.checkpoint.get("seen_calls", []))
-            state.verified_product = execution.checkpoint.get("verified_product")
-            state.verified_rfq_item = execution.checkpoint.get("verified_rfq_item")
-            budget_checkpoint = execution.checkpoint.get("token_budget") or {}
-            state.llm_tokens_used = max(state.llm_tokens_used, budget_checkpoint.get("used_tokens", 0))
-            state.llm_tokens_estimated = max(state.llm_tokens_estimated, budget_checkpoint.get("estimated_tokens", 0))
-            state.llm_calls = max(state.llm_calls, budget_checkpoint.get("calls", 0))
-            db.commit()
-        if db.scalar(select(User.status).where(User.id == user_id)) != "ACTIVE":
+        if not active:
             state.status, state.error_code, state.reply = "FAILED", "PERMISSION_DENIED", "用户状态已变化，任务停止。"
             try:
-                _persist(db, user, state)
+                await _offload_db_call(_persist, db, user, state)
             except TaskInterrupted:
                 pass
             return

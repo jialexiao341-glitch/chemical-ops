@@ -122,7 +122,7 @@ export const TASK_ERROR_HELP: Record<string, string> = {
   TASK_TIMEOUT: '查询超时。请缩小查询范围后重新发起。',
   MODEL_FORMAT_ERROR: '模型返回格式无效。请重新发起；若重复发生，请联系管理员检查模型配置。',
   STEP_LIMIT: '查询步骤达到上限。请明确产品规格及询价编号后重新发起。',
-  CONTEXT_LIMIT: '任务内容超过上限。请缩小查询范围后重新发起。',
+  CONTEXT_LIMIT: '任务上下文过长，无法安全继续。请按产品、仓库或时间范围分段查询。',
   INVALID_EVIDENCE: '模型引用了不存在的证据，任务已停止。请重新发起查询。',
   INCOMPLETE_TASK: '查询目标尚未全部完成。请补充缺失条件，或分项重新查询。',
   REPEATED_TOOL: '模型重复调用了相同工具。请补充更明确的产品、仓库或询价条件后重试。',
@@ -131,5 +131,6 @@ export const TASK_ERROR_HELP: Record<string, string> = {
   TOKEN_BUDGET_EXCEEDED: '本次任务预算已用完。请缩小范围或分多次查询。',
   DATABASE_ERROR: '业务数据读取失败。请稍后重试或联系管理员。',
   MODEL_SERVICE_ERROR: '模型服务暂时不可用。请稍后重试。',
-  RUNTIME_ERROR: '任务执行遇到异常，已停止。请缩小范围后重试。',
+  RUNTIME_ERROR: '任务遇到暂时异常并已安全停止。可重新发起；重复发生时请联系管理员并提供任务编号。',
+  RESULT_UNAVAILABLE: '任务结果因权限或数据范围变化暂不可访问。请按当前条件重新发起查询。',
 };

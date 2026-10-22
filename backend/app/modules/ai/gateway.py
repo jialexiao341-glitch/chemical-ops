@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+import inspect
 import json
 import math
 from threading import Lock
@@ -38,7 +39,7 @@ class TaskTokenBudget:
     """Cumulative token ledger shared by all LLM calls in one Agent task."""
 
     def __init__(self, limit: int, *, used_tokens: int = 0, estimated_tokens: int = 0,
-                 calls: int = 0, on_settle: Callable[[dict[str, int]], None] | None = None) -> None:
+                 calls: int = 0, on_settle: Callable[[dict[str, int]], object] | None = None) -> None:
         self.limit = limit
         self.used_tokens = max(0, used_tokens)
         self.estimated_tokens = max(0, estimated_tokens)
@@ -62,7 +63,7 @@ class TaskTokenBudget:
             self._reserved_tokens += reservation.amount
         return reservation
 
-    def settle(self, reservation: TokenReservation, usage: object = None) -> None:
+    def _record_settlement(self, reservation: TokenReservation, usage: object) -> tuple[dict[str, int], bool]:
         actual_input = actual_output = actual_total = None
         if isinstance(usage, dict):
             def valid(*names: str) -> int | None:
@@ -91,8 +92,28 @@ class TaskTokenBudget:
             snapshot = {"limit": self.limit, "used_tokens": self.used_tokens,
                         "estimated_tokens": self.estimated_tokens, "calls": self.calls}
             over_budget = self.used_tokens + self._reserved_tokens > self.limit
+        return snapshot, over_budget
+
+    def settle(self, reservation: TokenReservation, usage: object = None) -> None:
+        """Keep synchronous callers compatible; async callbacks use settle_async."""
+        snapshot, over_budget = self._record_settlement(reservation, usage)
         if self._on_settle:
-            self._on_settle(snapshot)
+            callback_result = self._on_settle(snapshot)
+            if inspect.isawaitable(callback_result):
+                close = getattr(callback_result, "close", None)
+                if close:
+                    close()
+                raise RuntimeError("异步预算回调必须通过 settle_async 等待")
+        if over_budget:
+            raise TaskTokenBudgetExceeded("TOKEN_BUDGET_EXCEEDED")
+
+    async def settle_async(self, reservation: TokenReservation, usage: object = None) -> None:
+        """Settle usage and await persistence callbacks without blocking the event loop."""
+        snapshot, over_budget = self._record_settlement(reservation, usage)
+        if self._on_settle:
+            callback_result = self._on_settle(snapshot)
+            if inspect.isawaitable(callback_result):
+                await callback_result
         if over_budget:
             raise TaskTokenBudgetExceeded("TOKEN_BUDGET_EXCEEDED")
 

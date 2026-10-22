@@ -8,8 +8,18 @@ from sqlalchemy import select, text
 from app.core.errors import AuthorizationError, BusinessValidationError
 from app.modules.ai import agent_runtime as runtime
 from app.modules.ai.model import AIAgentTask
-from tests.test_agent_runtime import USER, model_script, task_db, start, tool
+from tests.test_agent_runtime import USER, model_script, task_db as base_task_db, start, tool
 from tests.test_agent_read_tools import tool_db
+
+
+@pytest.fixture
+def task_db(base_task_db):
+    """询价 Agent 路径会读取化学品状态；补齐本模块所需的隔离表。"""
+    base_task_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
+    base_task_db.execute(text("INSERT INTO md_chemicals VALUES (1, 'ACTIVE')"))
+    base_task_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
+    base_task_db.execute(text("UPDATE md_products SET chemical_id = 1"))
+    return base_task_db
 
 
 def waiting_rfq(db, actions, question='比较测试乙醇报价'):
@@ -148,7 +158,7 @@ def test_combined_resume_refreshes_inventory_and_preserves_limit(task_db, model_
 
 def test_explicit_product_switch_clears_previous_ids_and_rfq(task_db, model_script):
     result = waiting_rfq(task_db, model_script[0])
-    task_db.execute(text("INSERT INTO md_products VALUES (3, '新产品', 'ACTIVE', 'NEW-P', '工业级', '桶', 1)"))
+    task_db.execute(text("INSERT INTO md_products VALUES (3, '新产品', 'ACTIVE', 'NEW-P', '工业级', '桶', 1, 1)"))
     task_db.commit()
     prepared = runtime.prepare_continue(task_db, USER, result.id,
         runtime.TaskContinue(question='改查新产品库存', revision=result.revision))

@@ -1,6 +1,7 @@
 """统一 LLM Gateway 的配置、熔断及并发治理单元测试。"""
 
 import asyncio
+import asyncio
 import json
 
 import pytest
@@ -101,6 +102,22 @@ def test_task_token_budget_rejects_call_before_it_can_exceed_limit():
     with pytest.raises(gateway.TaskTokenBudgetExceeded, match="TOKEN_BUDGET_EXCEEDED"):
         budget.reserve("hello world", 20)
     assert budget.snapshot()["used_tokens"] == 10
+
+
+def test_task_token_budget_awaits_async_settlement_callback():
+    persisted = []
+
+    async def persist(snapshot):
+        await asyncio.sleep(0)
+        persisted.append(snapshot)
+
+    budget = gateway.TaskTokenBudget(100, on_settle=persist)
+    reservation = budget.reserve("hello", 10)
+
+    asyncio.run(budget.settle_async(reservation, {"prompt_tokens": 3, "completion_tokens": 2}))
+
+    assert persisted == [budget.snapshot()]
+    assert budget.snapshot()["calls"] == 1
 
 
 def test_chat_charges_bound_task_budget_and_blocks_later_calls(monkeypatch):

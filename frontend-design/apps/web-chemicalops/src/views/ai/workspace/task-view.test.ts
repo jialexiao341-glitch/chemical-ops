@@ -32,12 +32,15 @@ describe('采购任务状态与来源', () => {
   });
   it('所有可恢复任务错误码都有行动建议，不只显示通用提示', () => {
     for (const code of [
+      'PERMISSION_DENIED', 'TASK_TIMEOUT', 'MODEL_FORMAT_ERROR', 'STEP_LIMIT', 'CONTEXT_LIMIT',
       'INVALID_EVIDENCE', 'INCOMPLETE_TASK', 'REPEATED_TOOL', 'TOOL_ERRORS',
       'INTENT_MISMATCH', 'TOKEN_BUDGET_EXCEEDED', 'DATABASE_ERROR',
-      'MODEL_SERVICE_ERROR', 'RUNTIME_ERROR',
+      'MODEL_SERVICE_ERROR', 'RUNTIME_ERROR', 'RESULT_UNAVAILABLE',
     ]) {
       expect(TASK_ERROR_HELP[code], code).toBeTruthy();
     }
+    expect(TASK_ERROR_HELP.RUNTIME_ERROR).toContain('任务编号');
+    expect(TASK_ERROR_HELP.RESULT_UNAVAILABLE).toContain('重新发起');
   });
   it('强制等待只展示最新候选，普通追问不能选择历史候选', () => {
     expect(waitingCandidates(waiting)?.tool).toBe('catalog.search_products');

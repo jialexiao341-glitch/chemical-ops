@@ -4,7 +4,6 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
-from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -30,31 +29,15 @@ from app.modules.ai.schema import (
     schema_response_format,
 )
 from app.modules.ai import agent_tools, conversation_store, llm, service, text2sql
+from app.modules.ai.candidate_resolution import inventory_family
+from app.modules.ai.product_query_policy import (
+    can_aggregate_inventory,
+    unsupported_product_slot_prompt,
+    unsupported_product_slots,
+)
+from app.modules.ai.product_query_summary import inventory_totals, summarize_product_evidence
 from app.modules.ai.model import AIConversation, AIMessage
 from app.modules.system.model import User
-
-
-def _inventory_totals(evidence: list[dict]) -> dict[tuple[int, str], Decimal]:
-    """只合计完整工具 totals，同单位累计；不能用截断后的明细求和。"""
-    totals = {}
-    for value in evidence:
-        if value.get("tool") != "inventory.query_available":
-            continue
-        for row in value["totals"]:
-            key = (row["unit_id"], row["unit_name"])
-            totals[key] = totals.get(key, Decimal(0)) + Decimal(str(row["available_quantity"]))
-    return totals
-
-
-def _inventory_family(db: Session, rows: list[dict], keyword: str) -> bool:
-    """同名规格或实际登记为同一化学品可汇总，模糊命中的不同化学品仍需消歧。"""
-    if all(row["product_name"] == keyword for row in rows):
-        return True
-    from app.modules.products.model import Product
-    from app.modules.chemicals.model import Chemical
-    identities = db.execute(select(Product.id, Product.chemical_id).join(Chemical, Chemical.id == Product.chemical_id)
-        .where(Product.id.in_([row["product_id"] for row in rows]), Chemical.status == "ACTIVE")).all()
-    return len(identities) == len(rows) and len({row.chemical_id for row in identities}) == 1
 
 
 async def plan_analytics(db: Session, user: User, task: SubTask, settings: Settings, *,
@@ -87,11 +70,12 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
     if required not in available or "catalog.search_products" not in available:
         raise AuthorizationError("没有执行该查询所需的权限")
     slots = task.slots
+    unsupported = unsupported_product_slots(task.kind, slots)
+    if unsupported:
+        result.status, result.answer = TaskStatus.WAITING_INPUT, unsupported_product_slot_prompt(unsupported)
+        return
     if not slots.product_keyword:
         result.status, result.answer = TaskStatus.WAITING_INPUT, "请补充该项查询的产品名称或编码。"
-        return
-    if slots.date_from or slots.date_to or slots.unit:
-        result.status, result.answer = TaskStatus.WAITING_INPUT, "当前库存与报价工具按现有记录和原始单位查询，请确认是否使用这一口径。"
         return
     def execute(name, **arguments):
         """通过统一权限护栏执行固定工具，并保留结果及历史重验所需摘要。"""
@@ -117,8 +101,12 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
             raise BusinessValidationError('所选产品已不在当前授权候选中')
         product = {**product, 'rows': [row for row in product['rows'] if row['product_id'] == chosen],
                    'total_rows': 1, 'truncated': False}
-    aggregate = (task.kind == "inventory" and product["total_rows"] > 1 and not product["truncated"]
-                 and _inventory_family(db, product["rows"], keyword))
+    same_family = (task.kind == "inventory" and not product["truncated"]
+                   and inventory_family(db, product["rows"], keyword))
+    aggregate = can_aggregate_inventory(
+        total_rows=product["total_rows"], truncated=product["truncated"],
+        explicit_aggregate=slots.aggregate_products, same_product_family=same_family,
+    ) and task.kind == "inventory"
     if (product["total_rows"] != 1 and not aggregate) or product["truncated"]:
         result.status = TaskStatus.WAITING_INPUT if product["total_rows"] else TaskStatus.SUCCEEDED
         result.answer = f"找到多个与“{keyword}”匹配的规格，请补充需要查询的规格名称或产品编码。" if product["total_rows"] else f"暂时没有找到与“{keyword}”匹配的产品，请核对名称或产品编码。"
@@ -143,13 +131,9 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
             arguments["warehouse_id"] = warehouses[0]
         inventory = [execute("inventory.query_available", **{**arguments, "product_id": row["product_id"]})
                      for row in product["rows"]]
-        totals = _inventory_totals(inventory)
-        quantities = "、".join(f"{amount.normalize():f} {unit}" for (_, unit), amount in totals.items())
-        result.answer = f"{keyword}的可用库存为 {quantities}。" if quantities else f"暂时没有找到{keyword}的库存记录。"
+        result.answer = summarize_product_evidence(inventory)
         if aggregate:
             result.answer += f"\n这是本次查询的 {len(inventory)} 个规格的合计，各规格库存可在明细中查看。"
-        if len(totals) > 1:
-            result.answer += "\n库存使用不同计量单位，已分别合计，不直接相加。"
         result.status = TaskStatus.SUCCEEDED
         return
     else:
@@ -172,8 +156,7 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
                     revision=(prior_pending.revision + 1 if prior_pending else 1))
             return
         value = execute("supplier_quotes.compare", **arguments, rfq_item_id=rfqs["rows"][0]["rfq_item_id"])
-    from app.modules.ai.agent_runtime import _summary
-    result.answer = _summary([{"tool": value["tool"], "result": value}])
+    result.answer = summarize_product_evidence([value])
     result.status = TaskStatus.SUCCEEDED
 
 
@@ -333,7 +316,7 @@ def summarize(batch: BatchResult, question: str = "") -> str:
         lines.append(f"\n### {index}. {task.question}（{TASK_STATUS_LABELS[task.status]}）\n{task.answer or '尚未执行。'}")
     inventory = [task for task in batch.tasks if task.kind == "inventory" and task.status == TaskStatus.SUCCEEDED]
     if len(inventory) > 1 and any(word in question for word in ("哪个多", "哪种多", "比较", "对比", "更多")):
-        totals = [_inventory_totals(task.evidence) for task in inventory]
+        totals = [inventory_totals(task.evidence) for task in inventory]
         units = set.intersection(*(set(value) for value in totals))
         lines.append("\n### 库存比较")
         if not units:

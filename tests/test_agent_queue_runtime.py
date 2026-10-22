@@ -255,7 +255,7 @@ def test_token_budget_is_persisted_to_task_and_queue_checkpoint(queued_db, monke
     async def ask_user(*args, **kwargs):
         budget = gateway.current_task_token_budget()
         reservation = budget.reserve("planner prompt", 8)
-        budget.settle(reservation, {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6})
+        await budget.settle_async(reservation, {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6})
         return SimpleNamespace(message=SimpleNamespace(content='{"action":"ask_user","question":"请补充信息"}'))
     monkeypatch.setattr(runtime.routing, "understand", understand)
     monkeypatch.setattr(runtime.llm, "chat", ask_user)

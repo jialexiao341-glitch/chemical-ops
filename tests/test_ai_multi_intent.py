@@ -104,6 +104,24 @@ def test_missing_product_is_waiting_and_never_invented(tool_db):
     assert all(not task.evidence for task in batch.tasks)
 
 
+@pytest.mark.parametrize("task_kind", ["inventory", "quotes"])
+@pytest.mark.parametrize("unsupported_slots", [
+    {"date_from": "2026-10-01"},
+    {"unit": "升"},
+])
+def test_batch_uses_shared_prompt_for_unsupported_product_slots(tool_db, task_kind, unsupported_slots):
+    from app.modules.ai.product_query_policy import unsupported_product_slot_prompt
+
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(
+        product_task(kind=task_kind, slots={"product_keyword": "测试乙醇", **unsupported_slots}),
+    ), Settings(_env_file=None)))
+    task = batch.tasks[0]
+
+    assert task.status == TaskStatus.WAITING_INPUT
+    assert task.answer == unsupported_product_slot_prompt(tuple(unsupported_slots))
+    assert task.tool_calls == []
+
+
 def test_inventory_sums_all_matching_specifications_and_rechecks_history(tool_db):
     from sqlalchemy import text
     tool_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '200kg', 1)"))
