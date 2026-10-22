@@ -335,6 +335,62 @@ def test_new_read_tools_recheck_permissions_and_reject_extra_fields(tool_db):
         call(tool_db, name="purchase_requests.get_by_no", request_no="PR20261022000031", user_id=7)
 
 
+def test_quality_acceptance_tool_reads_only_exact_visible_acceptance(tool_db, monkeypatch):
+    from app.modules.quality_acceptances import service as acceptance_service
+
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: ["quality.acceptances.read"])
+    acceptance = SimpleNamespace(
+        id=44, acceptance_no="QA20261022000044", result="PENDING", inspection_time=None,
+        test_result={"appearance": "符合"}, certificate_complete=1, report_file_id=12,
+        conclusion="等待检验完成",
+    )
+    seen = []
+    monkeypatch.setattr(acceptance_service, "get_acceptance_by_no",
+        lambda _db, _user, number: seen.append(number) or (acceptance if number == acceptance.acceptance_no else None))
+
+    result = call(tool_db, name="quality_acceptances.get_by_no", acceptance_no=acceptance.acceptance_no)
+
+    assert result.total_rows == 1
+    assert result.rows[0].acceptance_no == acceptance.acceptance_no
+    assert result.rows[0].test_result == {"appearance": "符合"}
+    assert result.rows[0].report_available is True
+    assert result.sources[0].resource == "quality_acceptances"
+    assert seen == [acceptance.acceptance_no]
+    assert call(tool_db, name="quality_acceptances.get_by_no", acceptance_no="QA20261022000045").total_rows == 0
+
+
+def test_quality_acceptance_tool_requires_permission_and_strict_number(tool_db, monkeypatch):
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: [])
+    with pytest.raises(AuthorizationError):
+        call(tool_db, name="quality_acceptances.get_by_no", acceptance_no="QA20261022000044")
+    monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: ["quality.acceptances.read"])
+    with pytest.raises(BusinessValidationError, match="参数"):
+        call(tool_db, name="quality_acceptances.get_by_no", acceptance_no="QA20261022000044", acceptance_id=44)
+    with pytest.raises(BusinessValidationError, match="参数"):
+        call(tool_db, name="quality_acceptances.get_by_no", acceptance_no="QA?")
+
+
+def test_quality_acceptance_service_reuses_inspector_scope(tool_db, monkeypatch):
+    from app.modules.quality_acceptances import service as acceptance_service
+
+    tool_db.execute(text("""CREATE TABLE quality_acceptances (
+        id INTEGER PRIMARY KEY, acceptance_no VARCHAR(32) NOT NULL, delivery_id INTEGER NOT NULL,
+        inspector_id INTEGER NOT NULL, result VARCHAR(20) NOT NULL, inspection_time DATETIME,
+        test_result JSON, certificate_complete SMALLINT NOT NULL, report_file_id INTEGER,
+        conclusion VARCHAR(2000), created_at DATETIME, updated_at DATETIME)"""))
+    tool_db.execute(text("""INSERT INTO quality_acceptances
+        (id, acceptance_no, delivery_id, inspector_id, result, certificate_complete)
+        VALUES (41, 'QA-OWN', 1, 7, 'PENDING', 0), (42, 'QA-OTHER', 2, 8, 'PASSED', 1)"""))
+    tool_db.commit()
+    monkeypatch.setattr(acceptance_service, "get_user_role_codes", lambda *_args: ["QUALITY"])
+
+    visible = acceptance_service.get_acceptance_by_no(tool_db, SimpleNamespace(id=7), "QA-OWN")
+
+    assert visible is not None and visible.id == 41
+    assert acceptance_service.get_acceptance_by_no(tool_db, SimpleNamespace(id=7), "QA-OTHER") is None
+    assert acceptance_service.get_acceptance_by_no(tool_db, SimpleNamespace(id=7), "QA-MISSING") is None
+
+
 def test_http_routes_require_authentication_and_reject_extra_identity_fields():
     """检查 API 登录要求和顶层身份字段被请求 Schema 拒绝。"""
     app = FastAPI()

@@ -24,6 +24,8 @@ from app.modules.ai.schema import (
     ProductSearchResult,
     PurchaseOrderTraceInput,
     PurchaseOrderTraceResult,
+    QualityAcceptanceInput,
+    QualityAcceptanceResult,
     PurchaseRequestInput,
     PurchaseRequestResult,
     QuoteInput,
@@ -318,6 +320,26 @@ def trace_purchase_order(db: Session, user: User, arguments: PurchaseOrderTraceI
     return PurchaseOrderTraceResult(**trace_service(db, user, arguments.po_no))
 
 
+def get_quality_acceptance(db: Session, user: User, arguments: QualityAcceptanceInput) -> QualityAcceptanceResult:
+    """按精确验收编号读取当前用户可见的质量验收事实，不推断质量结论。"""
+    from app.modules.quality_acceptances import service as acceptance_service
+
+    acceptance = acceptance_service.get_acceptance_by_no(db, user, arguments.acceptance_no)
+    if acceptance is None:
+        return QualityAcceptanceResult(total_rows=0, rows=[], sources=[])
+    row = {
+        "acceptance_no": acceptance.acceptance_no,
+        "result": acceptance.result,
+        "inspection_time": acceptance.inspection_time,
+        "test_result": acceptance.test_result,
+        "certificate_complete": bool(acceptance.certificate_complete),
+        "report_available": acceptance.report_file_id is not None,
+        "conclusion": acceptance.conclusion,
+    }
+    return QualityAcceptanceResult(total_rows=1, rows=[row],
+        sources=[Source(resource="quality_acceptances", record_id=acceptance.id)])
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """静态工具契约：Schema 与处理函数由代码登记，禁止按模型文本动态查找函数。"""
@@ -370,6 +392,10 @@ TOOLS = {
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("purchase_orders.trace_by_no", "按精确订单号跨业务环节追溯采购订单",
                  "procurement.orders.read", PurchaseOrderTraceInput, PurchaseOrderTraceResult, trace_purchase_order,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+        ToolSpec("quality_acceptances.get_by_no", "按精确验收编号读取当前用户可见的验收状态、检测记录及报告/证书状态",
+                 "quality.acceptances.read", QualityAcceptanceInput, QualityAcceptanceResult, get_quality_acceptance,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
     )

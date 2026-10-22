@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { QualityAcceptanceApi } from '#/api';
 
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
@@ -23,6 +23,7 @@ import {
   reviewAcceptanceReportApi,
   uploadAcceptanceReportApi,
 } from '#/api';
+import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 
 const emit = defineEmits(['continue']);
 const { hasAccessByCodes } = useAccess();
@@ -130,8 +131,19 @@ async function refreshSummary() {
 const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance>({
   /** 打开抽屉时清除上次状态并加载当前验收单上下文。 */
   async onOpenChange(isOpen) {
-    if (!isOpen) return;
+    if (!isOpen) {
+      if (acceptance.value) clearPageCopilotContext('quality_acceptance', acceptance.value.id);
+      return;
+    }
+    if (acceptance.value) clearPageCopilotContext('quality_acceptance', acceptance.value.id);
     acceptance.value = drawerApi.getData() ?? null;
+    if (acceptance.value) {
+      setPageCopilotContext({
+        objectType: 'quality_acceptance',
+        objectId: acceptance.value.id,
+        question: '这张验收单的检测结果和结论是什么？',
+      });
+    }
     review.value = null;
     targets.value = [];
     summary.value = null;
@@ -143,6 +155,10 @@ const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance
     selectedFileId.value = undefined;
     if (acceptance.value) await Promise.all([loadFiles(acceptance.value.id), loadContext(acceptance.value.id)]);
   },
+});
+
+onBeforeUnmount(() => {
+  if (acceptance.value) clearPageCopilotContext('quality_acceptance', acceptance.value.id);
 });
 
 /** 上传用户选择的报告，关联当前验收单并选中该文件。 */

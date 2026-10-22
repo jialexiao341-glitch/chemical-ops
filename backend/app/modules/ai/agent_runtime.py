@@ -82,7 +82,7 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 多个产品/询价候选由服务端暂停。只读查询不需要用户提供采购用途或采购数量。
 
 # 参数与执行顺序
-采购申请查询与订单追溯不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no。不得改写编号、补猜编号或调用库存/报价工具。
+采购申请查询、订单追溯与质量验收查询不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。
 根据已返回结果决定后续工具；不要重复调用同工具同参数。未授权工具不在目录中。
 用户指定返回条数时，必须在对应业务工具 arguments.limit 中保留该值（不超过工具上限）。
 库存 totals 已按全部授权余额计算，即使 limit=1 也无需扩大明细条数获取全范围合计。
@@ -446,6 +446,7 @@ _AGENT_TASK_TOOL = {
     "quotes": "supplier_quotes.compare",
     "purchase_request": "purchase_requests.get_by_no",
     "order_trace": "purchase_orders.trace_by_no",
+    "quality_acceptance": "quality_acceptances.get_by_no",
 }
 
 
@@ -653,7 +654,8 @@ def _summary(entries: list[dict]) -> str:
     """从后端已验证数据生成数值摘要，避免模型自由改写金额、数量或来源。"""
     requests = [entry["result"] for entry in entries if entry.get("tool") == "purchase_requests.get_by_no"]
     orders = [entry["result"] for entry in entries if entry.get("tool") == "purchase_orders.trace_by_no"]
-    if requests or orders:
+    acceptances = [entry["result"] for entry in entries if entry.get("tool") == "quality_acceptances.get_by_no"]
+    if requests or orders or acceptances:
         lines = []
         for result in requests:
             if not result["rows"]:
@@ -663,6 +665,17 @@ def _summary(entries: list[dict]) -> str:
             lines.append(f"采购申请 {row['request_no']}：{row['status']}；用途：{row['purpose']}；明细 {len(row['items'])} 项。")
         for result in orders:
             lines.append(result["answer"])
+        for result in acceptances:
+            if not result["rows"]:
+                lines.append("当前可访问范围内没有找到该质量验收编号。")
+                continue
+            row = result["rows"][0]
+            certificate = "证书齐全" if row["certificate_complete"] else "证书未齐全"
+            report = "报告已上传" if row["report_available"] else "报告未上传"
+            summary = f"质量验收 {row['acceptance_no']}：状态 {row['result']}；{certificate}；{report}"
+            if row.get("conclusion"):
+                summary += f"；结论：{row['conclusion']}"
+            lines.append(summary + "。")
         return "\n".join(lines)
     from app.modules.ai.product_query_summary import summarize_product_evidence
     return summarize_product_evidence(entries)
@@ -674,7 +687,8 @@ def _validate_finish_evidence(intent: str, entries: list[dict]) -> None:
                 {"inventory.query_available"} if intent == "inventory_query" else
                 {"supplier_quotes.compare"} if intent == "supplier_quote_query" else
                 {"purchase_requests.get_by_no"} if intent == "purchase_request_query" else
-                {"purchase_orders.trace_by_no"} if intent == "purchase_order_trace" else set())
+                {"purchase_orders.trace_by_no"} if intent == "purchase_order_trace" else
+                {"quality_acceptances.get_by_no"} if intent == "quality_acceptance_query" else set())
     locators = {"catalog.search_products", "supplier_quotes.find_rfq_items"}
     if any(entry["tool"] not in required and not (
         entry["tool"] in locators and entry.get("result", {}).get("total_rows") == 0
@@ -966,12 +980,14 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                 if ((action.tool.startswith("supplier_quotes.") and "quotes" not in tasks) or
                     (action.tool == "inventory.query_available" and "inventory" not in tasks) or
                     (action.tool == "purchase_requests.get_by_no" and "purchase_request" not in tasks) or
-                    (action.tool == "purchase_orders.trace_by_no" and "order_trace" not in tasks)):
+                    (action.tool == "purchase_orders.trace_by_no" and "order_trace" not in tasks) or
+                    (action.tool == "quality_acceptances.get_by_no" and "quality_acceptance" not in tasks)):
                     entry["error_code"] = "INTENT_MISMATCH"
                     raise BusinessValidationError("INTENT_MISMATCH")
                 slots = understanding.get("slots") or {}
                 if ((action.tool == "purchase_requests.get_by_no" and action.arguments.get("request_no") != slots.get("request_no")) or
-                    (action.tool == "purchase_orders.trace_by_no" and action.arguments.get("po_no") != slots.get("po_no"))):
+                    (action.tool == "purchase_orders.trace_by_no" and action.arguments.get("po_no") != slots.get("po_no")) or
+                    (action.tool == "quality_acceptances.get_by_no" and action.arguments.get("acceptance_no") != slots.get("acceptance_no"))):
                     raise BusinessValidationError("工具编号必须与本轮已确认的准确编号一致")
             if action.tool == "catalog.search_products" and current.verified_product is not None:
                 keyword = action.arguments.get("keyword")

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { InventoryApi } from '#/api';
 
-import { ref, watch } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
 
@@ -9,6 +9,7 @@ import { Empty, Spin, Table, Tag } from 'antdv-next';
 
 import { getBalanceStatusLogsApi } from '#/api';
 import { formatDateTime } from '#/utils/format';
+import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 
 const balanceId = ref<null | number>();
 const loading = ref(false);
@@ -19,8 +20,22 @@ const [Drawer, drawerApi] = useVbenDrawer<null | number>({
   onOpenChange(isOpen) {
     if (isOpen) {
       balanceId.value = drawerApi.getData();
+      if (balanceId.value) {
+        setPageCopilotContext({
+          objectType: 'inventory_balance',
+          objectId: balanceId.value,
+          question: '这笔库存余额有多少可用量，批次何时到期？',
+        });
+      }
+    } else if (balanceId.value) {
+      clearPageCopilotContext('inventory_balance', balanceId.value);
+      balanceId.value = null;
     }
   },
+});
+
+onBeforeUnmount(() => {
+  if (balanceId.value) clearPageCopilotContext('inventory_balance', balanceId.value);
 });
 
 const STATUS_LABEL: Record<string, string> = {

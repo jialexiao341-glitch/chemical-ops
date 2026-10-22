@@ -73,6 +73,11 @@ def _require_balance_for_user(db: Session, user: User, balance_id: int, *, for_u
     _require_warehouse_scope(db, user, balance.warehouse_id)
     return balance
 
+
+def get_balance_for_user(db: Session, user: User, balance_id: int) -> InventoryBalance:
+    """读取单条库存余额并执行与库存页面一致的仓库数据范围校验。"""
+    return _require_balance_for_user(db, user, balance_id)
+
 def accessible_warehouse_ids(db: Session, user: User) -> set[int] | None:
     roles = set(get_user_role_codes(db, user.id))
     if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:

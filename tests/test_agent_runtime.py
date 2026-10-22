@@ -795,6 +795,8 @@ def test_agent_entry_rejects_missing_tool_permission(task_db, monkeypatch):
      "purchase_requests.get_by_no", "purchase_request_query"),
     ("order_trace", "po_no", "PO-26001", "procurement.orders.read",
      "purchase_orders.trace_by_no", "purchase_order_trace"),
+    ("quality_acceptance", "acceptance_no", "QA20261022000031", "quality.acceptances.read",
+     "quality_acceptances.get_by_no", "quality_acceptance_query"),
 ])
 def test_numbered_agent_task_starts_with_only_its_read_permission(
     task_db, monkeypatch, kind, slot, number, permission, tool_name, intent,
@@ -815,9 +817,11 @@ def test_numbered_agent_task_starts_with_only_its_read_permission(
 def test_agent_capability_mapping_requires_only_the_task_tool():
     from app.modules.ai import routing
 
-    for kind, tool_name in (("purchase_request", "purchase_requests.get_by_no"),
-                            ("order_trace", "purchase_orders.trace_by_no")):
-        decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=[kind])
+    for kind, tool_name, slots in (("purchase_request", "purchase_requests.get_by_no", {}),
+                                   ("order_trace", "purchase_orders.trace_by_no", {}),
+                                   ("quality_acceptance", "quality_acceptances.get_by_no",
+                                    {"acceptance_no": "QA20261022000031"})):
+        decision = routing.Understanding(purpose="query", execution_mode="agent", tasks=[kind], slots=slots)
         runtime._ensure_agent_capabilities(decision, {tool_name})
         with pytest.raises(AuthorizationError):
             runtime._ensure_agent_capabilities(decision, set())
@@ -828,13 +832,19 @@ def test_numbered_agent_summaries_are_deterministic_and_use_trace_answer():
         "rows": [{"request_no": "PR20261022000031", "status": "APPROVING",
                   "purpose": "乙醇采购", "items": [{"line_no": 1}]}]}}])
     order_reply = runtime._summary([{"tool": "purchase_orders.trace_by_no", "result": {"answer": "追溯结论"}}])
+    acceptance_reply = runtime._summary([{"tool": "quality_acceptances.get_by_no", "result": {
+        "total_rows": 1, "rows": [{"acceptance_no": "QA20261022000031", "result": "PENDING",
+                                     "certificate_complete": True, "report_available": False,
+                                     "conclusion": "等待检验"}]}}])
     assert request_reply == "采购申请 PR20261022000031：APPROVING；用途：乙醇采购；明细 1 项。"
     assert order_reply == "追溯结论"
+    assert acceptance_reply == "质量验收 QA20261022000031：状态 PENDING；证书齐全；报告未上传；结论：等待检验。"
 
 
 @pytest.mark.parametrize("intent,tool_name,result", [
     ("purchase_request_query", "purchase_requests.get_by_no", {"total_rows": 0, "rows": []}),
     ("purchase_order_trace", "purchase_orders.trace_by_no", {"stages": [], "source_records": []}),
+    ("quality_acceptance_query", "quality_acceptances.get_by_no", {"total_rows": 0, "rows": []}),
 ])
 def test_numbered_agent_completion_requires_its_tool_evidence(intent, tool_name, result):
     entry = {"tool": tool_name, "result": result}
@@ -845,7 +855,8 @@ def test_numbered_agent_completion_requires_its_tool_evidence(intent, tool_name,
         runtime._validate_finish_evidence(intent, [{"tool": "catalog.search_products", "result": {"total_rows": 0}}])
 
 
-@pytest.mark.parametrize("tool_name", ["purchase_requests.get_by_no", "purchase_orders.trace_by_no"])
+@pytest.mark.parametrize("tool_name", ["purchase_requests.get_by_no", "purchase_orders.trace_by_no",
+                                       "quality_acceptances.get_by_no"])
 def test_revoked_numbered_tool_permission_blocks_historical_evidence(monkeypatch, tool_name):
     monkeypatch.setattr(tools, "list_tools", lambda *_args: [])
     monkeypatch.setattr(tools, "accessible_warehouse_ids", lambda *_args: None)

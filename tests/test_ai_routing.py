@@ -45,6 +45,7 @@ def test_inventory_aggregation_is_carried_as_a_structured_slot():
     ("query", "agent", ["inventory", "quotes"], [], "agent"),
     ("query", "agent", ["purchase_request"], [], "agent"),
     ("query", "agent", ["order_trace"], [], "agent"),
+    ("query", "agent", ["quality_acceptance"], [], "agent"),
     ("query", "batch", ["inventory"], ["inventory", "inventory"], "batch"),
     ("query", "batch", ["analytics"], ["analytics", "analytics"], "batch"),
     ("query", "batch", ["document"], ["document", "document"], "batch"),
@@ -58,6 +59,7 @@ def test_execution_mode_is_explicit_and_controls_route(purpose, mode, tasks, sub
         "purpose": purpose,
         "execution_mode": mode,
         "tasks": tasks,
+        "slots": {"acceptance_no": "QA20261022000001"} if "quality_acceptance" in tasks else {},
         "sub_tasks": [
             {"id": f"t{i}", "kind": kind, "question": f"查询任务{i}"}
             for i, kind in enumerate(subtasks, 1)
@@ -87,6 +89,7 @@ def test_execution_mode_is_explicit_and_controls_route(purpose, mode, tasks, sub
      "sub_tasks": [{"id": "t1", "kind": "purchase_request", "question": "读取申请 PR20261022000001"},
                    {"id": "t2", "kind": "purchase_request", "question": "读取申请 PR20261022000002"}]},
     {"purpose": "query", "execution_mode": "agent", "tasks": ["purchase_request", "inventory"]},
+    {"purpose": "query", "execution_mode": "agent", "tasks": ["quality_acceptance"]},
     {"purpose": "greeting", "execution_mode": "agent"},
 ])
 def test_invalid_execution_mode_combinations_are_rejected(payload):
@@ -97,6 +100,7 @@ def test_invalid_execution_mode_combinations_are_rejected(payload):
 @pytest.mark.parametrize("kind,slot,number,intent", [
     ("purchase_request", "request_no", "PR20261022000001", "purchase_request_query"),
     ("order_trace", "po_no", "PO-26001", "purchase_order_trace"),
+    ("quality_acceptance", "acceptance_no", "QA20261022000001", "quality_acceptance_query"),
 ])
 def test_agent_numbered_read_tasks_keep_exact_identifier_slot(kind, slot, number, intent):
     decision = routing.Understanding.model_validate({

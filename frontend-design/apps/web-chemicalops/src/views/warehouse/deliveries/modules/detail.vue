@@ -1,32 +1,53 @@
 <script lang="ts" setup>
 import type { DeliveryApi } from '#/api';
 
-import { ref } from 'vue';
+import { onBeforeUnmount, ref } from 'vue';
 
 import { useVbenDrawer } from '@vben/common-ui';
 
 import { Descriptions, DescriptionsItem, Empty, Spin, Table, Tag } from 'antdv-next';
 
 import { getDeliveryApi } from '#/api';
+import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 import { formatDate, formatDateTime } from '#/utils/format';
 
 const detail = ref<DeliveryApi.Delivery>();
 const loading = ref(false);
+let requestGeneration = 0;
 
 const [Drawer, drawerApi] = useVbenDrawer<null | DeliveryApi.Delivery>({
   footer: false,
   async onOpenChange(isOpen) {
-    if (!isOpen) return;
-    const id = drawerApi.getData()?.id;
+    const generation = ++requestGeneration;
+    if (!isOpen) {
+      if (detail.value) clearPageCopilotContext('delivery', detail.value.id);
+      detail.value = undefined;
+      loading.value = false;
+      return;
+    }
+    const data = drawerApi.getData();
+    if (detail.value) clearPageCopilotContext('delivery', detail.value.id);
     detail.value = undefined;
-    if (!id) return;
+    if (!data?.id) return;
     loading.value = true;
     try {
-      detail.value = await getDeliveryApi(id);
+      const delivery = await getDeliveryApi(data.id);
+      if (generation !== requestGeneration) return;
+      detail.value = delivery;
+      setPageCopilotContext({
+        objectType: 'delivery',
+        objectId: delivery.id,
+        question: '这张到货单的收货进展和单证是否齐全？',
+      });
     } finally {
-      loading.value = false;
+      if (generation === requestGeneration) loading.value = false;
     }
   },
+});
+
+onBeforeUnmount(() => {
+  requestGeneration += 1;
+  if (detail.value) clearPageCopilotContext('delivery', detail.value.id);
 });
 
 const itemColumns = [

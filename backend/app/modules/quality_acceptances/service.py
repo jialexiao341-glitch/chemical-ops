@@ -97,6 +97,16 @@ def get_acceptance(db: Session, user: User, acceptance_id: int, *, for_update: b
     return acceptance
 
 
+def get_acceptance_by_no(db: Session, user: User, acceptance_no: str) -> QualityAcceptance | None:
+    """按完整验收编号读取用户可见记录；不存在与不可见统一返回空。"""
+
+    condition = acceptance_read_condition(user, get_user_role_codes(db, user.id))
+    return db.scalar(select(QualityAcceptance).where(
+        QualityAcceptance.acceptance_no == acceptance_no,
+        condition,
+    ))
+
+
 def submit_result(db: Session, user: User, acceptance_id: int, data: QualityAcceptanceResult) -> QualityAcceptance:
     """提交验收结果，并同步更新到货单质量状态。"""
 

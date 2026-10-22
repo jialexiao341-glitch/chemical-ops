@@ -317,7 +317,7 @@ TASK_STATUS_LABELS = {
 
 # 语义理解与路由
 
-Task = Literal["inventory", "quotes", "purchase_request", "order_trace", "analytics", "document"]
+Task = Literal["inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "analytics", "document"]
 
 
 class Slots(BaseModel):
@@ -327,6 +327,7 @@ class Slots(BaseModel):
     rfq_no: str | None = Field(default=None, max_length=32)
     request_no: str | None = Field(default=None, max_length=32)
     po_no: str | None = Field(default=None, max_length=32)
+    acceptance_no: str | None = Field(default=None, max_length=32)
     warehouse_keyword: str | None = Field(default=None, max_length=128)
     date_from: date | None = None
     date_to: date | None = None
@@ -406,10 +407,12 @@ class Understanding(BaseModel):
 
         if self.purpose == "query" and self.dialogue_action != "cancel":
             if self.execution_mode == "agent":
-                if not set(self.tasks) <= {"inventory", "quotes", "purchase_request", "order_trace"} or self.sub_tasks:
-                    raise ValueError("agent 模式仅支持未拆分的库存、报价、采购申请或订单追溯目标")
-                if set(self.tasks) & {"purchase_request", "order_trace"} and len(self.tasks) != 1:
-                    raise ValueError("采购申请读取和订单追溯必须作为单一 Agent 目标执行")
+                if not set(self.tasks) <= {"inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance"} or self.sub_tasks:
+                    raise ValueError("agent 模式仅支持未拆分的库存、报价、采购申请、订单追溯或质量验收目标")
+                if set(self.tasks) & {"purchase_request", "order_trace", "quality_acceptance"} and len(self.tasks) != 1:
+                    raise ValueError("按编号读取采购申请、订单追溯和质量验收必须作为单一 Agent 目标执行")
+                if "quality_acceptance" in self.tasks and not self.slots.acceptance_no:
+                    raise ValueError("质量验收 Agent 目标必须提供准确验收编号")
             elif self.execution_mode == "batch":
                 if not 2 <= len(self.sub_tasks) <= 6:
                     raise ValueError("batch 模式必须包含 2 至 6 个原子任务")
@@ -438,7 +441,8 @@ class Understanding(BaseModel):
     def agent_goal(self) -> str:
         """将单一 Agent 类别映射到服务端完成条件。"""
         return ({"inventory": "inventory_query", "quotes": "supplier_quote_query",
-                 "purchase_request": "purchase_request_query", "order_trace": "purchase_order_trace"}.get(self.tasks[0], "unknown")
+                 "purchase_request": "purchase_request_query", "order_trace": "purchase_order_trace",
+                 "quality_acceptance": "quality_acceptance_query"}.get(self.tasks[0], "unknown")
                 if len(self.tasks) == 1 else "inventory_and_quotes_query" if set(self.tasks) == {"inventory", "quotes"} else "unknown")
 
 
@@ -586,6 +590,10 @@ class PurchaseOrderTraceInput(ToolSchema):
     po_no: str = Field(min_length=1, max_length=32, pattern=r"^PO[-_A-Za-z0-9]+$")
 
 
+class QualityAcceptanceInput(ToolSchema):
+    acceptance_no: str = Field(min_length=4, max_length=32, pattern=r"^QA[A-Za-z0-9_-]+$")
+
+
 class ProductCandidate(ToolSchema):
     product_id: int
     product_code: str
@@ -627,6 +635,23 @@ class PurchaseRequestResult(ToolSchema):
     tool: Literal["purchase_requests.get_by_no"] = "purchase_requests.get_by_no"
     total_rows: int
     rows: list[dict[str, Any]]
+    sources: list["Source"]
+
+
+class QualityAcceptanceRow(ToolSchema):
+    acceptance_no: str
+    result: str
+    inspection_time: datetime | None
+    test_result: dict[str, Any] | list[Any] | None
+    certificate_complete: bool
+    report_available: bool
+    conclusion: str | None
+
+
+class QualityAcceptanceResult(ToolSchema):
+    tool: Literal["quality_acceptances.get_by_no"] = "quality_acceptances.get_by_no"
+    total_rows: int
+    rows: list[QualityAcceptanceRow]
     sources: list["Source"]
 
 

@@ -10,11 +10,15 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.core.errors import BusinessValidationError
+from app.core.errors import AuthorizationError
 from app.core.errors import ResourceNotFoundError
 from app.modules.ai import context
 from app.modules.ai.schema import AIContextAskRequest
+from app.modules.deliveries import service as delivery_service
+from app.modules.inventory import service as inventory_service
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.purchase_requests.model import PurchaseRequest
+from app.modules.quality_acceptances import service as quality_acceptance_service
 
 from .conftest import login
 
@@ -141,6 +145,231 @@ def test_purchase_request_context_answers_the_asked_field_and_only_suggests_supp
     assert response.context.suggested_questions == [
         "关联询价与报价进展如何？", "采购订单到货和验收进展如何？", "当前流程卡在哪个环节？",
     ]
+
+
+@pytest.mark.parametrize(
+    ("status", "actual_quantity", "expected_phrase"),
+    [
+        ("IN_TRANSIT", Decimal("0"), "尚未确认收货"),
+        ("RECEIVED", Decimal("8"), "已确认收货"),
+    ],
+)
+def test_delivery_context_reads_authorized_delivery_and_returns_receipt_evidence(
+    monkeypatch, status, actual_quantity, expected_phrase,
+) -> None:
+    delivery = SimpleNamespace(
+        id=51, delivery_no="DL20261022000051", po_id=11, supplier_id=7,
+        status=status, shipment_date=date(2026, 10, 20),
+        expected_arrival_date=date(2026, 10, 22), actual_arrival_date=None,
+        logistics_company="示例物流", tracking_no="TRACK-51", received_at=None, note=None,
+        items=[SimpleNamespace(
+            id=61, line_no=1, product_id=9, po_item_id=31, batch_no="B-51",
+            package_spec="1 桶/20 千克", planned_quantity=Decimal("10"),
+            actual_quantity=actual_quantity, short_quantity=Decimal("0"), unit_id=2,
+            production_date=None, expiry_date=None, document_complete=1,
+        )],
+    )
+    seen = {}
+    order = SimpleNamespace(id=11, po_no="PO-26001")
+
+    def fake_get_delivery(db, user, delivery_id):
+        seen.update(db=db, user_id=user.id, delivery_id=delivery_id)
+        return delivery
+
+    monkeypatch.setattr(delivery_service, "get_delivery", fake_get_delivery)
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: ["warehouse.deliveries.read"])
+    monkeypatch.setattr(context, "read_order", lambda _db, _user, order_id: order)
+
+    response = context.ask_context(
+        "db-session", SimpleNamespace(id=7),
+        AIContextAskRequest(
+            question="这张到货单目前进展如何？",
+            context={"object_type": "delivery", "object_id": 51},
+        ),
+    )
+
+    assert seen == {"db": "db-session", "user_id": 7, "delivery_id": 51}
+    assert response.model == "delivery-context"
+    assert response.context.object_type == "delivery"
+    assert response.context.object_id == 51
+    assert response.context.reference_no == "DL20261022000051"
+    assert response.context.status == status
+    assert "采购订单 PO-26001" in response.answer
+    assert expected_phrase in response.answer
+    assert "计划 10，实收" in response.answer
+    assert response.citations[0]["type"] == "delivery-context"
+    assert response.citations[0]["source_records"] == response.context.source_records
+    assert {item["dataset"] for item in response.context.source_records} == {
+        "deliveries", "delivery_items", "purchase_orders",
+    }
+
+
+def test_delivery_context_preserves_not_found_or_scope_denial(monkeypatch) -> None:
+    def denied(*_args, **_kwargs):
+        raise ResourceNotFoundError("到货单不存在或无权查看")
+
+    monkeypatch.setattr(delivery_service, "get_delivery", denied)
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: ["warehouse.deliveries.read"])
+
+    with pytest.raises(ResourceNotFoundError, match="无权查看"):
+        context.ask_context(
+            SimpleNamespace(), SimpleNamespace(id=7),
+            AIContextAskRequest(
+                question="进展如何？",
+                context={"object_type": "delivery", "object_id": 51},
+            ),
+        )
+
+
+def test_delivery_context_requires_delivery_read_permission(monkeypatch) -> None:
+    def must_not_read(*_args, **_kwargs):
+        raise AssertionError("delivery lookup must not run without read permission")
+
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: [])
+    monkeypatch.setattr(delivery_service, "get_delivery", must_not_read)
+
+    with pytest.raises(AuthorizationError, match="没有到货单读取权限"):
+        context.ask_context(
+            SimpleNamespace(), SimpleNamespace(id=7),
+            AIContextAskRequest(
+                question="进展如何？",
+                context={"object_type": "delivery", "object_id": 51},
+            ),
+        )
+
+
+def test_inventory_balance_context_reads_scoped_balance_and_batch_evidence(monkeypatch) -> None:
+    balance = SimpleNamespace(
+        id=81, warehouse_id=4, location_id=5, product_id=6, batch_id=7, unit_id=8,
+        quantity=Decimal("12.500000"), locked_quantity=Decimal("2.000000"), status="AVAILABLE",
+    )
+    rows = {
+        "Warehouse": SimpleNamespace(id=4, warehouse_name="甲仓", warehouse_code="WH-A"),
+        "WarehouseLocation": SimpleNamespace(id=5, location_name="A-01", location_code="A-01"),
+        "Product": SimpleNamespace(id=6, product_name="乙醇", product_code="ETOH"),
+        "InventoryBatch": SimpleNamespace(id=7, batch_no="B-2026", expiry_date=date(2027, 1, 1), production_date=date(2026, 1, 1)),
+        "Unit": SimpleNamespace(id=8, unit_name="千克"),
+    }
+    db = SimpleNamespace(get=lambda model, _id: rows[model.__name__])
+    seen = {}
+
+    def read_balance(_db, user, balance_id):
+        seen.update(db=_db, user_id=user.id, balance_id=balance_id)
+        return balance
+
+    monkeypatch.setattr(inventory_service, "get_balance_for_user", read_balance)
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: ["warehouse.inventory.read"])
+
+    response = context.ask_context(
+        db, SimpleNamespace(id=7),
+        AIContextAskRequest(question="这笔库存余额有多少可用量，批次何时到期？", context={"object_type": "inventory_balance", "object_id": 81}),
+    )
+
+    assert seen == {"db": db, "user_id": 7, "balance_id": 81}
+    assert response.model == "inventory-balance-context"
+    assert response.context.title == "库存余额 #81：乙醇"
+    assert response.context.status == "AVAILABLE"
+    assert "可用数量：10.500000 千克" in response.answer
+    assert "批次：B-2026" in response.answer
+    assert "有效期：2027-01-01" in response.answer
+    assert response.citations[0]["type"] == "inventory-balance-context"
+    assert {source["dataset"] for source in response.context.source_records} == {
+        "inventory_balances", "inventory_batches",
+    }
+
+
+def test_inventory_balance_context_requires_permission_before_read(monkeypatch) -> None:
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: [])
+    monkeypatch.setattr(inventory_service, "get_balance_for_user", lambda *_args: pytest.fail("balance read without permission"))
+
+    with pytest.raises(AuthorizationError, match="没有库存读取权限"):
+        context.ask_context(
+            SimpleNamespace(), SimpleNamespace(id=7),
+            AIContextAskRequest(question="库存多少？", context={"object_type": "inventory_balance", "object_id": 81}),
+        )
+
+
+def test_inventory_balance_context_preserves_scope_denial(monkeypatch) -> None:
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: ["warehouse.inventory.read"])
+    monkeypatch.setattr(inventory_service, "get_balance_for_user", lambda *_args: (_ for _ in ()).throw(ResourceNotFoundError("库存余额不存在")))
+
+    with pytest.raises(ResourceNotFoundError, match="库存余额不存在"):
+        context.ask_context(
+            SimpleNamespace(), SimpleNamespace(id=7),
+            AIContextAskRequest(question="库存多少？", context={"object_type": "inventory_balance", "object_id": 81}),
+        )
+
+
+def test_quality_acceptance_context_answers_saved_results_with_delivery_sources(monkeypatch) -> None:
+    acceptance = SimpleNamespace(
+        id=91, acceptance_no="QA20261022000091", delivery_id=51, result="PASSED",
+        inspection_time=None, test_result={"by_delivery_item": {"61": {"外观": "澄清"}}},
+        certificate_complete=1, report_file_id=72, conclusion="符合采购要求",
+    )
+    delivery = SimpleNamespace(
+        id=51, delivery_no="DL20261022000051",
+        items=[SimpleNamespace(id=61, line_no=1, batch_no="B-91", product_id=9)],
+    )
+    seen = {}
+
+    def read_acceptance(_db, user, acceptance_id):
+        seen.update(user_id=user.id, acceptance_id=acceptance_id)
+        return acceptance
+
+    db = SimpleNamespace(get=lambda model, _id: delivery)
+    monkeypatch.setattr(quality_acceptance_service, "get_acceptance", read_acceptance)
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: ["quality.acceptances.read"])
+
+    response = context.ask_context(
+        db, SimpleNamespace(id=7),
+        AIContextAskRequest(question="这张验收单的检测结果和结论是什么？", context={"object_type": "quality_acceptance", "object_id": 91}),
+    )
+
+    assert seen == {"user_id": 7, "acceptance_id": 91}
+    assert response.model == "quality-acceptance-context"
+    assert response.context.object_type == "quality_acceptance"
+    assert response.context.title == "质量验收 QA20261022000091"
+    assert response.context.status == "PASSED"
+    assert "关联到货单：DL20261022000051" in response.answer
+    assert "检测结果：第 1 行 外观：澄清" in response.answer
+    assert "验收结论：符合采购要求" in response.answer
+    assert "质量证明文件：齐全" in response.answer
+    assert "检测报告：已登记" in response.answer
+    assert response.citations[0]["type"] == "quality-acceptance-context"
+    assert {source["dataset"] for source in response.context.source_records} == {
+        "quality_acceptances", "deliveries", "delivery_items",
+    }
+
+
+def test_quality_acceptance_context_requires_read_permission_before_lookup(monkeypatch) -> None:
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: [])
+    monkeypatch.setattr(quality_acceptance_service, "get_acceptance", lambda *_args: pytest.fail("acceptance read without permission"))
+
+    with pytest.raises(AuthorizationError, match="没有质量验收读取权限"):
+        context.ask_context(
+            SimpleNamespace(), SimpleNamespace(id=7),
+            AIContextAskRequest(question="验收结果是什么？", context={"object_type": "quality_acceptance", "object_id": 91}),
+        )
+
+
+def test_quality_acceptance_context_preserves_scope_denial(monkeypatch) -> None:
+    monkeypatch.setattr(context, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(context, "get_user_permission_codes", lambda *_args: ["quality.acceptances.read"])
+    monkeypatch.setattr(quality_acceptance_service, "get_acceptance", lambda *_args: (_ for _ in ()).throw(ResourceNotFoundError("质量验收记录 91 不存在")))
+
+    with pytest.raises(ResourceNotFoundError, match="质量验收记录 91 不存在"):
+        context.ask_context(
+            SimpleNamespace(), SimpleNamespace(id=7),
+            AIContextAskRequest(question="验收结果是什么？", context={"object_type": "quality_acceptance", "object_id": 91}),
+        )
 
 
 def test_purchase_request_context_reports_downstream_procurement_trace(monkeypatch) -> None:
