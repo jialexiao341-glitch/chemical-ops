@@ -38,7 +38,9 @@
 | AG-06 | 前端入口已补齐，待浏览器验收 | 任务中心现支持 WAITING_INPUT 继续、RUNNING 取消、FAILED 以首次问题新建查询；继续/取消仍按任务版本及本人权限走既有服务端校验。任务操作与 Agent 视图回归 20 项通过，前端类型检查此前通过；本轮本地无 API/前端服务，Docker Engine 不可用，未能进入浏览器验收 |
 | AG-07 任务创建能力校验 | 已落地 | `prepare_task`/`prepare_continue`/内部路由在启动前校验本轮工具是否在当前目录内；新增“有库存无询价权限”回归 |
 | F-03 第一批跨业务只读工具 | 已落地，待统一验收 | 静态工具目录新增 `purchase_requests.get_by_no` 与 `purchase_orders.trace_by_no`；申请查询精确匹配编号并复用申请服务的数据范围校验，裁剪审批意见与审批人身份；订单追溯复用 `order_trace.trace_purchase_order` 的基础权限、订单范围及逐环节授权。Agent 路由新增单一申请/订单任务类别，按对应只读权限启动，并要求本轮对应工具证据完成。目标后端回归 246 passed；未做浏览器验收、真实模型评测和性能评测 |
-| AG-08 ～ AG-14 | 未完成 | 工具平台、实体解析、分析能力、附件、草稿衔接、长期记忆、审计指标仍需建设 |
+| AG-08 工具目录治理元数据（首期） | 部分落地 | 六个静态只读工具逐项声明版本、风险、人工触发重试策略、幂等性、`DATABASE_READ` 成本类别与 `UNMETERED` 配额类别；工具目录和路由能力清单从同一 ToolSpec 方法读取。新增可配置的 15 秒工具级 SQL 预算：MySQL/PyMySQL 以 `MAX_EXECUTION_TIME` 中断 SELECT，SQLite 以 progress handler 中断；未知方言失败关闭。Agent 超时停止重规划，多意图批次按项保留结果，并在取消时等待 DB 线程收尾。Agent 定向回归 225 passed；超时模块专项 12 passed、MySQL 8.0 服务端集成 1 skipped（本机服务不可用）。重试/配额执行和版本迁移仍未实现；浏览器与 MySQL 服务端行为待统一验收 |
+| AG-09 实体别名与解析 | 部分落地 | 产品目录检索支持化学品中文名、英文名及登记别名；别名按完整分隔项精确匹配，候选仍由既有消歧流程确认，CAS 与精确产品编码优先规则保留。库存查询接受精确仓库名称或编码，Agent 与批次复用同一解析器，并继续校验 ACTIVE 状态和当前用户可见范围。尚未覆盖仓库自由简称、拼音、错别字和供应商侧别名；相关 AI/Agent 定向回归 291 passed，待统一验收 |
+| AG-10 ～ AG-14 | 未完成 | 分析能力、附件、草稿衔接、长期记忆、审计指标仍需建设 |
 | 页面上下文与全局化工助手（新增） | 采购申请/订单详情已接入，待浏览器验收 | 提交 `ee303d0` 增加全局可拖动悬浮入口与可调宽对话面板；`7205826` 将页面对象上下文接入采购申请和采购订单。`POST /ai/context/ask` 只接收问题与对象引用，服务端按当前权限重读数据；申请可追溯审批、询价/报价、订单及订单后续环节，订单复用原追溯能力。`tests/test_ai_context.py` 最近验证 11 passed、5 skipped；`vue-tsc --noEmit --skipLibCheck` 通过。尚未做浏览器验收；其他业务详情页未接入上下文问答 |
 | 测试门禁 | AI/Agent 定向已绿 | 最近一次 `test_ai_*.py` + `test_agent_*.py` + 数值/评测相关：**567 passed，0 failed**；新增上下文协议 8 项通过。全量 pytest 仍有与本报告无关的环境/既有失败，见下 |
 
@@ -277,7 +279,7 @@ if tasks <= {"inventory", "quotes"}:
 | AG-05 | P1 | 同步 SQLAlchemy 运行在 async Agent 循环中 | [agent_runtime.py:726](../backend/app/modules/ai/agent_runtime.py#L726-L784)；对比 [multi_intent.py:284](../backend/app/modules/ai/multi_intent.py#L280-L295) 使用 `asyncio.to_thread` | 工具查询/持久化阻塞事件循环；并发 Agent 或普通 API 可能互相拖慢；`asyncio.timeout` 不能中断同步 SQL |
 | AG-06 | P1 | 任务生命周期不完整 | 任务中心只有查看/导出（[tasks/index.vue:31](../frontend-design/apps/web-chemicalops/src/views/ai/tasks/index.vue#L31-L49)）；`currentAgent` 只取最后一条消息（[index.vue:234](../frontend-design/apps/web-chemicalops/src/views/ai/workspace/index.vue#L230-L259)）；自然语言取消见 IR-07 | `WAITING_INPUT` 任务可能变成“孤儿”；用户只能重新查询；重复消耗模型/查询资源 |
 | AG-07 | P1 | 任务创建没有校验“本轮任务是否在可用工具目录内” | [agent_runtime.py:829](../backend/app/modules/ai/agent_runtime.py#L829-L846) 只要求“产品 + 库存或询价之一” | 用户有库存无询价却问报价时，任务仍会启动，之后工具才失败；错误提示不具体 |
-| AG-08 | P2 | 工具平台元数据不足 | [agent_tools.py:252](../backend/app/modules/ai/agent_tools.py#L252-L274)；`list_tools` 版本/风险硬编码 | 没有工具级超时、重试、幂等、成本、调用配额、版本迁移；新增工具需改运行时/提示词/批次多处 |
+| AG-08 | P2 | 工具治理执行能力仍不完整 | [agent_tools.py](../backend/app/modules/ai/agent_tools.py)；`ToolSpec` 静态目录与 `tool_sql_timeout.py` | 版本、风险、重试策略、幂等、成本和配额类别已有静态元数据；首期工具 SQL 超时已执行。动态配额、自动版本迁移等仍未实现；新增治理能力需继续沿统一工具契约扩展 |
 | AG-09 | P2 | 实体解析窄 | 产品搜索只做名称/编码/CAS 子串（[agent_tools.py:43](../backend/app/modules/ai/agent_tools.py#L43-L82)）；仓库要求精确名称（[agent_runtime.py:679](../backend/app/modules/ai/agent_runtime.py#L679-L688)）；询价精确编号 | 常见别名、俗名、拼音、错别字、仓库简称无法命中；只能追问，体验差 |
 | AG-10 | P2 | 缺少分析/建议能力 | `finish` 只生成事实摘要（[agent_runtime.py:448](../backend/app/modules/ai/agent_runtime.py#L448-L478)）；无 Text2SQL/文档/订单追溯工具 | 只能“查数”，不能“分析为什么/建议怎么做”；与“企业采购 Agent”的定位有差距 |
 | AG-11 | P2 | 附件/多模态未进入 Agent | `AIChatRequest` 支持 `attachment_file_ids`，但 Agent 任务无附件字段；`PLANNER_PROMPT` 无附件概念；前端 AI 工作台未接附件 | 无法“把报价单/库存表发给 Agent 对比”；即使路由到 Agent，附件也会被忽略 |

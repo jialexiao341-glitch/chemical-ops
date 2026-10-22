@@ -86,7 +86,7 @@ ROUTING_PROMPT = """# 角色与任务
 # 输出契约
 只输出 JSON 对象，字段限于：purpose, execution_mode, clarification_slot, clarification_options, dialogue_action, tasks, excluded_tasks, slots, question, sub_tasks。
 slots 字段限于 product_keyword, rfq_no, request_no, po_no, warehouse_keyword, date_from, date_to, limit, unit, aggregate_products。
-询价号只填入 rfq_no，不填 product_keyword；编号前缀和格式不能决定对象类型。返回条数填 limit，仓库条件填原始准确名称 warehouse_keyword；续答继承未修改的槽位。执行器不会用关键词正则重新解析这些条件。
+询价号只填入 rfq_no，不填 product_keyword；编号前缀和格式不能决定对象类型。返回条数填 limit，仓库条件填用户给出的准确仓库名称或编码 warehouse_keyword；续答继承未修改的槽位。执行器不会用关键词正则重新解析这些条件。
 只有用户明确要求汇总全部匹配的产品规格时，aggregate_products 才为 true；明确排除全部、只查某个规格或未提出全规格汇总时为 false。不要仅因句子出现“全部/汇总”等字样就设为 true。
 无明确依据的字段为 null；tasks/excluded_tasks 为数组。不要输出推理过程或置信度。
 

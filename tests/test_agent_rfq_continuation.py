@@ -14,11 +14,7 @@ from tests.test_agent_read_tools import tool_db
 
 @pytest.fixture
 def task_db(base_task_db):
-    """询价 Agent 路径会读取化学品状态；补齐本模块所需的隔离表。"""
-    base_task_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
-    base_task_db.execute(text("INSERT INTO md_chemicals VALUES (1, 'ACTIVE')"))
-    base_task_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
-    base_task_db.execute(text("UPDATE md_products SET chemical_id = 1"))
+    """复用共享产品查询夹具中的化学品身份与状态。"""
     return base_task_db
 
 

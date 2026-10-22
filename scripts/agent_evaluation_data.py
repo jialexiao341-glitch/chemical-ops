@@ -16,7 +16,8 @@ def evaluation_db():
     today = datetime.now(timezone(timedelta(hours=8))).date()
     with engine.begin() as conn:
         for ddl in (
-            "CREATE TABLE md_products (id INTEGER PRIMARY KEY, product_name TEXT, status TEXT, product_code TEXT, model TEXT, packaging_spec TEXT, unit_id INTEGER)",
+            "CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, chemical_name TEXT, english_name TEXT, alias_text TEXT, cas_no TEXT, status TEXT)",
+            "CREATE TABLE md_products (id INTEGER PRIMARY KEY, product_name TEXT, status TEXT, product_code TEXT, model TEXT, packaging_spec TEXT, unit_id INTEGER, chemical_id INTEGER)",
             "CREATE TABLE md_units (id INTEGER PRIMARY KEY, unit_name TEXT, status TEXT)",
             "CREATE TABLE warehouses (id INTEGER PRIMARY KEY, warehouse_name TEXT, manager_id INTEGER, status TEXT, warehouse_code TEXT, region TEXT, address TEXT, note TEXT, created_at DATETIME, updated_at DATETIME)",
             "CREATE TABLE inventory_batches (id INTEGER PRIMARY KEY, batch_no TEXT, expiry_date DATE)",
@@ -29,7 +30,8 @@ def evaluation_db():
         ):
             conn.exec_driver_sql(ddl)
         for sql in (
-            "INSERT INTO md_products VALUES (1, '测试乙醇', 'ACTIVE', 'P-ETH', '分析纯', '20kg', 1), (2, '停用产品', 'INACTIVE', 'P-OFF', NULL, NULL, 1)",
+            "INSERT INTO md_chemicals VALUES (1, '乙醇', 'Ethanol', '酒精,乙醇俗名;Ethyl alcohol', '64-17-5', 'ACTIVE')",
+            "INSERT INTO md_products VALUES (1, '测试乙醇', 'ACTIVE', 'P-ETH', '分析纯', '20kg', 1, 1), (2, '停用产品', 'INACTIVE', 'P-OFF', NULL, NULL, 1, 1)",
             "INSERT INTO md_units VALUES (1, '千克', 'ACTIVE'), (2, '升', 'ACTIVE'), (3, '停用单位', 'INACTIVE')",
             "INSERT INTO warehouses (id, warehouse_name, manager_id, status) VALUES (1, '本人仓库', 7, 'ACTIVE'), (2, '其他仓库', 8, 'ACTIVE'), (3, '公共仓库', NULL, 'ACTIVE'), (4, '停用仓库', NULL, 'INACTIVE')",
             "INSERT INTO inventory_batches VALUES (1, '批次A', '2020-01-01'), (2, '批次B', NULL)",

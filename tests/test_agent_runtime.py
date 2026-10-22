@@ -109,6 +109,14 @@ def test_planner_view_compacts_large_results_without_mutating_evidence():
     assert "planner_truncated" not in entry["result"]
 
 
+def test_agent_resolves_exact_warehouse_code_with_access_scope(task_db):
+    task_db.execute(text("UPDATE warehouses SET warehouse_code='WH-OWN' WHERE id=1"))
+
+    assert runtime._resolve_agent_warehouse(task_db, USER, "WH-OWN") == 1
+    with pytest.raises(BusinessValidationError, match="准确名称或编码"):
+        runtime._resolve_agent_warehouse(task_db, USER, "WH-OTHER")
+
+
 def test_planner_view_limits_sources_even_when_rows_are_small():
     entry = _large_inventory_entry(count=1)
     entry["result"]["sources"] = [{"resource": "inventory_balances", "record_id": index}
@@ -274,6 +282,44 @@ def test_full_goal_drives_four_tools_with_evidence_and_persisted_trace(task_db, 
     assert result.trace[-1]['evidence_steps'] == [2, 4]
 
 
+@pytest.mark.parametrize(("timeout_error", "expected_code"), [
+    ("tool", "TOOL_TIMEOUT"), ("unsupported", "TOOL_TIMEOUT_UNSUPPORTED"),
+])
+def test_tool_timeout_fails_task_without_replanning(task_db, model_script, monkeypatch, timeout_error, expected_code):
+    from app.modules.ai.tool_sql_timeout import ToolExecutionTimeout, ToolTimeoutUnsupported
+
+    actions, contexts = model_script
+    actions.append(tool("catalog.search_products", keyword="测试乙醇"))
+    calls = []
+
+    def timeout_tool(*_args, **_kwargs):
+        calls.append(True)
+        error = ToolExecutionTimeout if timeout_error == "tool" else ToolTimeoutUnsupported
+        raise error("database deadline elapsed")
+
+    monkeypatch.setattr(runtime.tools, "execute_tool", timeout_tool)
+    result = start(task_db)
+
+    tool_entries = [entry for entry in result.trace if entry.get("action") == "call_tool"]
+    assert result.status == "FAILED" and result.error_code == expected_code
+    assert len(calls) == 1 and len(contexts) == 1
+    assert tool_entries[-1]["error_code"] == expected_code
+
+
+def test_invalid_tool_arguments_keep_existing_error_mapping(task_db, model_script):
+    actions, _contexts = model_script
+    actions.extend([
+        tool("catalog.search_products", keyword=""),
+        {"action": "ask_user", "question": "请补充有效的产品名称。"},
+    ])
+
+    result = start(task_db)
+    tool_entries = [entry for entry in result.trace if entry.get("action") == "call_tool"]
+
+    assert result.status == "WAITING_INPUT"
+    assert tool_entries[0]["error_code"] == "INVALID_TOOL_REQUEST"
+
+
 @pytest.mark.parametrize("task_kind", ["inventory", "quotes"])
 @pytest.mark.parametrize("unsupported_slots", [
     {"date_from": "2026-10-01"},
@@ -361,11 +407,7 @@ def test_agent_sync_tool_runs_off_event_loop_and_keeps_heartbeat_responsive(task
 
 def test_multiple_products_pause_and_selected_candidate_continues(task_db, model_script):
     """C18：多规格结果强制暂停；选择有效候选后重新查询并继续库存工具。"""
-    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇工业级', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
-    task_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
-    task_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
-    task_db.execute(text("INSERT INTO md_chemicals VALUES (1, 'ACTIVE'), (2, 'ACTIVE')"))
-    task_db.execute(text("UPDATE md_products SET chemical_id = CASE id WHEN 1 THEN 1 ELSE 2 END WHERE id IN (1, 3)"))
+    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇工业级', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1, 2)"))
     task_db.commit()
     actions, _ = model_script
     actions.append(tool('catalog.search_products', keyword='测试乙醇'))
@@ -380,7 +422,7 @@ def test_multiple_products_pause_and_selected_candidate_continues(task_db, model
 
 
 def test_inventory_summary_queries_all_specs_and_keeps_units_separate(task_db, model_script):
-    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
+    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1, 1)"))
     task_db.execute(text("INSERT INTO inventory_balances VALUES (6, 1, 1, 3, 1, 'AVAILABLE', 7.25, 0)"))
     task_db.commit()
     actions, _ = model_script
@@ -433,11 +475,7 @@ def test_candidate_aggregation_uses_structured_understanding_slot(
 
 
 def test_select_all_rechecks_candidates_and_queries_each_spec(task_db, model_script):
-    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇工业级', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
-    task_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
-    task_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
-    task_db.execute(text("INSERT INTO md_chemicals VALUES (1, 'ACTIVE'), (2, 'ACTIVE')"))
-    task_db.execute(text("UPDATE md_products SET chemical_id = CASE id WHEN 1 THEN 1 ELSE 2 END WHERE id IN (1, 3)"))
+    task_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇工业级', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1, 2)"))
     task_db.commit()
     actions, _ = model_script
     actions.append(tool('catalog.search_products', keyword='测试乙醇'))

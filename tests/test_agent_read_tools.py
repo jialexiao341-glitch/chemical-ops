@@ -1,6 +1,7 @@
 """只读工具的真实查询、权限、报价可比性和无写入回归；使用隔离 SQLite 样本。"""
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -31,7 +32,7 @@ def tool_db(monkeypatch):
     roles = {9: ["SYS_ADMIN"], 10: ["PROCUREMENT_MANAGER"]}
     permissions = {7: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read", "procurement.requests.read", "procurement.orders.read"],
                    8: ["warehouse.inventory.read"], 10: ["master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"]}
-    monkeypatch.setattr(tools, "get_settings", lambda: SimpleNamespace(agent_enabled=True))
+    monkeypatch.setattr(tools, "get_settings", lambda: SimpleNamespace(agent_enabled=True, agent_tool_timeout_seconds=15))
     monkeypatch.setattr(tools, "get_user_role_codes", lambda _db, uid: roles.get(uid, []))
     monkeypatch.setattr(tools, "get_user_permission_codes", lambda _db, uid: permissions.get(uid, []))
     monkeypatch.setattr(inventory_service, "get_user_role_codes", lambda _db, uid: roles.get(uid, []))
@@ -44,7 +45,8 @@ def tool_db(monkeypatch):
     today = datetime.now(timezone(timedelta(hours=8))).date()
     with engine.begin() as conn:
         for ddl in (
-            "CREATE TABLE md_products (id INTEGER PRIMARY KEY, product_name TEXT, status TEXT, product_code TEXT, model TEXT, packaging_spec TEXT, unit_id INTEGER)",
+            "CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, chemical_name TEXT, english_name TEXT, alias_text TEXT, cas_no TEXT, status TEXT)",
+            "CREATE TABLE md_products (id INTEGER PRIMARY KEY, product_name TEXT, status TEXT, product_code TEXT, model TEXT, packaging_spec TEXT, unit_id INTEGER, chemical_id INTEGER)",
             "CREATE TABLE md_units (id INTEGER PRIMARY KEY, unit_name TEXT, status TEXT)",
             "CREATE TABLE warehouses (id INTEGER PRIMARY KEY, warehouse_name TEXT, manager_id INTEGER, status TEXT, warehouse_code TEXT, region TEXT, address TEXT, note TEXT, created_at DATETIME, updated_at DATETIME)",
             "CREATE TABLE inventory_batches (id INTEGER PRIMARY KEY, batch_no TEXT, expiry_date DATE)",
@@ -57,9 +59,10 @@ def tool_db(monkeypatch):
         ):
             conn.exec_driver_sql(ddl)
         for sql in (
-            "INSERT INTO md_products VALUES (1, '测试乙醇', 'ACTIVE', 'P-ETH', '分析纯', '20kg', 1), (2, '停用产品', 'INACTIVE', 'P-OFF', NULL, NULL, 1)",
+            "INSERT INTO md_chemicals VALUES (1, '乙醇', 'Ethanol', '酒精,乙醇俗名;Ethyl alcohol', '64-17-5', 'ACTIVE'), (2, '停用化学品', 'Inactive compound', '停用别名', '00-00-0', 'INACTIVE')",
+            "INSERT INTO md_products (id, product_name, status, product_code, model, packaging_spec, unit_id, chemical_id) VALUES (1, '测试乙醇', 'ACTIVE', 'P-ETH', '分析纯', '20kg', 1, 1), (2, '停用产品', 'INACTIVE', 'P-OFF', NULL, NULL, 1, 2)",
             "INSERT INTO md_units VALUES (1, '千克', 'ACTIVE'), (2, '升', 'ACTIVE'), (3, '停用单位', 'INACTIVE')",
-            "INSERT INTO warehouses (id, warehouse_name, manager_id, status) VALUES (1, '本人仓库', 7, 'ACTIVE'), (2, '其他仓库', 8, 'ACTIVE'), (3, '公共仓库', NULL, 'ACTIVE'), (4, '停用仓库', NULL, 'INACTIVE')",
+            "INSERT INTO warehouses (id, warehouse_code, warehouse_name, manager_id, status) VALUES (1, 'WH-OWN', '本人仓库', 7, 'ACTIVE'), (2, 'WH-OTHER', '其他仓库', 8, 'ACTIVE'), (3, 'WH-PUBLIC', '公共仓库', NULL, 'ACTIVE'), (4, 'WH-OFF', '停用仓库', NULL, 'INACTIVE')",
             "INSERT INTO inventory_batches VALUES (1, '批次A', '2020-01-01'), (2, '批次B', NULL)",
             "INSERT INTO inventory_balances VALUES (1, 1, 1, 1, 1, 'AVAILABLE', 100, 20), (2, 1, 2, 1, 1, 'FROZEN', 50, 0), (3, 2, 2, 1, 1, 'AVAILABLE', 999, 0), (4, 3, 2, 1, 2, 'AVAILABLE', 5, 0), (5, 4, 2, 1, 1, 'AVAILABLE', 888, 0)",
             "INSERT INTO rfqs VALUES (1, 'RFQ-OWN', 7, 'RESPONDING'), (2, 'RFQ-OTHER', 8, 'RESPONDING'), (3, 'RFQ-CLOSED', 7, 'CLOSED')",
@@ -100,6 +103,55 @@ def tool_db(monkeypatch):
 def call(db, name="inventory.query_available", actor_id=7, **arguments):
     """区分认证执行人与工具参数，使身份注入用例真正进入 Schema 校验。"""
     return tools.execute_tool(db, SimpleNamespace(id=actor_id), tools.ToolCall(tool=name, arguments=arguments))
+
+
+def test_execute_tool_sets_and_resets_database_deadline(tool_db, monkeypatch):
+    from app.modules.ai.tool_sql_timeout import current_tool_deadline
+
+    spec = tools.TOOLS["catalog.search_products"]
+    observed = []
+
+    def record_deadline(db, user, arguments):
+        observed.append(current_tool_deadline())
+        return spec.handler(db, user, arguments)
+
+    monkeypatch.setitem(tools.TOOLS, spec.name, replace(spec, handler=record_deadline))
+    result = call(tool_db, name=spec.name, keyword="测试乙醇")
+
+    assert result.total_rows == 1
+    assert observed[0] is not None
+    assert current_tool_deadline() is None
+
+
+@pytest.mark.parametrize(("error_name", "result"), [
+    ("timeout", "timeout"), ("unsupported", "unsupported"),
+])
+def test_tool_timeout_metric_has_only_low_cardinality_labels(tool_db, monkeypatch, error_name, result):
+    from app.core.observability import metrics
+    from app.modules.ai.tool_sql_timeout import ToolExecutionTimeout, ToolTimeoutUnsupported
+
+    spec = tools.TOOLS["catalog.search_products"]
+    observed = []
+    original_increment = metrics.increment
+
+    def record_metric(name, *, labels=None, value=1.0):
+        if name == "agent_tool_sql_timeouts":
+            observed.append((name, labels))
+        return original_increment(name, labels=labels, value=value)
+
+    def timed_out(*_args, **_kwargs):
+        error = ToolExecutionTimeout if error_name == "timeout" else ToolTimeoutUnsupported
+        raise error("database deadline elapsed")
+
+    monkeypatch.setattr(metrics, "increment", record_metric)
+    monkeypatch.setitem(tools.TOOLS, spec.name, replace(spec, handler=timed_out))
+    error_type = ToolExecutionTimeout if error_name == "timeout" else ToolTimeoutUnsupported
+    with pytest.raises(error_type):
+        call(tool_db, name=spec.name, keyword="secret-user-query")
+
+    assert observed == [("agent_tool_sql_timeouts", {
+        "tool": spec.name, "dialect": "sqlite", "result": result,
+    })]
 
 
 def test_inventory_scope_totals_sources_and_frozen_balance(tool_db):
@@ -152,6 +204,19 @@ def test_missing_permission_blocks_catalog_and_execution(tool_db):
     with pytest.raises(AuthorizationError):
         call(tool_db, actor_id=20, product_id=1)
     assert [item['name'] for item in tools.list_tools(tool_db, SimpleNamespace(id=8))] == ['inventory.query_available']
+
+
+def test_tool_catalog_exposes_explicit_governance_metadata(tool_db):
+    catalog = tools.list_tools(tool_db, SimpleNamespace(id=9))
+
+    assert len(catalog) == len(tools.TOOLS)
+    for entry in catalog:
+        assert entry["version"] == "1.0"
+        assert entry["risk"] == "READ_ONLY"
+        assert entry["retry_policy"] == "MANUAL_ONLY"
+        assert entry["idempotent"] is True
+        assert entry["cost_class"] == "DATABASE_READ"
+        assert entry["quota_class"] == "UNMETERED"
 
 
 @pytest.mark.parametrize("arguments", [
@@ -321,12 +386,32 @@ def test_product_lookup_respects_product_read_permission(tool_db):
 
 
 def test_exact_product_code_resolves_prefix_ambiguity_without_guessing(tool_db):
-    tool_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-ALT', '其他规格', '5kg', 1)"))
+    tool_db.execute(text("INSERT INTO md_products (id, product_name, status, product_code, model, packaging_spec, unit_id, chemical_id) VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-ALT', '其他规格', '5kg', 1, 1)"))
     assert call(tool_db, name='catalog.search_products', keyword='测试乙醇').total_rows == 2
+    alias_matches = call(tool_db, name="catalog.search_products", keyword="酒精")
+    assert alias_matches.total_rows == 2
+    assert {row.product_id for row in alias_matches.rows} == {1, 3}
     exact = call(tool_db, name='catalog.search_products', keyword='P-ETH')
     assert exact.total_rows == 1 and exact.rows[0].product_id == 1
     assert exact.sources[0].record_id == 1
     assert call(tool_db, name='catalog.search_products', keyword='P-OFF').total_rows == 0
+
+
+@pytest.mark.parametrize("keyword", ["酒精", "乙醇俗名", "ETHANOL", "Ethyl alcohol"])
+def test_product_lookup_matches_registered_chemical_aliases_and_english_name(tool_db, keyword):
+    result = call(tool_db, name="catalog.search_products", keyword=keyword)
+
+    assert result.total_rows == 1
+    assert result.rows[0].product_id == 1
+    assert result.sources[0].record_id == 1
+
+
+def test_product_alias_match_is_exact_and_keeps_cas_and_code_rules(tool_db):
+    assert call(tool_db, name="catalog.search_products", keyword="精").total_rows == 0
+    assert call(tool_db, name="catalog.search_products", keyword="乙醇俗").total_rows == 0
+    assert call(tool_db, name="catalog.search_products", keyword="64-17-5").rows[0].product_id == 1
+    exact_code = call(tool_db, name="catalog.search_products", keyword="P-ETH")
+    assert exact_code.total_rows == 1 and exact_code.rows[0].product_id == 1
 
 
 def test_rfq_lookup_filters_requester_status_and_exact_number(tool_db):

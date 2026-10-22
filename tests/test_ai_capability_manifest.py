@@ -41,9 +41,18 @@ def test_manifest_tool_metadata_is_sourced_from_registered_tool_spec(monkeypatch
     monkeypatch.setattr(capabilities, "agent_enabled", lambda: True)
 
     payload = capabilities.build_capability_manifest(object(), SimpleNamespace(id=7)).model_dump(mode="json")
-    expected = {name: (spec.version, spec.risk) for name, spec in capabilities.TOOLS.items()}
+    expected = {name: {
+        "version": spec.version,
+        "risk": spec.risk,
+        "retry_policy": spec.retry_policy,
+        "idempotent": spec.idempotent,
+        "cost_class": spec.cost_class,
+        "quota_class": spec.quota_class,
+    } for name, spec in capabilities.TOOLS.items()}
 
-    assert {item["name"]: (item["version"], item["risk"]) for item in payload["agent_tools"]} == expected
+    actual = {item["name"]: {key: item[key] for key in expected[item["name"]]}
+              for item in payload["agent_tools"]}
+    assert actual == expected
 
 
 def test_manifest_omits_agent_and_document_capabilities_when_disabled_or_unavailable(monkeypatch):

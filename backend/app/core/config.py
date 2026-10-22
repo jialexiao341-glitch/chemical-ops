@@ -169,6 +169,7 @@ class Settings(BaseSettings):
     agent_enabled: bool = True
     agent_max_steps: int = Field(default=12, ge=1, le=24)
     agent_task_timeout_seconds: int = Field(default=120, ge=1, le=300)
+    agent_tool_timeout_seconds: int = Field(default=15, ge=1, le=60)
     agent_context_max_chars: int = Field(default=18000, ge=2000, le=18000)
     agent_max_total_tokens: int = Field(default=65536, ge=1024, le=1_000_000)
     agent_allow_write_tools: bool = False

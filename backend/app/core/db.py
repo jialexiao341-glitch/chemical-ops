@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 from app.core.observability import metrics
+from app.modules.ai.tool_sql_timeout import install_tool_sql_timeout_listeners
 
 
 settings = get_settings()
@@ -23,6 +24,7 @@ engine = create_engine(
     max_overflow=settings.db_max_overflow,
     echo=settings.db_echo,
 )
+install_tool_sql_timeout_listeners(engine)
 
 
 @event.listens_for(engine, "before_cursor_execute")

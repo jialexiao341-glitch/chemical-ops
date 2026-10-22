@@ -28,6 +28,11 @@ from app.modules.ai.schema import (
     Understanding,
     schema_response_format,
 )
+from app.modules.ai.tool_sql_timeout import (
+    ToolExecutionTimeout,
+    ToolTimeoutUnsupported,
+    agent_task_deadline_context,
+)
 from app.modules.ai import agent_tools, conversation_store, llm, service, text2sql
 from app.modules.ai.candidate_resolution import inventory_family
 from app.modules.ai.product_query_policy import (
@@ -38,6 +43,21 @@ from app.modules.ai.product_query_policy import (
 from app.modules.ai.product_query_summary import inventory_totals, summarize_product_evidence
 from app.modules.ai.model import AIConversation, AIMessage
 from app.modules.system.model import User
+
+
+async def _offload_db_call(function, *args, **kwargs):
+    """卸载同步 DB 操作；取消时等线程离开共享 Session 后再传播取消。"""
+
+    worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        try:
+            await worker
+        except Exception:
+            # 取消优先于线程的迟到异常；读取结果以免产生未检索异常。
+            pass
+        raise
 
 
 async def plan_analytics(db: Session, user: User, task: SubTask, settings: Settings, *,
@@ -118,17 +138,12 @@ def execute_product_task(db: Session, user: User, task: SubTask, result: TaskRes
     arguments = {"product_id": product_id, "limit": slots.limit or 20}
     if task.kind == "inventory":
         if slots.warehouse_keyword:
-            from app.modules.inventory.model import Warehouse
-            ids = agent_tools.accessible_warehouse_ids(db, user)
-            statement = select(Warehouse.id).where(Warehouse.status == "ACTIVE",
-                Warehouse.warehouse_name == slots.warehouse_keyword)
-            if ids is not None:
-                statement = statement.where(Warehouse.id.in_(ids))
-            warehouses = list(db.scalars(statement).all())
-            if len(warehouses) != 1:
-                result.status, result.answer = TaskStatus.WAITING_INPUT, "请提供当前可访问仓库的准确名称。"
+            try:
+                warehouse_id = agent_tools.resolve_accessible_warehouse_id(db, user, slots.warehouse_keyword)
+            except BusinessValidationError:
+                result.status, result.answer = TaskStatus.WAITING_INPUT, "请提供当前可访问仓库的准确名称或编码。"
                 return
-            arguments["warehouse_id"] = warehouses[0]
+            arguments["warehouse_id"] = warehouse_id
         inventory = [execute("inventory.query_available", **{**arguments, "product_id": row["product_id"]})
                      for row in product["rows"]]
         result.answer = summarize_product_evidence(inventory)
@@ -264,7 +279,15 @@ async def execute_batch(db: Session, user: User, decision: Understanding, settin
                     extra = {}
                     if selection and task.id == selection.task_id:
                         extra = {'selection': selection, 'prior_pending': TaskResult.model_validate(previous[task.id]).pending}
-                    await asyncio.to_thread(execute_product_task, db, user, task, result, products, **extra)
+                    await _offload_db_call(execute_product_task, db, user, task, result, products, **extra)
+            except ToolExecutionTimeout:
+                db.rollback()
+                result.status, result.error_code, result.answer = TaskStatus.FAILED, "TOOL_TIMEOUT", "该项查询超过执行时限，请缩小范围后重试。"
+                result.evidence, result.citations = [], []
+            except ToolTimeoutUnsupported:
+                db.rollback()
+                result.status, result.error_code, result.answer = TaskStatus.FAILED, "TOOL_TIMEOUT_UNSUPPORTED", "当前数据库暂不支持该项查询的执行时限控制。"
+                result.evidence, result.citations = [], []
             except (AuthorizationError, ResourceNotFoundError, BusinessValidationError, ValueError):
                 db.rollback()
                 result.status, result.error_code, result.answer = TaskStatus.FAILED, "QUERY_REJECTED", "该项查询未通过权限或参数校验，请核对条件。"
@@ -283,9 +306,10 @@ async def execute_batch(db: Session, user: User, decision: Understanding, settin
                 task.evidence, task.citations, task.tool_calls = [], [], []
 
     try:
-        async with asyncio.timeout(settings.agent_task_timeout_seconds):
-            await notify()
-            await run_items()
+        with agent_task_deadline_context(settings.agent_task_timeout_seconds):
+            async with asyncio.timeout(settings.agent_task_timeout_seconds):
+                await notify()
+                await run_items()
     except TimeoutError:
         stop(TaskStatus.FAILED, "TASK_TIMEOUT", "整组查询已超时，已完成项保留；可缩小范围后重试未完成项。")
     except asyncio.CancelledError:

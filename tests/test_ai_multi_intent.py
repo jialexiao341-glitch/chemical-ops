@@ -1,6 +1,8 @@
 """多意图计划与执行使用真实只读 SQL/工具；模型以结构化替身隔离。"""
 
 import asyncio
+from threading import Event
+from time import monotonic
 
 import pytest
 from sqlalchemy import select
@@ -82,6 +84,92 @@ def test_inventory_quotes_share_product_lookup_and_have_separate_evidence(tool_d
     assert multi.history_accessible(tool_db, USER, batch.model_dump(mode="json"))
 
 
+def test_product_tool_uses_remaining_batch_deadline(tool_db, monkeypatch):
+    from app.modules.ai.tool_sql_timeout import current_task_deadline
+
+    observed = []
+
+    def capture_deadline(_db, _user, _task, result, _products, **_kwargs):
+        observed.append(current_task_deadline())
+        result.status = TaskStatus.SUCCEEDED
+
+    monkeypatch.setattr(multi, "execute_product_task", capture_deadline)
+    before = monotonic()
+    asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
+
+    assert observed[0] is not None and observed[0] > before
+
+
+def test_tool_timeout_keeps_completed_results_and_runs_independent_items(tool_db, monkeypatch):
+    from app.modules.ai.tool_sql_timeout import ToolExecutionTimeout
+
+    original = multi.agent_tools.execute_tool
+    calls = []
+
+    def timeout_first_tool(db, user, call):
+        calls.append(call.tool)
+        if len(calls) == 1:
+            raise ToolExecutionTimeout("database deadline elapsed")
+        return original(db, user, call)
+
+    monkeypatch.setattr(multi.agent_tools, "execute_tool", timeout_first_tool)
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(
+        product_task("t1"), product_task("t2")), Settings(_env_file=None)))
+
+    assert batch.tasks[0].status == TaskStatus.FAILED
+    assert batch.tasks[0].error_code == "TOOL_TIMEOUT"
+    assert batch.tasks[1].status == TaskStatus.SUCCEEDED
+    assert batch.status == BatchStatus.PARTIAL
+
+
+def test_batch_cancellation_waits_for_tool_thread_before_session_cleanup(tool_db, monkeypatch):
+    started = Event()
+    release = Event()
+
+    def blocked_product_task(*_args, **_kwargs):
+        started.set()
+        release.wait(5)
+
+    monkeypatch.setattr(multi, "execute_product_task", blocked_product_task)
+
+    async def cancel_batch():
+        task = asyncio.create_task(multi.execute_batch(
+            tool_db, USER, decision(product_task()), Settings(_env_file=None)))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            task.cancel()
+            await asyncio.sleep(0)
+            was_done_before_worker_exit = task.done()
+        finally:
+            release.set()
+        batch = await task
+        return was_done_before_worker_exit, batch
+
+    was_done, batch = asyncio.run(cancel_batch())
+    assert was_done is False
+    assert batch.tasks[0].status == TaskStatus.CANCELLED
+
+
+def test_batch_inventory_accepts_exact_warehouse_code_with_visibility_scope(tool_db):
+    from sqlalchemy import text
+    tool_db.execute(text("UPDATE warehouses SET warehouse_code='WH-OWN' WHERE id=1"))
+    tool_db.execute(text("UPDATE warehouses SET warehouse_code='WH-OTHER' WHERE id=2"))
+
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(
+        product_task(slots={"product_keyword": "测试乙醇", "warehouse_keyword": "WH-OWN"}),
+    ), Settings(_env_file=None)))
+    task = batch.tasks[0]
+    assert task.status == TaskStatus.SUCCEEDED
+    inventory_call = next(call for call in task.tool_calls if call["tool"] == "inventory.query_available")
+    assert inventory_call["arguments"]["warehouse_id"] == 1
+
+    hidden = asyncio.run(multi.execute_batch(tool_db, USER, decision(
+        product_task(slots={"product_keyword": "测试乙醇", "warehouse_keyword": "WH-OTHER"}),
+    ), Settings(_env_file=None)))
+    assert hidden.tasks[0].status == TaskStatus.WAITING_INPUT
+    assert not any(call["tool"] == "inventory.query_available" for call in hidden.tasks[0].tool_calls)
+
+
 def test_plan_failure_blocks_dependency_but_independent_inventory_continues(tool_db, monkeypatch):
     """计划失败只阻塞其依赖，不能阻止独立任务或伪装整批成功。"""
     async def rejected(*args, **kwargs):
@@ -124,7 +212,7 @@ def test_batch_uses_shared_prompt_for_unsupported_product_slots(tool_db, task_ki
 
 def test_inventory_sums_all_matching_specifications_and_rechecks_history(tool_db):
     from sqlalchemy import text
-    tool_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '200kg', 1)"))
+    tool_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '200kg', 1, 1)"))
     tool_db.execute(text("INSERT INTO inventory_balances VALUES (6, 1, 2, 3, 1, 'AVAILABLE', 40, 10)"))
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
     task = batch.tasks[0]
@@ -138,13 +226,10 @@ def test_inventory_sums_all_matching_specifications_and_rechecks_history(tool_db
 
 def test_similar_names_require_real_chemical_identity(tool_db):
     from sqlalchemy import text
-    tool_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
-    tool_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
-    tool_db.execute(text("INSERT INTO md_products (id,product_name,status,product_code,unit_id) VALUES (3,'其他测试乙醇衍生品','ACTIVE','P-OTHER',1)"))
+    tool_db.execute(text("INSERT INTO md_products (id,product_name,status,product_code,unit_id,chemical_id) VALUES (3,'其他测试乙醇衍生品','ACTIVE','P-OTHER',1,2)"))
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
     assert batch.tasks[0].status == TaskStatus.WAITING_INPUT
     assert not any(call['tool']=='inventory.query_available' for call in batch.tasks[0].tool_calls)
-    tool_db.execute(text("INSERT INTO md_chemicals VALUES (1,'ACTIVE')"))
     tool_db.execute(text("UPDATE md_products SET chemical_id=1 WHERE id IN (1,3)"))
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
     assert batch.tasks[0].status == TaskStatus.SUCCEEDED
@@ -163,7 +248,7 @@ def test_single_inventory_reply_keeps_evidence_and_requested_advice(tool_db):
 
 def test_inventory_comparison_and_advice_use_actual_totals_without_unit_conversion(tool_db):
     from sqlalchemy import text
-    tool_db.execute(text("INSERT INTO md_products VALUES (3,'测试甲醇','ACTIVE','P-METH',NULL,NULL,1)"))
+    tool_db.execute(text("INSERT INTO md_products VALUES (3,'测试甲醇','ACTIVE','P-METH',NULL,NULL,1,1)"))
     tool_db.execute(text("INSERT INTO inventory_balances VALUES (6,1,2,3,1,'AVAILABLE',50,0)"))
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task(),
         product_task('t2', slots={'product_keyword':'测试甲醇'}, question='查询测试甲醇库存')), Settings(_env_file=None)))

@@ -86,8 +86,7 @@ def build_capability_manifest(db: Session, user: User) -> CapabilityManifest:
             {
                 "name": spec.name,
                 "description": spec.description,
-                "version": spec.version,
-                "risk": spec.risk,
+                **spec.governance_metadata(),
                 "input_schema": spec.input_schema.model_json_schema(),
             }
             for spec in TOOLS.values()

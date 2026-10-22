@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import re
 from typing import Callable
 
 from pydantic import TypeAdapter, ValidationError
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session, aliased
 from app.core.config import get_settings
 from app.core.cache import cached
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
+from app.core.observability import metrics
 from app.modules.ai.schema import (
     InventoryInput,
     InventoryResult,
@@ -34,6 +36,13 @@ from app.modules.ai.schema import (
     ToolCall,
     ToolSchema,
 )
+from app.modules.ai.tool_sql_timeout import (
+    ToolExecutionTimeout,
+    ToolTimeoutUnsupported,
+    current_task_deadline,
+    tool_deadline_context,
+)
+from app.modules.chemicals.model import Chemical
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.inventory.service import accessible_warehouse_ids
 from app.modules.products.model import Product
@@ -51,29 +60,43 @@ def search_products(db: Session, user: User, arguments: ProductSearchInput) -> P
 
 
 def _search_products(db: Session, arguments: ProductSearchInput) -> ProductSearchResult:
-    """按名称或编码查启用产品，返回规格候选；多个命中由 Runtime 追问选择。
+    """按产品名称/编码或化学品名称/登记别名查启用产品规格候选。
 
     统一执行入口要求产品读取权限；关键词使用绑定参数并转义 LIKE 通配符。
     不做名称到 CAS 的猜测，不把首个模糊命中直接当用户指定的产品。
     """
+    keyword = arguments.keyword.strip()
+    alias_rows = db.execute(select(Chemical.id, Chemical.alias_text).where(
+        Chemical.status == "ACTIVE", Chemical.alias_text.is_not(None),
+        func.lower(Chemical.alias_text).contains(keyword.casefold(), autoescape=True),
+    )).all()
+    alias_ids = [chemical_id for chemical_id, alias_text in alias_rows
+                 if any(alias.strip().casefold() == keyword.casefold()
+                        for alias in re.split(r"[,;，；、|/\n]+", alias_text or "") if alias.strip())]
+    chemical_match = (
+        Chemical.status == "ACTIVE",
+        Chemical.chemical_name.contains(keyword, autoescape=True) |
+        func.lower(Chemical.english_name).contains(keyword.casefold(), autoescape=True) |
+        (Chemical.id.in_(alias_ids) if alias_ids else False),
+    )
     base = select(
         Product.id.label("product_id"), Product.product_code, Product.product_name,
         Product.model, Product.packaging_spec, Product.unit_id, Unit.unit_name,
-    ).join(Unit, Unit.id == Product.unit_id).where(
+    ).join(Unit, Unit.id == Product.unit_id).join(Chemical, Chemical.id == Product.chemical_id).where(
         Product.status == "ACTIVE", Unit.status == "ACTIVE",
         Product.product_name.contains(arguments.keyword, autoescape=True) |
-        Product.product_code.contains(arguments.keyword, autoescape=True),
+        Product.product_code.contains(arguments.keyword, autoescape=True) |
+        (chemical_match[0] & chemical_match[1]),
     )
     from app.modules.chemicals.cas import extract_valid_cas
     if extract_valid_cas(arguments.keyword) == [arguments.keyword]:
-        from app.modules.chemicals.model import Chemical
         # CAS 定位实际登记的化学品关联规格，仍保留启用状态及多候选消歧。
         base = select(
             Product.id.label("product_id"), Product.product_code, Product.product_name,
             Product.model, Product.packaging_spec, Product.unit_id, Unit.unit_name,
         ).join(Unit, Unit.id == Product.unit_id).join(Chemical, Chemical.id == Product.chemical_id).where(
             Product.status == "ACTIVE", Unit.status == "ACTIVE", Chemical.status == "ACTIVE",
-            Chemical.cas_no == arguments.keyword,
+            Chemical.cas_no == keyword,
         )
     # 完整编码是明确规格；不能因它同时是其他编码的前缀而再次要求消歧。
     exact = base.where(Product.product_code == arguments.keyword)
@@ -84,6 +107,21 @@ def _search_products(db: Session, arguments: ProductSearchInput) -> ProductSearc
     return ProductSearchResult(keyword=arguments.keyword, total_rows=total,
         truncated=total > arguments.limit, rows=[ProductCandidate(**row) for row in rows],
         sources=[Source(resource="md_products", record_id=row["product_id"]) for row in rows])
+
+
+def resolve_accessible_warehouse_id(db: Session, user: User, identifier: str) -> int:
+    """按精确仓库名称或编码解析当前用户可访问的启用仓库。"""
+    visible = accessible_warehouse_ids(db, user)
+    query = select(Warehouse.id).where(
+        Warehouse.status == "ACTIVE",
+        (Warehouse.warehouse_name == identifier) | (Warehouse.warehouse_code == identifier),
+    )
+    if visible is not None:
+        query = query.where(Warehouse.id.in_(visible))
+    matches = list(db.scalars(query))
+    if len(matches) != 1:
+        raise BusinessValidationError("请提供当前可访问仓库的准确名称或编码")
+    return matches[0]
 
 
 def find_rfq_items(db: Session, user: User, arguments: RFQSearchInput) -> RFQSearchResult:
@@ -289,26 +327,65 @@ class ToolSpec:
     input_schema: type[ToolSchema]
     output_schema: type[ToolSchema]
     handler: Callable
-    version: str = "1.0"
-    risk: str = "READ_ONLY"
+    version: str
+    risk: str
+    retry_policy: str
+    idempotent: bool
+    cost_class: str
+    quota_class: str
+
+    def governance_metadata(self) -> dict[str, str | bool]:
+        """返回目录与路由能力清单共用的工具治理元数据。"""
+        return {
+            "version": self.version,
+            "risk": self.risk,
+            "retry_policy": self.retry_policy,
+            "idempotent": self.idempotent,
+            "cost_class": self.cost_class,
+            "quota_class": self.quota_class,
+        }
 
 
 TOOLS = {
     spec.name: spec for spec in (
-        ToolSpec("catalog.search_products", "按名称/编码找产品规格；多候选必须让用户选择，不猜 ID",
-                 "master.products.read", ProductSearchInput, ProductSearchResult, search_products),
+        ToolSpec("catalog.search_products", "按产品名称/编码、化学品名称/英文名/登记别名或 CAS 找规格；多候选必须让用户选择",
+                 "master.products.read", ProductSearchInput, ProductSearchResult, search_products,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("supplier_quotes.find_rfq_items", "定位产品的可见询价明细；多候选必须让用户选择",
-                 "procurement.rfqs.read", RFQSearchInput, RFQSearchResult, find_rfq_items),
+                 "procurement.rfqs.read", RFQSearchInput, RFQSearchResult, find_rfq_items,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("inventory.query_available", "按产品查询可见仓库余额，分单位合计，保留明细来源",
-                 "warehouse.inventory.read", InventoryInput, InventoryResult, query_inventory),
+                 "warehouse.inventory.read", InventoryInput, InventoryResult, query_inventory,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("supplier_quotes.compare", "同一可见询价明细的最新有效提交报价，分可比组排序",
-                 "procurement.rfqs.read", QuoteInput, QuoteResult, compare_quotes),
+                 "procurement.rfqs.read", QuoteInput, QuoteResult, compare_quotes,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("purchase_requests.get_by_no", "按精确编号读取当前用户可见采购申请及明细",
-                 "procurement.requests.read", PurchaseRequestInput, PurchaseRequestResult, get_purchase_request),
+                 "procurement.requests.read", PurchaseRequestInput, PurchaseRequestResult, get_purchase_request,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("purchase_orders.trace_by_no", "按精确订单号跨业务环节追溯采购订单",
-                 "procurement.orders.read", PurchaseOrderTraceInput, PurchaseOrderTraceResult, trace_purchase_order),
+                 "procurement.orders.read", PurchaseOrderTraceInput, PurchaseOrderTraceResult, trace_purchase_order,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
     )
 }
+
+
+def _record_tool_timeout(db: Session, call: ToolCall, result: str) -> None:
+    """记录工具超时；标签只包含登记工具名、方言和固定结果类别。"""
+
+    try:
+        dialect = db.get_bind().dialect.name
+    except Exception:
+        dialect = "unknown"
+    metrics.increment("agent_tool_sql_timeouts", labels={
+        "tool": call.tool, "dialect": dialect, "result": result,
+    })
 
 
 def _permissions(db: Session, user: User) -> tuple[bool, set[str]]:
@@ -321,8 +398,8 @@ def _permissions(db: Session, user: User) -> tuple[bool, set[str]]:
 def list_tools(db: Session, user: User) -> list[dict[str, object]]:
     """仅向用户公开当前有权执行的只读工具及输入/输出 Schema；不调用模型。"""
     admin, permissions = _permissions(db, user)
-    return [{"name": spec.name, "description": spec.description, "version": spec.version,
-             "risk": spec.risk, "permission": spec.permission,
+    return [{"name": spec.name, "description": spec.description, **spec.governance_metadata(),
+             "permission": spec.permission,
              "input_schema": spec.input_schema.model_json_schema(),
              "output_schema": spec.output_schema.model_json_schema()}
             for spec in TOOLS.values() if admin or spec.permission in permissions]
@@ -335,6 +412,24 @@ def execute_tool(db: Session, user: User, call: ToolCall) -> ToolSchema:
     禁用调用期间的 ORM 自动刷新，避免待写对象因查询被隐式写入。
     当前注册表只有只读函数；写开关不能使未知或写操作工具变成可执行工具。
     """
+    settings = get_settings()
+    try:
+        with tool_deadline_context(
+            getattr(settings, "agent_tool_timeout_seconds", 15),
+            parent_deadline=current_task_deadline(),
+        ):
+            return _execute_tool_with_deadline(db, user, call)
+    except ToolExecutionTimeout:
+        _record_tool_timeout(db, call, "timeout")
+        raise
+    except ToolTimeoutUnsupported:
+        _record_tool_timeout(db, call, "unsupported")
+        raise
+
+
+def _execute_tool_with_deadline(db: Session, user: User, call: ToolCall) -> ToolSchema:
+    """在统一工具超时上下文中执行既有权限、Schema 和 handler 契约。"""
+
     admin, permissions = _permissions(db, user)
     spec = TOOLS.get(call.tool)
     if spec is None:

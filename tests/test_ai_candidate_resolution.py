@@ -65,11 +65,7 @@ def test_inventory_family_accepts_exact_product_name_without_chemical_table(tool
 
 
 def test_inventory_family_uses_only_same_active_chemical_identity(tool_db):
-    tool_db.execute(text("ALTER TABLE md_products ADD COLUMN chemical_id INTEGER"))
-    tool_db.execute(text("CREATE TABLE md_chemicals (id INTEGER PRIMARY KEY, status TEXT)"))
-    tool_db.execute(text("INSERT INTO md_products (id, product_name, status, product_code, chemical_id) VALUES (3, '乙醇衍生产品', 'ACTIVE', 'P-DERIVATIVE', 1)"))
-    tool_db.execute(text("UPDATE md_products SET chemical_id = 1 WHERE id = 1"))
-    tool_db.execute(text("INSERT INTO md_chemicals VALUES (1, 'ACTIVE')"))
+    tool_db.execute(text("INSERT INTO md_products (id, product_name, status, product_code, unit_id, chemical_id) VALUES (3, '乙醇衍生产品', 'ACTIVE', 'P-DERIVATIVE', 1, 1)"))
     rows = [{"product_id": 1, "product_name": "测试乙醇"}, {"product_id": 3, "product_name": "乙醇衍生产品"}]
 
     assert inventory_family(tool_db, rows, "测试乙醇")
