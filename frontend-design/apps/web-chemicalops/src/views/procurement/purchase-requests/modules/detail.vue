@@ -17,6 +17,7 @@ import {
 import type { StepItem } from 'antdv-next';
 
 import { getPurchaseRequestApi } from '#/api';
+import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 import {
   PRIORITY_DICT,
   PURCHASE_REQUEST_STATUS_DICT,
@@ -27,14 +28,21 @@ import { getUnitNameMap } from '#/utils/lookup';
 const detail = ref<PurchaseRequestApi.PurchaseRequest>();
 const loading = ref(false);
 const unitMap = ref<Map<number, string>>(new Map());
+let requestGeneration = 0;
 
 const [Drawer, drawerApi] = useVbenDrawer<null | PurchaseRequestApi.PurchaseRequest>({
   footer: false,
   async onOpenChange(isOpen) {
     if (!isOpen) {
+      requestGeneration += 1;
+      if (detail.value) clearPageCopilotContext('purchase_request', detail.value.id);
+      detail.value = undefined;
+      loading.value = false;
       return;
     }
+    const generation = ++requestGeneration;
     const data = drawerApi.getData();
+    if (detail.value) clearPageCopilotContext('purchase_request', detail.value.id);
     detail.value = undefined;
     if (!data?.id) {
       return;
@@ -45,10 +53,16 @@ const [Drawer, drawerApi] = useVbenDrawer<null | PurchaseRequestApi.PurchaseRequ
         getPurchaseRequestApi(data.id),
         getUnitNameMap(),
       ]);
+      if (generation !== requestGeneration) return;
       detail.value = request;
+      setPageCopilotContext({
+        objectType: 'purchase_request',
+        objectId: request.id,
+        question: '这份申请后续采购流程走到哪里了？',
+      });
       unitMap.value = units;
     } finally {
-      loading.value = false;
+      if (generation === requestGeneration) loading.value = false;
     }
   },
 });

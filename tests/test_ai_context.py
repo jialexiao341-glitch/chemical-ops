@@ -14,6 +14,7 @@ from app.core.errors import ResourceNotFoundError
 from app.modules.ai import context
 from app.modules.ai.schema import AIContextAskRequest
 from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.purchase_requests.model import PurchaseRequest
 
 from .conftest import login
 
@@ -83,6 +84,90 @@ def test_purchase_order_context_uses_server_side_trace(monkeypatch) -> None:
     assert response.citations[0]["order_trace"] == _trace()
 
 
+def test_purchase_request_context_reads_authorized_request_and_returns_lines(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+    request = SimpleNamespace(
+        id=21, request_no="PR20261022000021", status="PENDING_APPROVAL", purpose="实验室补充溶剂",
+        priority="HIGH", budget_amount=Decimal("2500.00"), currency_code="CNY",
+        approvals=[],
+        expected_date=date(2026, 11, 10), items=[SimpleNamespace(
+            id=31, line_no=1, requested_name="乙醇", quantity=Decimal("50.000000"), unit_id=2,
+            budget_price=Decimal("50.00"), status="OPEN",
+        )],
+    )
+
+    def fake_get_request(_db, _user, request_id):
+        seen["request_id"] = request_id
+        return request
+
+    monkeypatch.setattr(context, "get_purchase_request", fake_get_request)
+    monkeypatch.setattr(context, "_purchase_request_trace", lambda *_args: ([], []))
+
+    response = context.ask_context(
+        SimpleNamespace(), SimpleNamespace(id=7),
+        AIContextAskRequest(question="采购用途和明细是什么？", context={"object_type": "purchase_request", "object_id": 21}),
+    )
+
+    assert seen == {"request_id": 21}
+    assert response.model == "purchase-request-trace"
+    assert response.context.title == "采购申请 PR20261022000021"
+    assert response.context.status == "PENDING_APPROVAL"
+    assert "实验室补充溶剂" in response.answer
+    assert "乙醇" in response.answer
+    assert "50.000000" in response.answer
+    assert "#2" in response.answer
+    assert response.citations[0]["type"] == "purchase-request-trace"
+    assert response.context.source_records == [
+        {"dataset": "purchase_requests", "record_id": 21, "label": "采购申请 PR20261022000021"},
+        {"dataset": "purchase_request_items", "record_id": 31, "label": "采购明细 1：乙醇"},
+    ]
+
+
+def test_purchase_request_context_answers_the_asked_field_and_only_suggests_supported_questions(monkeypatch) -> None:
+    request = SimpleNamespace(
+        id=21, request_no="PR20261022000021", status="PENDING_APPROVAL", purpose="实验室补充溶剂",
+        budget_amount=Decimal("2500.00"), currency_code="CNY", expected_date=date(2026, 11, 10), approvals=[],
+        items=[SimpleNamespace(id=31, line_no=1, requested_name="乙醇", quantity=Decimal("50"), unit_id=2, status="OPEN")],
+    )
+    monkeypatch.setattr(context, "get_purchase_request", lambda *_args: request)
+    monkeypatch.setattr(context, "_purchase_request_trace", lambda *_args: ([], []))
+
+    response = context.ask_context(
+        SimpleNamespace(), SimpleNamespace(id=7),
+        AIContextAskRequest(question="当前审批状态是什么？", context={"object_type": "purchase_request", "object_id": 21}),
+    )
+
+    assert response.answer == "采购申请 PR20261022000021 当前状态：PENDING_APPROVAL。当前读取的是申请状态字段，不包含审批节点或审批意见。"
+    assert response.context.suggested_questions == [
+        "关联询价与报价进展如何？", "采购订单到货和验收进展如何？", "当前流程卡在哪个环节？",
+    ]
+
+
+def test_purchase_request_context_reports_downstream_procurement_trace(monkeypatch) -> None:
+    request = SimpleNamespace(
+        id=21, request_no="PR20261022000021", status="APPROVED", purpose="实验室补充溶剂",
+        budget_amount=None, currency_code="CNY", expected_date=None, approvals=[],
+        items=[SimpleNamespace(id=31, line_no=1, requested_name="乙醇", quantity=Decimal("50"), unit_id=2, status="OPEN")],
+    )
+    stages = [
+        {"stage": "询价与报价", "status": "AVAILABLE", "summary": "关联询价单  RFQ-1；报价 2 条", "records": [{"number": "RFQ-1", "status": "SENT"}]},
+        {"stage": "采购订单", "status": "NO_DATA", "summary": "没有查到关联记录", "records": []},
+    ]
+    sources = [{"dataset": "rfqs", "record_id": 41, "label": "询价单 RFQ-1"}]
+    monkeypatch.setattr(context, "get_purchase_request", lambda *_args: request)
+    monkeypatch.setattr(context, "_purchase_request_trace", lambda *_args: (stages, sources))
+
+    response = context.ask_context(
+        SimpleNamespace(), SimpleNamespace(id=7),
+        AIContextAskRequest(question="这份申请后续采购流程走到哪了？", context={"object_type": "purchase_request", "object_id": 21}),
+    )
+
+    assert "RFQ-1" in response.answer
+    assert "采购订单：没有查到关联记录" in response.answer
+    assert response.citations[0]["type"] == "purchase-request-trace"
+    assert all(source in response.citations[0]["source_records"] for source in sources)
+
+
 def test_context_question_cannot_supply_business_snapshot() -> None:
     """客户端附带业务字段必须被拒绝，否则可伪造订单状态影响回答。"""
     with pytest.raises(ValidationError):
@@ -141,6 +226,27 @@ def test_context_ask_returns_trace_for_existing_order(client: TestClient, db_ses
     assert body["citations"][0]["source_records"] == body["context"]["source_records"]
 
 
+def test_context_ask_traces_downstream_records_for_existing_request(client: TestClient, db_session, demo_password) -> None:
+    request_id = db_session.scalar(select(PurchaseRequest.id).order_by(PurchaseRequest.id))
+    if request_id is None:
+        pytest.skip("当前测试库没有采购申请样本")
+
+    headers = login(client, "system_admin", demo_password)
+    response = client.post(
+        "/api/v1/ai/context/ask",
+        headers=headers,
+        json={"question": "这份申请后续采购流程走到哪里了？", "context": {"object_type": "purchase_request", "object_id": request_id}},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model"] == "purchase-request-trace"
+    assert "询价与报价" in body["answer"]
+    assert "采购订单" in body["answer"]
+    assert body["citations"][0]["type"] == "purchase-request-trace"
+    assert body["citations"][0]["stages"]
+
+
 def test_context_ask_maps_missing_order_to_404(client: TestClient, db_session, demo_password) -> None:
     headers = login(client, "system_admin", demo_password)
     missing_id = (db_session.scalar(select(PurchaseOrder.id).order_by(PurchaseOrder.id.desc())) or 0) + 1
@@ -159,7 +265,7 @@ def test_context_ask_maps_unsupported_object_to_400(client: TestClient, demo_pas
     response = client.post(
         "/api/v1/ai/context/ask",
         headers=headers,
-        json={"question": "这单卡在哪", "context": {"object_type": "purchase_request", "object_id": 1}},
+        json={"question": "这单卡在哪", "context": {"object_type": "rfq", "object_id": 1}},
     )
 
     assert response.status_code == 400

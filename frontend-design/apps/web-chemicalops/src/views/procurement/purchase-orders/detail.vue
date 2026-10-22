@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { PurchaseOrderApi } from '#/api';
 
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
@@ -44,7 +44,7 @@ import { getSupplierNameMap, getUnitNameMap } from '#/utils/lookup';
 import ApproveModal from './modules/approve.vue';
 import CancelModal from './modules/cancel.vue';
 import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
-import PageCopilotDrawer from '#/views/ai/workspace/modules/page-copilot-drawer.vue';
+import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 
 defineOptions({ name: 'PurchaseOrderDetail' });
 
@@ -55,11 +55,9 @@ const userStore = useUserStore();
 
 const order = ref<PurchaseOrderApi.PurchaseOrder>();
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
-const copilotDrawer = ref<{
-  open: (objectType: 'purchase_order', id: number, question?: string) => void;
-}>();
 const loading = ref(false);
 const acting = ref(false);
+let viewActive = false;
 const resolveSupplier = ref<(id?: null | number) => string>(() => '-');
 const resolveUnit = ref<(id?: null | number) => string>(() => '-');
 
@@ -161,7 +159,13 @@ async function load() {
       getSupplierNameMap(),
       getUnitNameMap(),
     ]);
+    if (!viewActive) return;
     order.value = detail;
+    setPageCopilotContext({
+      objectType: 'purchase_order',
+      objectId: detail.id,
+      question: '这单当前进展和卡点是什么？',
+    });
     resolveSupplier.value = (sid) =>
       sid ? (suppliers.get(sid) ?? `#${sid}`) : '-';
     resolveUnit.value = (uid) => (uid ? (units.get(uid) ?? `#${uid}`) : '-');
@@ -190,13 +194,19 @@ const orderPayload = computed(() => ({
   poNo: order.value?.po_no ?? '',
 }));
 
-onMounted(load);
+onMounted(() => {
+  viewActive = true;
+  void load();
+});
+onBeforeUnmount(() => {
+  viewActive = false;
+  if (order.value) clearPageCopilotContext('purchase_order', order.value.id);
+});
 </script>
 
 <template>
   <Page auto-content-height>
     <BusinessInsightDrawer ref="insightDrawer" />
-    <PageCopilotDrawer ref="copilotDrawer" />
     <Approve @success="load" />
     <Cancel @success="load" />
     <Spin :spinning="loading">
@@ -214,12 +224,6 @@ onMounted(load);
             </Tag>
           </div>
           <div class="flex flex-wrap gap-2">
-            <Button
-              v-if="order.id && hasAccessByCodes(['ai.workspace.read'])"
-              @click="copilotDrawer?.open('purchase_order', order.id, '这单当前进展和卡点是什么？')"
-            >
-              问 AI
-            </Button>
             <Button
               v-if="order.id && hasAccessByCodes(['finance.reconciliations.read']) && hasAccessByCodes(['ai.workspace.read'])"
               @click="insightDrawer?.open('finance-difference', order.id)"
