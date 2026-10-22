@@ -36,6 +36,7 @@ ACTION_ENTRIES = {
     "rfq.create_draft": ("基于已审批申请创建询价草稿", "chat", "rfq_draft"),
     "rfq.send": ("发送询价", "business_page", None),
     "rfq.select_quote": ("确认中选报价", "business_page", None),
+    "purchase_order.create_draft": ("检查条款并准备采购订单草稿", "business_page", None),
 }
 
 # Composite datasets require every listed read permission. The base DatasetSpec.permission

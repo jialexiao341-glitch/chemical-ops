@@ -60,26 +60,27 @@ def _add_event(db: Session, order: PurchaseOrder, user_id: int, event_type: str,
     )
 
 
-def _validate_source(db: Session, user: User, data: PurchaseOrderCreate):
+def _validate_source(db: Session, user: User, data: PurchaseOrderCreate, *, for_update: bool = True):
     """校验比价结果、中选报价和产品明细可以生成采购订单。"""
 
     rfq_id = db.scalar(select(QuoteComparison.rfq_id).where(QuoteComparison.id == data.comparison_id))
     if rfq_id is not None:
-        db.scalar(select(RFQ).where(RFQ.id == rfq_id).with_for_update())
-    comparison = db.scalar(select(QuoteComparison).where(QuoteComparison.id == data.comparison_id)
-                           .with_for_update().execution_options(populate_existing=True))
+        rfq_query = select(RFQ).where(RFQ.id == rfq_id)
+        db.scalar(rfq_query.with_for_update() if for_update else rfq_query)
+    comparison_query = select(QuoteComparison).where(QuoteComparison.id == data.comparison_id).execution_options(populate_existing=True)
+    comparison = db.scalar(comparison_query.with_for_update() if for_update else comparison_query)
     if comparison is None:
         raise ResourceNotFoundError("报价比较结果不存在")
     if comparison.status != "CONFIRMED" or comparison.selected_quote_id != data.quote_id:
         raise BusinessValidationError("只能根据已确认且与中选报价一致的比价结果生成订单")
-    quote = crud.get_quote(db, data.quote_id)
+    quote = crud.get_quote(db, data.quote_id, for_update=for_update)
     if quote is None:
         raise ResourceNotFoundError("供应商报价不存在")
     if quote.status != "SELECTED" or quote.rfq is None:
         raise BusinessValidationError("报价尚未被确认中选")
     if quote.rfq.source_request_id is None:
         raise BusinessValidationError("只有关联采购申请的询价才能生成订单")
-    source_request = get_scoped_purchase_request(db, user, quote.rfq.source_request_id)
+    source_request = get_scoped_purchase_request(db, user, quote.rfq.source_request_id, for_update=for_update)
     if source_request.status != "APPROVED":
         raise BusinessValidationError("来源采购申请不存在或未审批通过")
     if not quote.items:

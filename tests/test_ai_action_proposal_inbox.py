@@ -55,8 +55,9 @@ def proposal_db(monkeypatch):
 
 
 class _ReadHandler:
-    def __init__(self, error=None):
+    def __init__(self, error=None, permission_code="procurement.requests.write"):
         self.error = error
+        self.permission_code = permission_code
 
     def validate_current(self, *_args, **_kwargs):
         if self.error:
@@ -103,7 +104,10 @@ def _configure_reads(monkeypatch, *, permissions=None, handler=None, request_err
     monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
-    monkeypatch.setattr(action_handlers, "get_handler", lambda _action_type: handler or _ReadHandler())
+    monkeypatch.setattr(action_handlers, "get_handler", lambda action_type: handler or _ReadHandler(
+        permission_code="procurement.rfqs.award" if action_type == "rfq.select_quote" else
+        "procurement.rfqs.write" if action_type in {"rfq.send", "rfq.create_draft"} else
+        "procurement.requests.write"))
 
     from app.modules.purchase_requests import service as request_service
 
@@ -211,7 +215,7 @@ def test_rfq_send_inbox_shows_rfq_reference_and_deep_link(proposal_db, monkeypat
     monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
-    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.write"))
     from app.modules.rfqs import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     proposal = _proposal(proposal_db, action_type="rfq.send")
@@ -233,7 +237,7 @@ def test_rfq_send_inbox_hides_reference_and_evidence_without_rfq_read_permission
     monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
-    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.write"))
     proposal = _proposal(proposal_db, action_type="rfq.send")
     proposal.permission_code = "procurement.rfqs.write"
     proposal.payload = {"rfq_id": 73}
@@ -254,7 +258,7 @@ def test_rfq_select_quote_inbox_shows_rfq_reference_and_selection_reason(proposa
     monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
-    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.award"))
     from app.modules.rfqs import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     proposal = _proposal(proposal_db, action_type="rfq.select_quote")
@@ -276,7 +280,7 @@ def test_rfq_select_quote_list_is_scoped_to_owner(proposal_db, monkeypatch):
     monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
-    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.award"))
     from app.modules.rfqs import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     own = _proposal(proposal_db, owner_id=1, action_type="rfq.select_quote")
@@ -298,7 +302,7 @@ def test_rfq_select_quote_inbox_disables_confirmation_after_award_permission_rev
     monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
-    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.award"))
     from app.modules.rfqs import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     proposal = _proposal(proposal_db, action_type="rfq.select_quote")
@@ -319,7 +323,7 @@ def test_rfq_select_quote_inbox_hides_reason_without_rfq_read_permission(proposa
     monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
-    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler())
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.award"))
     proposal = _proposal(proposal_db, action_type="rfq.select_quote")
     proposal.permission_code = "procurement.rfqs.award"
     proposal.payload = {"rfq_id": 73, "comparison_id": 2, "quote_id": 3, "selection_reason": "受限的商务理由"}
@@ -333,3 +337,84 @@ def test_rfq_select_quote_inbox_hides_reason_without_rfq_read_permission(proposa
     assert result.diff == []
     assert result.evidence == []
     assert result.revision_values == {}
+
+
+def test_purchase_order_proposal_inbox_shows_rfq_reference_and_allowed_revision_fields(proposal_db, monkeypatch):
+    permissions = {1: ["procurement.orders.write", "procurement.rfqs.read"]}
+    monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
+    monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.orders.write"))
+    from app.modules.rfqs import service as rfq_service
+    monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
+    proposal = _proposal(proposal_db, action_type="purchase_order.create_draft")
+    proposal.resource_type = "RFQ"
+    proposal.resource_id = "73"
+    proposal.permission_code = "procurement.orders.write"
+    proposal.payload = {"comparison_id": 2, "quote_id": 3, "delivery_address": "仓库 A",
+                       "expected_arrival_date": "2026-01-10", "note": "留样"}
+    proposal_db.commit()
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.business_reference == "RFQ-0073"
+    assert result.source_route == "/procurement/rfqs?ai_record_id=73"
+    assert result.revision_values == {"delivery_address": "仓库 A", "expected_arrival_date": "2026-01-10", "note": "留样"}
+
+
+def test_purchase_order_proposal_inbox_hides_quote_evidence_without_rfq_read_permission(proposal_db, monkeypatch):
+    permissions = {1: ["procurement.orders.write"]}
+    monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda _db, user_id: permissions.get(user_id, []))
+    monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.orders.write"))
+    proposal = _proposal(proposal_db, action_type="purchase_order.create_draft")
+    proposal.resource_type = "RFQ"
+    proposal.resource_id = "73"
+    proposal.permission_code = "procurement.orders.write"
+    proposal.payload = {"comparison_id": 2, "quote_id": 3, "delivery_address": "机密地址"}
+    proposal.diff = [{"field": "supplier", "after": "secret supplier"}]
+    proposal.evidence = [{"type": "purchase_order_terms_check", "items": [{"payment_terms": "secret terms"}]}]
+    proposal_db.commit()
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.availability == "PERMISSION_REVOKED"
+    assert result.business_reference is None
+    assert result.source_route is None
+    assert result.diff == []
+    assert result.evidence == []
+    assert result.revision_values == {}
+
+
+def test_purchase_order_proposal_revision_only_changes_allowed_order_fields(proposal_db, monkeypatch):
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    proposal = _proposal(proposal_db, action_type="purchase_order.create_draft")
+    proposal.permission_code = "procurement.orders.write"
+    proposal.resource_type = "RFQ"
+    proposal.resource_id = "73"
+    proposal.payload = {"comparison_id": 2, "quote_id": 3, "delivery_address": None,
+                       "expected_arrival_date": None, "note": None}
+    proposal_db.commit()
+    seen = []
+
+    class _PrepareHandler(_ReadHandler):
+        def prepare(self, _db, _user, payload):
+            seen.append(payload)
+            return {"payload": payload, "snapshot": {"updated": True}, "resource_id": 73,
+                    "diff": [], "evidence": [], "warnings": [], "blockers": []}
+
+    monkeypatch.setattr(action_proposals, "_owned_proposal", lambda *_args, **_kwargs: proposal)
+    monkeypatch.setattr(action_proposals, "_authorize", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _PrepareHandler())
+
+    result = action_proposals.revise_action(
+        proposal_db, SimpleNamespace(id=1), proposal.confirmation_id, proposal.preview_version,
+        {"delivery_address": "新地址"},
+    )
+
+    assert seen[0] == {**proposal.payload, "delivery_address": "新地址"}
+    assert proposal.preview_version == 3
+    assert result.preview_version == 3

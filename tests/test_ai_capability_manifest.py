@@ -109,6 +109,22 @@ def test_action_manifest_separates_chat_and_page_confirmation_entries(monkeypatc
     assert "提交采购申请" not in reply
 
 
+def test_order_draft_action_requires_order_write_and_rfq_read_permissions(monkeypatch):
+    codes = {"ai.workspace.read", "procurement.orders.write", "procurement.rfqs.read"}
+    monkeypatch.setattr(capabilities, "get_user_role_codes", lambda *_: [])
+    monkeypatch.setattr(capabilities, "get_user_permission_codes", lambda *_: codes)
+    monkeypatch.setattr(capabilities, "agent_enabled", lambda: True)
+
+    manifest = capabilities.build_capability_manifest(object(), SimpleNamespace(id=7))
+    actions = {item["action_type"]: item for item in manifest.action_proposals}
+
+    assert actions["purchase_order.create_draft"]["entrypoint"] == "business_page"
+    assert actions["purchase_order.create_draft"]["requires_confirmation"] is True
+    codes.remove("procurement.rfqs.read")
+    manifest = capabilities.build_capability_manifest(object(), SimpleNamespace(id=7))
+    assert "purchase_order.create_draft" not in {item["action_type"] for item in manifest.action_proposals}
+
+
 def test_manifest_reads_permission_snapshot_once(monkeypatch):
     calls = []
     monkeypatch.setattr(capabilities, "get_user_role_codes", lambda *_: calls.append('roles') or ['SYS_ADMIN'])

@@ -8,6 +8,9 @@ from app.modules.purchase_requests import service as purchase_request_service
 from app.modules.purchase_requests.model import PurchaseRequest
 from app.modules.purchase_requests.model import Unit
 from app.modules.purchase_requests.schema import PurchaseRequestCreate, PurchaseRequestUpdate, PurchaseRequestRead
+from app.modules.purchase_orders import service as purchase_order_service
+from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.purchase_orders.schema import PurchaseOrderCreate, PurchaseOrderRead
 from app.modules.system.model import User
 from app.modules.suppliers.model import Supplier
 from sqlalchemy import select
@@ -54,6 +57,8 @@ def required_permissions(action_type: str) -> set[str]:
     required = {get_handler(action_type).permission_code}
     if action_type == "rfq.create_draft":
         required.add("master.suppliers.read")
+    if action_type == "purchase_order.create_draft":
+        required.add("procurement.rfqs.read")
     return required
 
 
@@ -613,3 +618,169 @@ class RFQSelectQuoteHandler:
 
 
 register_handler("rfq.select_quote", RFQSelectQuoteHandler())
+
+
+def _purchase_request_source_snapshot(request) -> dict[str, Any]:
+    return {
+        "id": request.id,
+        "updated_at": request.updated_at.isoformat() if request.updated_at else None,
+        "status": request.status,
+        "department_id": request.department_id,
+        "expected_date": request.expected_date.isoformat() if request.expected_date else None,
+        "items": [
+            {"id": item.id, "quantity": str(item.quantity),
+             "fulfilled_quantity": str(item.fulfilled_quantity)}
+            for item in sorted(request.items, key=lambda value: value.id)
+        ],
+    }
+
+
+class PurchaseOrderCreateDraftHandler:
+    permission_code = "procurement.orders.write"
+    resource_type = "RFQ"
+    editable_fields = frozenset({"delivery_address", "expected_arrival_date", "note"})
+
+    def prepare(self, db, user, payload):
+        return self._prepare(db, user, payload, for_update=False)
+
+    def _prepare(self, db, user, payload, *, for_update: bool):
+        from pydantic import ValidationError
+        from app.modules.rfqs import service as rfq_service
+
+        if not isinstance(payload, dict) or set(payload) - ({"comparison_id", "quote_id"} | self.editable_fields):
+            raise BusinessValidationError("订单草稿提案包含不允许的字段")
+        if not {"comparison_id", "quote_id"} <= set(payload):
+            raise BusinessValidationError("订单草稿提案必须提供比价结果和中选报价编号")
+        for key in ("comparison_id", "quote_id"):
+            value = payload[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise BusinessValidationError("比价结果或报价编号无效")
+        try:
+            data = PurchaseOrderCreate.model_validate(payload)
+        except ValidationError as exc:
+            raise BusinessValidationError("订单草稿提案参数无效") from exc
+
+        comparison, quote, request, rfq_items, quote_items = purchase_order_service._validate_source(
+            db, user, data, for_update=for_update,
+        )
+        if comparison.status != "CONFIRMED" or comparison.selected_quote_id != quote.id or quote.status != "SELECTED":
+            raise BusinessValidationError("比价结果或中选报价状态已变化，请重新生成提案")
+        if request.status != "APPROVED":
+            raise BusinessValidationError("来源采购申请未审批通过，不能生成采购订单")
+        rfq = rfq_service.get_rfq(db, user, quote.rfq_id, for_update=for_update)
+        if rfq.id != comparison.rfq_id or rfq.id != quote.rfq_id:
+            raise BusinessValidationError("比价结果、报价与询价单来源不一致")
+        existing_order = db.scalar(
+            select(PurchaseOrder.id).where(PurchaseOrder.source_comparison_id == comparison.id)
+            .with_for_update() if for_update else
+            select(PurchaseOrder.id).where(PurchaseOrder.source_comparison_id == comparison.id)
+        )
+        if existing_order is not None:
+            raise BusinessValidationError("该比价结果已经生成采购订单")
+
+        normalized = data.model_dump(mode="json")
+        request_snapshot = _purchase_request_source_snapshot(request)
+        source_lines = []
+        line_details = []
+        request_items = {item.id: item for item in request.items}
+        for rfq_item_id in sorted(quote_items, key=lambda value: rfq_items[value].line_no):
+            rfq_item = rfq_items[rfq_item_id]
+            quote_item = quote_items[rfq_item_id]
+            request_item = request_items.get(rfq_item.source_request_item_id)
+            remaining = request_item.quantity - request_item.fulfilled_quantity if request_item else None
+            source_lines.append({
+                "rfq_item_id": rfq_item.id,
+                "line_no": rfq_item.line_no,
+                "product_id": rfq_item.product_id,
+                "requested_name": rfq_item.requested_name,
+                "required_delivery_date": rfq_item.required_delivery_date.isoformat()
+                if rfq_item.required_delivery_date else None,
+                "source_request_item_id": rfq_item.source_request_item_id,
+                "request_quantity": str(request_item.quantity) if request_item else None,
+                "request_fulfilled_quantity": str(request_item.fulfilled_quantity) if request_item else None,
+                "quote_item_id": quote_item.id,
+                "supplier_product_id": quote_item.supplier_product_id,
+                "supplier_model": quote_item.supplier_model,
+                "quoted_quantity": str(quote_item.quoted_quantity),
+                "unit_id": quote_item.unit_id,
+                "unit_price": str(quote_item.unit_price),
+                "tax_rate": str(quote_item.tax_rate) if quote_item.tax_rate is not None else None,
+                "lead_days": quote_item.lead_days,
+                "payment_terms": quote_item.payment_terms,
+                "available_request_quantity": str(remaining) if remaining is not None else None,
+                "quantity_check": "within_remaining" if remaining is not None and quote_item.quoted_quantity <= remaining else "not_applicable",
+            })
+            line_details.append({
+                "line_no": rfq_item.line_no,
+                "product": rfq_item.requested_name,
+                "product_id": rfq_item.product_id,
+                "quantity": str(quote_item.quoted_quantity),
+                "unit_id": quote_item.unit_id,
+                "unit_price": str(quote_item.unit_price),
+                "tax_rate": str(quote_item.tax_rate) if quote_item.tax_rate is not None else None,
+                "currency_code": quote.currency_code,
+                "lead_days": quote_item.lead_days,
+                "payment_terms": quote_item.payment_terms,
+                "required_delivery_date": rfq_item.required_delivery_date.isoformat()
+                if rfq_item.required_delivery_date else request.expected_date.isoformat() if request.expected_date else None,
+                "available_request_quantity": str(remaining) if remaining is not None else None,
+                "quantity_check": "within_remaining" if remaining is not None and quote_item.quoted_quantity <= remaining else "not_applicable",
+            })
+        snapshot = {
+            "rfq": {**_rfq_send_snapshot(rfq), "source_request_id": rfq.source_request_id},
+            "comparison": _quote_comparison_snapshot(comparison),
+            "quote": _supplier_quote_snapshot(quote),
+            "request": request_snapshot,
+            "lines": source_lines,
+        }
+        warnings = []
+        if not data.delivery_address:
+            warnings.append("尚未填写收货地址，生成草稿后需人工核对。")
+        if data.expected_arrival_date is None:
+            warnings.append("尚未填写预计到货日期，无法与询价要求日期核对。")
+        elif (rfq.requested_delivery_date or request.expected_date) and data.expected_arrival_date > (
+            rfq.requested_delivery_date or request.expected_date
+        ):
+            warnings.append("预计到货日期晚于询价要求日期，请人工确认。")
+        if any(not item["payment_terms"] for item in line_details):
+            warnings.append("部分报价明细未提供付款条件，订单快照将保留为空。")
+        if any(item["lead_days"] is None for item in line_details):
+            warnings.append("部分报价明细未提供交期，无法核对该行交付周期。")
+        diff = [
+            {"field": "supplier", "before": None, "after": quote.supplier_id},
+            {"field": "currency_code", "before": None, "after": quote.currency_code},
+            {"field": "delivery_address", "before": None, "after": data.delivery_address},
+            {"field": "expected_arrival_date", "before": rfq.requested_delivery_date.isoformat()
+             if rfq.requested_delivery_date else request.expected_date.isoformat() if request.expected_date else None,
+             "after": data.expected_arrival_date.isoformat() if data.expected_arrival_date else None},
+            {"field": "items", "before": None, "after": line_details},
+        ]
+        evidence = [{"type": "purchase_order_terms_check", "rfq_no": rfq.rfq_no,
+                    "comparison_no": comparison.comparison_no, "quote_no": quote.quote_no,
+                    "supplier_id": quote.supplier_id,
+                    "request_no": request.request_no, "items": line_details}]
+        return {
+            "payload": normalized,
+            "snapshot": snapshot,
+            "resource_type": "RFQ",
+            "resource_id": rfq.id,
+            "diff": diff,
+            "evidence": evidence,
+            "warnings": warnings,
+            "blockers": [],
+            "risk_level": "MEDIUM",
+        }
+
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        prepared = self._prepare(db, user, proposal.payload, for_update=for_update)
+        if prepared["snapshot"] != proposal.expected_resource_snapshot:
+            raise BusinessValidationError("询价、比价、报价或申请数据已变化，请重新核对")
+
+    def execute(self, db, user, proposal, *, commit=False):
+        order = purchase_order_service.create_order(
+            db, user, PurchaseOrderCreate.model_validate(proposal.payload), commit=commit,
+        )
+        return PurchaseOrderRead.model_validate(order).model_dump(mode="json")
+
+
+register_handler("purchase_order.create_draft", PurchaseOrderCreateDraftHandler())
