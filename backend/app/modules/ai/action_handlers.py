@@ -19,7 +19,7 @@ class ActionHandler(Protocol):
 
     def prepare(self, db, user, payload: dict[str, Any]) -> dict[str, Any]: ...
 
-    def validate_current(self, db, user, proposal) -> None: ...
+    def validate_current(self, db, user, proposal, *, for_update: bool = True) -> None: ...
 
     def execute(self, db, user, proposal, *, commit: bool = False) -> dict[str, Any]: ...
 
@@ -153,15 +153,17 @@ class PurchaseRequestCreateHandler:
                 "resource_id": None, "diff": preview_diff,
                 "evidence": [], "warnings": [], "blockers": [], "risk_level": "LOW"}
 
-    def validate_current(self, db, user, proposal):
+    def validate_current(self, db, user, proposal, *, for_update=True):
         if proposal.expected_resource_snapshot.get("department_id") != user.department_id:
             raise BusinessValidationError("当前用户部门已变化，请重新生成预览")
         for product_id, expected in proposal.expected_resource_snapshot.get("products", {}).items():
-            product = db.scalar(select(Product).where(Product.id == int(product_id)).with_for_update())
+            query = select(Product).where(Product.id == int(product_id))
+            product = db.scalar(query.with_for_update() if for_update else query)
             if product is None or product.status != "ACTIVE" or product.status != expected["status"] or product.version_no != expected["version_no"]:
                 raise BusinessValidationError("关联产品状态或版本已变化，请重新生成预览")
         for unit_id, expected in proposal.expected_resource_snapshot.get("units", {}).items():
-            unit = db.scalar(select(Unit).where(Unit.id == int(unit_id)).with_for_update())
+            query = select(Unit).where(Unit.id == int(unit_id))
+            unit = db.scalar(query.with_for_update() if for_update else query)
             if unit is None or unit.status != "ACTIVE" or unit.unit_name != expected["unit_name"] or unit.dimension != expected["dimension"]:
                 raise BusinessValidationError("关联计量单位状态或信息已变化，请重新生成预览")
 
@@ -200,14 +202,14 @@ class PurchaseRequestUpdateHandler:
                 "evidence": [{"type": "purchase_request", "id": request_id, "request_no": request.request_no}],
                 "warnings": [], "blockers": [], "risk_level": "LOW"}
 
-    def validate_current(self, db, user, proposal):
-        request = purchase_request_service.get_request(db, user, int(proposal.resource_id), for_update=True)
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        request = purchase_request_service.get_request(db, user, int(proposal.resource_id), for_update=for_update)
         if request.status not in {"DRAFT", "REJECTED"} or _request_snapshot(request) != proposal.expected_resource_snapshot["request"]:
             raise BusinessValidationError("采购申请状态或内容已变化，请重新生成预览")
         updated = PurchaseRequestUpdate.model_validate(proposal.payload["changes"])
         item_values = updated.items if updated.items is not None else request.items
         purchase_request_service._validate_items(db, item_values)
-        if _item_reference_snapshot(db, item_values, for_update=True) != proposal.expected_resource_snapshot["refs"]:
+        if _item_reference_snapshot(db, item_values, for_update=for_update) != proposal.expected_resource_snapshot["refs"]:
             raise BusinessValidationError("采购申请关联的产品或单位已变化，请重新生成预览")
 
     def execute(self, db, user, proposal, *, commit=False):
@@ -236,8 +238,8 @@ class PurchaseRequestSubmitHandler:
                 "evidence": [{"type": "purchase_request", "id": request_id, "request_no": request.request_no}],
                 "warnings": [], "blockers": [], "risk_level": "MEDIUM"}
 
-    def validate_current(self, db, user, proposal):
-        request = purchase_request_service.get_request(db, user, int(proposal.resource_id), for_update=True)
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        request = purchase_request_service.get_request(db, user, int(proposal.resource_id), for_update=for_update)
         if request.status not in {"DRAFT", "REJECTED"} or _request_snapshot(request) != proposal.expected_resource_snapshot:
             raise BusinessValidationError("采购申请状态或内容已变化，请重新检查")
         if not request.items:
@@ -361,13 +363,13 @@ class RFQCreateDraftHandler:
                                                            "selected_by_user": bool(selected_supplier_codes)}],
                 "warnings": [], "blockers": [], "risk_level": "MEDIUM"}
 
-    def validate_current(self, db, user, proposal):
+    def validate_current(self, db, user, proposal, *, for_update=True):
         from app.modules.purchase_requests import service as request_service
         from app.modules.rfqs import service as rfq_service
         from app.modules.rfqs.schema import RFQCreate
 
         data = RFQCreate.model_validate(proposal.payload)
-        source = request_service.get_request(db, user, data.source_request_id)
+        source = request_service.get_request(db, user, data.source_request_id, for_update=for_update)
         if source.status != "APPROVED" or _request_snapshot(source) != proposal.expected_resource_snapshot["source_request"]:
             raise BusinessValidationError("来源采购申请或明细已变化，请重新生成询价预览")
         source_items = {item.id: item for item in source.items}
@@ -378,15 +380,18 @@ class RFQCreateDraftHandler:
         rfq_service._validate_item_refs(db, data.items, data.source_request_id)
         rfq_service._validate_suppliers(db, data.supplier_ids)
         for supplier_id, expected in proposal.expected_resource_snapshot["suppliers"].items():
-            supplier = db.scalar(select(Supplier).where(Supplier.id == int(supplier_id)).with_for_update())
+            query = select(Supplier).where(Supplier.id == int(supplier_id))
+            supplier = db.scalar(query.with_for_update() if for_update else query)
             if supplier is None or supplier.status != "ACTIVE" or supplier.status != expected["status"]:
                 raise BusinessValidationError("受邀供应商状态已变化，请重新生成询价预览")
         for product_id, expected in proposal.expected_resource_snapshot["products"].items():
-            product = db.scalar(select(Product).where(Product.id == int(product_id)).with_for_update())
+            query = select(Product).where(Product.id == int(product_id))
+            product = db.scalar(query.with_for_update() if for_update else query)
             if product is None or product.status != "ACTIVE" or product.version_no != expected["version_no"]:
                 raise BusinessValidationError("询价产品状态或版本已变化，请重新生成预览")
         for unit_id, expected in proposal.expected_resource_snapshot["units"].items():
-            unit = db.scalar(select(Unit).where(Unit.id == int(unit_id)).with_for_update())
+            query = select(Unit).where(Unit.id == int(unit_id))
+            unit = db.scalar(query.with_for_update() if for_update else query)
             if unit is None or unit.status != "ACTIVE" or unit.unit_name != expected["unit_name"] or unit.dimension != expected["dimension"]:
                 raise BusinessValidationError("询价单位状态或信息已变化，请重新生成预览")
 

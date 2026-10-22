@@ -46,7 +46,9 @@ from app.modules.ai.schema import (
     AIActionProposalRevise,
     AIActionProposalCancel,
     AIActionProposalConfirm,
+    AIActionProposalPage,
     AIActionProposalPreview,
+    AIActionProposalRead,
     Text2SQLRequest,
     Text2SQLResponse,
     ToolCall,
@@ -79,6 +81,23 @@ def action_proposal_create(data: AIActionProposalCreate, db: Session = Depends(g
                            user: User = Depends(get_current_user)) -> AIActionProposalPreview:
     return action_proposals.propose_action(db, user, data.action_type, data.payload,
                                            idempotency_key=data.idempotency_key)
+
+
+@router.get("/action-proposals", response_model=AIActionProposalPage, summary="分页查询本人动作提案")
+def action_proposal_list(page: int = Query(default=1, ge=1),
+                         page_size: int = Query(default=20, ge=1, le=100),
+                         inbox_only: bool = Query(default=False),
+                         db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)) -> AIActionProposalPage:
+    return action_proposals.list_action_proposals(
+        db, user, page=page, page_size=page_size, inbox_only=inbox_only)
+
+
+@router.get("/action-proposals/{confirmation_id}", response_model=AIActionProposalRead,
+            summary="查询本人动作提案详情")
+def action_proposal_read(confirmation_id: str, db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)) -> AIActionProposalRead:
+    return action_proposals.get_action_proposal(db, user, confirmation_id)
 
 
 @router.patch("/action-proposals/{confirmation_id}", response_model=AIActionProposalPreview,

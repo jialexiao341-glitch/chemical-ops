@@ -1,8 +1,9 @@
 <script lang="ts" setup>
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
-import type { AgentApi } from '#/api';
+import type { AgentApi, AiApi } from '#/api';
 
 import { computed, ref } from 'vue';
+import dayjs from 'dayjs';
 
 import { Page } from '@vben/common-ui';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
@@ -15,18 +16,31 @@ import {
   exportAgentTaskApi,
   getAgentTaskApi,
   getAgentTaskPageApi,
+  cancelActionProposalApi,
+  confirmActionProposalApi,
+  getActionProposalApi,
+  getActionProposalPageApi,
+  reviseActionProposalApi,
 } from '#/api';
 import AgentChatTask from '../workspace/agent-chat-task.vue';
 import { acceptTask } from '../workspace/task-view';
 import { retryQuestion, taskActionFeedback, taskActions } from './task-actions';
+import ActionProposalDetail from './ActionProposalDetail.vue';
 
 defineOptions({ name: 'AiTaskHistory' });
 
 const status = ref<AgentApi.Task['status']>();
 const inboxOnly = ref(true);
+const showProposals = ref(false);
+const proposalInboxOnly = ref(true);
 const selectedTask = ref<AgentApi.Task>();
+const selectedProposal = ref<AiApi.ActionProposalRead>();
+const selectedProposalId = ref<string>();
 const detailOpen = ref(false);
+const proposalDetailOpen = ref(false);
 const selectedLoading = ref(false);
+const proposalLoading = ref(false);
+const proposalBusy = ref(false);
 const busyTaskId = ref<string>();
 const followUpQuestion = ref('');
 const selectedBusy = computed(() => Boolean(selectedTask.value && busyTaskId.value === selectedTask.value.id));
@@ -66,6 +80,32 @@ const columns = [
   },
 ];
 
+const proposalStatusLabels: Record<AiApi.ActionProposalRead['status'], string> = {
+  CANCELLED: '已取消', EXECUTED: '已执行', EXPIRED: '已过期', INVALIDATED: '资源已变化', PENDING: '待确认',
+};
+const proposalActionLabels: Record<string, string> = {
+  'purchase_request.update_draft': '修改采购申请',
+  'purchase_request.submit': '提交采购申请',
+  'rfq.create_draft': '询价草稿',
+};
+const proposalColumns = [
+  { field: 'confirmation_id', title: '提案编号', minWidth: 190 },
+  { field: 'action_type', title: '提案类型', minWidth: 150, formatter: ({ cellValue }: { cellValue: string }) => proposalActionLabels[cellValue] || cellValue },
+  { field: 'business_reference', title: '单据编号', minWidth: 160, formatter: ({ cellValue }: { cellValue?: string }) => cellValue || '—' },
+  { field: 'status', title: '状态', width: 170, formatter: ({ cellValue, row }: { cellValue: AiApi.ActionProposalRead['status']; row: AiApi.ActionProposalRead }) => row.availability === 'PERMISSION_REVOKED' ? `${proposalStatusLabels[cellValue]} · 权限已失效` : row.availability === 'RESOURCE_UNAVAILABLE' ? '资源不可访问' : proposalStatusLabels[cellValue] },
+  { field: 'expires_at', title: '过期时间', width: 180, formatter: ({ cellValue }: { cellValue: string }) => dayjs(cellValue).format('YYYY-MM-DD HH:mm') },
+  {
+    align: 'center',
+    cellRender: {
+      attrs: { onClick: onProposalActionClick },
+      name: 'CellOperation',
+      options: [{ code: 'view', text: '查看' }],
+      props: { renderMode: 'menu' },
+    },
+    field: 'operation', fixed: 'right', title: '操作', width: 90,
+  },
+];
+
 const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     columns,
@@ -83,12 +123,36 @@ const [Grid, gridApi] = useVbenVxeGrid({
   } as VxeTableGridOptions<AgentApi.Task>,
 });
 
+const [ProposalGrid, proposalGridApi] = useVbenVxeGrid({
+  gridOptions: {
+    columns: proposalColumns,
+    height: 'auto',
+    proxyConfig: {
+      ajax: {
+        query: async ({ page }) => {
+          const result = await getActionProposalPageApi(page.currentPage, page.pageSize, proposalInboxOnly.value);
+          return { items: result.items, total: result.total };
+        },
+      },
+    },
+    rowConfig: { keyField: 'confirmation_id' },
+    toolbarConfig: { custom: true, export: false, refresh: true, search: false, zoom: true },
+  } as VxeTableGridOptions<AiApi.ActionProposalRead>,
+});
+
 function search() { void gridApi.query(); }
 
 function showInbox(inbox: boolean) {
   inboxOnly.value = inbox;
+  showProposals.value = false;
   status.value = undefined;
   void gridApi.query();
+}
+
+function showProposalInbox(inbox: boolean) {
+  showProposals.value = true;
+  proposalInboxOnly.value = inbox;
+  void proposalGridApi.query();
 }
 
 async function refreshTask(taskId: string) {
@@ -219,6 +283,105 @@ async function onActionClick({ code, row }: { code: string; row: AgentApi.Task }
     message.error('任务结果已不可访问或导出失败，请刷新后重试');
   }
 }
+
+async function openProposal(row: AiApi.ActionProposalRead) {
+  selectedProposalId.value = row.confirmation_id;
+  selectedProposal.value = undefined;
+  proposalDetailOpen.value = true;
+  await loadProposal(row.confirmation_id);
+}
+
+async function loadProposal(confirmationId: string) {
+  proposalLoading.value = true;
+  try {
+    selectedProposal.value = await getActionProposalApi(confirmationId);
+  } catch {
+    selectedProposal.value = undefined;
+    message.error('提案详情无法读取，请刷新列表后重试');
+  } finally {
+    proposalLoading.value = false;
+  }
+}
+
+async function onProposalActionClick({ code, row }: { code: string; row: AiApi.ActionProposalRead }) {
+  if (code === 'view') await openProposal(row);
+}
+
+async function refreshProposal() {
+  if (!selectedProposalId.value || proposalBusy.value || proposalLoading.value) return;
+  await loadProposal(selectedProposalId.value);
+  void proposalGridApi.query();
+}
+
+async function reviseProposal(payload: Record<string, unknown>) {
+  const proposal = selectedProposal.value;
+  if (!proposal?.requires_user_confirmation || proposalBusy.value) return;
+  proposalBusy.value = true;
+  try {
+    await reviseActionProposalApi(proposal.confirmation_id, proposal.preview_version, payload);
+    selectedProposal.value = await getActionProposalApi(proposal.confirmation_id);
+    message.success('已保存新的提案预览，请重新核对');
+    void proposalGridApi.query();
+  } catch {
+    message.error('提案修改未完成，正在重新读取服务端状态');
+    selectedProposal.value = undefined;
+    await loadProposal(proposal.confirmation_id);
+  } finally {
+    proposalBusy.value = false;
+  }
+}
+
+function confirmProposal() {
+  const proposal = selectedProposal.value;
+  if (!proposal?.requires_user_confirmation || proposalBusy.value) return;
+  Modal.confirm({
+    title: '确认执行提案',
+    content: `确认执行提案 ${proposal.confirmation_id} 的当前预览版本 ${proposal.preview_version}？`,
+    okText: '确认执行',
+    cancelText: '返回核对',
+    onOk: async () => {
+      proposalBusy.value = true;
+      try {
+        await confirmActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+        selectedProposal.value = await getActionProposalApi(proposal.confirmation_id);
+        message.success('已按确认的预览执行动作');
+        void proposalGridApi.query();
+      } catch {
+        message.error('提案状态或权限已变化，正在重新读取服务端状态');
+        selectedProposal.value = undefined;
+        await loadProposal(proposal.confirmation_id);
+      } finally {
+        proposalBusy.value = false;
+      }
+    },
+  });
+}
+
+function cancelProposal() {
+  const proposal = selectedProposal.value;
+  if (!proposal?.requires_user_confirmation || proposalBusy.value) return;
+  Modal.confirm({
+    title: '取消动作提案',
+    content: `确认取消提案 ${proposal.confirmation_id}？`,
+    okText: '取消提案',
+    cancelText: '返回',
+    onOk: async () => {
+      proposalBusy.value = true;
+      try {
+        await cancelActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+        selectedProposal.value = await getActionProposalApi(proposal.confirmation_id);
+        message.success('提案已取消');
+        void proposalGridApi.query();
+      } catch {
+        message.error('提案状态或权限已变化，正在重新读取服务端状态');
+        selectedProposal.value = undefined;
+        await loadProposal(proposal.confirmation_id);
+      } finally {
+        proposalBusy.value = false;
+      }
+    },
+  });
+}
 </script>
 
 <template>
@@ -242,14 +405,29 @@ async function onActionClick({ code, row }: { code: string; row: AgentApi.Task }
         </div>
       </template>
     </Modal>
+    <Modal v-model:open="proposalDetailOpen" title="动作提案详情与确认" :footer="null" width="760px">
+      <div v-if="proposalLoading" role="status" aria-live="polite" class="py-4 text-center text-muted-foreground">正在读取最新提案状态…</div>
+      <ActionProposalDetail
+        v-else-if="selectedProposal"
+        :proposal="selectedProposal"
+        :busy="proposalBusy"
+        @cancel="cancelProposal"
+        @confirm="confirmProposal"
+        @revise="reviseProposal"
+      />
+      <div v-else-if="!proposalLoading" role="alert" class="py-4 text-center text-sm text-muted-foreground">提案详情读取失败，请刷新状态后重试。</div>
+      <div class="mt-2 flex justify-end"><Button :disabled="proposalLoading || proposalBusy" @click="refreshProposal">刷新状态</Button></div>
+    </Modal>
     <div class="flex h-full flex-col gap-3">
       <section class="rounded bg-card p-4">
         <div class="flex w-full flex-wrap items-center justify-between gap-3">
-          <span class="font-medium">{{ inboxOnly ? '待补充或失败待处理的本人任务。' : '本人 AI 只读查询任务。' }}导出前会重新检查当前数据权限。</span>
+          <span class="font-medium">{{ showProposals ? (proposalInboxOnly ? '本人待确认及已失效的采购动作提案。' : '本人采购动作提案记录。') : inboxOnly ? '待补充或失败待处理的本人任务。' : '本人 AI 只读查询任务。' }}<template v-if="!showProposals">导出前会重新检查当前数据权限。</template></span>
           <div class="ml-auto flex items-center gap-2">
-            <Button :type="inboxOnly ? 'primary' : 'default'" @click="showInbox(true)">Agent Inbox</Button>
-            <Button :type="inboxOnly ? 'default' : 'primary'" @click="showInbox(false)">全部任务</Button>
-            <template v-if="!inboxOnly">
+            <Button :type="!showProposals && inboxOnly ? 'primary' : 'default'" @click="showInbox(true)">Agent Inbox · 任务</Button>
+            <Button :type="showProposals && proposalInboxOnly ? 'primary' : 'default'" @click="showProposalInbox(true)">待确认提案</Button>
+            <Button :type="!showProposals && !inboxOnly ? 'primary' : 'default'" @click="showInbox(false)">全部任务</Button>
+            <Button :type="showProposals && !proposalInboxOnly ? 'primary' : 'default'" @click="showProposalInbox(false)">全部提案</Button>
+            <template v-if="!showProposals && !inboxOnly">
               <Select v-model:value="status" :options="statusOptions" allow-clear placeholder="全部状态" class="w-40" />
               <Button @click="status = undefined; search()">重置</Button>
               <Button type="primary" @click="search">搜索</Button>
@@ -257,7 +435,8 @@ async function onActionClick({ code, row }: { code: string; row: AgentApi.Task }
           </div>
         </div>
       </section>
-      <Grid :table-title="inboxOnly ? 'Agent Inbox · 待处理任务' : 'AI 任务记录'" />
+      <Grid v-if="!showProposals" :table-title="inboxOnly ? 'Agent Inbox · 待处理任务' : 'AI 任务记录'" />
+      <ProposalGrid v-else :table-title="proposalInboxOnly ? 'Agent Inbox · 待确认提案' : '动作提案记录'" />
     </div>
   </Page>
 </template>

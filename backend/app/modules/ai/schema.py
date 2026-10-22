@@ -320,6 +320,24 @@ class AIActionProposalPreview(BaseModel):
     requires_user_confirmation: bool = True
 
 
+class AIActionProposalRead(AIActionProposalPreview):
+    """供提案 Inbox 安全展示的详情；不包含执行 payload 和资源快照。"""
+
+    created_at: datetime
+    business_reference: str | None = None
+    source_route: str | None = None
+    availability: Literal["AVAILABLE", "PERMISSION_REVOKED", "RESOURCE_UNAVAILABLE"]
+    unavailable_reason: str | None = None
+    revision_values: dict[str, Any] = Field(default_factory=dict)
+
+
+class AIActionProposalPage(BaseModel):
+    """当前用户动作提案分页结果。"""
+
+    items: list[AIActionProposalRead]
+    total: int
+
+
 # 共享意图与状态
 
 class Intent(StrEnum):

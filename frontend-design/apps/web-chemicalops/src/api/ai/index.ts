@@ -183,6 +183,20 @@ export namespace AiApi {
     expires_at: string;
     requires_user_confirmation: boolean;
   }
+
+  export interface ActionProposalRead extends ActionProposalPreview {
+    availability: 'AVAILABLE' | 'PERMISSION_REVOKED' | 'RESOURCE_UNAVAILABLE';
+    business_reference?: null | string;
+    created_at: string;
+    source_route?: null | string;
+    unavailable_reason?: null | string;
+    revision_values: Record<string, unknown>;
+  }
+
+  export interface ActionProposalPage {
+    items: ActionProposalRead[];
+    total: number;
+  }
 }
 
 /** 生成运营晨报；推送时由调用方先向用户确认接收角色。 */
@@ -237,6 +251,18 @@ export async function confirmActionProposalApi<T = Record<string, unknown>>(conf
     preview_version: previewVersion,
     confirm: true,
   });
+}
+
+export async function getActionProposalPageApi(page: number, pageSize: number, inboxOnly = true) {
+  return requestClient.get<AiApi.ActionProposalPage>('/ai/action-proposals', {
+    params: { page, page_size: pageSize, inbox_only: inboxOnly },
+  });
+}
+
+export async function getActionProposalApi(confirmationId: string) {
+  return requestClient.get<AiApi.ActionProposalRead>(
+    `/ai/action-proposals/${encodeURIComponent(confirmationId)}`,
+  );
 }
 
 /** 确认指定预览快照；请求不接受客户端修改后的业务字段。 */
