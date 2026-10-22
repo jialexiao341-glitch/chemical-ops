@@ -37,8 +37,18 @@ def summarize_product_evidence(entries: Sequence[Mapping[str, Any]]) -> str:
             lines.append(f"{label}：可用库存为 {amounts}。" if amounts else f"{label}：暂时没有找到库存记录。")
         elif tool == "supplier_quotes.compare":
             lines.append(f"询价 {result['rfq_no']}：找到 {result['total_rows']} 条符合条件的最新报价。")
-            lines.extend(f"{row['supplier_name']}：{row['unit_price']} {row['currency_code']}/{row['unit_name']}"
-                         f"，可比组排名 {row['rank'] if row['rank'] is not None else '不排序'}。" for row in result.get("rows", []))
+            for row in result.get("rows", []):
+                summary = (f"{row['supplier_name']}：{row['unit_price']} {row['currency_code']}/{row['unit_name']}"
+                           f"，可比组单价排名 {row['rank'] if row['rank'] is not None else '不排序'}。")
+                costs = row.get("cost_analysis")
+                if costs:
+                    if costs.get("complete") and costs.get("total_cost") is not None:
+                        summary += (f"按采购量 {costs['purchase_quantity']} {row['unit_name']} 计算的总成本为 "
+                                    f"{costs['total_cost']} {row['currency_code']}（含商品税和已登记运费）；"
+                                    f"MOQ 增加采购量 {costs['moq_extra_quantity']} {row['unit_name']}。")
+                    else:
+                        summary += "总成本尚不完整：" + "；".join(costs.get("reasons") or ["缺少成本组成信息"]) + "。"
+                lines.append(summary)
         elif tool in {"catalog.search_products", "supplier_quotes.find_rfq_items"} and result.get("total_rows", 0) == 0:
             lines.append("暂时没有找到匹配的产品或询价明细，请核对名称或单号。")
         if result.get("truncated"):

@@ -47,3 +47,13 @@ def test_quote_summary_preserves_quote_values_and_no_result_state():
     assert "询价 RFQ-1：找到 2 条" in summary
     assert "甲：8.25 CNY/千克" in summary
     assert "没有找到匹配的产品或询价明细" in summary
+
+
+def test_quote_summary_preserves_cost_completeness_and_currency():
+    base = {"supplier_name": "甲", "unit_price": "8.25", "currency_code": "CNY", "unit_name": "千克", "rank": 1}
+    rows = [{**base, "cost_analysis": {"complete": True, "total_cost": "121.20", "purchase_quantity": "12", "moq_extra_quantity": "2"}},
+            {**base, "supplier_name": "乙", "currency_code": "USD", "cost_analysis": {"complete": False, "reasons": ["运费未登记"]}}]
+    summary = summarize_product_evidence([{"tool": "supplier_quotes.compare", "rfq_no": "TEST-RFQ", "total_rows": 2, "rows": rows}])
+    assert "121.20 CNY" in summary and "MOQ 增加采购量 2 千克" in summary
+    assert "总成本尚不完整：运费未登记" in summary
+    assert "121.20 USD" not in summary
