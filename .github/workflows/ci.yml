@@ -143,4 +143,4 @@ jobs:
         run: pnpm build:chemicalops
       - name: Frontend dependency security audit
         working-directory: frontend-design
-        run: pnpm audit --audit-level high
+        run: pnpm audit --audit-level high --registry=https://registry.npmjs.org/

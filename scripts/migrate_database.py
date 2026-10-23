@@ -14,6 +14,7 @@ import sys
 import time
 
 from sqlalchemy import inspect, text
+from sqlalchemy.dialects import mysql
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -245,6 +246,31 @@ def _apply_idempotency_response_headers(connection) -> None:
         connection.commit()
 
 
+def _apply_ai_conversation_pinned(connection, migration: Migration) -> None:
+    """Apply 025 to legacy schemas and validate the column in newer baselines."""
+    table = "ai_conversations"
+    if not _table_exists(connection, table):
+        raise RuntimeError("ai_conversations 表不存在，无法执行会话置顶迁移")
+
+    column = next(
+        (item for item in inspect(connection).get_columns(table) if item["name"] == "pinned"),
+        None,
+    )
+    if column is None:
+        _execute_sql_file(connection, migration)
+        return
+
+    data_type = column["type"].compile(dialect=mysql.dialect()).upper()
+    default = str(column.get("default") or "").strip().strip("'").strip('"').strip("() ")
+    if data_type != "TINYINT(1)" or column["nullable"] or default != "0":
+        raise RuntimeError(
+            "Schema conflict: ai_conversations.pinned exists with a definition "
+            "that differs from migration 025; "
+            f"type={data_type}, default={column.get('default')!r}, "
+            f"nullable={column['nullable']}. Reconcile the schema before migrating."
+        )
+
+
 def _apply_return_reconciliation_items(connection, migration: Migration) -> None:
     """恢复中断的增量迁移；每个 ALTER 在 MySQL 中作为一个原子 DDL。"""
     statements = [part.strip() for part in migration.path.read_text(encoding="utf-8").split(";") if part.strip()]
@@ -262,7 +288,9 @@ def _apply_return_reconciliation_items(connection, migration: Migration) -> None
 
 
 def _apply_migration(connection, migration: Migration) -> None:
-    if migration.version == "014":
+    if migration.version == "025":
+        _apply_ai_conversation_pinned(connection, migration)
+    elif migration.version == "014":
         _apply_finance_ref(connection, migration)
     elif migration.version == "016":
         _apply_task2_consistency(connection, migration)
