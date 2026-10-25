@@ -2,7 +2,7 @@
 
 > 当前默认执行模式为 MySQL database 队列；可显式回退 in_process。同步任务、异步任务和业务写入边界分别说明。
 
-异步任务使用 `AGENT_EXECUTION_MODE=database`，可显式回退为 `in_process`。四个异步入口用 MySQL 同事务保存任务、聊天关联和执行记录，公开响应仍为 202/TaskRead；队列等待仍显示 RUNNING。独立 Worker 保存运行代次、最新 revision 和已核验对象 checkpoint，中断重试更新已有助手消息；WAITING_INPUT 结束当前执行，人工续跑创建新代次，取消使旧 token 失效。排队及工具步骤重新检查用户状态、权限和来源范围。同步任务入口保持原行为，任务仍只读，不新增自动确认或业务写入。
+异步任务使用 `AGENT_EXECUTION_MODE=database`，可显式回退为 `in_process`。四个异步入口用 MySQL 同事务保存任务、聊天关联和执行记录，公开响应仍为 202/TaskRead；队列等待仍显示 RUNNING。独立 Worker 保存运行代次、最新 revision 和已核验对象 checkpoint，中断重试更新已有助手消息；WAITING_INPUT 结束当前执行，人工续跑创建新代次，取消使旧 token 失效。排队及工具步骤重新检查用户状态、权限和来源范围。未被 Worker 领取的排队任务超过 `max(30 秒, 2 × 租约秒数)` 后，读取任务会以 `WORKER_UNAVAILABLE` 结束等待并提示检查 Worker，不再无限轮询。同步任务入口保持原行为，任务仍只读，不新增自动确认或业务写入。
 
 启动、队列等待/失败查询及分阶段回滚统一见 [数据库队列运行说明](数据库任务队列运行说明.md)。已退役的 RabbitMQ 运行与验收说明不再作为当前入口；历史模型评测仍按原样本范围解释。
 
