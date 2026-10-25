@@ -394,7 +394,7 @@ TASK_STATUS_LABELS = {
 
 # 语义理解与路由
 
-Task = Literal["inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "analytics", "document"]
+Task = Literal["inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile", "analytics", "document"]
 
 
 class Slots(BaseModel):
@@ -460,15 +460,24 @@ class ExceptionTaskActionFields(TypedDict, total=False):
     due_at: str | None
 
 
+class ReplenishmentActionFields(TypedDict, total=False):
+    """补货申请候选；供应商和产品由槽位解析，不接受模型指定 ID。"""
+    quantity: Decimal | None
+    reason: str | None
+    expected_date: str | None
+    note: str | None
+
+
 PurchaseRequestActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
 RfqDraftActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
 ExceptionTaskActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
+ReplenishmentActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
 
 
 class Understanding(BaseModel):
     """语义模型的严格输出契约，由程序校验后才能用于路由或拆分。"""
     model_config = ConfigDict(extra="forbid")
-    purpose: Literal["capability", "guidance", "query", "purchase_draft", "purchase_update", "purchase_submit", "rfq_draft", "exception_task", "greeting", "unsupported", "clarify"]
+    purpose: Literal["capability", "guidance", "query", "purchase_draft", "purchase_update", "purchase_submit", "purchase_order_submit", "rfq_draft", "exception_task", "replenishment_draft", "greeting", "unsupported", "clarify"]
     execution_mode: Literal["agent", "batch", "query", "document", "none"] = "none"
     clarification_slot: str | None = Field(default=None, min_length=1, max_length=64)
     clarification_options: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(default_factory=list, max_length=5)
@@ -476,7 +485,7 @@ class Understanding(BaseModel):
     tasks: list[Task] = Field(default_factory=list, max_length=4)
     excluded_tasks: list[Task] = Field(default_factory=list, max_length=4)
     slots: Slots = Field(default_factory=Slots)
-    action_fields: PurchaseRequestActionFields | RfqDraftActionFields | ExceptionTaskActionFields | None = None
+    action_fields: PurchaseRequestActionFields | RfqDraftActionFields | ExceptionTaskActionFields | ReplenishmentActionFields | None = None
     question: str | None = Field(default=None, max_length=1000)
     sub_tasks: list[SubTask] = Field(default_factory=list, max_length=6)
 
@@ -488,7 +497,7 @@ class Understanding(BaseModel):
             self.action_fields = None
         if self.action_fields is not None:
             self.action_fields = {key: value for key, value in self.action_fields.items() if value is not None}
-            if self.purpose not in {"purchase_update", "rfq_draft", "exception_task"}:
+            if self.purpose not in {"purchase_update", "rfq_draft", "exception_task", "replenishment_draft"}:
                 raise ValueError("当前意图不接受动作候选字段，action_fields 必须为 null")
         if self.purpose == "clarify":
             if self.clarification_options and not self.clarification_slot:
@@ -505,6 +514,8 @@ class Understanding(BaseModel):
                 raise ValueError("非查询意图必须使用 none 模式且不含查询任务")
             if self.purpose in {"purchase_update", "purchase_submit", "rfq_draft"} and not self.slots.request_no:
                 raise ValueError("修改、提交采购申请或创建询价草稿必须提供准确申请编号")
+            if self.purpose == "purchase_order_submit" and not self.slots.po_no:
+                raise ValueError("提交采购订单审批必须提供准确订单号")
             if self.purpose == "purchase_update":
                 allowed = {"purpose", "priority", "budget_amount", "currency_code", "expected_date", "items", "department_id"}
                 if not self.action_fields or set(self.action_fields) - allowed:
@@ -528,6 +539,19 @@ class Understanding(BaseModel):
                     raise ValueError("异常任务提案包含不允许的候选字段：" + ", ".join(sorted(set(fields) - allowed)))
                 if fields.get("priority") is not None and fields["priority"] not in {"LOW", "NORMAL", "HIGH", "URGENT"}:
                     raise ValueError("异常任务优先级无效")
+            elif self.purpose == "replenishment_draft":
+                if not self.slots.supplier_code or not self.slots.product_keyword:
+                    raise ValueError("创建补货申请必须提供准确的供应商编码和产品编码或名称")
+                allowed = {"quantity", "reason", "expected_date", "note"}
+                fields = self.action_fields or {}
+                quantity = fields.get("quantity")
+                if quantity is None or not isinstance(quantity, Decimal) or quantity <= 0:
+                    raise ValueError("创建补货申请必须提供正数补货数量")
+                reason = fields.get("reason")
+                if not isinstance(reason, str) or not reason.strip():
+                    raise ValueError("创建补货申请必须说明补货原因")
+                if set(fields) - allowed:
+                    raise ValueError("补货提案包含不允许的候选字段：" + ", ".join(sorted(set(fields) - allowed)))
             elif self.action_fields is not None:
                 raise ValueError("当前意图不接受动作候选字段")
         elif self.dialogue_action == "cancel":
@@ -554,10 +578,10 @@ class Understanding(BaseModel):
 
         if self.purpose == "query" and self.dialogue_action != "cancel":
             if self.execution_mode == "agent":
-                if not set(self.tasks) <= {"inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier"} or self.sub_tasks:
-                    raise ValueError("agent 模式仅支持未拆分的库存、报价、采购申请、订单追溯、质量验收、到货、财务对账或供应商查询目标")
-                if set(self.tasks) & {"purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier"} and len(self.tasks) != 1:
-                    raise ValueError("按编号读取采购申请、订单追溯、质量验收、到货单、对账单和供应商必须作为单一 Agent 目标执行")
+                if not set(self.tasks) <= {"inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile"} or self.sub_tasks:
+                    raise ValueError("agent 模式仅支持未拆分的库存、报价、采购申请、订单追溯、质量验收、到货、财务对账、供应商或供应商 360 查询目标")
+                if set(self.tasks) & {"purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile"} and len(self.tasks) != 1:
+                    raise ValueError("按编号读取采购申请、订单追溯、质量验收、到货单、对账单、供应商和供应商 360 必须作为单一 Agent 目标执行")
                 if "quality_acceptance" in self.tasks and not self.slots.acceptance_no:
                     raise ValueError("质量验收 Agent 目标必须提供准确验收编号")
                 if "delivery" in self.tasks and not self.slots.delivery_no:
@@ -566,6 +590,8 @@ class Understanding(BaseModel):
                     raise ValueError("财务对账 Agent 目标必须提供准确对账单号")
                 if "supplier" in self.tasks and not self.slots.supplier_code:
                     raise ValueError("供应商 Agent 目标必须提供准确供应商编码")
+                if "supplier_profile" in self.tasks and not self.slots.supplier_code:
+                    raise ValueError("供应商 360 Agent 目标必须提供准确供应商编码")
             elif self.execution_mode == "batch":
                 if not 2 <= len(self.sub_tasks) <= 6:
                     raise ValueError("batch 模式必须包含 2 至 6 个原子任务")
@@ -597,7 +623,7 @@ class Understanding(BaseModel):
                  "purchase_request": "purchase_request_query", "order_trace": "purchase_order_trace",
                  "quality_acceptance": "quality_acceptance_query", "delivery": "delivery_query",
                  "finance_reconciliation": "finance_reconciliation_query",
-                 "supplier": "supplier_query"}.get(self.tasks[0], "unknown")
+                 "supplier": "supplier_query", "supplier_profile": "supplier_profile"}.get(self.tasks[0], "unknown")
                 if len(self.tasks) == 1 else "inventory_and_quotes_query" if set(self.tasks) == {"inventory", "quotes"} else "unknown")
 
 
@@ -763,6 +789,10 @@ class SupplierInput(ToolSchema):
     supplier_code: str = Field(min_length=1, max_length=64)
 
 
+class SupplierProfileInput(ToolSchema):
+    supplier_code: str = Field(min_length=1, max_length=64)
+
+
 class ProductCandidate(ToolSchema):
     product_id: int
     product_code: str
@@ -919,6 +949,18 @@ class SupplierResult(ToolSchema):
     total_rows: int
     rows: list[SupplierRow]
     sources: list["Source"]
+
+
+class SupplierProfileResult(ToolSchema):
+    """供应商 360：各业务段按当前权限裁剪，金额与数量由服务端格式化。"""
+
+    tool: Literal["suppliers.profile"] = "suppliers.profile"
+    supplier_code: str
+    supplier_name: str | None
+    status: str | None
+    sections: list[dict[str, Any]]
+    sources: list["Source"]
+    answer: str
 
 
 class PurchaseOrderTraceResult(ToolSchema):

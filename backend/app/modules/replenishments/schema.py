@@ -48,6 +48,9 @@ class ReplenishmentItemRead(BaseModel):
     note: str | None
     created_at: datetime
     updated_at: datetime
+    product_code: str | None = None
+    product_name: str | None = None
+    unit_name: str | None = None
 
 
 class ReplenishmentRead(BaseModel):
@@ -71,6 +74,9 @@ class ReplenishmentRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     items: list[ReplenishmentItemRead]
+    supplier_code: str | None = None
+    supplier_name: str | None = None
+    applicant_name: str | None = None
 
 
 class ReplenishmentPage(BaseModel):

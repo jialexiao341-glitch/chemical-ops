@@ -29,6 +29,25 @@ def _can_manage_all(db: Session, user: User) -> bool:
     return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(get_user_role_codes(db, user.id)))
 
 
+def _enrich_header(db: Session, value: ReplenishmentRequest) -> None:
+    """补充列表展示所需的供应商和申请人名称；不改变业务字段。"""
+
+    supplier = db.get(Supplier, value.supplier_id)
+    value.supplier_code = supplier.supplier_code if supplier else None
+    value.supplier_name = supplier.supplier_name if supplier else None
+    applicant = db.get(User, value.applicant_id)
+    value.applicant_name = (applicant.display_name or applicant.username) if applicant else None
+
+
+def _enrich_items(db: Session, value: ReplenishmentRequest) -> None:
+    for item in value.items:
+        product = db.get(Product, item.product_id)
+        unit = db.get(Unit, item.unit_id)
+        item.product_code = product.product_code if product else None
+        item.product_name = product.product_name if product else None
+        item.unit_name = unit.unit_name if unit else None
+
+
 def _require(db: Session, replenishment_id: int, *, for_update: bool = False) -> ReplenishmentRequest:
     """查询补货申请及明细。"""
     statement = select(ReplenishmentRequest).options(selectinload(ReplenishmentRequest.items)).where(ReplenishmentRequest.id == replenishment_id)
@@ -37,11 +56,15 @@ def _require(db: Session, replenishment_id: int, *, for_update: bool = False) ->
     value = db.scalar(statement)
     if value is None:
         raise ResourceNotFoundError(f"补货申请 {replenishment_id} 不存在")
+    _enrich_header(db, value)
+    _enrich_items(db, value)
     return value
 
 
-def create_replenishment(db: Session, user: User, data: ReplenishmentCreate) -> ReplenishmentRequest:
-    """创建补货申请草稿。"""
+def create_replenishment(
+    db: Session, user: User, data: ReplenishmentCreate, *, commit: bool = True,
+) -> ReplenishmentRequest:
+    """创建补货申请草稿；可由调用方在同一事务内提交。"""
     supplier = db.get(Supplier, data.supplier_id)
     if supplier is None or supplier.status != "ACTIVE":
         raise BusinessValidationError("补货供应商不存在或已停用")
@@ -67,7 +90,8 @@ def create_replenishment(db: Session, user: User, data: ReplenishmentCreate) -> 
     db.flush()
     value.replenishment_no = f"RP{date.today():%Y%m%d}{value.id:06d}"
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="REPLENISHMENT_REQUEST", resource_id=value.id, request_summary="创建供应商补货申请", result_status="SUCCESS")
-    db.commit()
+    if commit:
+        db.commit()
     return _require(db, value.id)
 
 
@@ -78,6 +102,8 @@ def list_replenishments(db: Session, user: User, *, status: str | None, page: in
         conditions.append(ReplenishmentRequest.status == status)
     total = db.scalar(select(func.count(ReplenishmentRequest.id)).where(*conditions)) or 0
     items = list(db.scalars(select(ReplenishmentRequest).options(selectinload(ReplenishmentRequest.items)).where(*conditions).order_by(ReplenishmentRequest.id.desc()).offset((page - 1) * page_size).limit(page_size)).all())
+    for item in items:
+        _enrich_header(db, item)
     return items, total
 
 

@@ -5,7 +5,7 @@ import copy
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import TypedDict
 from uuid import uuid4
@@ -82,7 +82,7 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 多个产品/询价候选由服务端暂停。只读查询不需要用户提供采购用途或采购数量。
 
 # 参数与执行顺序
-采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询与供应商资料查询不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询可以复述系统保存的订单/到货/验收/退货/对账行、发票行占用与核验金额、来源变化提示及付款状态和理论上限。必须保留来源未匹配、旧版本或已变化等核查提示；理论付款上限不等于对任一具体金额的审批通过，不得建议或执行付款，付款服务在提交/审批时仍会重新校验。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险。
+采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询与供应商资料查询不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code；supplier_profile 只能调用 suppliers.profile，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询可以复述系统保存的订单/到货/验收/退货/对账行、发票行占用与核验金额、来源变化提示及付款状态和理论上限。必须保留来源未匹配、旧版本或已变化等核查提示；理论付款上限不等于对任一具体金额的审批通过，不得建议或执行付款，付款服务在提交/审批时仍会重新校验。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险；供应商 360 可复述工具返回的订单、到货、质量、异常与财务汇总，但必须保留各段权限状态和“仅代表当前范围”的限制，不得补算或推断未返回的指标。
 根据已返回结果决定后续工具；不要重复调用同工具同参数。未授权工具不在目录中。
 用户指定返回条数时，必须在对应业务工具 arguments.limit 中保留该值（不超过工具上限）。
 库存 totals 已按全部授权余额计算，即使 limit=1 也无需扩大明细条数获取全范围合计。
@@ -251,12 +251,70 @@ def _load(db: Session, user: User, task_id: str) -> AIAgentTask:
     return task
 
 
+def _reap_unclaimed_task(db: Session, task: AIAgentTask) -> AIAgentTask:
+    """未被 Worker 领取的任务在租约超时后失败，避免前端无限等待。"""
+
+    if task.status != "RUNNING":
+        return task
+    from app.modules.task_queue.model import TaskExecution
+
+    try:
+        execution = db.scalar(
+            select(TaskExecution)
+            .where(TaskExecution.business_id == task.id, TaskExecution.task_type == "agent.run")
+            .order_by(TaskExecution.id.desc())
+            .limit(1)
+        )
+        if execution is None or execution.status != "QUEUED":
+            return task
+        threshold = max(30, get_settings().task_lease_seconds * 2)
+        if execution.updated_at is None or _now() - execution.updated_at < timedelta(seconds=threshold):
+            return task
+        locked = db.scalar(
+            select(TaskExecution).where(TaskExecution.id == execution.id).with_for_update()
+        )
+        if locked is None or locked.status != "QUEUED":
+            return task
+        now = _now()
+        locked.status = "FAILED"
+        locked.error_code = "WORKER_UNAVAILABLE"
+        locked.finished_at = now
+        locked.updated_at = now
+        reply = (
+            f"任务等待 {threshold} 秒后仍未被 Agent Worker 领取，可能 Worker 未启动。"
+            "请检查后端 Worker 后重新发起；本次未执行任何查询。"
+        )
+        db.execute(
+            update(AIAgentTask)
+            .where(AIAgentTask.id == task.id, AIAgentTask.status == "RUNNING")
+            .values(status="FAILED", error_code="WORKER_UNAVAILABLE", reply=reply, updated_at=now)
+        )
+        chat = (task.payload or {}).get("chat") or {}
+        if chat.get("assistant_message_id"):
+            db.execute(update(AIMessage).where(
+                AIMessage.id == chat["assistant_message_id"],
+                AIMessage.conversation_id == chat.get("conversation_id"),
+            ).values(content=reply))
+        db.commit()
+        db.refresh(task)
+    except SQLAlchemyError:
+        # 轻量任务表尚未迁移或测试替身缺少队列表时，不阻断任务读取。
+        db.rollback()
+    return task
+
+
 def _check_trace_access(db: Session, user: User, trace: list[dict]) -> list[dict]:
     """读取/发送历史证据前重查权限及仓库/询价范围，防授权变化泄漏旧结果。"""
     catalog = tools.list_tools(db, user)
     names = {item["name"] for item in catalog}
     warehouses = tools.accessible_warehouse_ids(db, user)
     roles = set(tools.get_user_role_codes(db, user.id))
+    stage_permissions = {
+        "订单": "procurement.orders.read", "到货": "warehouse.deliveries.read",
+        "质量验收": "quality.acceptances.read", "运营异常": "operations.exceptions.read",
+        "财务对账": "finance.reconciliations.read", "发票": "finance.invoices.read",
+        "付款": "finance.payments.read",
+    }
     for entry in trace:
         if entry.get("status") != "SUCCEEDED" or entry.get("action") != "call_tool":
             continue
@@ -275,12 +333,20 @@ def _check_trace_access(db: Session, user: User, trace: list[dict]) -> list[dict
                 scope = scope.where(RFQ.requester_id == user.id)
             if ids - set(db.scalars(scope)):
                 raise AuthorizationError("询价授权范围已变化，历史结果不可访问")
+        if entry["tool"] == "suppliers.profile" and "SYS_ADMIN" not in roles:
+            permissions = set(tools.get_user_permission_codes(db, user.id))
+            for section in result.get("sections", []):
+                if section.get("status") == "NO_PERMISSION":
+                    continue
+                required = stage_permissions.get(str(section.get("stage")))
+                if required and required not in permissions:
+                    raise AuthorizationError("供应商 360 的分段读取权限已变化，历史结果不可访问")
     return catalog
 
 
 def get_task(db: Session, user: User, task_id: str) -> TaskRead:
     """返回本人任务的公开步骤/结果；不返回提示词、模型思维链或服务端异常原文。"""
-    task = _load(db, user, task_id)
+    task = _reap_unclaimed_task(db, _load(db, user, task_id))
     _check_trace_access(db, user, task.payload["trace"])
     return TaskRead(id=task.id, status=task.status, revision=task.revision, reply=task.reply,
         can_select_all_products=(task.payload.get('memory_state') or {}).get('goal', {}).get('intent') == 'inventory_query',
@@ -655,6 +721,9 @@ def _summary(entries: list[dict]) -> str:
     deliveries = [entry["result"] for entry in entries if entry.get("tool") == "deliveries.get_by_no"]
     reconciliations = [entry["result"] for entry in entries if entry.get("tool") == "finance_reconciliations.get_by_no"]
     suppliers = [entry["result"] for entry in entries if entry.get("tool") == "suppliers.get_by_code"]
+    profiles = [entry["result"] for entry in entries if entry.get("tool") == "suppliers.profile"]
+    if profiles:
+        return "\n".join(result["answer"] for result in profiles)
     if requests or orders or acceptances or deliveries or reconciliations or suppliers:
         lines = []
         for result in requests:
@@ -741,7 +810,8 @@ def _validate_finish_evidence(intent: str, entries: list[dict]) -> None:
                 {"quality_acceptances.get_by_no"} if intent == "quality_acceptance_query" else
                 {"deliveries.get_by_no"} if intent == "delivery_query" else
                 {"finance_reconciliations.get_by_no"} if intent == "finance_reconciliation_query" else
-                {"suppliers.get_by_code"} if intent == "supplier_query" else set())
+                {"suppliers.get_by_code"} if intent == "supplier_query" else
+                {"suppliers.profile"} if intent == "supplier_profile" else set())
     locators = {"catalog.search_products", "supplier_quotes.find_rfq_items"}
     if any(entry["tool"] not in required and not (
         entry["tool"] in locators and entry.get("result", {}).get("total_rows") == 0
@@ -1041,7 +1111,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                     (action.tool == "quality_acceptances.get_by_no" and "quality_acceptance" not in tasks) or
                     (action.tool == "deliveries.get_by_no" and "delivery" not in tasks) or
                     (action.tool == "finance_reconciliations.get_by_no" and "finance_reconciliation" not in tasks) or
-                    (action.tool == "suppliers.get_by_code" and "supplier" not in tasks)):
+                    (action.tool == "suppliers.get_by_code" and "supplier" not in tasks) or
+                    (action.tool == "suppliers.profile" and "supplier_profile" not in tasks)):
                     entry["error_code"] = "INTENT_MISMATCH"
                     raise BusinessValidationError("INTENT_MISMATCH")
                 slots = understanding.get("slots") or {}
@@ -1050,7 +1121,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                     (action.tool == "quality_acceptances.get_by_no" and action.arguments.get("acceptance_no") != slots.get("acceptance_no")) or
                     (action.tool == "deliveries.get_by_no" and action.arguments.get("delivery_no") != slots.get("delivery_no")) or
                     (action.tool == "finance_reconciliations.get_by_no" and action.arguments.get("reconciliation_no") != slots.get("reconciliation_no")) or
-                    (action.tool == "suppliers.get_by_code" and action.arguments.get("supplier_code") != slots.get("supplier_code"))):
+                    (action.tool == "suppliers.get_by_code" and action.arguments.get("supplier_code") != slots.get("supplier_code")) or
+                    (action.tool == "suppliers.profile" and action.arguments.get("supplier_code") != slots.get("supplier_code"))):
                     raise BusinessValidationError("工具编号必须与本轮已确认的准确编号一致")
             if action.tool == "catalog.search_products" and current.verified_product is not None:
                 keyword = action.arguments.get("keyword")

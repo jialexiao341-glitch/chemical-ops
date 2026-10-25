@@ -34,6 +34,8 @@ from app.modules.ai.schema import (
     FinancePaymentPrecheck,
     FinanceStatusCount,
     SupplierInput,
+    SupplierProfileInput,
+    SupplierProfileResult,
     SupplierResult,
     PurchaseRequestInput,
     PurchaseRequestResult,
@@ -47,6 +49,7 @@ from app.modules.ai.schema import (
     ToolCall,
     ToolSchema,
 )
+from app.modules.ai.supplier_profile import supplier_profile_tool
 from app.modules.ai.tool_sql_timeout import (
     ToolExecutionTimeout,
     ToolTimeoutUnsupported,
@@ -587,6 +590,10 @@ TOOLS = {
                  additional_permissions=("finance.invoices.read", "finance.payments.read")),
         ToolSpec("suppliers.get_by_code", "按准确供应商编码读取当前用户可见的供应商合作状态与基本业务资料",
                  "master.suppliers.read", SupplierInput, SupplierResult, get_supplier,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+        ToolSpec("suppliers.profile", "按准确供应商编码汇总订单、到货、质量验收、异常与财务进度；各段按当前权限裁剪",
+                 "master.suppliers.read", SupplierProfileInput, SupplierProfileResult, supplier_profile_tool,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
     )

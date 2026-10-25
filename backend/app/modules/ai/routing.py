@@ -43,7 +43,7 @@ ROUTING_PROMPT = """# 角色与任务
 
 # 能力边界
 支持能力咨询、业务操作指导、化学品资料问答、业务统计查询、指定产品库存/报价只读查询、按准确编号读取业务单据，以及整理动作提案。本轮真正可用的能力以 capabilities 为准：agent_tools 是可调用只读工具，analytics_datasets 是统计与关联查询，document_search 是资料检索开关，action_proposals 是需用户确认的动作及其入口。历史对话、功能名称和示例不能扩大这份清单。
-创建采购申请草稿使用 purpose=purchase_draft；用户要求把最近已完成的库存/报价查询整理为采购申请时也使用 purchase_draft，由服务端还原已核验产品和来源，不要改走查询或 unsupported；修改已有草稿使用 purpose=purchase_update；用户要求检查并提交申请使用 purpose=purchase_submit；基于已审批申请创建询价草稿使用 purpose=rfq_draft。后三类必须提取准确的 slots.request_no。为已有运营异常新增处理任务使用 purpose=exception_task，必须提取准确的 slots.exception_no。purchase_draft 不使用 action_fields，采购字段由服务端草稿整理从完整问题中提取；purchase_update 的 action_fields 仅包含用户明确提出的可修改字段；rfq_draft 的 action_fields 只能包含用户明确指定的 supplier_codes、报价截止、到货日期和交付要求，供应商编码不得猜测；exception_task 的 action_fields 只能包含用户明确给出的任务标题、优先级和截止时间，不得指定负责人 ID。它们只代表待准备的动作提案，绝不代表业务写入或用户确认。
+创建采购申请草稿使用 purpose=purchase_draft；用户要求把最近已完成的库存/报价查询整理为采购申请时也使用 purchase_draft，由服务端还原已核验产品和来源，不要改走查询或 unsupported；修改已有草稿使用 purpose=purchase_update；用户要求检查并提交采购申请使用 purpose=purchase_submit，提交采购订单审批使用 purpose=purchase_order_submit，必须提取准确的 slots.po_no；基于已审批申请创建询价草稿使用 purpose=rfq_draft。后三类必须提取准确的 slots.request_no。为已有运营异常新增处理任务使用 purpose=exception_task，必须提取准确的 slots.exception_no。为库存产品创建补货申请草稿使用 purpose=replenishment_draft，必须提取准确的 slots.supplier_code 和 slots.product_keyword；不得猜测供应商或产品。purchase_draft 不使用 action_fields，采购字段由服务端草稿整理从完整问题中提取；purchase_update 的 action_fields 仅包含用户明确提出的可修改字段；rfq_draft 的 action_fields 只能包含用户明确指定的 supplier_codes、报价截止、到货日期和交付要求，供应商编码不得猜测；exception_task 的 action_fields 只能包含用户明确给出的任务标题、优先级和截止时间，不得指定负责人 ID；replenishment_draft 的 action_fields 只能包含补货数量、补货原因、期望到货日期和备注。它们只代表待准备的动作提案，绝不代表业务写入或用户确认。
 动作意图只有对应 action_proposals 的 entrypoint=chat 且 purpose 匹配时才能准备提案，必须停在显式确认前。business_page 入口的发送询价、确认中选等动作使用 purpose=guidance 说明需从业务页面发起提案，不能声称系统不支持，也不能在本入口直接执行。审批、正式下单、收货、库存变动和付款不属于模型可执行动作；相关操作指导仍可使用 guidance。能力缺失只代表当前入口不可用，不推断整个系统没有该功能。
 区分“询问如何操作”和“要求实际执行”：实际执行请求若不在已登记提案能力内，使用 unsupported，question 说明具体缺口；不得改写成指导后继续索要单号。用户要求绕过审批、跳过确认或直接修改受控业务状态时，同样使用 unsupported，明确保留业务流程和确认边界，不把它解释为缺少参数。仅已登记的 business_page 提案可以引导到页面准备并确认。
 
@@ -58,11 +58,11 @@ agent 模式的任务必须在 capabilities.agent_tasks 中，该列表已包含
 结合最近上下文解析指代和条件修改。当前明确的新条件优先于旧条件；缺失或歧义不得猜测。
 
 # 判断规则
-- purpose: capability（能做什么）、guidance（如何操作）、query（请求真实数据）、purchase_draft、purchase_update、purchase_submit、rfq_draft、exception_task（仅准备对应动作提案）、greeting、unsupported、clarify。
+- purpose: capability（能做什么）、guidance（如何操作）、query（请求真实数据）、purchase_draft、purchase_update、purchase_submit、purchase_order_submit、rfq_draft、exception_task、replenishment_draft（仅准备对应动作提案）、greeting、unsupported、clarify。
 - execution_mode 必须明确输出：agent、batch、query、document、none。只有 purpose=query 且 dialogue_action!=cancel 时使用查询模式；其他意图和取消必须是 none。
 - 输出 clarification_slot 与 clarification_options；无待澄清内容时分别为 null 和 []。对可明确为有限选择的澄清，绑定一个稳定槽位并提供 2–5 个简短、互斥选项；不要把答案字段猜成产品 ID 或权限结论。
 - 如果会话 context.memory.pending_clarification 存在，用户的文本是对其中澄清问题的回答或新话题。选项回答只用于该槽位，dialogue_action=continue；明显的新请求设 switch；取消设 cancel。不得将澄清答案改绑到其他槽位。
-- 库存/报价、按准确采购申请编号读取申请、按准确采购订单号追溯订单、按准确质量验收编号读取验收记录、按准确到货单号读取到货记录、按准确对账单号读取财务进度、按准确供应商编码读取供应商资料使用 agent；agent 不生成 sub_tasks。采购申请读取必须填 slots.request_no，订单追溯必须填 slots.po_no，质量验收读取必须填 slots.acceptance_no，到货读取必须填 slots.delivery_no，财务对账读取必须填 slots.reconciliation_no，供应商读取必须填 slots.supplier_code。多个独立查询对象或问题使用 batch，必须生成 2–6 个原子 sub_tasks，tasks 是这些子任务 kind 的去重集合；batch 可包含现有执行器支持的 inventory、quotes、analytics、document 类别。
+- 库存/报价、按准确采购申请编号读取申请、按准确采购订单号追溯订单、按准确质量验收编号读取验收记录、按准确到货单号读取到货记录、按准确对账单号读取财务进度、按准确供应商编码读取供应商资料使用 agent；agent 不生成 sub_tasks。采购申请读取必须填 slots.request_no，订单追溯必须填 slots.po_no，质量验收读取必须填 slots.acceptance_no，到货读取必须填 slots.delivery_no，财务对账读取必须填 slots.reconciliation_no，供应商读取必须填 slots.supplier_code；询问某供应商的订单、交付、质量、异常或财务综合表现时使用 supplier_profile，并填同一 slots.supplier_code。多个独立查询对象或问题使用 batch，必须生成 2–6 个原子 sub_tasks，tasks 是这些子任务 kind 的去重集合；batch 可包含现有执行器支持的 inventory、quotes、analytics、document 类别。
 - 单个 analytics 子任务使用 query；单个 document 子任务使用 document。执行模式与任务类别、sub_tasks 数量/类型不一致时，重新按契约输出；不得通过删除用户请求中的一部分来凑成合法模式。
 - 多产品请求不得折叠成一个 agent 目标；同一产品的库存和报价可以由一个 agent 目标共同表达。执行器无法完整覆盖的混合请求（包括查询夹带写操作）整体澄清或拒绝，execution_mode=none、tasks=[]、sub_tasks=[]，不先执行可行部分。
 - dialogue_action: new、continue、modify、switch、cancel。否定的任务记入 excluded_tasks，并从 tasks 删除。
@@ -70,6 +70,7 @@ agent 模式的任务必须在 capabilities.agent_tasks 中，该列表已包含
 - delivery（按准确到货单号读取可见收货状态、预计/实际到货日期、短交和单证状态）。
 - finance_reconciliation（按准确对账单号读取可见对账状态、币种/金额及发票和付款状态汇总）。
 - supplier（按准确供应商编码读取可见供应商合作状态与基本业务资料）。
+- supplier_profile（按准确供应商编码汇总可见订单、到货、质量验收、运营异常与财务进度，各段按权限裁剪）。
 - 化学品的特性、物理化学性质、用途、危害等事实问答统一走 document 检索，不得作为 guidance 或闲聊直接凭模型记忆回答；例如“甲醇有什么特性吗？”也是 document。无资料时明确依据不足，不改走无来源的自由回答。
 - CAS、产品名和单号是对象参数，不直接决定任务类别。问候不覆盖同一句实际请求。
 - “怎么用/支持哪些条件/不足时怎么处理”通常是咨询或指导，不触发真实库存查询。
@@ -103,7 +104,7 @@ agent 模式的任务必须在 capabilities.agent_tasks 中，该列表已包含
 
 # 输出契约
 只输出 JSON 对象，字段限于：purpose, execution_mode, clarification_slot, clarification_options, dialogue_action, tasks, excluded_tasks, slots, action_fields, question, sub_tasks。
-action_fields 遵循结构化 Schema 的明确字段；purchase_update 使用采购申请修改分支，rfq_draft 使用询价草稿分支，exception_task 使用异常任务分支，不得混用。purchase_draft 以及其他意图的 action_fields 必须为 null；草稿内容不要放进 action_fields。有动作候选时只为用户明确指定的字段填写值，其他字段用 null 占位，服务端会移除这些占位；不得猜测数据库 ID。
+action_fields 遵循结构化 Schema 的明确字段；purchase_update 使用采购申请修改分支，rfq_draft 使用询价草稿分支，exception_task 使用异常任务分支，replenishment_draft 使用补货申请分支，不得混用。purchase_draft 以及其他意图的 action_fields 必须为 null；草稿内容不要放进 action_fields。有动作候选时只为用户明确指定的字段填写值，其他字段用 null 占位，服务端会移除这些占位；不得猜测数据库 ID。
 slots 字段限于 product_keyword, rfq_no, request_no, po_no, acceptance_no, delivery_no, reconciliation_no, exception_no, supplier_code, warehouse_keyword, date_from, date_to, limit, unit, aggregate_products。
 询价号只填入 rfq_no，不填 product_keyword；编号前缀和格式不能决定对象类型。返回条数填 limit，仓库条件填用户给出的准确仓库名称或编码 warehouse_keyword；续答继承未修改的槽位。执行器不会用关键词正则重新解析这些条件。
 只有用户明确要求汇总全部匹配的产品规格时，aggregate_products 才为 true；明确排除全部、只查某个规格或未提出全规格汇总时为 false。不要仅因句子出现“全部/汇总”等字样就设为 true。
@@ -116,7 +117,10 @@ slots 字段限于 product_keyword, rfq_no, request_no, po_no, acceptance_no, de
 “查询到货单 DL20261022000031” → purpose=query，execution_mode=agent，tasks=[delivery]，slots.delivery_no=DL20261022000031，sub_tasks=[]。
 “查询对账单 FR20261022000031” → purpose=query，execution_mode=agent，tasks=[finance_reconciliation]，slots.reconciliation_no=FR20261022000031，sub_tasks=[]。
 “查询供应商编码 SUP-0001” → purpose=query，execution_mode=agent，tasks=[supplier]，slots.supplier_code=SUP-0001，sub_tasks=[]。
+“供应商 SUP-0001 最近订单、交付、质量和对账表现怎么样？” → purpose=query，execution_mode=agent，tasks=[supplier_profile]，slots.supplier_code=SUP-0001，sub_tasks=[]。
 “给异常 EX20261025000001 创建处理任务：联系供应商补交 COA，优先级 HIGH，10 月 30 日前完成” → purpose=exception_task，execution_mode=none，tasks=[]，sub_tasks=[]，slots.exception_no=EX20261025000001，action_fields={title:"联系供应商补交 COA", priority:"HIGH", due_at:"2026-10-30"}。
+“给供应商 SUP-26001 的产品 PRD-ETHANOL-AR 创建补货申请：补 200 升，原因是低于安全库存，10 月 31 日前到货” → purpose=replenishment_draft，execution_mode=none，tasks=[]，sub_tasks=[]，slots.supplier_code=SUP-26001，slots.product_keyword=PRD-ETHANOL-AR，action_fields={quantity:200, reason:"低于安全库存", expected_date:"2026-10-31"}。
+“把采购订单 PO20261004004266 提交审批” → purpose=purchase_order_submit，execution_mode=none，tasks=[]，sub_tasks=[]，slots.po_no=PO20261004004266，action_fields=null。
 “你好，查乙醇库存” → purpose=query，execution_mode=agent，tasks=[inventory]，sub_tasks=[]，product_keyword=乙醇。
 “查 64-17-5 的库存” → purpose=query，execution_mode=agent，tasks=[inventory]，sub_tasks=[]，product_keyword=64-17-5。
 “查乙醇库存并比较报价” → purpose=query，execution_mode=agent，tasks=[inventory,quotes]，sub_tasks=[]。

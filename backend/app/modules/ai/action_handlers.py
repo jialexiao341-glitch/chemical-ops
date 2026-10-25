@@ -1,8 +1,11 @@
 """服务端明确注册的 Agent 写动作处理器。"""
 
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 
-from app.core.errors import BusinessValidationError, ResourceNotFoundError
+from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
+from app.modules.ai.formatting import format_decimal
 from app.modules.products.model import Product
 from app.modules.purchase_requests import service as purchase_request_service
 from app.modules.purchase_requests.model import PurchaseRequest
@@ -13,8 +16,11 @@ from app.modules.operation_exceptions.schema import OperationTaskCreate, Operati
 from app.modules.purchase_orders import service as purchase_order_service
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.purchase_orders.schema import PurchaseOrderCreate, PurchaseOrderRead
+from app.modules.replenishments import service as replenishment_service
+from app.modules.replenishments.schema import ReplenishmentCreate, ReplenishmentItemCreate, ReplenishmentRead
 from app.modules.system.model import User
 from app.modules.suppliers.model import Supplier
+from app.modules.suppliers.service import get_supplier_by_code
 from sqlalchemy import select
 
 
@@ -895,3 +901,244 @@ class ExceptionTaskCreateHandler:
 
 
 register_handler("exceptions.create_task", ExceptionTaskCreateHandler())
+
+
+def _parse_positive_quantity(value: Any) -> Decimal:
+    if isinstance(value, bool) or value is None:
+        raise BusinessValidationError("补货数量必须是正数")
+    try:
+        quantity = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        raise BusinessValidationError("补货数量必须是正数") from None
+    if not quantity.is_finite() or quantity <= 0:
+        raise BusinessValidationError("补货数量必须是正数")
+    return quantity
+
+
+def _parse_expected_date(value: Any) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value.strip()[:10])
+        except ValueError:
+            raise BusinessValidationError("期望到货日期格式应为 YYYY-MM-DD") from None
+    raise BusinessValidationError("期望到货日期格式应为 YYYY-MM-DD")
+
+
+class ReplenishmentCreateHandler:
+    permission_code = "procurement.replenishment.write"
+    resource_type = "REPLENISHMENT_REQUEST"
+    _FIELDS = ("supplier_code", "product_keyword", "quantity", "reason", "expected_date", "note")
+
+    def _prepare(self, db, user, payload):
+        if not isinstance(payload, dict):
+            raise BusinessValidationError("补货申请提案格式无效")
+        if set(payload) - set(self._FIELDS):
+            raise BusinessValidationError("补货申请提案包含不允许的字段")
+        supplier_code = payload.get("supplier_code")
+        product_keyword = payload.get("product_keyword")
+        if not isinstance(supplier_code, str) or not supplier_code.strip():
+            raise BusinessValidationError("请提供准确的供应商编码")
+        if not isinstance(product_keyword, str) or not product_keyword.strip():
+            raise BusinessValidationError("请提供准确的产品编码或规格")
+        supplier = get_supplier_by_code(db, supplier_code.strip())
+        if supplier is None or supplier.status != "ACTIVE":
+            raise BusinessValidationError("补货供应商不存在或已停用")
+
+        from app.modules.ai import agent_tools
+        from app.modules.ai.schema import ToolCall
+
+        available = {entry["name"] for entry in agent_tools.list_tools(db, user)}
+        if "catalog.search_products" not in available:
+            raise BusinessValidationError("当前账号不能检索产品目录，无法创建补货申请")
+        candidates = agent_tools.execute_tool(db, user, ToolCall(
+            tool="catalog.search_products", arguments={"keyword": product_keyword.strip(), "limit": 10}))
+        if candidates.total_rows != 1 or candidates.truncated:
+            raise BusinessValidationError("请提供唯一的产品编码或规格后再创建补货申请")
+        product = db.get(Product, candidates.rows[0].product_id)
+        if product is None or product.status != "ACTIVE":
+            raise BusinessValidationError("补货产品不存在或已停用")
+        unit = db.get(Unit, product.unit_id)
+        if unit is None or unit.status != "ACTIVE":
+            raise BusinessValidationError("补货产品的计量单位不存在或已停用")
+
+        quantity = _parse_positive_quantity(payload.get("quantity"))
+        reason = payload.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise BusinessValidationError("请说明补货原因")
+        expected_date = _parse_expected_date(payload.get("expected_date"))
+        note = payload.get("note")
+        if note is not None and (not isinstance(note, str) or len(note) > 1000):
+            raise BusinessValidationError("补货备注格式无效")
+
+        data = ReplenishmentCreate(
+            supplier_id=supplier.id,
+            reason=reason.strip(),
+            items=[ReplenishmentItemCreate(
+                product_id=product.id, unit_id=unit.id, requested_quantity=quantity,
+                expected_date=expected_date, note=note,
+            )],
+        )
+        snapshot = {
+            "supplier": {"id": supplier.id, "supplier_code": supplier.supplier_code, "status": supplier.status},
+            "product": {"id": product.id, "product_code": product.product_code,
+                        "status": product.status, "version_no": product.version_no},
+            "unit": {"id": unit.id, "unit_name": unit.unit_name, "dimension": unit.dimension,
+                     "status": unit.status},
+        }
+        evidence: list[dict] = [
+            {"type": "supplier", "id": supplier.id, "supplier_code": supplier.supplier_code,
+             "supplier_name": supplier.supplier_name, "status": supplier.status},
+            {"type": "product", "id": product.id, "product_code": product.product_code,
+             "product_name": product.product_name, "unit_name": unit.unit_name},
+        ]
+        warnings: list[str] = []
+        try:
+            inventory_call = ToolCall(tool="inventory.query_available", arguments={"product_id": product.id})
+            inventory = agent_tools.execute_tool(db, user, inventory_call)
+            dumped = inventory.model_dump(mode="json")
+            evidence.append({"type": "inventory", "label": "当前可用库存",
+                             "product_id": product.id, "scope": dumped.get("scope"),
+                             "observed_at": dumped.get("observed_at"),
+                             "totals": dumped.get("totals") or [],
+                             "sources": dumped.get("sources") or []})
+        except (AuthorizationError, BusinessValidationError, ResourceNotFoundError):
+            warnings.append("当前账号无库存读取权限或库存事实暂不可用，未展示补货前的可用库存。")
+        diff = [
+            {"field": "supplier", "before": None, "after": supplier.supplier_code},
+            {"field": "product", "before": None, "after": product.product_code},
+            {"field": "quantity", "before": None, "after": format_decimal(quantity)},
+            {"field": "reason", "before": None, "after": reason.strip()},
+        ]
+        if expected_date is not None:
+            diff.append({"field": "expected_date", "before": None, "after": expected_date.isoformat()})
+        normalized = {
+            "supplier_id": supplier.id,
+            "reason": reason.strip(),
+            "items": [{
+                "product_id": product.id, "unit_id": unit.id,
+                "requested_quantity": format_decimal(quantity),
+                "expected_date": expected_date.isoformat() if expected_date else None,
+                "note": note,
+            }],
+        }
+        return {"payload": normalized, "snapshot": snapshot, "resource_id": None,
+                "diff": diff, "evidence": evidence, "warnings": warnings,
+                "blockers": [], "risk_level": "MEDIUM"}
+
+    def prepare(self, db, user, payload):
+        return self._prepare(db, user, payload)
+
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        expected = proposal.expected_resource_snapshot or {}
+        supplier_id = int(proposal.payload.get("supplier_id"))
+        supplier = db.scalar(select(Supplier).where(Supplier.id == supplier_id).with_for_update()
+                             if for_update else select(Supplier).where(Supplier.id == supplier_id))
+        if supplier is None or supplier.status != "ACTIVE":
+            raise BusinessValidationError("补货供应商已停用或不存在，请重新生成预览")
+        item = (proposal.payload.get("items") or [{}])[0]
+        product = db.scalar(select(Product).where(Product.id == int(item.get("product_id"))).with_for_update()
+                            if for_update else select(Product).where(Product.id == int(item.get("product_id"))))
+        if product is None or product.status != "ACTIVE":
+            raise BusinessValidationError("补货产品已停用或不存在，请重新生成预览")
+        unit = db.scalar(select(Unit).where(Unit.id == int(item.get("unit_id"))).with_for_update()
+                         if for_update else select(Unit).where(Unit.id == int(item.get("unit_id"))))
+        if unit is None or unit.status != "ACTIVE":
+            raise BusinessValidationError("补货计量单位已停用或不存在，请重新生成预览")
+        current = {
+            "supplier": {"id": supplier.id, "supplier_code": supplier.supplier_code, "status": supplier.status},
+            "product": {"id": product.id, "product_code": product.product_code,
+                        "status": product.status, "version_no": product.version_no},
+            "unit": {"id": unit.id, "unit_name": unit.unit_name, "dimension": unit.dimension,
+                     "status": unit.status},
+        }
+        if current != expected:
+            raise BusinessValidationError("供应商、产品或计量单位已变化，请重新生成预览")
+
+    def execute(self, db, user, proposal, *, commit=False):
+        data = ReplenishmentCreate.model_validate(proposal.payload)
+        value = replenishment_service.create_replenishment(db, user, data, commit=commit)
+        return ReplenishmentRead.model_validate(value).model_dump(mode="json")
+
+
+register_handler("inventory.create_replenishment", ReplenishmentCreateHandler())
+
+
+def _order_snapshot(order: PurchaseOrder) -> dict[str, Any]:
+    return {
+        "id": order.id,
+        "po_no": order.po_no,
+        "status": order.status,
+        "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+        "supplier_id": order.supplier_id,
+        "buyer_id": order.buyer_id,
+        "order_amount": str(order.order_amount),
+        "currency_code": order.currency_code,
+        "item_count": len(order.items),
+    }
+
+
+class PurchaseOrderSubmitHandler:
+    permission_code = "procurement.orders.write"
+    resource_type = "PURCHASE_ORDER"
+
+    def _resolve(self, db, user, payload):
+        if not isinstance(payload, dict) or set(payload) - {"order_id", "po_no"}:
+            raise BusinessValidationError("订单提交提案包含不允许的字段")
+        if ("order_id" in payload) == ("po_no" in payload):
+            raise BusinessValidationError("订单提交提案必须且只能提供准确订单号")
+        if "order_id" in payload:
+            order_id = payload["order_id"]
+            if isinstance(order_id, bool) or not isinstance(order_id, int) or order_id <= 0:
+                raise BusinessValidationError("采购订单编号无效")
+            return purchase_order_service.get_order(db, user, order_id)
+        po_no = payload["po_no"]
+        if not isinstance(po_no, str) or not po_no.strip() or len(po_no.strip()) > 32:
+            raise BusinessValidationError("请提供准确的采购订单号")
+        return purchase_order_service.get_order_by_no(db, user, po_no.strip())
+
+    def prepare(self, db, user, payload):
+        order = self._resolve(db, user, payload)
+        if order.status != "DRAFT":
+            raise BusinessValidationError("只有草稿状态的采购订单可以提交审批")
+        if not order.items:
+            raise BusinessValidationError("采购订单必须包含明细")
+        snapshot = _order_snapshot(order)
+        return {
+            "payload": {"order_id": order.id},
+            "snapshot": snapshot,
+            "resource_id": order.id,
+            "diff": [
+                {"field": "status", "before": "DRAFT", "after": "APPROVING"},
+                {"field": "item_count", "before": len(order.items), "after": len(order.items)},
+            ],
+            "evidence": [{"type": "purchase_order", "id": order.id, "po_no": order.po_no,
+                          "status": order.status, "amount": format_decimal(order.order_amount),
+                          "currency": order.currency_code}],
+            "warnings": [],
+            "blockers": [],
+            "risk_level": "HIGH",
+        }
+
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        order = purchase_order_service.get_order(
+            db, user, int(proposal.payload.get("order_id")), for_update=for_update)
+        if order.status != "DRAFT":
+            raise BusinessValidationError("采购订单已不是草稿状态，请重新核对")
+        if not order.items:
+            raise BusinessValidationError("采购订单没有明细，不能提交审批")
+        if _order_snapshot(order) != (proposal.expected_resource_snapshot or {}):
+            raise BusinessValidationError("采购订单内容或状态已变化，请重新核对")
+
+    def execute(self, db, user, proposal, *, commit=False):
+        order = purchase_order_service.submit_order(
+            db, user, int(proposal.payload.get("order_id")), commit=commit)
+        return PurchaseOrderRead.model_validate(order).model_dump(mode="json")
+
+
+register_handler("purchase_order.submit", PurchaseOrderSubmitHandler())

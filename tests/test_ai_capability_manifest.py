@@ -25,7 +25,7 @@ def test_manifest_exposes_only_current_tools_datasets_and_non_identifying_scopes
         "catalog.search_products", "inventory.query_available",
         "supplier_quotes.find_rfq_items", "supplier_quotes.compare",
         "purchase_orders.trace_by_no",
-        "deliveries.get_by_no", "suppliers.get_by_code",
+        "deliveries.get_by_no", "suppliers.get_by_code", "suppliers.profile",
     }
     datasets = {item["key"] for item in payload["analytics_datasets"]}
     assert {"purchase_orders", "deliveries", "inventory", "weekly_order_risks"} <= datasets

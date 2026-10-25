@@ -26,6 +26,7 @@ AGENT_TASK_REQUIREMENTS = {
     "delivery": frozenset({"deliveries.get_by_no"}),
     "finance_reconciliation": frozenset({"finance_reconciliations.get_by_no"}),
     "supplier": frozenset({"suppliers.get_by_code"}),
+    "supplier_profile": frozenset({"suppliers.profile"}),
 }
 
 # 入口说明是产品契约；是否可用仍由已注册 handler、开关和实时权限决定。
@@ -38,6 +39,8 @@ ACTION_ENTRIES = {
     "rfq.select_quote": ("确认中选报价", "business_page", None),
     "purchase_order.create_draft": ("检查条款并准备采购订单草稿", "business_page", None),
     "exceptions.create_task": ("创建异常处理任务", "chat", "exception_task"),
+    "inventory.create_replenishment": ("创建补货申请草稿", "chat", "replenishment_draft"),
+    "purchase_order.submit": ("提交采购订单审批", "chat", "purchase_order_submit"),
 }
 
 # Composite datasets require every listed read permission. The base DatasetSpec.permission

@@ -38,13 +38,17 @@ def test_routing_action_schema_has_explicit_properties_and_nullable_branch_types
     schema = schema_response_format(routing.Understanding, "route")["json_schema"]["schema"]
     branches = schema["properties"]["action_fields"]["anyOf"]
     objects = [branch for branch in branches if branch.get('type') == 'object']
-    assert len(objects) == 3
+    assert len(objects) == 4
     fields = set().union(*(branch['properties'].keys() for branch in objects))
-    assert {"supplier_codes", "quote_deadline", "purpose", "items", "title", "due_at"} <= fields
+    assert {"supplier_codes", "quote_deadline", "purpose", "items", "title", "due_at",
+            "quantity", "reason"} <= fields
     assert all("type" in branch for branch in branches)
     assert all(not ({"purpose", "supplier_codes"} <= branch['properties'].keys()) for branch in objects)
     assert any({"title", "due_at"} <= branch['properties'].keys()
                and "assignee_id" not in branch['properties'] for branch in objects)
+    assert any({"quantity", "reason"} <= branch['properties'].keys()
+               and not ({"supplier_id", "product_id"} & branch['properties'].keys())
+               for branch in objects)
     with pytest.raises(ValidationError):
         routing.Understanding.model_validate({
             "purpose": "purchase_update", "slots": {"request_no": "PR-001"},

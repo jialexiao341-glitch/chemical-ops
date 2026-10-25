@@ -11,6 +11,7 @@ const routes: RouteRecordRaw[] = [
         'procurement.requests.read',
         'procurement.rfqs.read',
         'procurement.orders.read',
+        'procurement.replenishment.read',
       ],
       icon: 'lucide:shopping-cart',
       order: 3,
@@ -60,6 +61,17 @@ const routes: RouteRecordRaw[] = [
           authority: ['procurement.orders.read'],
           hideInMenu: true,
           title: '采购订单详情',
+        },
+      },
+      {
+        name: 'ReplenishmentList',
+        path: 'replenishments',
+        component: () =>
+          import('#/views/procurement/replenishments/index.vue'),
+        meta: {
+          authority: ['procurement.replenishment.read'],
+          icon: 'lucide:package-plus',
+          title: '补货申请',
         },
       },
     ],

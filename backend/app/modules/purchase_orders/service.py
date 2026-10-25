@@ -201,12 +201,32 @@ def read_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
     return order
 
 
+def _assert_order_scope(db: Session, user: User, order: PurchaseOrder) -> None:
+    if not _can_manage_all(db, user) and not (
+        (user.department_id is not None and order.department_id == user.department_id)
+        or (user.department_id is None and order.buyer_id == user.id)
+    ):
+        raise ResourceNotFoundError(f"采购订单 {order.id} 不存在")
+
+
 def get_order(db: Session, user: User, order_id: int, *, for_update: bool = False) -> PurchaseOrder:
     """查询订单详情并执行数据范围校验。"""
 
     order = _require_order(db, order_id, for_update=for_update)
-    if not _can_manage_all(db, user) and not ((user.department_id is not None and order.department_id == user.department_id) or (user.department_id is None and order.buyer_id == user.id)):
-        raise ResourceNotFoundError(f"采购订单 {order_id} 不存在")
+    _assert_order_scope(db, user, order)
+    return order
+
+
+def get_order_by_no(db: Session, user: User, po_no: str, *, for_update: bool = False) -> PurchaseOrder:
+    """按准确订单号读取订单并执行与详情一致的数据范围校验。"""
+
+    statement = select(PurchaseOrder).where(PurchaseOrder.po_no == po_no)
+    if for_update:
+        statement = statement.with_for_update()
+    order = db.scalar(statement)
+    if order is None:
+        raise ResourceNotFoundError(f"采购订单 {po_no} 不存在")
+    _assert_order_scope(db, user, order)
     return order
 
 
@@ -223,8 +243,8 @@ def update_order(db: Session, user: User, order_id: int, data: PurchaseOrderUpda
     return _require_order(db, order.id)
 
 
-def submit_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
-    """提交采购订单并创建采购经理审批节点。"""
+def submit_order(db: Session, user: User, order_id: int, *, commit: bool = True) -> PurchaseOrder:
+    """提交采购订单并创建采购经理审批节点；可由调用方在同一事务内提交。"""
 
     order = get_order(db, user, order_id, for_update=True)
     if order.status != "DRAFT":
@@ -245,7 +265,10 @@ def submit_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
         approval.acted_at = None
     _add_event(db, order, user.id, "SUBMITTED", previous, "APPROVING", "提交采购订单审批")
     add_audit_log(db, actor_id=user.id, action_type="SUBMIT", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary="提交采购订单审批", result_status="SUCCESS")
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return _require_order(db, order.id)
 
 

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import and_, exists, false, or_, select
+from sqlalchemy import and_, exists, false, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -280,6 +280,22 @@ def create_automatic_exception(
             return None
         raise
     return exception
+
+
+def supplier_exception_counts(db: Session, user: User, supplier_id: int) -> dict[str, int]:
+    """按供应商关联的订单/到货统计异常状态；按当前用户异常范围裁剪。"""
+
+    po_ids = select(PurchaseOrder.id).where(PurchaseOrder.supplier_id == supplier_id)
+    delivery_ids = select(Delivery.id).where(Delivery.supplier_id == supplier_id)
+    rows = db.execute(
+        select(OperationException.status, func.count(OperationException.id))
+        .where(
+            or_(OperationException.po_id.in_(po_ids), OperationException.delivery_id.in_(delivery_ids)),
+            _exception_record_scope_condition(db, user),
+        )
+        .group_by(OperationException.status)
+    ).all()
+    return {str(status): int(count) for status, count in rows}
 
 
 def list_exceptions(db: Session, user: User, *, exception_type: str | None, status: str | None, page: int, page_size: int):

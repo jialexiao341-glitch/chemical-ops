@@ -17,7 +17,7 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 
 
-INBOX_ACTION_TYPES = ("purchase_request.create_draft", "purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft", "exceptions.create_task")
+INBOX_ACTION_TYPES = ("purchase_request.create_draft", "purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft", "purchase_order.submit", "exceptions.create_task", "inventory.create_replenishment")
 
 
 def _now() -> datetime:
@@ -198,6 +198,41 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
         elif availability != "PERMISSION_REVOKED":
             availability = "RESOURCE_UNAVAILABLE"
             reason = "当前账号没有查看关联异常的权限"
+    elif proposal.action_type == "purchase_order.submit":
+        if "SYS_ADMIN" in roles or "procurement.orders.read" in permission_codes:
+            try:
+                from app.modules.purchase_orders import service as purchase_order_service
+
+                order = purchase_order_service.get_order(db, user, int(proposal.resource_id))
+                readable_reference = order.po_no
+                source_route = f"/procurement/orders/{order.id}"
+                resource_visible = True
+            except (TypeError, ValueError, BusinessValidationError, ResourceNotFoundError):
+                availability = "RESOURCE_UNAVAILABLE"
+                reason = "关联采购订单已不可访问"
+        elif availability != "PERMISSION_REVOKED":
+            availability = "RESOURCE_UNAVAILABLE"
+            reason = "当前账号没有查看关联采购订单的权限"
+    elif proposal.action_type == "inventory.create_replenishment":
+        if proposal.status == "EXECUTED" and proposal.result:
+            if "SYS_ADMIN" in roles or "procurement.replenishment.read" in permission_codes:
+                try:
+                    from app.modules.replenishments import service as replenishment_service
+
+                    value = replenishment_service.get_replenishment(db, user, int(proposal.result["id"]))
+                    readable_reference = value.replenishment_no
+                    source_route = f"/procurement/replenishments?ai_record_id={value.id}"
+                    resource_visible = True
+                except (KeyError, TypeError, ValueError, BusinessValidationError, ResourceNotFoundError):
+                    availability = "RESOURCE_UNAVAILABLE"
+                    reason = "关联补货申请已不可访问"
+            elif availability != "PERMISSION_REVOKED":
+                availability = "RESOURCE_UNAVAILABLE"
+                reason = "当前账号没有查看关联补货申请的权限"
+        else:
+            resource_visible = ("SYS_ADMIN" in roles or "procurement.replenishment.write" in permission_codes)
+            if resource_visible:
+                readable_reference = "待创建补货申请"
     elif proposal.action_type in {"purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft"}:
         resource_read_permission = "procurement.rfqs.read" if proposal.action_type in {"rfq.send", "rfq.select_quote", "purchase_order.create_draft"} else "procurement.requests.read"
         if "SYS_ADMIN" in roles or resource_read_permission in permission_codes:

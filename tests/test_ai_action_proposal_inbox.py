@@ -476,6 +476,92 @@ def test_exception_task_inbox_hides_reference_without_exception_read_permission(
     assert result.requires_user_confirmation is False
 
 
+def test_purchase_order_submit_inbox_shows_order_reference_and_deep_link(proposal_db, monkeypatch):
+    from app.modules.purchase_orders import service as order_service
+
+    monkeypatch.setattr(order_service, "get_order",
+                        lambda *_args, **_kwargs: SimpleNamespace(id=1153, po_no="PO20261004004266"))
+    _configure_reads(monkeypatch, permissions={1: [
+        "procurement.orders.read", "procurement.orders.write",
+    ]}, handler=_ReadHandler(permission_code="procurement.orders.write"))
+    proposal = _proposal(proposal_db, action_type="purchase_order.submit")
+    proposal.permission_code = "procurement.orders.write"
+    proposal.resource_type = "PURCHASE_ORDER"
+    proposal.resource_id = "1153"
+    proposal.payload = {"order_id": 1153}
+    proposal_db.commit()
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.business_reference == "PO20261004004266"
+    assert result.source_route == "/procurement/orders/1153"
+    assert result.availability == "AVAILABLE"
+    assert result.requires_user_confirmation is True
+
+
+def _replenishment_proposal(proposal_db):
+    proposal = _proposal(proposal_db, action_type="inventory.create_replenishment",
+                         evidence=[{"type": "product", "id": 318,
+                                    "product_code": "PRD-ETHANOL-AR", "product_name": "无水乙醇"}])
+    proposal.permission_code = "procurement.replenishment.write"
+    proposal.resource_type = "REPLENISHMENT_REQUEST"
+    proposal.resource_id = None
+    proposal.payload = {"supplier_id": 3, "reason": "低于安全库存",
+                        "items": [{"product_id": 318, "unit_id": 2, "requested_quantity": "200"}]}
+    proposal_db.commit()
+    return proposal
+
+
+def test_replenishment_inbox_shows_pending_draft_reference_and_evidence(proposal_db, monkeypatch):
+    _configure_reads(monkeypatch, permissions={1: ["procurement.replenishment.write"]},
+                     handler=_ReadHandler(permission_code="procurement.replenishment.write"))
+    _replenishment_proposal(proposal_db)
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.business_reference == "待创建补货申请"
+    assert result.availability == "AVAILABLE"
+    assert result.requires_user_confirmation is True
+    assert result.evidence[0]["product_code"] == "PRD-ETHANOL-AR"
+
+
+def test_replenishment_inbox_shows_created_reference_after_execution(proposal_db, monkeypatch):
+    from app.modules.replenishments import service as replenishment_service
+
+    monkeypatch.setattr(replenishment_service, "get_replenishment",
+                        lambda *_args, **_kwargs: SimpleNamespace(id=77, replenishment_no="RP20261025000077"))
+    _configure_reads(monkeypatch, permissions={1: [
+        "procurement.replenishment.read", "procurement.replenishment.write",
+    ]}, handler=_ReadHandler(permission_code="procurement.replenishment.write"))
+    proposal = _replenishment_proposal(proposal_db)
+    proposal.status = "EXECUTED"
+    proposal.result = {"id": 77, "replenishment_no": "RP20261025000077"}
+    proposal_db.commit()
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.business_reference == "RP20261025000077"
+    assert result.source_route == "/procurement/replenishments?ai_record_id=77"
+    assert result.availability == "AVAILABLE"
+    assert result.requires_user_confirmation is False
+
+
+def test_replenishment_inbox_disables_confirmation_without_write_permission(proposal_db, monkeypatch):
+    _configure_reads(monkeypatch, permissions={1: ["procurement.replenishment.read"]},
+                     handler=_ReadHandler(permission_code="procurement.replenishment.write"))
+    _replenishment_proposal(proposal_db)
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.availability == "PERMISSION_REVOKED"
+    assert result.evidence == []
+    assert result.requires_user_confirmation is False
+
+
 def test_create_draft_revision_clears_evidence_only_when_product_changes(proposal_db, monkeypatch):
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
     proposal = _proposal(proposal_db, action_type="purchase_request.create_draft", evidence=_draft_evidence())

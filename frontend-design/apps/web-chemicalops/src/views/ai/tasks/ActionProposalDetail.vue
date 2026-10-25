@@ -29,6 +29,8 @@ const actionLabels: Record<string, string> = {
   'rfq.select_quote': '确认中选报价',
   'purchase_order.create_draft': '生成采购订单草稿',
   'exceptions.create_task': '创建异常处理任务',
+  'inventory.create_replenishment': '创建补货申请',
+  'purchase_order.submit': '提交采购订单审批',
 };
 const statusLabels: Record<AiApi.ActionProposalRead['status'], string> = {
   CANCELLED: '已取消',
@@ -62,6 +64,9 @@ const fieldLabels: Record<string, string> = {
   title: '任务标题',
   due_at: '截止时间',
   assignee_id: '负责人',
+  product: '产品',
+  quantity: '补货数量',
+  reason: '补货原因',
 };
 const dateFields = new Set(['expected_date', 'requested_delivery_date', 'quote_deadline', 'expected_arrival_date']);
 const statusColor: Record<AiApi.ActionProposalRead['status'], string> = {
@@ -171,10 +176,26 @@ function orderTermsLines(evidence: Record<string, unknown>) {
       <h3 class="mb-2 font-medium">证据</h3>
       <ul class="list-disc space-y-1 pl-5 text-sm">
         <li v-for="(item, index) in proposal.evidence" :key="index">
-          <template v-if="item.type === 'tool'">
+          <template v-if="item.type === 'supplier'">
+            <div class="font-medium">供应商 {{ formatValue(item.supplier_name) }}</div>
+            <div class="text-muted-foreground">{{ formatValue(item.supplier_code) }} · {{ formatValue(item.status) }}</div>
+          </template>
+          <template v-else-if="item.type === 'product'">
+            <div class="font-medium">产品 {{ formatValue(item.product_name) }}</div>
+            <div class="text-muted-foreground">{{ formatValue(item.product_code) }} · 单位 {{ formatValue(item.unit_name) }}</div>
+          </template>
+          <template v-else-if="item.type === 'inventory'">
+            <div class="font-medium">当前可用库存</div>
+            <div class="text-muted-foreground">{{ toolEvidenceSummary(item) }}<span v-if="item.scope"> · {{ formatValue(item.scope) }}</span></div>
+          </template>
+          <template v-else-if="item.type === 'tool'">
             <div class="font-medium">{{ formatValue(item.label) }}</div>
             <div class="text-muted-foreground">{{ toolEvidenceSummary(item) }}<span v-if="item.scope"> · {{ formatValue(item.scope) }}</span></div>
             <div v-if="evidenceSourceLabels(item)" class="text-muted-foreground">来源 {{ evidenceSourceLabels(item) }}</div>
+          </template>
+          <template v-else-if="item.type === 'purchase_order'">
+            <div class="font-medium">采购订单 {{ formatValue(item.po_no) }}</div>
+            <div class="text-muted-foreground">{{ formatValue(item.status) }} · {{ formatValue(item.amount) }} {{ formatValue(item.currency) }}</div>
           </template>
           <template v-else-if="item.type === 'operation_exception'">
             <div class="font-medium">异常 {{ formatValue(item.exception_no) }}</div>

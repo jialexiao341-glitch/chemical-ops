@@ -2,6 +2,7 @@
 import type { NotificationApi } from '#/api';
 
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
@@ -16,8 +17,10 @@ import {
 import { formatDateTime } from '#/utils/format';
 
 defineOptions({ name: 'NotificationCenter' });
+const router = useRouter();
 const { hasAccessByCodes } = useAccess();
 const canWriteNotifications = computed(() => hasAccessByCodes(['system.notifications.write']));
+const canUseAiWorkspace = computed(() => hasAccessByCodes(['ai.workspace.read']));
 
 const items = ref<NotificationApi.Notification[]>([]);
 const total = ref(0);
@@ -65,6 +68,15 @@ function onToggleUnread(value: boolean | string | number) {
   unreadOnly.value = Boolean(value);
   page.value = 1;
   load();
+}
+
+function onUseSuggestion(row: NotificationApi.Notification) {
+  if (!canUseAiWorkspace.value) {
+    message.warning('当前账号没有 AI 工作台权限');
+    return;
+  }
+  const instruction = row.content.match(/建议指令：([\s\S]+)$/)?.[1]?.trim() || row.content;
+  void router.push({ path: '/ai/workspace', query: { prompt: instruction } });
 }
 
 const columns = [
@@ -120,7 +132,7 @@ onMounted(load);
               <span class="text-muted-foreground">{{ record.content }}</span>
             </template>
             <template v-else-if="column.key === 'notification_type'">
-              <Tag>{{ record.notification_type }}</Tag>
+              <Tag>{{ record.notification_type === 'OPERATION_SUGGESTION' ? '运营建议' : record.notification_type }}</Tag>
             </template>
             <template v-else-if="column.key === 'created_at'">
               {{ formatDateTime(record.created_at) }}
@@ -131,6 +143,14 @@ onMounted(load);
               </Tag>
             </template>
             <template v-else-if="column.key === '__action'">
+              <Button
+                v-if="record.notification_type === 'OPERATION_SUGGESTION' && canUseAiWorkspace"
+                size="small"
+                type="link"
+                @click="onUseSuggestion(record)"
+              >
+                让 Agent 处理
+              </Button>
               <Button
                 v-if="canWriteNotifications"
                 :disabled="record.is_read === 1"

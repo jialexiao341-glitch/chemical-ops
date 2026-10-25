@@ -535,6 +535,19 @@ async function onSend(retryFailed = false) {
       await prepareExceptionTaskProposal(text, 'understanding' in decision ? decision.understanding : { slots: {} });
       return;
     }
+    if (decision.route === 'replenishment_draft') {
+      messages.value = history;
+      sending.value = false;
+      await prepareReplenishmentProposal(text, 'understanding' in decision ? decision.understanding : { slots: {} });
+      return;
+    }
+    if (decision.route === 'purchase_order_submit') {
+      messages.value = history;
+      sending.value = false;
+      await preparePurchaseOrderSubmitProposal(
+        text, 'understanding' in decision ? decision.understanding : { slots: {} });
+      return;
+    }
     if (decision.route === 'agent') {
       messages.value = history;
       sending.value = false;
@@ -751,6 +764,169 @@ async function prepareActionProposal(
     messages.value = messages.value.map((item) => item.id === assistantMessageId
       ? { ...item, content: error?.message || '动作预览生成失败，未执行写入。', streaming: false }
       : item);
+  } finally {
+    actionProposalBusy.value = false;
+    scrollToBottom();
+  }
+}
+
+async function prepareReplenishmentProposal(
+  question: string,
+  understanding: {
+    action_fields?: Record<string, unknown> | null;
+    slots?: {
+      product_keyword?: string | null;
+      supplier_code?: string | null;
+      request_no?: string | null;
+    } | null;
+  },
+) {
+  const supplierCode = understanding.slots?.supplier_code;
+  const productKeyword = understanding.slots?.product_keyword;
+  const userMessageId = nextId();
+  const assistantMessageId = nextId();
+  messages.value = [
+    ...messages.value,
+    { content: question, id: userMessageId, role: 'user' },
+    { content: '正在校验收货产品、供应商和补货候选…', id: assistantMessageId, role: 'assistant', streaming: true },
+  ];
+  const fail = (content: string) => {
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? { ...item, content, streaming: false }
+      : item);
+  };
+  if (!supplierCode || !productKeyword) {
+    fail('需要准确的供应商编码和产品编码或名称，当前请求没有创建提案。');
+    message.warning('需要准确的供应商编码和产品编码或名称。');
+    return;
+  }
+  if (!(hasAccessByRoles(['SYS_ADMIN']) || hasAccessByCodes(['procurement.replenishment.write']))) {
+    fail('当前账号没有补货申请写入权限，未创建提案。');
+    message.error('你没有补货申请写入权限。');
+    return;
+  }
+  const fields = understanding.action_fields ?? {};
+  const quantity = Number(fields.quantity);
+  const reason = typeof fields.reason === 'string' ? fields.reason.trim() : '';
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    fail('请提供正数补货数量，当前请求没有创建提案。');
+    message.warning('请提供补货数量。');
+    return;
+  }
+  if (!reason) {
+    fail('请说明补货原因，当前请求没有创建提案。');
+    message.warning('请说明补货原因。');
+    return;
+  }
+  const payload = { supplier_code: supplierCode, product_keyword: productKeyword, ...fields };
+  actionProposalBusy.value = true;
+  try {
+    const proposal = await createActionProposalApi('inventory.create_replenishment', payload, makeIdempotencyKey());
+    const canConfirm = canConfirmActionProposal(proposal, proposal.preview_version, false);
+    const diff = proposal.diff.map((entry) => `${String(entry.field)}：${JSON.stringify(entry.after)}`).join('\n');
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? {
+          ...item,
+          content: canConfirm
+            ? `待确认提案已生成。\n供应商：${supplierCode}\n产品：${productKeyword}\n${diff}`
+            : proposal.blockers.join('；') || '当前提案不能确认，请补充信息后重试。',
+          streaming: false,
+        }
+      : item);
+    if (!canConfirm) return;
+    Modal.confirm({
+      title: '确认创建补货申请',
+      content: `供应商：${supplierCode}\n产品：${productKeyword}\n${diff}\n确认后仅创建状态为“草稿”的补货申请。`,
+      okText: '确认创建',
+      onOk: async () => {
+        actionProposalBusy.value = true;
+        try {
+          const result = await confirmActionProposalApi<Record<string, any>>(proposal.confirmation_id, proposal.preview_version);
+          const replenishmentNo = result.replenishment_no || result.id;
+          messages.value = messages.value.map((item) => item.id === assistantMessageId
+            ? { ...item, content: `${item.content}\n\n已创建补货申请 ${replenishmentNo}。` }
+            : item);
+          message.success('已按确认的预览创建补货申请草稿');
+        } finally {
+          actionProposalBusy.value = false;
+        }
+      },
+      onCancel: async () => {
+        await cancelActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+      },
+    });
+  } catch (error: any) {
+    fail(error?.message || '动作预览生成失败，未执行写入。');
+  } finally {
+    actionProposalBusy.value = false;
+    scrollToBottom();
+  }
+}
+
+async function preparePurchaseOrderSubmitProposal(
+  question: string,
+  understanding: { slots?: { po_no?: string | null; request_no?: string | null } | null },
+) {
+  const poNo = understanding.slots?.po_no;
+  const userMessageId = nextId();
+  const assistantMessageId = nextId();
+  messages.value = [
+    ...messages.value,
+    { content: question, id: userMessageId, role: 'user' },
+    { content: '正在校验采购订单、审批状态和权限…', id: assistantMessageId, role: 'assistant', streaming: true },
+  ];
+  const fail = (content: string) => {
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? { ...item, content, streaming: false }
+      : item);
+  };
+  if (!poNo) {
+    fail('需要准确的采购订单号，当前请求没有创建提案。');
+    message.warning('需要准确的采购订单号。');
+    return;
+  }
+  if (!(hasAccessByRoles(['SYS_ADMIN']) || hasAccessByCodes(['procurement.orders.write']))) {
+    fail('当前账号没有采购订单写入权限，未创建提案。');
+    message.error('你没有采购订单写入权限。');
+    return;
+  }
+  actionProposalBusy.value = true;
+  try {
+    const proposal = await createActionProposalApi('purchase_order.submit', { po_no: poNo }, makeIdempotencyKey());
+    const canConfirm = canConfirmActionProposal(proposal, proposal.preview_version, false);
+    const diff = proposal.diff.map((entry) => `${String(entry.field)}：${JSON.stringify(entry.after)}`).join('\n');
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? {
+          ...item,
+          content: canConfirm
+            ? `待确认提案已生成。\n采购订单：${poNo}\n${diff}`
+            : proposal.blockers.join('；') || '当前提案不能确认，请补充信息后重试。',
+          streaming: false,
+        }
+      : item);
+    if (!canConfirm) return;
+    Modal.confirm({
+      title: '确认提交采购订单审批',
+      content: `采购订单：${poNo}\n${diff}\n提交后进入采购经理审批，不会自动审批或下单。`,
+      okText: '确认提交',
+      onOk: async () => {
+        actionProposalBusy.value = true;
+        try {
+          const result = await confirmActionProposalApi<Record<string, any>>(proposal.confirmation_id, proposal.preview_version);
+          messages.value = messages.value.map((item) => item.id === assistantMessageId
+            ? { ...item, content: `${item.content}\n\n已提交采购订单 ${result.po_no || poNo}，状态：${result.status || 'APPROVING'}。` }
+            : item);
+          message.success('已按确认的预览提交采购订单审批');
+        } finally {
+          actionProposalBusy.value = false;
+        }
+      },
+      onCancel: async () => {
+        await cancelActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+      },
+    });
+  } catch (error: any) {
+    fail(error?.message || '动作预览生成失败，未执行写入。');
   } finally {
     actionProposalBusy.value = false;
     scrollToBottom();
@@ -1337,6 +1513,21 @@ watch(
     message.info('已带入提醒背景。请补充真实采购物料、数量、单位和用途，再生成草稿预览。');
     const query = { ...route.query };
     delete query.draft_context;
+    void router.replace({ path: route.path, query });
+  },
+  { immediate: true },
+);
+
+watch(
+  () => route.query.prompt,
+  (rawPrompt) => {
+    if (typeof rawPrompt !== 'string' || !rawPrompt.trim()) return;
+    newConversation();
+    draftMode.value = false;
+    inputText.value = rawPrompt.trim().slice(0, 2000);
+    message.info('已带入运营建议，请确认后发送。');
+    const query = { ...route.query };
+    delete query.prompt;
     void router.replace({ path: route.path, query });
   },
   { immediate: true },

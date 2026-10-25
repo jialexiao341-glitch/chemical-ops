@@ -130,6 +130,7 @@ export const TASK_ERROR_HELP: Record<string, string> = {
   INTENT_MISMATCH: '本轮请求与任务目标不一致。请重新描述要查询的库存或报价。',
   TOKEN_BUDGET_EXCEEDED: '本次任务预算已用完。请缩小范围或分多次查询。',
   DATABASE_ERROR: '业务数据读取失败。请稍后重试或联系管理员。',
+  WORKER_UNAVAILABLE: '任务长时间未被 Agent Worker 领取，可能后端 Worker 未启动。请检查 Worker 后重新发起；本次未执行任何查询。',
   MODEL_SERVICE_ERROR: '模型服务暂时不可用。请稍后重试。',
   RUNTIME_ERROR: '任务遇到暂时异常并已安全停止。可重新发起；重复发生时请联系管理员并提供任务编号。',
   RESULT_UNAVAILABLE: '任务结果因权限或数据范围变化暂不可访问。请按当前条件重新发起查询。',

@@ -1,5 +1,6 @@
 """逾期扫描任务。"""
 
+import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -23,6 +24,20 @@ from app.modules.products.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.purchase_requests.model import Unit
 from app.modules.system.model import Role, User, UserRole
+
+
+LOGGER = logging.getLogger("chemicalops.jobs")
+
+
+def _publish_suggestion(db: Session, exception: OperationException) -> None:
+    """事件建议属于附加能力，失败不能影响业务提醒和扫描结果。"""
+
+    try:
+        from app.modules.ai.proactive import publish_exception_suggestion
+
+        publish_exception_suggestion(db, exception)
+    except Exception:
+        LOGGER.exception("运营建议生成失败 exception_id=%s", exception.id)
 
 
 def list_job_runs(db: Session, *, limit: int = 50) -> list[SchedulerJobRun]:
@@ -83,6 +98,7 @@ def scan_overdue_deliveries(db: Session, actor: User) -> dict[str, int]:
         if exception is not None:
             created_count += 1
             notify_users(db, recipient_ids=[order.buyer_id] if order is not None else [], role_codes=["PROCUREMENT_MANAGER", "WAREHOUSE"], notification_type="OVERDUE_CREATED", title="发现逾期到货", content=exception.description, related_type="OPERATION_EXCEPTION", related_id=exception.id)
+            _publish_suggestion(db, exception)
     db.commit()
     result = {"scanned_count": len(deliveries), "created_count": created_count}
     metrics.increment("scheduler_jobs", labels={"job": "overdue_scan", "status": "success"})
@@ -141,6 +157,7 @@ def scan_expiring_inventory(db: Session, actor: User) -> dict[str, int]:
                 related_type="OPERATION_EXCEPTION",
                 related_id=exception.id,
             )
+            _publish_suggestion(db, exception)
     db.commit()
     result = {"scanned_count": len(rows), "created_count": created_count}
     metrics.increment("scheduler_jobs", labels={"job": "inventory_expiry_scan", "status": "success"})
@@ -202,6 +219,7 @@ def scan_pending_quality_acceptances(
                 related_type="OPERATION_EXCEPTION",
                 related_id=exception.id,
             )
+            _publish_suggestion(db, exception)
     db.commit()
     result = {"scanned_count": len(rows), "created_count": created_count}
     metrics.increment("scheduler_jobs", labels={"job": "quality_pending_scan", "status": "success"})
@@ -319,6 +337,7 @@ def scan_low_inventory(db: Session, actor: User) -> dict[str, int]:
                 related_type="OPERATION_EXCEPTION",
                 related_id=exception.id,
             )
+            _publish_suggestion(db, exception)
     db.commit()
     result = {
         "scanned_count": len(states),
