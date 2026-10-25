@@ -104,6 +104,27 @@ function formatValue(value: unknown) {
   return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
+function toolEvidenceSummary(entry: Record<string, unknown>) {
+  if (Array.isArray(entry.rows) && entry.rows.length) {
+    return `${entry.rows.length} 条记录`;
+  }
+  if (Array.isArray(entry.totals) && entry.totals.length) {
+    return entry.totals
+      .map((total: Record<string, unknown>) =>
+        `${formatValue(total.available_quantity)} ${formatValue(total.unit_name)}`)
+      .join('、');
+  }
+  return '无匹配记录';
+}
+
+function evidenceSourceLabels(entry: Record<string, unknown>) {
+  return Array.isArray(entry.sources)
+    ? entry.sources
+        .map((source: Record<string, unknown>) => `${formatValue(source.resource)}#${formatValue(source.record_id)}`)
+        .join('、')
+    : '';
+}
+
 function orderTermsLines(evidence: Record<string, unknown>) {
   return Array.isArray(evidence.items)
     ? evidence.items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
@@ -146,7 +167,12 @@ function orderTermsLines(evidence: Record<string, unknown>) {
       <h3 class="mb-2 font-medium">证据</h3>
       <ul class="list-disc space-y-1 pl-5 text-sm">
         <li v-for="(item, index) in proposal.evidence" :key="index">
-          <template v-if="item.type === 'purchase_order_terms_check'">
+          <template v-if="item.type === 'tool'">
+            <div class="font-medium">{{ formatValue(item.label) }}</div>
+            <div class="text-muted-foreground">{{ toolEvidenceSummary(item) }}<span v-if="item.scope"> · {{ formatValue(item.scope) }}</span></div>
+            <div v-if="evidenceSourceLabels(item)" class="text-muted-foreground">来源 {{ evidenceSourceLabels(item) }}</div>
+          </template>
+          <template v-else-if="item.type === 'purchase_order_terms_check'">
             <div class="mb-1 text-muted-foreground">比价单 {{ formatValue(item.comparison_no) }} · 报价 {{ formatValue(item.quote_no) }} · 申请 {{ formatValue(item.request_no) }}</div>
             <div v-for="line in orderTermsLines(item)" :key="formatValue(line.line_no)" class="border-b border-border py-2 last:border-0">
               <div class="font-medium">第 {{ formatValue(line.line_no) }} 行 · {{ formatValue(line.product) }}</div>

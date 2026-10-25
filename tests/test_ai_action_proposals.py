@@ -144,6 +144,61 @@ def test_action_proposal_rechecks_permission_at_confirmation(monkeypatch):
     assert db.writes == 0
 
 
+def _evidence_entry(fingerprint: str) -> dict:
+    return {"type": "tool", "label": "授权库存", "tool": "inventory.query_available",
+            "arguments": {"product_id": 9}, "fingerprint": fingerprint, "totals": [], "sources": []}
+
+
+def _tool_result(payload: dict):
+    return SimpleNamespace(model_dump=lambda **_kwargs: payload)
+
+
+def test_confirm_rejects_changed_source_facts_before_locking(monkeypatch):
+    _register(monkeypatch)
+    db = _DB()
+    user = SimpleNamespace(id=5, status="ACTIVE")
+    preview = action_proposals.propose_action(db, user, "test.create", {"purpose": "实验"}, idempotency_key="req-ev-1")
+    db.rows[0].evidence = [_evidence_entry("stale-fingerprint")]
+    from app.modules.ai import agent_tools
+    monkeypatch.setattr(agent_tools, "execute_tool", lambda *_args, **_kwargs:
+                        _tool_result({"tool": "inventory.query_available", "totals": [], "rows": [], "sources": []}))
+    request = AIActionProposalConfirm(confirmation_id=preview.confirmation_id, preview_version=1, confirm=True)
+    with pytest.raises(BusinessValidationError, match="来源事实已变化"):
+        action_proposals.confirm_action(db, user, request)
+    assert db.writes == 0
+
+
+def test_confirm_rejects_revoked_source_permission(monkeypatch):
+    _register(monkeypatch)
+    db = _DB()
+    user = SimpleNamespace(id=5, status="ACTIVE")
+    preview = action_proposals.propose_action(db, user, "test.create", {"purpose": "实验"}, idempotency_key="req-ev-2")
+    db.rows[0].evidence = [_evidence_entry("fingerprint")]
+    from app.modules.ai import agent_tools
+    def denied(*_args, **_kwargs):
+        raise AuthorizationError("没有执行该工具的权限")
+    monkeypatch.setattr(agent_tools, "execute_tool", denied)
+    request = AIActionProposalConfirm(confirmation_id=preview.confirmation_id, preview_version=1, confirm=True)
+    with pytest.raises(BusinessValidationError, match="权限"):
+        action_proposals.confirm_action(db, user, request)
+    assert db.writes == 0
+
+
+def test_confirm_executes_when_source_facts_are_unchanged(monkeypatch):
+    _register(monkeypatch)
+    db = _DB()
+    user = SimpleNamespace(id=5, status="ACTIVE")
+    preview = action_proposals.propose_action(db, user, "test.create", {"purpose": "实验"}, idempotency_key="req-ev-3")
+    payload = {"tool": "inventory.query_available", "totals": [], "rows": [], "sources": []}
+    from app.modules.ai.purchase_draft_bridge import result_fingerprint
+    db.rows[0].evidence = [_evidence_entry(result_fingerprint(payload))]
+    from app.modules.ai import agent_tools
+    monkeypatch.setattr(agent_tools, "execute_tool", lambda *_args, **_kwargs: _tool_result(payload))
+    request = AIActionProposalConfirm(confirmation_id=preview.confirmation_id, preview_version=1, confirm=True)
+    assert action_proposals.confirm_action(db, user, request)["request_no"] == "PR-001"
+    assert db.writes == 1
+
+
 def test_action_proposal_cancel_requires_current_version(monkeypatch):
     _register(monkeypatch)
     db = _DB()

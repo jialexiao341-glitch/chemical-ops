@@ -804,7 +804,12 @@ async function previewPurchaseRequestDraft(freeText?: string) {
   sending.value = true;
   scrollToBottom();
   try {
-    const result = await proposePurchaseRequestDraftApi(freeText ? [...draftFollowups.value, freeText].join('\n') : payload);
+    const requestEpoch = chatEpoch;
+    const result = await proposePurchaseRequestDraftApi(
+      freeText ? [...draftFollowups.value, freeText].join('\n') : payload,
+      activeConversationId.value,
+    );
+    if (requestEpoch !== chatEpoch) return;
     draftMissingFields.value = result.missing_fields;
     if (result.missing_fields.length > 0) {
       draftPurpose.value = result.draft.purpose ?? '';

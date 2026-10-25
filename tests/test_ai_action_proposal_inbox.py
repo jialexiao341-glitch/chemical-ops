@@ -65,7 +65,7 @@ class _ReadHandler:
 
 
 def _proposal(db, *, owner_id=1, confirmation_id="a" * 32, action_type="purchase_request.update_draft",
-              status="PENDING", expires_at=None, request_id=73):
+              status="PENDING", expires_at=None, request_id=73, evidence=None):
     now = datetime(2026, 1, 1, 12)
     proposal = AIAgentActionProposal(
         confirmation_id=confirmation_id,
@@ -78,7 +78,7 @@ def _proposal(db, *, owner_id=1, confirmation_id="a" * 32, action_type="purchase
         payload_hash="payload-hash",
         expected_resource_snapshot={"version": 3, "sensitive": "snapshot-secret"},
         diff=[{"field": "purpose", "before": "旧用途", "after": "实验"}],
-        evidence=[{"type": "source", "value": "evidence-secret"}],
+        evidence=evidence if evidence is not None else [{"type": "source", "value": "evidence-secret"}],
         warnings=["需要复核"],
         blockers=[],
         permission_code="procurement.requests.write",
@@ -418,3 +418,68 @@ def test_purchase_order_proposal_revision_only_changes_allowed_order_fields(prop
     assert seen[0] == {**proposal.payload, "delivery_address": "新地址"}
     assert proposal.preview_version == 3
     assert result.preview_version == 3
+
+
+def _draft_evidence():
+    return [
+        {"type": "tool", "label": "授权库存", "tool": "inventory.query_available",
+         "arguments": {"product_id": 9}, "fingerprint": "a" * 64, "totals": [], "sources": []},
+        {"type": "tool", "label": "产品目录", "tool": "catalog.search_products",
+         "arguments": {"keyword": "乙醇"}, "fingerprint": "b" * 64, "rows": [], "sources": []},
+    ]
+
+
+def test_create_draft_revision_clears_evidence_only_when_product_changes(proposal_db, monkeypatch):
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    proposal = _proposal(proposal_db, action_type="purchase_request.create_draft", evidence=_draft_evidence())
+    proposal.payload = {"purpose": "实验", "items": [{"product_id": 9, "quantity": "2", "unit_id": 3}]}
+    proposal_db.commit()
+
+    class _PrepareHandler(_ReadHandler):
+        def prepare(self, _db, _user, payload):
+            return {"payload": payload, "snapshot": {"updated": True}, "resource_id": None,
+                    "diff": [], "evidence": [], "warnings": [], "blockers": []}
+
+    monkeypatch.setattr(action_proposals, "_owned_proposal", lambda *_args, **_kwargs: proposal)
+    monkeypatch.setattr(action_proposals, "_authorize", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _PrepareHandler())
+
+    same = {"purpose": "实验", "items": [{"product_id": 9, "quantity": "3", "unit_id": 3}]}
+    action_proposals.revise_action(
+        proposal_db, SimpleNamespace(id=1), proposal.confirmation_id, proposal.preview_version, same)
+    assert len(proposal.evidence) == 2
+
+    changed = {"purpose": "实验", "items": [{"product_id": 10, "quantity": "3", "unit_id": 3}]}
+    action_proposals.revise_action(
+        proposal_db, SimpleNamespace(id=1), proposal.confirmation_id, proposal.preview_version, changed)
+    assert proposal.evidence == []
+    assert proposal.preview_version == 4
+
+
+def test_create_draft_inbox_reads_without_resource_and_hides_unreadable_sources(proposal_db, monkeypatch):
+    _configure_reads(monkeypatch, permissions={1: ["procurement.requests.write"]})
+    _proposal(proposal_db, action_type="purchase_request.create_draft", evidence=_draft_evidence())
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.business_reference == "待创建采购申请"
+    assert result.evidence == []
+    assert result.availability == "PERMISSION_REVOKED"
+    assert result.unavailable_reason == "当前账号已无查看来源库存或报价所需的权限"
+    assert result.requires_user_confirmation is False
+
+
+def test_create_draft_inbox_shows_sources_when_current_permissions_allow(proposal_db, monkeypatch):
+    _configure_reads(monkeypatch, permissions={1: [
+        "procurement.requests.write", "warehouse.inventory.read", "master.products.read",
+    ]})
+    _proposal(proposal_db, action_type="purchase_request.create_draft", evidence=_draft_evidence())
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert [entry["tool"] for entry in result.evidence] == [
+        "inventory.query_available", "catalog.search_products"]
+    assert result.availability == "AVAILABLE"
+    assert result.requires_user_confirmation is True

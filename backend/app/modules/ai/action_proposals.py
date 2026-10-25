@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
-from app.modules.ai import action_handlers
+from app.modules.ai import action_handlers, purchase_draft_bridge as bridge_module
 from app.modules.ai.model import AIAgentActionProposal
 from app.modules.ai.schema import (AIActionProposalConfirm, AIActionProposalPage, AIActionProposalPreview,
                                    AIActionProposalRead)
@@ -17,7 +17,7 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 
 
-INBOX_ACTION_TYPES = ("purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft")
+INBOX_ACTION_TYPES = ("purchase_request.create_draft", "purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft")
 
 
 def _now() -> datetime:
@@ -61,7 +61,7 @@ def _preview(proposal: AIAgentActionProposal) -> AIActionProposalPreview:
     )
 
 
-def propose_action(db: Session, user: User, action_type: str, payload: dict, *, idempotency_key: str) -> AIActionProposalPreview:
+def propose_action(db: Session, user: User, action_type: str, payload: dict, *, idempotency_key: str, evidence: list[dict] | None = None) -> AIActionProposalPreview:
     handler = action_handlers.get_handler(action_type)
     _authorize(db, user, handler.permission_code, action_type=action_type)
     prepared = handler.prepare(db, user, payload)
@@ -87,7 +87,7 @@ def propose_action(db: Session, user: User, action_type: str, payload: dict, *, 
         payload_hash=_hash(normalized),
         expected_resource_snapshot=prepared.get("snapshot", {}),
         diff=prepared.get("diff", []),
-        evidence=prepared.get("evidence", []),
+        evidence=evidence if evidence is not None else prepared.get("evidence", []),
         warnings=prepared.get("warnings", []),
         blockers=[],
         permission_code=handler.permission_code,
@@ -105,11 +105,42 @@ def _owned_proposal(db: Session, user: User, confirmation_id: str, *, for_update
     query = select(AIAgentActionProposal).where(
         AIAgentActionProposal.confirmation_id == confirmation_id,
         AIAgentActionProposal.user_id == user.id,
-    )
+    ).execution_options(populate_existing=True)
     proposal = db.scalar(query.with_for_update() if for_update else query)
     if proposal is None:
         raise ResourceNotFoundError("动作提案不存在或不属于当前用户")
     return proposal
+
+
+def _revalidate_tool_evidence(db: Session, user: User, proposal: AIAgentActionProposal) -> None:
+    """确认前按当前权限重放只读来源；事实或权限变化时要求重新预览。
+
+    不放在写事务内：先复核来源，再锁提案并复查版本，避免长时间持有业务行锁。
+    产品目录定位结果由提案快照中的产品状态/版本校验，不重复比较搜索排名。
+    """
+
+    from app.modules.ai import agent_tools
+    from app.modules.ai.purchase_draft_bridge import result_fingerprint
+    from app.modules.ai.schema import ToolCall
+    from app.modules.ai.tool_sql_timeout import ToolTimeoutUnsupported
+
+    for entry in proposal.evidence or []:
+        if not isinstance(entry, dict) or entry.get("type") != "tool":
+            continue
+        tool = entry.get("tool")
+        arguments = entry.get("arguments")
+        if tool == "catalog.search_products":
+            continue
+        if not isinstance(tool, str) or not isinstance(arguments, dict) or not entry.get("fingerprint"):
+            raise BusinessValidationError("来源证据格式无效，请重新生成预览")
+        try:
+            result = agent_tools.execute_tool(db, user, ToolCall(tool=tool, arguments=arguments))
+        except AuthorizationError as exc:
+            raise BusinessValidationError("来源数据读取权限已变化，请重新生成预览") from exc
+        except (BusinessValidationError, ResourceNotFoundError, TimeoutError, ToolTimeoutUnsupported) as exc:
+            raise BusinessValidationError("来源事实暂时无法核验，请稍后重新生成预览") from exc
+        if result_fingerprint(result.model_dump(mode="json")) != entry.get("fingerprint"):
+            raise BusinessValidationError("来源事实已变化，请重新核对预览后再确认")
 
 
 def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> tuple[AIActionProposalRead, bool]:
@@ -147,7 +178,11 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
     readable_reference = None
     source_route = None
     resource_visible = False
-    if proposal.action_type in {"purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft"}:
+    if proposal.action_type == "purchase_request.create_draft":
+        resource_visible = ("SYS_ADMIN" in roles or "procurement.requests.write" in permission_codes)
+        if resource_visible:
+            readable_reference = "待创建采购申请"
+    elif proposal.action_type in {"purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft"}:
         resource_read_permission = "procurement.rfqs.read" if proposal.action_type in {"rfq.send", "rfq.select_quote", "purchase_order.create_draft"} else "procurement.requests.read"
         if "SYS_ADMIN" in roles or resource_read_permission in permission_codes:
             try:
@@ -187,6 +222,16 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
     if not resource_visible:
         base["diff"] = []
         base["evidence"] = []
+    elif base["evidence"]:
+        readable_evidence = [entry for entry in base["evidence"]
+                             if bridge_module.evidence_readable(entry, permission_codes, roles)]
+        if len(readable_evidence) != len(base["evidence"]):
+            base["evidence"] = readable_evidence
+            if proposal.action_type == "purchase_request.create_draft" and availability == "AVAILABLE":
+                availability = "PERMISSION_REVOKED"
+                reason = "当前账号已无查看来源库存或报价所需的权限"
+        else:
+            base["evidence"] = readable_evidence
     can_confirm = (
         proposal.status == "PENDING"
         and availability == "AVAILABLE"
@@ -289,11 +334,20 @@ def revise_action(db: Session, user: User, confirmation_id: str, preview_version
             if item.get("field") == "selection_reason" else item
             for item in prepared.get("diff", [])
         ]
+    if proposal.action_type == "purchase_request.create_draft":
+        previous_products = {item.get("product_id") for item in proposal.payload.get("items", [])
+                             if isinstance(item, dict)}
+        next_products = {item.get("product_id") for item in prepared["payload"].get("items", [])
+                         if isinstance(item, dict)}
+        if previous_products != next_products:
+            # 产品改变后旧库存/报价证据不再相关；确认时会重新校验剩余来源。
+            proposal.evidence = []
     proposal.payload = prepared["payload"]
     proposal.payload_hash = _hash(proposal.payload)
     proposal.expected_resource_snapshot = prepared.get("snapshot", {})
     proposal.diff = prepared.get("diff", [])
-    proposal.evidence = prepared.get("evidence", [])
+    if proposal.action_type != "purchase_request.create_draft":
+        proposal.evidence = prepared.get("evidence", []) or proposal.evidence or []
     proposal.warnings = prepared.get("warnings", [])
     proposal.resource_id = str(prepared["resource_id"]) if prepared.get("resource_id") is not None else None
     proposal.preview_version += 1
@@ -313,7 +367,7 @@ def cancel_action(db: Session, user: User, confirmation_id: str, preview_version
 
 
 def confirm_action(db: Session, user: User, data: AIActionProposalConfirm) -> dict:
-    proposal = _owned_proposal(db, user, data.confirmation_id)
+    proposal = _owned_proposal(db, user, data.confirmation_id, for_update=False)
     handler = action_handlers.get_handler(proposal.action_type)
     _authorize(db, user, proposal.permission_code, action_type=proposal.action_type)
     if proposal.status == "EXECUTED":
@@ -328,7 +382,21 @@ def confirm_action(db: Session, user: User, data: AIActionProposalConfirm) -> di
         raise DuplicateResourceError("动作提案已过期，请重新生成")
     if _hash(proposal.payload) != proposal.payload_hash:
         raise BusinessValidationError("动作提案参数校验失败，请重新生成")
-    handler.validate_current(db, user, proposal)
+    # 来源核验放在加锁前：工具查询可能耗时，不占用业务行锁。
+    _revalidate_tool_evidence(db, user, proposal)
+    proposal = _owned_proposal(db, user, data.confirmation_id)
+    _authorize(db, user, proposal.permission_code, action_type=proposal.action_type)
+    if proposal.status == "EXECUTED":
+        return proposal.result or {}
+    if proposal.preview_version != data.preview_version or proposal.status != "PENDING":
+        raise DuplicateResourceError("动作提案已变化，请重新核对")
+    if proposal.expires_at <= _now():
+        proposal.status = "EXPIRED"
+        db.commit()
+        raise DuplicateResourceError("动作提案已过期，请重新生成")
+    if _hash(proposal.payload) != proposal.payload_hash:
+        raise BusinessValidationError("动作提案参数校验失败，请重新生成")
+    action_handlers.get_handler(proposal.action_type).validate_current(db, user, proposal)
     result = handler.execute(db, user, proposal, commit=False)
     proposal.status = "EXECUTED"
     proposal.result = result

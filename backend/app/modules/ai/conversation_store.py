@@ -443,6 +443,129 @@ def original_question_for_pending(db: Session, user: User, conversation_id: int,
     return None
 
 
+PURCHASE_DRAFT_BRIDGE_KEY = "purchase_draft_bridge"
+
+
+def _parse_iso_utc(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+
+def _sync_pending_version(memory: dict, next_version: int) -> None:
+    """会话状态整体递增时，同步澄清状态版本，避免同一 JSON 内互相失效。"""
+    if isinstance(memory.get("pending_clarification"), dict):
+        try:
+            pending = PendingClarification.model_validate(memory["pending_clarification"])
+            memory["pending_clarification"] = pending.model_copy(update={"state_version": next_version}).model_dump(mode="json")
+        except (TypeError, ValueError):
+            memory.pop("pending_clarification", None)
+
+
+def load_purchase_draft_bridge(
+    db: Session, user: User, conversation_id: int, *, now: datetime | None = None,
+) -> dict | None:
+    """读取本人会话中尚未补齐的采购草稿来源；过期或版本失效按不存在处理。"""
+
+    conversation = get_owned_conversation(db, user, conversation_id)
+    state = load_conversation_state(db, conversation)
+    if state is None:
+        return None
+    raw = (state.memory_state or {}).get(PURCHASE_DRAFT_BRIDGE_KEY)
+    if not isinstance(raw, dict) or raw.get("contract_version") != "1":
+        return None
+    if int(raw.get("state_version") or 0) != int(state.state_version or 0):
+        return None
+    expires_at = _parse_iso_utc(raw.get("expires_at"))
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    if expires_at is None or expires_at <= current_time:
+        return None
+    if not isinstance(raw.get("source"), dict) or not isinstance(raw.get("requirements"), dict):
+        return None
+    return raw
+
+
+def save_purchase_draft_bridge(
+    db: Session, user: User, conversation_id: int, bridge: dict, *,
+    expected_state_version: int | None = None, now: datetime | None = None, ttl_seconds: int = 600,
+) -> dict | None:
+    """按会话版本 CAS 保存草稿来源锚点与已收集需求；不覆盖其他业务状态。"""
+
+    if not conversation_state_enabled(db):
+        return None
+    conversation = get_owned_conversation(db, user, conversation_id)
+    state = lock_conversation_state(db, conversation)
+    if state is None:
+        if expected_state_version is not None:
+            raise BusinessValidationError("草稿整理状态已变化，请重新说明")
+        state = AIConversationState(conversation_id=conversation.id, thread_id=f"ai:{user.id}:{conversation.id}",
+                                    state_version=1, memory_state={})
+        db.add(state)
+        db.flush()
+    else:
+        db.refresh(state)
+    memory = dict(state.memory_state or {})
+    current = memory.get(PURCHASE_DRAFT_BRIDGE_KEY)
+    if expected_state_version is not None:
+        current_version = int(current.get("state_version") or 0) if isinstance(current, dict) else 0
+        if current_version != expected_state_version:
+            raise BusinessValidationError("草稿整理状态已变化，请重新说明")
+    current_version = int(state.state_version or 0)
+    next_version = current_version + 1
+    created = now or datetime.now(timezone.utc)
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    stored = {
+        **bridge,
+        "contract_version": "1",
+        "conversation_id": conversation.id,
+        "created_at": created.isoformat(),
+        "expires_at": (created + timedelta(seconds=ttl_seconds)).isoformat(),
+        "state_version": next_version,
+    }
+    memory[PURCHASE_DRAFT_BRIDGE_KEY] = json.loads(json.dumps(stored, ensure_ascii=False, default=str))
+    _sync_pending_version(memory, next_version)
+    _write_state_values(
+        db, state, current_version=current_version, next_version=next_version,
+        memory=memory, error="草稿整理状态已变化，请重新说明",
+        permission_snapshot_value=permission_snapshot(db, user))
+    return stored
+
+
+def clear_purchase_draft_bridge(
+    db: Session, user: User, conversation_id: int, *, state_version: int | None = None,
+) -> int:
+    """成功后清除本次来源锚点；版本不符时保留新状态，不误删其他请求。"""
+
+    if not conversation_state_enabled(db):
+        return 0
+    conversation = get_owned_conversation(db, user, conversation_id)
+    state = lock_conversation_state(db, conversation)
+    if state is None:
+        return 0
+    db.refresh(state)
+    memory = dict(state.memory_state or {})
+    current = memory.get(PURCHASE_DRAFT_BRIDGE_KEY)
+    if not isinstance(current, dict):
+        return int(state.state_version or 0)
+    if state_version is not None and int(current.get("state_version") or 0) != state_version:
+        return int(state.state_version or 0)
+    memory.pop(PURCHASE_DRAFT_BRIDGE_KEY, None)
+    current_version = int(state.state_version or 0)
+    next_version = current_version + 1
+    _sync_pending_version(memory, next_version)
+    return _write_state_values(
+        db, state, current_version=current_version, next_version=next_version,
+        memory=memory, error="草稿整理状态已变化，请重新说明")
+
+
 def save_batch_state(db: Session, user: User, conversation: AIConversation, state: AIConversationState | None, tasks: list[dict]) -> None:
     """保存批量任务上下文，与聊天消息共用调用方事务。"""
     if not conversation_state_enabled(db):

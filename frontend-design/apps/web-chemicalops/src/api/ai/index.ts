@@ -216,10 +216,13 @@ export async function parseNaturalFiltersApi(dataset: string, question: string) 
 }
 
 /** 将明确需求整理成候选采购申请表单，不写入或提交业务单据。 */
-export async function proposePurchaseRequestDraftApi(input: string | import('../procurement/purchase-requests').PurchaseRequestApi.RequestPayload) {
+export async function proposePurchaseRequestDraftApi(
+  input: string | import('../procurement/purchase-requests').PurchaseRequestApi.RequestPayload,
+  conversationId?: number,
+) {
   return requestClient.post<AiApi.PurchaseDraftPreview>(
     '/ai/purchase-request-draft/preview',
-    typeof input === 'string' ? { question: input } : { draft: input },
+    { ...(typeof input === 'string' ? { question: input } : { draft: input }), conversation_id: conversationId },
   );
 }
 
