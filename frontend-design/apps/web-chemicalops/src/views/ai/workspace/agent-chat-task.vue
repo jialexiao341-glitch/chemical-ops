@@ -15,6 +15,7 @@ const selection = ref<number | 'all'>();
 const candidates = computed(() => waitingCandidates(props.task));
 const results = computed(() => primaryTaskResults(props.task));
 const showInventorySummary = computed(() => !props.compactDetails && props.task.status === 'SUCCEEDED' && results.value.length > 1 && results.value.every((entry) => entry.result?.tool === 'inventory.query_available'));
+const hasDedicatedResult = computed(() => results.value.some((entry) => entry.result?.tool === 'inventory.query_available' || entry.result?.tool === 'supplier_quotes.compare'));
 const inventoryContext = computed(() => {
   const inventory = results.value.flatMap((entry) => entry.result?.tool === 'inventory.query_available' ? [entry.result] : []);
   return {
@@ -85,6 +86,7 @@ function quoteRecommendationLines(result?: AgentApi.Result) {
     </template>
     <template v-else>
       <p v-if="task.status !== 'SUCCEEDED' || !results.length" class="agent-reply">{{ task.status === 'RUNNING' ? '正在核对产品和业务数据…' : task.reply }}</p>
+      <p v-else-if="!hasDedicatedResult && task.reply" class="agent-reply">{{ task.reply }}</p>
       <p v-if="task.status === 'RUNNING'" class="agent-muted">查询结果会自动更新。</p>
     </template>
     <p v-if="task.error_code" class="agent-error">{{ TASK_ERROR_HELP[task.error_code] || '请核对条件、权限及模型服务后重新查询。' }}（{{ task.error_code }}）</p>

@@ -71,6 +71,7 @@ agent 模式的任务必须在 capabilities.agent_tasks 中，该列表已包含
 - finance_reconciliation（按准确对账单号读取可见对账状态、币种/金额及发票和付款状态汇总）。
 - supplier（按准确供应商编码读取可见供应商合作状态与基本业务资料）。
 - supplier_profile（按准确供应商编码汇总可见订单、到货、质量验收、运营异常与财务进度，各段按权限裁剪）。
+- replenishment_plan（按产品安全库存、当前可用量、在途采购和未完成补货计算补货缺口，先定位产品）。
 - 化学品的特性、物理化学性质、用途、危害等事实问答统一走 document 检索，不得作为 guidance 或闲聊直接凭模型记忆回答；例如“甲醇有什么特性吗？”也是 document。无资料时明确依据不足，不改走无来源的自由回答。
 - CAS、产品名和单号是对象参数，不直接决定任务类别。问候不覆盖同一句实际请求。
 - “怎么用/支持哪些条件/不足时怎么处理”通常是咨询或指导，不触发真实库存查询。
@@ -118,6 +119,7 @@ slots 字段限于 product_keyword, rfq_no, request_no, po_no, acceptance_no, de
 “查询对账单 FR20261022000031” → purpose=query，execution_mode=agent，tasks=[finance_reconciliation]，slots.reconciliation_no=FR20261022000031，sub_tasks=[]。
 “查询供应商编码 SUP-0001” → purpose=query，execution_mode=agent，tasks=[supplier]，slots.supplier_code=SUP-0001，sub_tasks=[]。
 “供应商 SUP-0001 最近订单、交付、质量和对账表现怎么样？” → purpose=query，execution_mode=agent，tasks=[supplier_profile]，slots.supplier_code=SUP-0001，sub_tasks=[]。
+“无水乙醇现在应该补多少？” → purpose=query，execution_mode=agent，tasks=[replenishment_plan]，slots.product_keyword=无水乙醇，sub_tasks=[]。
 “给异常 EX20261025000001 创建处理任务：联系供应商补交 COA，优先级 HIGH，10 月 30 日前完成” → purpose=exception_task，execution_mode=none，tasks=[]，sub_tasks=[]，slots.exception_no=EX20261025000001，action_fields={title:"联系供应商补交 COA", priority:"HIGH", due_at:"2026-10-30"}。
 “给供应商 SUP-26001 的产品 PRD-ETHANOL-AR 创建补货申请：补 200 升，原因是低于安全库存，10 月 31 日前到货” → purpose=replenishment_draft，execution_mode=none，tasks=[]，sub_tasks=[]，slots.supplier_code=SUP-26001，slots.product_keyword=PRD-ETHANOL-AR，action_fields={quantity:200, reason:"低于安全库存", expected_date:"2026-10-31"}。
 “把采购订单 PO20261004004266 提交审批” → purpose=purchase_order_submit，execution_mode=none，tasks=[]，sub_tasks=[]，slots.po_no=PO20261004004266，action_fields=null。

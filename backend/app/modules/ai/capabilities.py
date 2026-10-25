@@ -27,6 +27,7 @@ AGENT_TASK_REQUIREMENTS = {
     "finance_reconciliation": frozenset({"finance_reconciliations.get_by_no"}),
     "supplier": frozenset({"suppliers.get_by_code"}),
     "supplier_profile": frozenset({"suppliers.profile"}),
+    "replenishment_plan": frozenset({"inventory.replenishment_plan"}),
 }
 
 # 入口说明是产品契约；是否可用仍由已注册 handler、开关和实时权限决定。

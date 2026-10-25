@@ -394,7 +394,7 @@ TASK_STATUS_LABELS = {
 
 # 语义理解与路由
 
-Task = Literal["inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile", "analytics", "document"]
+Task = Literal["inventory", "replenishment_plan", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile", "analytics", "document"]
 
 
 class Slots(BaseModel):
@@ -578,8 +578,8 @@ class Understanding(BaseModel):
 
         if self.purpose == "query" and self.dialogue_action != "cancel":
             if self.execution_mode == "agent":
-                if not set(self.tasks) <= {"inventory", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile"} or self.sub_tasks:
-                    raise ValueError("agent 模式仅支持未拆分的库存、报价、采购申请、订单追溯、质量验收、到货、财务对账、供应商或供应商 360 查询目标")
+                if not set(self.tasks) <= {"inventory", "replenishment_plan", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile"} or self.sub_tasks:
+                    raise ValueError("agent 模式仅支持未拆分的库存、补货量建议、报价、采购申请、订单追溯、质量验收、到货、财务对账、供应商或供应商 360 查询目标")
                 if set(self.tasks) & {"purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile"} and len(self.tasks) != 1:
                     raise ValueError("按编号读取采购申请、订单追溯、质量验收、到货单、对账单、供应商和供应商 360 必须作为单一 Agent 目标执行")
                 if "quality_acceptance" in self.tasks and not self.slots.acceptance_no:
@@ -592,6 +592,8 @@ class Understanding(BaseModel):
                     raise ValueError("供应商 Agent 目标必须提供准确供应商编码")
                 if "supplier_profile" in self.tasks and not self.slots.supplier_code:
                     raise ValueError("供应商 360 Agent 目标必须提供准确供应商编码")
+                if "replenishment_plan" in self.tasks and not self.slots.product_keyword:
+                    raise ValueError("补货量建议 Agent 目标必须提供产品关键词")
             elif self.execution_mode == "batch":
                 if not 2 <= len(self.sub_tasks) <= 6:
                     raise ValueError("batch 模式必须包含 2 至 6 个原子任务")
@@ -623,7 +625,8 @@ class Understanding(BaseModel):
                  "purchase_request": "purchase_request_query", "order_trace": "purchase_order_trace",
                  "quality_acceptance": "quality_acceptance_query", "delivery": "delivery_query",
                  "finance_reconciliation": "finance_reconciliation_query",
-                 "supplier": "supplier_query", "supplier_profile": "supplier_profile"}.get(self.tasks[0], "unknown")
+                 "supplier": "supplier_query", "supplier_profile": "supplier_profile",
+                 "replenishment_plan": "replenishment_plan"}.get(self.tasks[0], "unknown")
                 if len(self.tasks) == 1 else "inventory_and_quotes_query" if set(self.tasks) == {"inventory", "quotes"} else "unknown")
 
 
@@ -1017,6 +1020,27 @@ class InventoryResult(ToolSchema):
     rows: list[InventoryRow]
     sources: list[Source]
     warnings: list[str]
+
+
+class ReplenishmentPlanInput(ToolSchema):
+    product_id: PositiveID
+
+
+class ReplenishmentPlanResult(ToolSchema):
+    tool: Literal["inventory.replenishment_plan"] = "inventory.replenishment_plan"
+    product_id: int
+    product_code: str
+    product_name: str
+    unit_name: str | None
+    safety_stock: str | None
+    available_quantity: str
+    incoming_purchase_quantity: str
+    incoming_replenishment_quantity: str
+    suggested_quantity: str | None
+    status: Literal["SUGGESTED", "COVERED", "NO_THRESHOLD"]
+    summary: str
+    warnings: list[str]
+    sources: list[Source]
 
 
 class QuoteRow(ToolSchema):

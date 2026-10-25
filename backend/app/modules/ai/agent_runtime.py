@@ -82,7 +82,7 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 多个产品/询价候选由服务端暂停。只读查询不需要用户提供采购用途或采购数量。
 
 # 参数与执行顺序
-采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询与供应商资料查询不需要产品目录定位。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code；supplier_profile 只能调用 suppliers.profile，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询可以复述系统保存的订单/到货/验收/退货/对账行、发票行占用与核验金额、来源变化提示及付款状态和理论上限。必须保留来源未匹配、旧版本或已变化等核查提示；理论付款上限不等于对任一具体金额的审批通过，不得建议或执行付款，付款服务在提交/审批时仍会重新校验。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险；供应商 360 可复述工具返回的订单、到货、质量、异常与财务汇总，但必须保留各段权限状态和“仅代表当前范围”的限制，不得补算或推断未返回的指标。
+采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询、供应商资料查询与供应商 360 不需要产品目录定位；补货量建议 replenishment_plan 必须先通过 catalog.search_products 定位唯一产品，再调用 inventory.replenishment_plan，不得自行估算补货量。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code；supplier_profile 只能调用 suppliers.profile，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询可以复述系统保存的订单/到货/验收/退货/对账行、发票行占用与核验金额、来源变化提示及付款状态和理论上限。必须保留来源未匹配、旧版本或已变化等核查提示；理论付款上限不等于对任一具体金额的审批通过，不得建议或执行付款，付款服务在提交/审批时仍会重新校验。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险；供应商 360 可复述工具返回的订单、到货、质量、异常与财务汇总，但必须保留各段权限状态和“仅代表当前范围”的限制，不得补算或推断未返回的指标。
 根据已返回结果决定后续工具；不要重复调用同工具同参数。未授权工具不在目录中。
 用户指定返回条数时，必须在对应业务工具 arguments.limit 中保留该值（不超过工具上限）。
 库存 totals 已按全部授权余额计算，即使 limit=1 也无需扩大明细条数获取全范围合计。
@@ -724,6 +724,9 @@ def _summary(entries: list[dict]) -> str:
     profiles = [entry["result"] for entry in entries if entry.get("tool") == "suppliers.profile"]
     if profiles:
         return "\n".join(result["answer"] for result in profiles)
+    plans = [entry["result"] for entry in entries if entry.get("tool") == "inventory.replenishment_plan"]
+    if plans:
+        return "\n".join(result["summary"] for result in plans)
     if requests or orders or acceptances or deliveries or reconciliations or suppliers:
         lines = []
         for result in requests:
@@ -811,7 +814,8 @@ def _validate_finish_evidence(intent: str, entries: list[dict]) -> None:
                 {"deliveries.get_by_no"} if intent == "delivery_query" else
                 {"finance_reconciliations.get_by_no"} if intent == "finance_reconciliation_query" else
                 {"suppliers.get_by_code"} if intent == "supplier_query" else
-                {"suppliers.profile"} if intent == "supplier_profile" else set())
+                {"suppliers.profile"} if intent == "supplier_profile" else
+                {"inventory.replenishment_plan"} if intent == "replenishment_plan" else set())
     locators = {"catalog.search_products", "supplier_quotes.find_rfq_items"}
     if any(entry["tool"] not in required and not (
         entry["tool"] in locators and entry.get("result", {}).get("total_rows") == 0
@@ -1112,7 +1116,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                     (action.tool == "deliveries.get_by_no" and "delivery" not in tasks) or
                     (action.tool == "finance_reconciliations.get_by_no" and "finance_reconciliation" not in tasks) or
                     (action.tool == "suppliers.get_by_code" and "supplier" not in tasks) or
-                    (action.tool == "suppliers.profile" and "supplier_profile" not in tasks)):
+                    (action.tool == "suppliers.profile" and "supplier_profile" not in tasks) or
+                    (action.tool == "inventory.replenishment_plan" and "replenishment_plan" not in tasks)):
                     entry["error_code"] = "INTENT_MISMATCH"
                     raise BusinessValidationError("INTENT_MISMATCH")
                 slots = understanding.get("slots") or {}
@@ -1128,7 +1133,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                 keyword = action.arguments.get("keyword")
                 if keyword != current.workflow.product_keyword:
                     raise BusinessValidationError("产品已定位，请沿用当前产品查询库存或询价")
-            if action.tool in {"inventory.query_available", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"}:
+            if action.tool in {"inventory.query_available", "inventory.replenishment_plan", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"}:
                 verified_ids = current.workflow.verified_products if action.tool == 'inventory.query_available' and current.workflow.all_products else [current.verified_product]
                 if current.verified_product is None or action.arguments.get("product_id") not in verified_ids:
                     raise BusinessValidationError("产品 ID 必须来自本轮定位或用户选择")

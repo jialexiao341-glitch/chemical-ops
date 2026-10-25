@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import re
 from typing import Callable
 
@@ -24,6 +25,8 @@ from app.modules.ai.schema import (
     ProductSearchResult,
     PurchaseOrderTraceInput,
     PurchaseOrderTraceResult,
+    ReplenishmentPlanInput,
+    ReplenishmentPlanResult,
     QualityAcceptanceInput,
     QualityAcceptanceResult,
     DeliveryInput,
@@ -49,6 +52,7 @@ from app.modules.ai.schema import (
     ToolCall,
     ToolSchema,
 )
+from app.modules.ai.formatting import format_decimal
 from app.modules.ai.supplier_profile import supplier_profile_tool
 from app.modules.ai.tool_sql_timeout import (
     ToolExecutionTimeout,
@@ -62,7 +66,10 @@ from app.modules.chemicals.model import Chemical
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.inventory.service import accessible_warehouse_ids
 from app.modules.products.model import Product
+from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
+from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.purchase_requests.model import Unit
+from app.modules.replenishments.model import ReplenishmentItem, ReplenishmentRequest
 from app.modules.rfqs.model import RFQ, RFQItem, SupplierQuote, SupplierQuoteItem
 from app.modules.suppliers.model import Supplier
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
@@ -224,6 +231,123 @@ def query_inventory(db: Session, user: User, arguments: InventoryInput) -> Inven
         rows=[InventoryRow(**row) for row in rows],
         sources=[Source(resource="inventory_balances", record_id=row["balance_id"]) for row in rows],
         warnings=warnings,
+    )
+
+
+def replenishment_plan(db: Session, user: User, arguments: ReplenishmentPlanInput) -> ReplenishmentPlanResult:
+    """按安全库存、当前可用量、在途采购和未完成补货给出只读补货缺口。"""
+
+    product = db.execute(select(
+        Product.id, Product.product_code, Product.product_name, Product.unit_id,
+        Product.safety_stock_quantity,
+    ).where(Product.id == arguments.product_id, Product.status == "ACTIVE")).first()
+    if product is None:
+        raise ResourceNotFoundError("产品不存在或已停用")
+    unit = db.get(Unit, product.unit_id)
+    unit_name = unit.unit_name if unit is not None else None
+    warnings: list[str] = []
+    warehouses = accessible_warehouse_ids(db, user)
+    available_condition = [
+        InventoryBalance.product_id == product.id,
+        InventoryBalance.unit_id == product.unit_id,
+        Warehouse.status == "ACTIVE",
+    ]
+    if warehouses is not None:
+        available_condition.append(InventoryBalance.warehouse_id.in_(warehouses))
+    available = db.scalar(
+        select(func.coalesce(func.sum(case(
+            (InventoryBalance.status == "AVAILABLE",
+             InventoryBalance.quantity - InventoryBalance.locked_quantity), else_=0)), 0))
+        .select_from(InventoryBalance)
+        .join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id)
+        .where(*available_condition)
+    ) or Decimal(0)
+
+    roles = set(get_user_role_codes(db, user.id))
+    permissions = set(get_user_permission_codes(db, user.id))
+    admin = "SYS_ADMIN" in roles
+    incoming_purchase = Decimal(0)
+    if admin or "procurement.orders.read" in permissions:
+        pending_quantity = case(
+            (PurchaseOrderItem.order_quantity > PurchaseOrderItem.received_quantity,
+             PurchaseOrderItem.order_quantity - PurchaseOrderItem.received_quantity),
+            else_=0,
+        )
+        incoming_purchase = db.scalar(
+            select(func.coalesce(func.sum(pending_quantity), 0))
+            .select_from(PurchaseOrderItem)
+            .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.po_id)
+            .where(
+                PurchaseOrderItem.product_id == product.id,
+                PurchaseOrderItem.unit_id == product.unit_id,
+                PurchaseOrder.status.in_(("ORDERED", "PARTIAL")),
+                order_read_condition(user, roles),
+            )
+        ) or Decimal(0)
+    else:
+        warnings.append("当前账号没有采购订单读取权限，未计入在途采购量。")
+
+    incoming_replenishment = Decimal(0)
+    if admin or "procurement.replenishments.read" in permissions:
+        incoming_replenishment = db.scalar(
+            select(func.coalesce(func.sum(ReplenishmentItem.requested_quantity), 0))
+            .select_from(ReplenishmentItem)
+            .join(ReplenishmentRequest, ReplenishmentRequest.id == ReplenishmentItem.replenishment_request_id)
+            .where(
+                ReplenishmentItem.product_id == product.id,
+                ReplenishmentItem.unit_id == product.unit_id,
+                ReplenishmentItem.status == "OPEN",
+                ReplenishmentRequest.status.in_(("SUBMITTED", "APPROVED")),
+            )
+        ) or Decimal(0)
+    else:
+        warnings.append("当前账号没有补货申请读取权限，未计入未完成补货量。")
+
+    safety = product.safety_stock_quantity
+    if safety is None or safety <= 0:
+        status = "NO_THRESHOLD"
+        suggested = None
+        summary = (
+            f"产品 {product.product_code}（{product.product_name}）未维护安全库存，"
+            f"当前可用 {format_decimal(available)} {unit_name or '单位未知'}；无法给出补货量建议。"
+        )
+    else:
+        gap = safety - available - incoming_purchase - incoming_replenishment
+        suggested = max(Decimal(0), gap)
+        status = "COVERED" if gap <= 0 else "SUGGESTED"
+        if status == "COVERED":
+            summary = (
+                f"产品 {product.product_code}（{product.product_name}）可用 {format_decimal(available)} + "
+                f"在途采购 {format_decimal(incoming_purchase)} + 未完成补货 "
+                f"{format_decimal(incoming_replenishment)} 已覆盖安全库存 "
+                f"{format_decimal(safety)} {unit_name or '单位未知'}，暂不需要新增补货。"
+            )
+        else:
+            summary = (
+                f"产品 {product.product_code}（{product.product_name}）安全库存 "
+                f"{format_decimal(safety)} {unit_name or '单位未知'}，当前可用 {format_decimal(available)}、"
+                f"在途采购 {format_decimal(incoming_purchase)}、未完成补货 "
+                f"{format_decimal(incoming_replenishment)}；建议补货 {format_decimal(suggested)} "
+                f"{unit_name or '单位未知'}。"
+            )
+    if safety is not None and safety > 0 and suggested is not None and suggested > 0:
+        warnings.append("建议量仅按库存缺口计算，未考虑采购批量、MOQ、包装规格和消耗速度。")
+    if unit_name is None:
+        warnings.append("产品计量单位缺失，数量口径需人工核对。")
+    return ReplenishmentPlanResult(
+        product_id=product.id,
+        product_code=product.product_code,
+        product_name=product.product_name,
+        unit_name=unit_name,
+        safety_stock=format_decimal(safety) if safety is not None else None,
+        available_quantity=format_decimal(available),
+        incoming_purchase_quantity=format_decimal(incoming_purchase),
+        incoming_replenishment_quantity=format_decimal(incoming_replenishment),
+        suggested_quantity=format_decimal(suggested) if suggested is not None else None,
+        status=status,
+        summary=summary,
+        warnings=warnings,
+        sources=[Source(resource="products", record_id=product.id)],
     )
 
 
@@ -560,6 +684,10 @@ TOOLS = {
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("inventory.query_available", "按产品查询可见仓库余额，分单位合计，保留明细来源",
                  "warehouse.inventory.read", InventoryInput, InventoryResult, query_inventory,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+        ToolSpec("inventory.replenishment_plan", "按产品安全库存、当前可用量、在途采购和未完成补货计算只读补货缺口",
+                 "warehouse.inventory.read", ReplenishmentPlanInput, ReplenishmentPlanResult, replenishment_plan,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("supplier_quotes.compare", "比较同一可见询价明细的最新有效报价，并在完整可比报价中提供成本候选及交期、账期、可见质量事实风险",
