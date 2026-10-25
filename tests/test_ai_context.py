@@ -159,7 +159,7 @@ def test_finance_reconciliation_context_shows_line_matching_and_payment_cap(monk
     ))
 
     assert "第 1 行 乙醇" in response.answer
-    assert "当前单笔付款理论上限 70 CNY" in response.answer
+    assert "当前单笔付款理论上限 70.00 CNY" in response.answer
     assert "保存版本相比已变化" in response.answer
     assert "FI-UNMATCHED" in response.answer
     assert "付款服务提交时重新校验" in response.answer

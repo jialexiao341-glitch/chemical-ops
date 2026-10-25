@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from app.core.config import Settings
 from app.modules.ai.schema import Intent
 from app.modules.ai.evaluation import classify_intent
-from app.modules.ai.order_trace import _can_read, _stage, extract_order_trace_no
+from app.modules.ai.order_trace import _amount, _can_read, _stage, extract_order_trace_no
 
 
 def test_order_trace_requires_order_number_and_trace_question() -> None:
@@ -23,6 +23,14 @@ def test_order_trace_accepts_production_order_number_without_rewriting_it() -> N
     assert extract_order_trace_no("采购订单 po_26001 为什么还没有结算？") == "PO_26001"
     assert extract_order_trace_no("为什么 POST 请求失败") is None
     assert extract_order_trace_no("为什么 POBOX 还没有结算") is None
+
+
+def test_trace_amounts_use_trimmed_decimal_text() -> None:
+    from decimal import Decimal
+
+    assert _amount(Decimal("54.240000")) == "54.24"
+    assert _amount(Decimal("100.000000")) == "100.00"
+    assert _amount(None) is None
 
 
 def test_denied_stage_does_not_expose_records_or_counts() -> None:

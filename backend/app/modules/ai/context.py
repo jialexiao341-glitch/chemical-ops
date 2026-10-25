@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import AuthorizationError, BusinessValidationError
+from app.modules.ai.formatting import format_amount, format_decimal
 from app.modules.ai.order_trace import format_stage_line, trace_purchase_order
 from app.modules.ai.schema import (
     AIContextAskRequest,
@@ -93,7 +94,7 @@ def _purchase_order_snapshot(db: Session, user: User, object_id: int) -> tuple[A
     summary = [
         f"订单状态：{order.status}",
         f"供应商：{trace.get('supplier') or '未登记'}",
-        f"订单金额：{order.order_amount} {order.currency_code}",
+        f"订单金额：{format_amount(order.order_amount)} {order.currency_code}",
     ]
     if order.expected_arrival_date:
         summary.append(f"预计到货日期：{order.expected_arrival_date.isoformat()}")
@@ -216,7 +217,7 @@ def _purchase_request_context(db: Session, user: User, object_id: int) -> tuple[
     request = get_purchase_request(db, user, object_id)
     summary = [f"申请状态：{request.status}", f"采购用途：{request.purpose}"]
     if request.budget_amount is not None:
-        summary.append(f"预算金额：{request.budget_amount} {request.currency_code}")
+        summary.append(f"预算金额：{format_amount(request.budget_amount)} {request.currency_code}")
     if request.expected_date:
         summary.append(f"期望到货日期：{request.expected_date.isoformat()}")
     if request.items:
@@ -282,7 +283,8 @@ def _purchase_request_answer(question: str, purchase_request: object, full_answe
             lines.append("当前没有采购明细。")
         return "\n".join(lines)
     if any(marker in question for marker in ("预算", "到货", "日期", "金额")):
-        budget = f"{purchase_request.budget_amount} {purchase_request.currency_code}" if purchase_request.budget_amount is not None else "未填写"
+        budget = (f"{format_amount(purchase_request.budget_amount)} {purchase_request.currency_code}"
+                  if purchase_request.budget_amount is not None else "未填写")
         expected = purchase_request.expected_date.isoformat() if purchase_request.expected_date else "未填写"
         return f"采购申请 {purchase_request.request_no}\n预算金额：{budget}\n期望到货日期：{expected}"
     if any(marker in question for marker in ("缺", "还要", "完善")):
@@ -517,13 +519,16 @@ def _finance_reconciliation_context(db: Session, user: User, object_id: int) -> 
     payment_precheck = read_model["payment_precheck"]
     summary = [
         f"对账状态：{reconciliation.status}",
-        f"对账金额：{reconciliation.total_amount} {reconciliation.currency_code}",
+        f"对账金额：{format_amount(reconciliation.total_amount)} {reconciliation.currency_code}",
         f"发票状态汇总：{len(invoice_summary)} 种状态，{sum(int(row['count']) for row in invoice_summary)} 张",
         f"付款状态汇总：{len(payment_summary)} 种状态，{sum(int(row['count']) for row in payment_summary)} 笔",
-        f"当前付款理论上限：{payment_precheck['max_new_payment_amount']} {reconciliation.currency_code}",
+        f"当前付款理论上限：{format_amount(payment_precheck['max_new_payment_amount'])} {reconciliation.currency_code}",
     ]
     summary.extend(
-        f"第 {line['line_no']} 行 {line['product_name']}：验收 {line['accepted_quantity']}，对账 {line['reconciliation_quantity']} {line['unit_name']}；发票已核验 {line['verified_invoice_amount']}/{line['amount_incl_tax']} {reconciliation.currency_code}。"
+        f"第 {line['line_no']} 行 {line['product_name']}：验收 {format_decimal(line['accepted_quantity'])}，"
+        f"对账 {format_decimal(line['reconciliation_quantity'])} {line['unit_name']}；"
+        f"发票已核验 {format_amount(line['verified_invoice_amount'])}/"
+        f"{format_amount(line['amount_incl_tax'])} {reconciliation.currency_code}。"
         for line in read_model["lines"]
     )
     if read_model["source_changed"]:
@@ -583,16 +588,21 @@ def _finance_reconciliation_answer(trace: dict) -> str:
     read_model = trace["read_model"]
     lines = [
         f"财务对账单 {reconciliation.reconciliation_no}：{reconciliation.status}。",
-        f"对账金额：{reconciliation.total_amount} {reconciliation.currency_code}。",
+        f"对账金额：{format_amount(reconciliation.total_amount)} {reconciliation.currency_code}。",
         f"供应商：{supplier.supplier_name if supplier else '未登记'}。",
     ]
     for label, rows in (("发票", read_model["invoices"]), ("付款", read_model["payments"])):
-        detail = "、".join(f"{row['status']} {row['count']} 笔 / {row['amount']} {reconciliation.currency_code}" for row in rows) or "暂无记录"
+        detail = "、".join(f"{row['status']} {row['count']} 笔 / {format_amount(row['amount'])} {reconciliation.currency_code}" for row in rows) or "暂无记录"
         lines.append(f"{label}状态汇总：{detail}。")
     for row in read_model["lines"]:
         lines.append(
-            f"第 {row['line_no']} 行 {row['product_name']}：订购 {row['ordered_quantity']}，已收 {row['received_quantity']}，验收 {row['accepted_quantity']}，退货 {row['returned_quantity']}，对账 {row['reconciliation_quantity']} {row['unit_name']}；"
-            f"发票已占用 {row['invoiced_reserved_amount']}，已核验 {row['verified_invoice_amount']}/{row['amount_incl_tax']} {reconciliation.currency_code}。"
+            f"第 {row['line_no']} 行 {row['product_name']}：订购 {format_decimal(row['ordered_quantity'])}，"
+            f"已收 {format_decimal(row['received_quantity'])}，验收 {format_decimal(row['accepted_quantity'])}，"
+            f"退货 {format_decimal(row['returned_quantity'])}，"
+            f"对账 {format_decimal(row['reconciliation_quantity'])} {row['unit_name']}；"
+            f"发票已占用 {format_amount(row['invoiced_reserved_amount'])}，"
+            f"已核验 {format_amount(row['verified_invoice_amount'])}/"
+            f"{format_amount(row['amount_incl_tax'])} {reconciliation.currency_code}。"
         )
         lines.extend(f"第 {row['line_no']} 行核查提示：{warning}。" for warning in row["warnings"])
     if read_model["source_changed"]:
@@ -602,9 +612,9 @@ def _finance_reconciliation_answer(trace: dict) -> str:
         lines.append("有效发票尚未行级匹配：" + "、".join(read_model["unallocated_invoices"]) + "。")
     precheck = read_model["payment_precheck"]
     lines.append(
-        f"付款前置数据：已核验发票 {precheck['verified_invoice_amount']} {reconciliation.currency_code}，"
-        f"有效付款占用 {precheck['active_payment_amount']} {reconciliation.currency_code}，"
-        f"当前单笔付款理论上限 {precheck['max_new_payment_amount']} {reconciliation.currency_code}。"
+        f"付款前置数据：已核验发票 {format_amount(precheck['verified_invoice_amount'])} {reconciliation.currency_code}，"
+        f"有效付款占用 {format_amount(precheck['active_payment_amount'])} {reconciliation.currency_code}，"
+        f"当前单笔付款理论上限 {format_amount(precheck['max_new_payment_amount'])} {reconciliation.currency_code}。"
     )
     lines.extend(f"付款前置条件未满足：{blocker}。" for blocker in precheck["blockers"])
     lines.append(precheck["limitation"])

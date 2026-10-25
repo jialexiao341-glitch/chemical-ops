@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery
+from app.modules.ai.formatting import format_amount
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
 from app.modules.inventory.model import InventoryBalance, InventoryBatch
 from app.modules.inventory_returns.model import InventoryReturnRequest
@@ -56,7 +57,7 @@ def _iso(value: Any) -> str | None:
 
 
 def _amount(value: Decimal | None) -> str | None:
-    return str(value) if value is not None else None
+    return format_amount(value) if value is not None else None
 
 
 def _can_read(stage: str, permissions: set[str], roles: set[str]) -> bool:
@@ -282,7 +283,8 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
             )
         ) or Decimal(0)
         if verified < expected:
-            conclusion.append(f"已核验发票 {verified} {currency}，低于应付口径 {expected} {currency}")
+            conclusion.append(f"已核验发票 {format_amount(verified)} {currency}，"
+                              f"低于应付口径 {format_amount(expected)} {currency}")
     if payment_allowed and expected is not None:
         paid = db.scalar(
             select(func.coalesce(func.sum(FinancePayment.amount), 0)).where(
@@ -292,7 +294,8 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
             )
         ) or Decimal(0)
         if paid < expected:
-            conclusion.append(f"已付款 {paid} {currency}，低于应付口径 {expected} {currency}")
+            conclusion.append(f"已付款 {format_amount(paid)} {currency}，"
+                              f"低于应付口径 {format_amount(expected)} {currency}")
     if settlement_allowed:
         if not settlements:
             conclusion.append("尚未生成结算单")
