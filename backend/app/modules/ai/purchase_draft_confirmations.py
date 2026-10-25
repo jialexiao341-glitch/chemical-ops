@@ -159,7 +159,7 @@ def patch_purchase_draft(db: Session, user: User, data: AIPurchaseDraftPatch) ->
                     raise AuthorizationError("当前权限不能检索产品目录")
                 from app.modules.ai.schema import ToolCall
                 found = agent_tools.execute_tool(db, user, ToolCall(tool="catalog.search_products",
-                    arguments={"keyword": item.requested_name, "limit": 100}))
+                    arguments={"keyword": product.product_code, "limit": 10}))
                 if product.id not in {row.product_id for row in found.rows}:
                     raise BusinessValidationError("产品必须来自当前授权目录候选")
             products[str(product.id)] = {"version_no": product.version_no, "status": product.status}

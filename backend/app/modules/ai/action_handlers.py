@@ -8,6 +8,8 @@ from app.modules.purchase_requests import service as purchase_request_service
 from app.modules.purchase_requests.model import PurchaseRequest
 from app.modules.purchase_requests.model import Unit
 from app.modules.purchase_requests.schema import PurchaseRequestCreate, PurchaseRequestUpdate, PurchaseRequestRead
+from app.modules.operation_exceptions import service as exception_service
+from app.modules.operation_exceptions.schema import OperationTaskCreate, OperationTaskRead
 from app.modules.purchase_orders import service as purchase_order_service
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.purchase_orders.schema import PurchaseOrderCreate, PurchaseOrderRead
@@ -114,8 +116,11 @@ def _validate_catalog_product_candidates(db, user, items, existing_product_ids: 
         available = {entry["name"] for entry in agent_tools.list_tools(db, user)}
         if "catalog.search_products" not in available:
             raise BusinessValidationError("当前账号不能将产品目录记录关联到采购申请")
+        product = db.get(Product, item.product_id)
+        if product is None or product.status != "ACTIVE":
+            raise BusinessValidationError("关联产品不存在或已停用")
         candidates = agent_tools.execute_tool(db, user, ToolCall(
-            tool="catalog.search_products", arguments={"keyword": item.requested_name, "limit": 100}))
+            tool="catalog.search_products", arguments={"keyword": product.product_code, "limit": 10}))
         if item.product_id not in {row.product_id for row in candidates.rows}:
             raise BusinessValidationError("关联产品必须来自当前用户可访问的产品目录候选")
 
@@ -787,3 +792,106 @@ class PurchaseOrderCreateDraftHandler:
 
 
 register_handler("purchase_order.create_draft", PurchaseOrderCreateDraftHandler())
+
+
+def _exception_snapshot(exception) -> dict[str, Any]:
+    return {
+        "id": exception.id,
+        "exception_no": exception.exception_no,
+        "exception_type": exception.exception_type,
+        "status": exception.status,
+        "owner_id": exception.owner_id,
+        "updated_at": exception.updated_at.isoformat() if exception.updated_at else None,
+        "source_type": exception.source_type,
+        "source_id": exception.source_id,
+    }
+
+
+def _assignee_snapshot(db, assignee_id: int | None) -> dict[str, Any] | None:
+    if assignee_id is None:
+        return None
+    assignee = db.get(User, assignee_id)
+    if assignee is None:
+        raise BusinessValidationError("任务负责人不存在或已停用")
+    return {"id": assignee.id, "status": assignee.status, "department_id": assignee.department_id}
+
+
+class ExceptionTaskCreateHandler:
+    permission_code = "operations.exceptions.write"
+    resource_type = "OPERATION_EXCEPTION"
+    _TASK_FIELDS = ("title", "assignee_id", "priority", "due_at")
+
+    @staticmethod
+    def _task_values(payload: dict[str, Any]) -> dict[str, Any]:
+        """日期型截止时间按当天结束处理；不接受模型自行换算时区。"""
+
+        values = {key: payload[key] for key in ExceptionTaskCreateHandler._TASK_FIELDS if key in payload}
+        due_at = values.get("due_at")
+        if isinstance(due_at, str) and len(due_at) == 10 and due_at[4] == "-" and due_at[7] == "-":
+            values["due_at"] = f"{due_at}T23:59:59"
+        return values
+
+    def _resolve_exception(self, db, user, payload: dict[str, Any]):
+        if ("exception_id" in payload) == ("exception_no" in payload):
+            raise BusinessValidationError("异常任务提案必须且只能提供准确异常编号")
+        if "exception_id" in payload:
+            exception_id = payload["exception_id"]
+            if isinstance(exception_id, bool) or not isinstance(exception_id, int) or exception_id <= 0:
+                raise BusinessValidationError("运营异常编号无效")
+            return exception_service.get_exception_for_task_creation(db, user, exception_id)
+        exception_no = payload["exception_no"]
+        if not isinstance(exception_no, str) or not exception_no.strip() or len(exception_no.strip()) > 32:
+            raise BusinessValidationError("请提供准确的运营异常编号")
+        return exception_service.get_exception_by_no(db, user, exception_no.strip())
+
+    def _prepare(self, db, user, payload, *, for_update: bool):
+        if not isinstance(payload, dict):
+            raise BusinessValidationError("异常任务提案格式无效")
+        if set(payload) - {"exception_id", "exception_no", *self._TASK_FIELDS}:
+            raise BusinessValidationError("异常任务提案包含不允许的字段")
+        exception = self._resolve_exception(db, user, payload)
+        if for_update:
+            exception = exception_service.get_exception_for_task_creation(db, user, exception.id, for_update=True)
+        if exception.status in {"CLOSED", "CANCELLED"}:
+            raise BusinessValidationError("已关闭或已取消的异常不能新增处理任务")
+        data = OperationTaskCreate.model_validate(self._task_values(payload))
+        exception_service.validate_assignee(db, user, data.assignee_id)
+        snapshot = {"exception": _exception_snapshot(exception),
+                    "assignee": _assignee_snapshot(db, data.assignee_id)}
+        return data, exception, snapshot
+
+    def prepare(self, db, user, payload):
+        data, exception, snapshot = self._prepare(db, user, payload, for_update=False)
+        normalized = {"exception_id": exception.id, **data.model_dump(mode="json")}
+        diff = [{"field": "title", "before": None, "after": data.title}]
+        diff.append({"field": "priority", "before": None, "after": data.priority})
+        if data.due_at is not None:
+            diff.append({"field": "due_at", "before": None, "after": data.due_at.isoformat()})
+        if data.assignee_id is not None:
+            diff.append({"field": "assignee_id", "before": None, "after": data.assignee_id})
+        return {
+            "payload": normalized,
+            "snapshot": snapshot,
+            "resource_id": exception.id,
+            "diff": diff,
+            "evidence": [{"type": "operation_exception", "id": exception.id,
+                          "exception_no": exception.exception_no, "status": exception.status,
+                          "exception_type": exception.exception_type}],
+            "warnings": [],
+            "blockers": [],
+            "risk_level": "LOW",
+        }
+
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        expected = proposal.expected_resource_snapshot or {}
+        _, exception, snapshot = self._prepare(db, user, proposal.payload, for_update=for_update)
+        if snapshot != expected:
+            raise BusinessValidationError("异常状态、负责人或内容已变化，请重新核对")
+
+    def execute(self, db, user, proposal, *, commit=False):
+        data = OperationTaskCreate.model_validate(self._task_values(proposal.payload))
+        task = exception_service.create_task(db, user, int(proposal.resource_id), data, commit=commit)
+        return OperationTaskRead.model_validate(task).model_dump(mode="json")
+
+
+register_handler("exceptions.create_task", ExceptionTaskCreateHandler())

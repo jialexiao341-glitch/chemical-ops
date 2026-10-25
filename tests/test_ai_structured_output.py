@@ -38,16 +38,28 @@ def test_routing_action_schema_has_explicit_properties_and_nullable_branch_types
     schema = schema_response_format(routing.Understanding, "route")["json_schema"]["schema"]
     branches = schema["properties"]["action_fields"]["anyOf"]
     objects = [branch for branch in branches if branch.get('type') == 'object']
-    assert len(objects) == 2
+    assert len(objects) == 3
     fields = set().union(*(branch['properties'].keys() for branch in objects))
-    assert {"supplier_codes", "quote_deadline", "purpose", "items"} <= fields
+    assert {"supplier_codes", "quote_deadline", "purpose", "items", "title", "due_at"} <= fields
     assert all("type" in branch for branch in branches)
     assert all(not ({"purpose", "supplier_codes"} <= branch['properties'].keys()) for branch in objects)
+    assert any({"title", "due_at"} <= branch['properties'].keys()
+               and "assignee_id" not in branch['properties'] for branch in objects)
     with pytest.raises(ValidationError):
         routing.Understanding.model_validate({
             "purpose": "purchase_update", "slots": {"request_no": "PR-001"},
             "action_fields": {"arbitrary_write": "forbidden"},
         })
+
+
+def test_purchase_draft_discards_model_action_fields():
+    decision = routing.Understanding.model_validate({
+        "purpose": "purchase_draft",
+        "action_fields": {"purpose": "质量部留样", "priority": "HIGH",
+                          "items": [{"requested_name": "无水乙醇", "quantity": "50", "unit_id": 2}]},
+    })
+    assert decision.action_fields is None
+    assert decision.route == "purchase_draft"
 
 
 def test_routing_strict_action_null_placeholders_do_not_expand_a_proposal():

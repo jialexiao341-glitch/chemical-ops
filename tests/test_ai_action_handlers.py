@@ -20,6 +20,27 @@ class _DB:
         self.commits += 1
 
 
+def test_create_draft_catalog_validation_uses_product_code_with_valid_limit(monkeypatch):
+    from app.modules.ai import action_handlers, agent_tools
+    from app.modules.products.model import Product
+
+    product = SimpleNamespace(id=9, product_code="PRD-ETHANOL-AR", status="ACTIVE")
+    db = _DB()
+    db.get = lambda model, _id: product if model is Product else None
+    calls = []
+    monkeypatch.setattr(agent_tools, "list_tools", lambda *_args: [{"name": "catalog.search_products"}])
+
+    def execute_tool(_db, _user, call):
+        calls.append(call)
+        assert 1 <= call.arguments["limit"] <= 20
+        return SimpleNamespace(rows=[SimpleNamespace(product_id=9)])
+
+    monkeypatch.setattr(agent_tools, "execute_tool", execute_tool)
+    action_handlers._validate_catalog_product_candidates(
+        db, SimpleNamespace(id=5), [SimpleNamespace(product_id=9)])
+    assert calls[0].arguments == {"keyword": "PRD-ETHANOL-AR", "limit": 10}
+
+
 def test_update_request_flushes_without_committing_when_used_by_action_transaction(monkeypatch):
     request = SimpleNamespace(id=8, status="DRAFT", purpose="旧用途", items=[])
     db = _DB()

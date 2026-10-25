@@ -298,6 +298,34 @@ def get_exception(db: Session, user: User, exception_id: int, *, for_update: boo
     return exception
 
 
+def _require_task_creation_scope(db: Session, user: User, exception: OperationException) -> OperationException:
+    """新增处理任务要求本人负责或来源记录处于可读范围。"""
+
+    if exception.owner_id != user.id and not _has_source_exception_scope(db, user, exception):
+        raise ResourceNotFoundError(f"异常 {exception.id} 不存在")
+    return exception
+
+
+def get_exception_for_task_creation(
+    db: Session, user: User, exception_id: int, *, for_update: bool = False,
+) -> OperationException:
+    """读取异常并校验新增处理任务的数据范围。"""
+
+    return _require_task_creation_scope(db, user, _require_exception(db, exception_id, for_update=for_update))
+
+
+def get_exception_by_no(
+    db: Session, user: User, exception_no: str, *, for_update: bool = False,
+) -> OperationException:
+    """按准确异常编号读取本人可办理的异常。"""
+
+    query = select(OperationException).where(OperationException.exception_no == exception_no)
+    exception = db.scalar(query.with_for_update() if for_update else query)
+    if exception is None:
+        raise ResourceNotFoundError(f"异常 {exception_no} 不存在或不在当前用户数据范围内")
+    return _require_task_creation_scope(db, user, exception)
+
+
 def update_exception(db: Session, user: User, exception_id: int, data: OperationExceptionUpdate) -> OperationException:
     """指派负责人并推进异常状态。"""
 
@@ -308,7 +336,7 @@ def update_exception(db: Session, user: User, exception_id: int, data: Operation
         raise BusinessValidationError("已关闭或已取消的异常不能修改")
     values = data.model_dump(exclude_unset=True)
     if "owner_id" in values and data.owner_id is not None:
-        _validate_assignee(db, user, data.owner_id)
+        validate_assignee(db, user, data.owner_id)
     next_status = data.status
     if next_status:
         if next_status in {"RESOLVED", "CLOSED"}:
@@ -381,7 +409,7 @@ def _require_task(db: Session, task_id: int, *, for_update: bool = False) -> Ope
     return task
 
 
-def _validate_assignee(db: Session, user: User, assignee_id: int | None) -> None:
+def validate_assignee(db: Session, user: User, assignee_id: int | None) -> None:
     """校验异常经办人处于允许的部门范围且启用。"""
 
     if assignee_id is not None:
@@ -427,23 +455,24 @@ def list_tasks(db: Session, user: User, exception_id: int, *, status: str | None
     )
 
 
-def create_task(db: Session, user: User, exception_id: int, data: OperationTaskCreate) -> OperationTask:
-    """为异常创建处理任务。"""
+def create_task(
+    db: Session, user: User, exception_id: int, data: OperationTaskCreate, *, commit: bool = True,
+) -> OperationTask:
+    """为异常创建处理任务；可由调用方在同一事务内提交。"""
 
-    exception = get_exception(db, user, exception_id)
-    if exception.owner_id != user.id and not _has_source_exception_scope(db, user, exception):
-        raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
+    exception = get_exception_for_task_creation(db, user, exception_id, for_update=True)
     if exception.status in {"CLOSED", "CANCELLED"}:
         raise BusinessValidationError("已关闭或已取消的异常不能新增处理任务")
-    _validate_assignee(db, user, data.assignee_id)
+    validate_assignee(db, user, data.assignee_id)
     task = OperationTask(exception_id=exception.id, **data.model_dump())
     db.add(task)
     if exception.status in {"OPEN", "RESOLVED"}:
         exception.status = "PROCESSING"
     db.flush()
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="OPERATION_TASK", resource_id=task.id, request_summary="创建异常处理任务", result_status="SUCCESS")
-    db.commit()
-    db.refresh(task)
+    if commit:
+        db.commit()
+        db.refresh(task)
     return task
 
 
@@ -464,7 +493,7 @@ def update_task(db: Session, user: User, task_id: int, data: OperationTaskUpdate
     if task.status == "CANCELLED":
         raise BusinessValidationError("已取消的任务不能修改")
     if "assignee_id" in values:
-        _validate_assignee(db, user, data.assignee_id)
+        validate_assignee(db, user, data.assignee_id)
     next_status = data.status
     if next_status:
         allowed = {

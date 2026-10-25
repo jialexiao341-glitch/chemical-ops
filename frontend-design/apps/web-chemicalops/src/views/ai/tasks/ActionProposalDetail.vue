@@ -28,6 +28,7 @@ const actionLabels: Record<string, string> = {
   'rfq.send': '发送询价',
   'rfq.select_quote': '确认中选报价',
   'purchase_order.create_draft': '生成采购订单草稿',
+  'exceptions.create_task': '创建异常处理任务',
 };
 const statusLabels: Record<AiApi.ActionProposalRead['status'], string> = {
   CANCELLED: '已取消',
@@ -58,6 +59,9 @@ const fieldLabels: Record<string, string> = {
   delivery_address: '收货地址',
   expected_arrival_date: '预计到货日期',
   note: '备注',
+  title: '任务标题',
+  due_at: '截止时间',
+  assignee_id: '负责人',
 };
 const dateFields = new Set(['expected_date', 'requested_delivery_date', 'quote_deadline', 'expected_arrival_date']);
 const statusColor: Record<AiApi.ActionProposalRead['status'], string> = {
@@ -171,6 +175,10 @@ function orderTermsLines(evidence: Record<string, unknown>) {
             <div class="font-medium">{{ formatValue(item.label) }}</div>
             <div class="text-muted-foreground">{{ toolEvidenceSummary(item) }}<span v-if="item.scope"> · {{ formatValue(item.scope) }}</span></div>
             <div v-if="evidenceSourceLabels(item)" class="text-muted-foreground">来源 {{ evidenceSourceLabels(item) }}</div>
+          </template>
+          <template v-else-if="item.type === 'operation_exception'">
+            <div class="font-medium">异常 {{ formatValue(item.exception_no) }}</div>
+            <div class="text-muted-foreground">类型 {{ formatValue(item.exception_type) }} · 状态 {{ formatValue(item.status) }}</div>
           </template>
           <template v-else-if="item.type === 'purchase_order_terms_check'">
             <div class="mb-1 text-muted-foreground">比价单 {{ formatValue(item.comparison_no) }} · 报价 {{ formatValue(item.quote_no) }} · 申请 {{ formatValue(item.request_no) }}</div>

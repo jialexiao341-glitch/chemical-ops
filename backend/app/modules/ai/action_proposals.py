@@ -17,7 +17,7 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 
 
-INBOX_ACTION_TYPES = ("purchase_request.create_draft", "purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft")
+INBOX_ACTION_TYPES = ("purchase_request.create_draft", "purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft", "exceptions.create_task")
 
 
 def _now() -> datetime:
@@ -182,6 +182,22 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
         resource_visible = ("SYS_ADMIN" in roles or "procurement.requests.write" in permission_codes)
         if resource_visible:
             readable_reference = "待创建采购申请"
+    elif proposal.action_type == "exceptions.create_task":
+        if "SYS_ADMIN" in roles or "operations.exceptions.read" in permission_codes:
+            try:
+                from app.modules.operation_exceptions import service as exception_service
+
+                exception = exception_service.get_exception_for_task_creation(
+                    db, user, int(proposal.resource_id))
+                readable_reference = exception.exception_no
+                source_route = "/operations/exceptions"
+                resource_visible = True
+            except (TypeError, ValueError, BusinessValidationError, ResourceNotFoundError):
+                availability = "RESOURCE_UNAVAILABLE"
+                reason = "关联异常已不可访问"
+        elif availability != "PERMISSION_REVOKED":
+            availability = "RESOURCE_UNAVAILABLE"
+            reason = "当前账号没有查看关联异常的权限"
     elif proposal.action_type in {"purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft"}:
         resource_read_permission = "procurement.rfqs.read" if proposal.action_type in {"rfq.send", "rfq.select_quote", "purchase_order.create_draft"} else "procurement.requests.read"
         if "SYS_ADMIN" in roles or resource_read_permission in permission_codes:

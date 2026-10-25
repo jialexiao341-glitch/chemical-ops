@@ -429,6 +429,53 @@ def _draft_evidence():
     ]
 
 
+def _exception_task_proposal(proposal_db):
+    proposal = _proposal(proposal_db, action_type="exceptions.create_task",
+                         evidence=[{"type": "operation_exception", "id": 5,
+                                    "exception_no": "EX20261025000001", "status": "OPEN"}])
+    proposal.permission_code = "operations.exceptions.write"
+    proposal.resource_type = "OPERATION_EXCEPTION"
+    proposal.resource_id = "5"
+    proposal.payload = {"exception_id": 5, "title": "联系供应商补交 COA", "priority": "HIGH"}
+    proposal_db.commit()
+    return proposal
+
+
+def test_exception_task_inbox_shows_exception_reference_and_evidence(proposal_db, monkeypatch):
+    from app.modules.operation_exceptions import service as exception_service
+
+    monkeypatch.setattr(exception_service, "get_exception_for_task_creation",
+                        lambda *_args, **_kwargs: SimpleNamespace(id=5, exception_no="EX20261025000001"))
+    _configure_reads(monkeypatch, permissions={1: [
+        "operations.exceptions.read", "operations.exceptions.write",
+    ]}, handler=_ReadHandler(permission_code="operations.exceptions.write"))
+    _exception_task_proposal(proposal_db)
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.business_reference == "EX20261025000001"
+    assert result.source_route == "/operations/exceptions"
+    assert result.availability == "AVAILABLE"
+    assert result.requires_user_confirmation is True
+    assert result.evidence[0]["exception_no"] == "EX20261025000001"
+
+
+def test_exception_task_inbox_hides_reference_without_exception_read_permission(proposal_db, monkeypatch):
+    _configure_reads(monkeypatch, permissions={1: ["operations.exceptions.write"]},
+                     handler=_ReadHandler(permission_code="operations.exceptions.write"))
+    _exception_task_proposal(proposal_db)
+
+    result = ai_controller.action_proposal_read(
+        "a" * 32, db=proposal_db, user=SimpleNamespace(id=1, status="ACTIVE"))
+
+    assert result.availability == "RESOURCE_UNAVAILABLE"
+    assert result.business_reference is None
+    assert result.source_route is None
+    assert result.evidence == []
+    assert result.requires_user_confirmation is False
+
+
 def test_create_draft_revision_clears_evidence_only_when_product_changes(proposal_db, monkeypatch):
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
     proposal = _proposal(proposal_db, action_type="purchase_request.create_draft", evidence=_draft_evidence())

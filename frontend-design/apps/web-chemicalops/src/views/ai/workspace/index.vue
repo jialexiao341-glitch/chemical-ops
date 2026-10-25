@@ -529,6 +529,12 @@ async function onSend(retryFailed = false) {
       await prepareActionProposal(text, decision.route, 'understanding' in decision ? decision.understanding : { slots: {} });
       return;
     }
+    if (decision.route === 'exception_task') {
+      messages.value = history;
+      sending.value = false;
+      await prepareExceptionTaskProposal(text, 'understanding' in decision ? decision.understanding : { slots: {} });
+      return;
+    }
     if (decision.route === 'agent') {
       messages.value = history;
       sending.value = false;
@@ -745,6 +751,88 @@ async function prepareActionProposal(
     messages.value = messages.value.map((item) => item.id === assistantMessageId
       ? { ...item, content: error?.message || '动作预览生成失败，未执行写入。', streaming: false }
       : item);
+  } finally {
+    actionProposalBusy.value = false;
+    scrollToBottom();
+  }
+}
+
+async function prepareExceptionTaskProposal(
+  question: string,
+  understanding: {
+    action_fields?: Record<string, unknown> | null;
+    slots?: { exception_no?: string | null; request_no?: string | null } | null;
+  },
+) {
+  const exceptionNo = understanding.slots?.exception_no;
+  const userMessageId = nextId();
+  const assistantMessageId = nextId();
+  messages.value = [
+    ...messages.value,
+    { content: question, id: userMessageId, role: 'user' },
+    { content: '正在校验异常、权限和任务候选…', id: assistantMessageId, role: 'assistant', streaming: true },
+  ];
+  const fail = (content: string) => {
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? { ...item, content, streaming: false }
+      : item);
+  };
+  if (!exceptionNo) {
+    fail('需要准确的运营异常编号，当前请求没有创建提案。');
+    message.warning('需要准确的运营异常编号，当前请求没有创建提案。');
+    return;
+  }
+  if (!(hasAccessByRoles(['SYS_ADMIN']) || hasAccessByCodes(['operations.exceptions.write']))) {
+    fail('当前账号没有运营异常写入权限，未创建提案。');
+    message.error('你没有运营异常写入权限。');
+    return;
+  }
+  const fields = understanding.action_fields ?? {};
+  const title = typeof fields.title === 'string' ? fields.title.trim() : '';
+  if (!title) {
+    fail('请说明要创建的处理任务标题，当前请求没有创建提案。');
+    message.warning('请说明处理任务标题。');
+    return;
+  }
+  const payload = { exception_no: exceptionNo, ...fields };
+  actionProposalBusy.value = true;
+  try {
+    const proposal = await createActionProposalApi('exceptions.create_task', payload, makeIdempotencyKey());
+    const canConfirm = canConfirmActionProposal(proposal, proposal.preview_version, false);
+    const diff = proposal.diff.map((entry) => `${String(entry.field)}：${JSON.stringify(entry.after)}`).join('\n');
+    messages.value = messages.value.map((item) => item.id === assistantMessageId
+      ? {
+          ...item,
+          content: canConfirm
+            ? `待确认提案已生成。\n异常：${exceptionNo}\n${diff}`
+            : proposal.blockers.join('；') || '当前提案不能确认，请补充信息后重试。',
+          streaming: false,
+        }
+      : item);
+    if (!canConfirm) return;
+    Modal.confirm({
+      title: '确认创建异常处理任务',
+      content: `异常：${exceptionNo}\n${diff}\n确认后仅为该异常新增处理任务，并按既有规则推进异常状态。`,
+      okText: '确认创建',
+      onOk: async () => {
+        actionProposalBusy.value = true;
+        try {
+          const result = await confirmActionProposalApi<Record<string, any>>(proposal.confirmation_id, proposal.preview_version);
+          const taskTitle = result.title || title;
+          messages.value = messages.value.map((item) => item.id === assistantMessageId
+            ? { ...item, content: `${item.content}\n\n已创建异常处理任务：${taskTitle}${result.id ? `（#${result.id}）` : ''}。` }
+            : item);
+          message.success('已按确认的预览创建异常处理任务');
+        } finally {
+          actionProposalBusy.value = false;
+        }
+      },
+      onCancel: async () => {
+        await cancelActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+      },
+    });
+  } catch (error: any) {
+    fail(error?.message || '动作预览生成失败，未执行写入。');
   } finally {
     actionProposalBusy.value = false;
     scrollToBottom();

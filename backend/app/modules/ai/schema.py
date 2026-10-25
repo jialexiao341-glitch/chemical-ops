@@ -407,6 +407,7 @@ class Slots(BaseModel):
     acceptance_no: str | None = Field(default=None, max_length=32)
     delivery_no: str | None = Field(default=None, max_length=32)
     reconciliation_no: str | None = Field(default=None, max_length=32)
+    exception_no: str | None = Field(default=None, max_length=32, description="准确的运营异常编号，例如 EX20261025000001；不得猜测")
     supplier_code: str | None = Field(default=None, max_length=64)
     warehouse_keyword: str | None = Field(default=None, max_length=128)
     date_from: date | None = None
@@ -452,14 +453,22 @@ class RfqDraftActionFields(TypedDict, total=False):
     delivery_requirements: str | None
 
 
+class ExceptionTaskActionFields(TypedDict, total=False):
+    """异常处理任务候选；不含负责人 ID，避免模型猜测用户。"""
+    title: str | None
+    priority: str | None
+    due_at: str | None
+
+
 PurchaseRequestActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
 RfqDraftActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
+ExceptionTaskActionFields.__pydantic_config__ = ConfigDict(extra="forbid")
 
 
 class Understanding(BaseModel):
     """语义模型的严格输出契约，由程序校验后才能用于路由或拆分。"""
     model_config = ConfigDict(extra="forbid")
-    purpose: Literal["capability", "guidance", "query", "purchase_draft", "purchase_update", "purchase_submit", "rfq_draft", "greeting", "unsupported", "clarify"]
+    purpose: Literal["capability", "guidance", "query", "purchase_draft", "purchase_update", "purchase_submit", "rfq_draft", "exception_task", "greeting", "unsupported", "clarify"]
     execution_mode: Literal["agent", "batch", "query", "document", "none"] = "none"
     clarification_slot: str | None = Field(default=None, min_length=1, max_length=64)
     clarification_options: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(default_factory=list, max_length=5)
@@ -467,16 +476,19 @@ class Understanding(BaseModel):
     tasks: list[Task] = Field(default_factory=list, max_length=4)
     excluded_tasks: list[Task] = Field(default_factory=list, max_length=4)
     slots: Slots = Field(default_factory=Slots)
-    action_fields: PurchaseRequestActionFields | RfqDraftActionFields | None = None
+    action_fields: PurchaseRequestActionFields | RfqDraftActionFields | ExceptionTaskActionFields | None = None
     question: str | None = Field(default=None, max_length=1000)
     sub_tasks: list[SubTask] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode="after")
     def normalize(self):
         """校验任务一致性、执行模式和无环依赖，再移除明确排除的类别。"""
+        if self.purpose == "purchase_draft" and self.action_fields is not None:
+            # 草稿字段由服务端从完整问题重新整理；模型附带的候选字段不参与该入口。
+            self.action_fields = None
         if self.action_fields is not None:
             self.action_fields = {key: value for key, value in self.action_fields.items() if value is not None}
-            if self.purpose not in {"purchase_update", "rfq_draft"}:
+            if self.purpose not in {"purchase_update", "rfq_draft", "exception_task"}:
                 raise ValueError("当前意图不接受动作候选字段，action_fields 必须为 null")
         if self.purpose == "clarify":
             if self.clarification_options and not self.clarification_slot:
@@ -504,6 +516,18 @@ class Understanding(BaseModel):
                     raise ValueError("创建询价提案必须提供用户明确指定的供应商编码")
                 if set(self.action_fields or {}) - allowed:
                     raise ValueError("询价提案包含不允许的候选字段：" + ", ".join(sorted(set(self.action_fields) - allowed)))
+            elif self.purpose == "exception_task":
+                if not self.slots.exception_no:
+                    raise ValueError("创建异常处理任务必须提供准确异常编号")
+                allowed = {"title", "priority", "due_at"}
+                fields = self.action_fields or {}
+                title = fields.get("title")
+                if not isinstance(title, str) or not title.strip():
+                    raise ValueError("创建异常处理任务必须提供任务标题")
+                if set(fields) - allowed:
+                    raise ValueError("异常任务提案包含不允许的候选字段：" + ", ".join(sorted(set(fields) - allowed)))
+                if fields.get("priority") is not None and fields["priority"] not in {"LOW", "NORMAL", "HIGH", "URGENT"}:
+                    raise ValueError("异常任务优先级无效")
             elif self.action_fields is not None:
                 raise ValueError("当前意图不接受动作候选字段")
         elif self.dialogue_action == "cancel":
