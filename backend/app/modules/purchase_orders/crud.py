@@ -61,14 +61,17 @@ def list_page(
     return items, total
 
 
-def get_quote(db: Session, quote_id: int) -> SupplierQuote | None:
-    """查询报价及报价明细。"""
+def get_quote(db: Session, quote_id: int, *, for_update: bool = False) -> SupplierQuote | None:
+    """查询报价及报价明细；订单确认时锁定并刷新当前报价状态。"""
 
-    return db.scalar(
+    statement = (
         select(SupplierQuote)
         .options(selectinload(SupplierQuote.items))
         .where(SupplierQuote.id == quote_id)
     )
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    return db.scalar(statement)
 
 
 def get_comparison(db: Session, comparison_id: int) -> QuoteComparison | None:
