@@ -15,6 +15,7 @@ import {
   Descriptions,
   DescriptionsItem,
   Empty,
+  Modal,
   Spin,
   Steps,
   Table,
@@ -46,6 +47,9 @@ import CancelModal from './modules/cancel.vue';
 import BusinessInsightDrawer from '#/views/ai/workspace/modules/business-insight-drawer.vue';
 import { clearPageCopilotContext, setPageCopilotContext } from '#/utils/page-copilot-context';
 import { paymentTermsSnapshotLabel } from './item-display';
+import ActionProposalDetail from '#/views/ai/tasks/ActionProposalDetail.vue';
+import { cancelActionProposalApi, confirmActionProposalApi, createActionProposalApi, getActionProposalApi, reviseActionProposalApi } from '#/api/ai';
+import { canPrepareFollowup, useFollowupProposal } from './followup-proposal';
 
 defineOptions({ name: 'PurchaseOrderDetail' });
 
@@ -58,6 +62,27 @@ const order = ref<PurchaseOrderApi.PurchaseOrder>();
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const loading = ref(false);
 const acting = ref(false);
+const followup = useFollowupProposal({
+  prepare: (orderId, key) => createActionProposalApi('deliveries.followup_draft', { order_id: orderId }, key),
+  get: getActionProposalApi,
+  revise: reviseActionProposalApi,
+  confirm: confirmActionProposalApi,
+  cancel: cancelActionProposalApi,
+});
+const canFollowup = computed(() => canPrepareFollowup(
+  order.value?.status,
+  hasAccessByCodes(['procurement.orders.read']),
+  hasAccessByCodes(['procurement.orders.write']),
+  hasAccessByCodes(['ai.workspace.read']),
+));
+
+async function prepareFollowup() {
+  if (order.value && canFollowup.value) await followup.prepare(order.value.id);
+}
+
+async function confirmFollowup() {
+  if (await followup.confirm()) message.success('催办草稿已保存，尚未向供应商发送');
+}
 let viewActive = false;
 const resolveSupplier = ref<(id?: null | number) => string>(() => '-');
 const resolveUnit = ref<(id?: null | number) => string>(() => '-');
@@ -211,6 +236,19 @@ onBeforeUnmount(() => {
     <BusinessInsightDrawer ref="insightDrawer" />
     <Approve @success="load" />
     <Cancel @success="load" />
+    <Modal v-model:open="followup.open.value" title="交期跟进与催办草稿" :footer="null" width="760px" :closable="!followup.busy.value" :mask-closable="!followup.busy.value" :keyboard="!followup.busy.value">
+      <div v-if="followup.busy.value" role="status" aria-live="polite" class="py-4 text-center text-muted-foreground">正在读取最新提案状态…</div>
+      <ActionProposalDetail
+        v-else-if="followup.proposal.value"
+        :proposal="followup.proposal.value"
+        :busy="followup.busy.value"
+        @cancel="followup.cancel"
+        @confirm="confirmFollowup"
+        @revise="followup.revise"
+      />
+      <div v-else-if="followup.error.value" role="alert" class="py-4 text-center text-sm text-muted-foreground">草稿准备或操作未完成，请核对订单状态与权限后刷新；原预览不能继续使用。</div>
+      <div class="mt-2 flex justify-end"><Button :disabled="followup.busy.value" @click="followup.refresh">刷新状态</Button></div>
+    </Modal>
     <Spin :spinning="loading">
       <Empty v-if="!order && !loading" description="未找到该采购订单" />
       <div v-else-if="order" class="space-y-4">
@@ -226,6 +264,7 @@ onBeforeUnmount(() => {
             </Tag>
           </div>
           <div class="flex flex-wrap gap-2">
+            <Button v-if="canFollowup" :loading="followup.busy.value" @click="prepareFollowup">交期跟进</Button>
             <Button
               v-if="order.id && hasAccessByCodes(['finance.reconciliations.read']) && hasAccessByCodes(['ai.workspace.read'])"
               @click="insightDrawer?.open('finance-difference', order.id)"

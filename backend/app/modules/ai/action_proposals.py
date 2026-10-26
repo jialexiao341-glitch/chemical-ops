@@ -17,7 +17,7 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 
 
-INBOX_ACTION_TYPES = ("purchase_request.create_draft", "purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft", "purchase_order.submit", "exceptions.create_task", "inventory.create_replenishment")
+INBOX_ACTION_TYPES = ("purchase_request.create_draft", "purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft", "purchase_order.submit", "exceptions.create_task", "inventory.create_replenishment", "deliveries.followup_draft")
 
 
 def _now() -> datetime:
@@ -198,8 +198,9 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
         elif availability != "PERMISSION_REVOKED":
             availability = "RESOURCE_UNAVAILABLE"
             reason = "当前账号没有查看关联异常的权限"
-    elif proposal.action_type == "purchase_order.submit":
-        if "SYS_ADMIN" in roles or "procurement.orders.read" in permission_codes:
+    elif proposal.action_type in {"purchase_order.submit", "deliveries.followup_draft"}:
+        may_show_draft = proposal.action_type != "deliveries.followup_draft" or availability != "PERMISSION_REVOKED"
+        if may_show_draft and ("SYS_ADMIN" in roles or "procurement.orders.read" in permission_codes):
             try:
                 from app.modules.purchase_orders import service as purchase_order_service
 
@@ -302,6 +303,8 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
     elif proposal.action_type == "purchase_order.create_draft":
         revision_values = {key: proposal.payload.get(key) for key in
                            ("delivery_address", "expected_arrival_date", "note")}
+    elif proposal.action_type == "deliveries.followup_draft" and proposal.status == "PENDING":
+        revision_values = {"followup_note": proposal.payload.get("followup_note", "")}
     if not resource_visible:
         revision_values = {}
     result = AIActionProposalRead(
@@ -376,6 +379,10 @@ def revise_action(db: Session, user: User, confirmation_id: str, preview_version
         "delivery_address", "expected_arrival_date", "note"
     }:
         payload = {**proposal.payload, **payload}
+    elif proposal.action_type == "deliveries.followup_draft":
+        if set(payload) != {"followup_note"}:
+            raise BusinessValidationError("交期跟进草稿仅可修改补充说明，不能更换订单或覆盖业务事实")
+        payload = {**proposal.payload, **payload}
     prepared = handler.prepare(db, user, payload)
     if prepared.get("blockers"):
         raise BusinessValidationError("动作提案存在阻塞项，不能保存为可确认预览")
@@ -417,12 +424,21 @@ def cancel_action(db: Session, user: User, confirmation_id: str, preview_version
     db.commit()
 
 
+def _read_executed_result(db: Session, user: User, proposal: AIAgentActionProposal) -> dict:
+    # 草稿正文属于订单数据；幂等重放也须校验当前资源范围，不能只检查动作权限。
+    if proposal.action_type == "deliveries.followup_draft":
+        from app.modules.purchase_orders import service as order_service
+
+        order_service.get_order(db, user, int(proposal.resource_id))
+    return proposal.result or {}
+
+
 def confirm_action(db: Session, user: User, data: AIActionProposalConfirm) -> dict:
     proposal = _owned_proposal(db, user, data.confirmation_id, for_update=False)
     handler = action_handlers.get_handler(proposal.action_type)
     _authorize(db, user, proposal.permission_code, action_type=proposal.action_type)
     if proposal.status == "EXECUTED":
-        return proposal.result or {}
+        return _read_executed_result(db, user, proposal)
     if proposal.preview_version != data.preview_version:
         raise DuplicateResourceError("动作提案版本已变化，请重新核对")
     if proposal.status != "PENDING":
@@ -438,7 +454,7 @@ def confirm_action(db: Session, user: User, data: AIActionProposalConfirm) -> di
     proposal = _owned_proposal(db, user, data.confirmation_id)
     _authorize(db, user, proposal.permission_code, action_type=proposal.action_type)
     if proposal.status == "EXECUTED":
-        return proposal.result or {}
+        return _read_executed_result(db, user, proposal)
     if proposal.preview_version != data.preview_version or proposal.status != "PENDING":
         raise DuplicateResourceError("动作提案已变化，请重新核对")
     if proposal.expires_at <= _now():

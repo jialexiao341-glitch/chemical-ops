@@ -40,8 +40,8 @@ def proposal_db(monkeypatch):
                 expires_at DATETIME NOT NULL,
                 status VARCHAR(20) NOT NULL,
                 result JSON,
-                created_at DATETIME NOT NULL,
-                updated_at DATETIME NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 executed_at DATETIME
             )
             """
@@ -62,6 +62,118 @@ class _ReadHandler:
     def validate_current(self, *_args, **_kwargs):
         if self.error:
             raise self.error
+
+
+@pytest.fixture
+def followup_source(monkeypatch):
+    from app.modules.purchase_orders import followup, service as order_service
+
+    permissions = ["procurement.orders.read", "procurement.orders.write"]
+    order = SimpleNamespace(id=41, po_no="PO20261004004266")
+    monkeypatch.setattr(action_proposals, "get_user_permission_codes", lambda *_: permissions)
+    monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_: [])
+    monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
+    monkeypatch.setattr(order_service, "get_order", lambda *_args, **_kwargs: order)
+
+    def draft(db, user, order_id, *, note="", for_update=False):
+        order_service.get_order(db, user, order_id, for_update=for_update)
+        return {"message": f"订单 {order.po_no} 催办草稿\n补充说明：{note}",
+                "snapshot": {"order_id": order_id, "po_no": order.po_no},
+                "warnings": ["未发送"]}
+
+    monkeypatch.setattr(followup, "build_followup", draft)
+    return permissions, SimpleNamespace(id=1, status="ACTIVE"), order
+
+
+def test_followup_inbox_revision_confirmation_and_idempotent_result(proposal_db, followup_source, monkeypatch):
+    from app.modules.ai.schema import AIActionProposalConfirm
+
+    _, user, order = followup_source
+    preview = action_proposals.propose_action(proposal_db, user, "deliveries.followup_draft",
+        {"order_id": order.id}, idempotency_key="followup-test")
+    read = action_proposals.get_action_proposal(proposal_db, user, preview.confirmation_id)
+    assert read.business_reference == order.po_no
+    assert read.source_route == "/procurement/orders/41"
+    assert read.revision_values == {"followup_note": ""}
+    revised = action_proposals.revise_action(proposal_db, user, preview.confirmation_id,
+        preview.preview_version, {"followup_note": "请反馈交期"})
+    assert revised.preview_version == 2
+    assert "请反馈交期" in revised.diff[0]["after"]
+    from app.core.errors import DuplicateResourceError
+    with pytest.raises(DuplicateResourceError):
+        action_proposals.confirm_action(proposal_db, user, AIActionProposalConfirm(
+            confirmation_id=preview.confirmation_id, preview_version=1, confirm=True))
+    handler = action_handlers.get_handler("deliveries.followup_draft")
+    original_execute = handler.execute
+    calls = []
+    def execute(*args, **kwargs):
+        calls.append(True)
+        return original_execute(*args, **kwargs)
+    monkeypatch.setattr(handler, "execute", execute)
+    confirmation = AIActionProposalConfirm(confirmation_id=preview.confirmation_id, preview_version=2, confirm=True)
+    result = action_proposals.confirm_action(proposal_db, user, confirmation)
+    assert result["sent"] is False
+    assert result["status"] == "DRAFT"
+    assert action_proposals.confirm_action(proposal_db, user, confirmation) == result
+    assert len(calls) == 1
+    saved = action_proposals.get_action_proposal(proposal_db, user, preview.confirmation_id)
+    assert saved.status == "EXECUTED"
+    assert saved.diff[0]["after"] == result["message"]
+    assert not saved.revision_values
+
+
+@pytest.mark.parametrize("revoked", ["procurement.orders.read", "procurement.orders.write"])
+def test_followup_revoked_permission_hides_message_evidence_and_reference(proposal_db, followup_source, revoked):
+    permissions, user, order = followup_source
+    preview = action_proposals.propose_action(proposal_db, user, "deliveries.followup_draft",
+        {"order_id": order.id}, idempotency_key="followup-revoked")
+    permissions.remove(revoked)
+    read = action_proposals.get_action_proposal(proposal_db, user, preview.confirmation_id)
+    assert read.availability == "PERMISSION_REVOKED"
+    assert not read.diff and not read.evidence and not read.revision_values
+    assert read.business_reference is None and read.source_route is None
+    assert not read.requires_user_confirmation
+
+
+def test_followup_revision_cannot_switch_order(proposal_db, followup_source):
+    _, user, order = followup_source
+    preview = action_proposals.propose_action(proposal_db, user, "deliveries.followup_draft",
+        {"order_id": order.id}, idempotency_key="followup-revision")
+    with pytest.raises(BusinessValidationError):
+        action_proposals.revise_action(proposal_db, user, preview.confirmation_id,
+            preview.preview_version, {"order_id": 42, "followup_note": "改订单"})
+
+
+def test_followup_order_scope_revocation_and_owner_isolation(proposal_db, followup_source, monkeypatch):
+    _, user, order = followup_source
+    preview = action_proposals.propose_action(proposal_db, user, "deliveries.followup_draft",
+        {"order_id": order.id}, idempotency_key="followup-scope")
+    with pytest.raises(ResourceNotFoundError):
+        action_proposals.get_action_proposal(proposal_db, SimpleNamespace(id=2, status="ACTIVE"), preview.confirmation_id)
+    from app.modules.purchase_orders import service as order_service
+    def denied(*args, **kwargs):
+        raise ResourceNotFoundError("订单不可访问")
+    monkeypatch.setattr(order_service, "get_order", denied)
+    read = action_proposals.get_action_proposal(proposal_db, user, preview.confirmation_id)
+    assert read.availability == "RESOURCE_UNAVAILABLE"
+    assert not read.diff and not read.evidence and not read.revision_values
+
+
+def test_saved_followup_confirmation_replay_rechecks_order_scope(proposal_db, followup_source, monkeypatch):
+    from app.modules.ai.schema import AIActionProposalConfirm
+    from app.modules.purchase_orders import service as order_service
+
+    _, user, order = followup_source
+    preview = action_proposals.propose_action(proposal_db, user, "deliveries.followup_draft",
+        {"order_id": order.id}, idempotency_key="followup-replay-scope")
+    confirmation = AIActionProposalConfirm(
+        confirmation_id=preview.confirmation_id, preview_version=1, confirm=True)
+    action_proposals.confirm_action(proposal_db, user, confirmation)
+    def denied(*args, **kwargs):
+        raise ResourceNotFoundError("订单不可访问")
+    monkeypatch.setattr(order_service, "get_order", denied)
+    with pytest.raises(ResourceNotFoundError):
+        action_proposals.confirm_action(proposal_db, user, confirmation)
 
 
 def _proposal(db, *, owner_id=1, confirmation_id="a" * 32, action_type="purchase_request.update_draft",

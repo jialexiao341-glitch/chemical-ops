@@ -42,6 +42,7 @@ ACTION_ENTRIES = {
     "exceptions.create_task": ("创建异常处理任务", "chat", "exception_task"),
     "inventory.create_replenishment": ("创建补货申请草稿", "chat", "replenishment_draft"),
     "purchase_order.submit": ("提交采购订单审批", "chat", "purchase_order_submit"),
+    "deliveries.followup_draft": ("准备订单交期跟进草稿", "business_page", None),
 }
 
 # Composite datasets require every listed read permission. The base DatasetSpec.permission

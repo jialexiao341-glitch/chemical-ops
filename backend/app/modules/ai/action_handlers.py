@@ -67,6 +67,8 @@ def required_permissions(action_type: str) -> set[str]:
         required.add("master.suppliers.read")
     if action_type == "purchase_order.create_draft":
         required.add("procurement.rfqs.read")
+    if action_type == "deliveries.followup_draft":
+        required.add("procurement.orders.read")
     return required
 
 
@@ -1142,3 +1144,42 @@ class PurchaseOrderSubmitHandler:
 
 
 register_handler("purchase_order.submit", PurchaseOrderSubmitHandler())
+
+
+class DeliveryFollowupDraftHandler:
+    permission_code = "procurement.orders.write"
+    resource_type = "PURCHASE_ORDER"
+
+    def prepare(self, db, user, payload):
+        from app.modules.purchase_orders.followup import build_followup, validate_input
+
+        data = validate_input(payload)
+        draft = build_followup(db, user, data.order_id, note=data.followup_note)
+        return {
+            "payload": data.model_dump(), "snapshot": draft["snapshot"], "resource_id": data.order_id,
+            "diff": [{"field": "followup_message", "before": None, "after": draft["message"]}],
+            "evidence": [{"type": "delivery_followup", **draft["snapshot"]}],
+            "warnings": draft["warnings"], "blockers": [], "risk_level": "LOW",
+        }
+
+    def validate_current(self, db, user, proposal, *, for_update=True):
+        from app.modules.purchase_orders.followup import build_followup, validate_input
+
+        data = validate_input(proposal.payload)
+        current = build_followup(db, user, data.order_id, note=data.followup_note, for_update=for_update)
+        if current["snapshot"] != proposal.expected_resource_snapshot:
+            raise BusinessValidationError("订单交期、收货数量或来源事实已变化，请重新生成预览")
+
+    def execute(self, db, user, proposal, *, commit=False):
+        from app.modules.purchase_orders.followup import build_followup, validate_input
+
+        data = validate_input(proposal.payload)
+        draft = build_followup(db, user, data.order_id, note=data.followup_note, for_update=True)
+        if draft["snapshot"] != proposal.expected_resource_snapshot:
+            raise BusinessValidationError("订单来源事实已变化，请重新生成预览")
+        # 通用账本保存此结果；不调用通知或供应商发送服务，也不改订单状态。
+        return {"order_id": data.order_id, "po_no": draft["snapshot"]["po_no"],
+                "status": "DRAFT", "sent": False, "message": draft["message"]}
+
+
+register_handler("deliveries.followup_draft", DeliveryFollowupDraftHandler())

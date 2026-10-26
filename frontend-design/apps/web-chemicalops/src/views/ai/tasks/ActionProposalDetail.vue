@@ -31,6 +31,7 @@ const actionLabels: Record<string, string> = {
   'exceptions.create_task': '创建异常处理任务',
   'inventory.create_replenishment': '创建补货申请',
   'purchase_order.submit': '提交采购订单审批',
+  'deliveries.followup_draft': '保存交期催办草稿',
 };
 const statusLabels: Record<AiApi.ActionProposalRead['status'], string> = {
   CANCELLED: '已取消',
@@ -67,6 +68,8 @@ const fieldLabels: Record<string, string> = {
   product: '产品',
   quantity: '补货数量',
   reason: '补货原因',
+  followup_message: '催办草稿正文',
+  followup_note: '补充说明',
 };
 const dateFields = new Set(['expected_date', 'requested_delivery_date', 'quote_deadline', 'expected_arrival_date']);
 const statusColor: Record<AiApi.ActionProposalRead['status'], string> = {
@@ -166,7 +169,7 @@ function orderTermsLines(evidence: Record<string, unknown>) {
       <div v-if="proposal.diff.length" class="overflow-x-auto rounded-md border border-border">
         <div v-for="(item, index) in proposal.diff" :key="`${String(item.field)}-${index}`" class="grid grid-cols-[140px_minmax(0,1fr)] gap-3 border-b border-border p-3 text-sm last:border-0">
           <strong>{{ fieldLabels[String(item.field)] || String(item.field) }}</strong>
-          <span class="min-w-0 break-words">{{ formatValue(item.before) }} → {{ formatValue(item.after) }}</span>
+          <span class="min-w-0 break-words" :class="{ 'whitespace-pre-wrap': item.field === 'followup_message' }">{{ item.field === 'followup_message' ? formatValue(item.after) : `${formatValue(item.before)} → ${formatValue(item.after)}` }}</span>
         </div>
       </div>
       <div v-else class="text-sm text-muted-foreground">没有字段差异。</div>
@@ -196,6 +199,11 @@ function orderTermsLines(evidence: Record<string, unknown>) {
           <template v-else-if="item.type === 'purchase_order'">
             <div class="font-medium">采购订单 {{ formatValue(item.po_no) }}</div>
             <div class="text-muted-foreground">{{ formatValue(item.status) }} · {{ formatValue(item.amount) }} {{ formatValue(item.currency) }}</div>
+          </template>
+          <template v-else-if="item.type === 'delivery_followup'">
+            <div class="font-medium">采购订单 {{ formatValue(item.po_no) }}</div>
+            <div class="text-muted-foreground">来源：订单主单与明细 · 上海业务日 {{ formatValue(item.business_date) }} · 预计到货 {{ formatValue(item.expected_arrival_date || '未维护') }}</div>
+            <div class="text-muted-foreground">供应商确认 {{ item.supplier_confirmed_at ? '已确认' : '待确认' }} · 仅为生成时快照</div>
           </template>
           <template v-else-if="item.type === 'operation_exception'">
             <div class="font-medium">异常 {{ formatValue(item.exception_no) }}</div>
@@ -233,7 +241,7 @@ function orderTermsLines(evidence: Record<string, unknown>) {
         <Select v-if="field === 'priority'" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :options="PRIORITY_DICT.options()" class="w-full" />
         <DatePicker v-else-if="dateFields.has(field)" :aria-label="fieldLabels[field]" :show-time="field === 'quote_deadline'" :value="dateValue(value)" class="w-full" @change="updateDate(field, $event)" />
         <InputNumber v-else-if="field === 'budget_amount'" :aria-label="fieldLabels[field]" :value="typeof value === 'number' || typeof value === 'string' ? Number(value) : null" :min="0" class="w-full" @change="updateNumber(field, $event)" />
-        <Input.TextArea v-else-if="['purpose', 'delivery_requirements', 'selection_reason', 'delivery_address', 'note'].includes(field)" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :rows="2" :maxlength="field === 'selection_reason' ? 2000 : field === 'delivery_address' ? 500 : 1000" />
+        <Input.TextArea v-else-if="['purpose', 'delivery_requirements', 'selection_reason', 'delivery_address', 'note', 'followup_note'].includes(field)" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :rows="2" :maxlength="field === 'selection_reason' ? 2000 : field === 'delivery_address' ? 500 : 1000" />
         <Input v-else v-model:value="revisionValues[field]" :aria-label="fieldLabels[field] || field" />
       </div>
     </section>
@@ -246,7 +254,7 @@ function orderTermsLines(evidence: Record<string, unknown>) {
       <template v-else>
         <Button v-if="proposal.requires_user_confirmation" danger :disabled="busy" @click="emit('cancel')">取消提案</Button>
         <Button v-if="canEdit" :disabled="busy" @click="startEditing">修改</Button>
-        <Button v-if="proposal.requires_user_confirmation" type="primary" :loading="busy" :disabled="busy" @click="emit('confirm')">确认执行</Button>
+        <Button v-if="proposal.requires_user_confirmation" type="primary" :loading="busy" :disabled="busy" @click="emit('confirm')">{{ proposal.action_type === 'deliveries.followup_draft' ? '确认保存草稿' : '确认执行' }}</Button>
       </template>
     </div>
   </div>
