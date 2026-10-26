@@ -64,6 +64,20 @@ export function useFollowupProposal(api: FollowupApi) {
     return run(() => api.get(id));
   }
 
+  async function resume(orderId: number, id: string) {
+    if (busy.value) return false;
+    confirmationId = id;
+    targetOrderId = orderId;
+    open.value = true;
+    return run(async () => {
+      const current = await api.get(id);
+      if (current.action_type !== 'deliveries.followup_draft' || String(current.resource_id) !== String(orderId)) {
+        throw new Error('催办草稿不属于当前订单');
+      }
+      return current;
+    });
+  }
+
   function editable() {
     const current = proposal.value;
     return current && !busy.value && current.requires_user_confirmation &&
@@ -98,5 +112,5 @@ export function useFollowupProposal(api: FollowupApi) {
     });
   }
 
-  return { proposal, busy, open, error, prepare, refresh, revise, confirm, cancel };
+  return { proposal, busy, open, error, prepare, refresh, resume, revise, confirm, cancel };
 }

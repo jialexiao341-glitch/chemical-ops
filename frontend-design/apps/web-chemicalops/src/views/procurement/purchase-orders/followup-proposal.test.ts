@@ -25,6 +25,17 @@ function fixture() {
 }
 
 describe('order followup proposal lifecycle', () => {
+  it('resumes the saved draft from Inbox without creating or confirming another proposal', async () => {
+    const { api, state } = fixture();
+    api.get.mockResolvedValueOnce({ ...(await api.get()), resource_id: '41', status: 'EXECUTED' } as any);
+    expect(await state.resume(41, 'a'.repeat(32))).toBe(true);
+    expect(state.proposal.value?.status).toBe('EXECUTED');
+    expect(api.prepare).not.toHaveBeenCalled();
+    expect(api.confirm).not.toHaveBeenCalled();
+    api.get.mockResolvedValueOnce({ ...(await api.get()), resource_id: '42' } as any);
+    expect(await state.resume(41, 'foreign')).toBe(false);
+    expect(state.proposal.value).toBeUndefined();
+  });
   it('only opens for active fulfilment orders with both order permissions and AI access', () => {
     expect(canPrepareFollowup('ORDERED', true, true, true)).toBe(true);
     expect(canPrepareFollowup('PARTIAL', true, true, true)).toBe(true);

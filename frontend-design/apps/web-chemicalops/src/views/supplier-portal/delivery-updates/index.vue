@@ -2,7 +2,8 @@
 import type { PurchaseOrderApi } from '#/api';
 import type { Dayjs } from 'dayjs';
 
-import { ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import dayjs from 'dayjs';
 
 import { useAccess } from '@vben/access';
@@ -12,10 +13,13 @@ import { getSupplierOrderListApi, updateSupplierExpectedDeliveryApi } from '#/ap
 import { PURCHASE_ORDER_STATUS_DICT } from '#/constants/dictionary';
 import { formatDate } from '#/utils/format';
 import SupplierRecordList from '../components/SupplierRecordList.vue';
+import FollowupHistory from '#/views/procurement/purchase-orders/modules/followup-history.vue';
 
 defineOptions({ name: 'SupplierDeliveryUpdates' });
 
 const { hasAccessByCodes } = useAccess();
+const route = useRoute();
+const followupHistory = ref<InstanceType<typeof FollowupHistory>>();
 const rows = ref<PurchaseOrderApi.PurchaseOrder[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -42,6 +46,13 @@ const statusOptions = [
   { label: '部分到货', value: 'PARTIAL' },
 ];
 const canUpdate = hasAccessByCodes(['supplier.portal.delivery.update']);
+
+function openNotifiedFollowup() {
+  const id = Number(route.query.followup_order);
+  if (Number.isSafeInteger(id) && id > 0) void followupHistory.value?.open(id);
+}
+watch(() => [route.query.followup_order, route.query.followup], openNotifiedFollowup, { flush: 'post' });
+onMounted(openNotifiedFollowup);
 
 async function load() {
   loading.value = true;
@@ -79,7 +90,7 @@ async function save() {
     export-permission="supplier.portal.delivery.export"
     v-model:keyword="keyword"
     v-model:status="status"
-    :columns="canUpdate ? columns : columns.filter((column) => column.key !== '__action')"
+    :columns="columns"
     :fetch-records="load"
     :loading="loading"
     v-model:page="page"
@@ -95,9 +106,10 @@ async function save() {
       <template v-else-if="column.key === 'expected_arrival_date'">{{ formatDate(record.expected_arrival_date) }}</template>
       <template v-else-if="column.key === 'status'"><Tag :color="PURCHASE_ORDER_STATUS_DICT.color(record.status)">{{ PURCHASE_ORDER_STATUS_DICT.label(record.status) }}</Tag></template>
       <template v-else-if="column.key === 'supplier_confirmed_at'"><Tag :color="record.supplier_confirmed_at ? 'success' : 'warning'">{{ record.supplier_confirmed_at ? '已确认' : '待确认' }}</Tag></template>
-      <template v-else-if="column.key === '__action'"><Button v-if="canUpdate" type="link" @click="openUpdate(record)">更新预计交期</Button></template>
+      <template v-else-if="column.key === '__action'"><Button type="link" @click="followupHistory?.open(record.id)">催办记录</Button><Button v-if="canUpdate" type="link" @click="openUpdate(record)">更新预计交期</Button></template>
     </template>
   </SupplierRecordList>
+  <FollowupHistory ref="followupHistory" supplier-mode @changed="load" />
 
   <Modal v-model:open="modalOpen" :confirm-loading="saving" title="更新预计交期" @ok="save">
     <div v-if="order" class="space-y-4 py-2">

@@ -207,6 +207,8 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
                 order = purchase_order_service.get_order(db, user, int(proposal.resource_id))
                 readable_reference = order.po_no
                 source_route = f"/procurement/orders/{order.id}"
+                if proposal.action_type == 'deliveries.followup_draft' and proposal.status == 'EXECUTED':
+                    source_route += f'?followup_proposal={proposal.confirmation_id}'
                 resource_visible = True
             except (TypeError, ValueError, BusinessValidationError, ResourceNotFoundError):
                 availability = "RESOURCE_UNAVAILABLE"

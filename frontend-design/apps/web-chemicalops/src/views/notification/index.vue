@@ -13,6 +13,7 @@ import {
   getNotificationListApi,
   markAllNotificationsReadApi,
   markNotificationReadApi,
+  resolveDeliveryFollowupApi,
 } from '#/api';
 import { formatDateTime } from '#/utils/format';
 
@@ -79,6 +80,21 @@ function onUseSuggestion(row: NotificationApi.Notification) {
   void router.push({ path: '/ai/workspace', query: { prompt: instruction } });
 }
 
+async function onOpenFollowup(row: NotificationApi.Notification) {
+  if (!row.related_id) return;
+  const supplierMode = row.notification_type === 'DELIVERY_FOLLOWUP';
+  if (!hasAccessByCodes([supplierMode ? 'supplier.portal.delivery.read' : 'procurement.orders.read'])) {
+    message.warning('当前账号没有查看催办的权限');
+    return;
+  }
+  try {
+    const record = await resolveDeliveryFollowupApi(row.related_id, supplierMode);
+    await router.push(supplierMode
+      ? { path: '/supplier-portal/delivery-updates', query: { followup_order: String(record.order_id), followup: String(record.id) } }
+      : { path: `/procurement/orders/${record.order_id}`, query: { followup: String(record.id) } });
+  } catch { message.warning('催办记录已不可访问，请核对当前账号权限与供应商绑定'); }
+}
+
 const columns = [
   { key: 'title', title: '标题', minWidth: 220 },
   { key: 'content', title: '内容', minWidth: 320 },
@@ -143,6 +159,7 @@ onMounted(load);
               </Tag>
             </template>
             <template v-else-if="column.key === '__action'">
+              <Button v-if="record.related_type === 'DELIVERY_FOLLOWUP'" size="small" type="link" @click="onOpenFollowup(record)">查看催办</Button>
               <Button
                 v-if="record.notification_type === 'OPERATION_SUGGESTION' && canUseAiWorkspace"
                 size="small"

@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
+from app.core.time import business_today, utc_now
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance import reconciliation_items
 from app.modules.finance.model import FinanceReconciliation
@@ -257,12 +258,12 @@ def reject_order(db: Session, user: User, order_id: int, reason: str) -> Purchas
     return _require_order(db, user, order.id)
 
 
-def update_expected_delivery(db: Session, user: User, order_id: int, data: SupplierDeliveryDateUpdate):
+def update_expected_delivery(db: Session, user: User, order_id: int, data: SupplierDeliveryDateUpdate, *, commit: bool = True):
     """更新当前供应商订单交期并保留历史和订单事件。"""
     order = _require_order(db, user, order_id, for_update=True)
     if order.status not in {"ORDERED", "PARTIAL"}:
         raise BusinessValidationError("只有已下单或部分到货的订单可以更新预计交期")
-    if data.expected_date < date.today():
+    if data.expected_date < business_today():
         raise BusinessValidationError("预计交期不能早于今天")
     previous = order.expected_arrival_date
     order.expected_arrival_date = data.expected_date
@@ -276,6 +277,7 @@ def update_expected_delivery(db: Session, user: User, order_id: int, data: Suppl
         expected_date=data.expected_date,
         note=data.note,
         submitted_by=user.id,
+        submitted_at=utc_now(),
     )
     db.add(update)
     db.flush()
@@ -287,7 +289,10 @@ def update_expected_delivery(db: Session, user: User, order_id: int, data: Suppl
         event_note=f"供应商更新预计交期：{previous or '未设置'} → {data.expected_date}" + (f"；{data.note}" if data.note else ""),
     ))
     add_audit_log(db, actor_id=user.id, action_type="UPDATE_ETA", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary="供应商更新预计交期", result_status="SUCCESS")
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return SupplierDeliveryUpdateRead(id=update.id, po_id=order.id, po_no=order.po_no, previous_date=previous, expected_date=data.expected_date, note=data.note, submitted_at=update.submitted_at)
 
 

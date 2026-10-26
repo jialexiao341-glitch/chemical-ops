@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { PurchaseOrderApi } from '#/api';
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
@@ -29,6 +29,7 @@ import {
   getPurchaseOrderApi,
   placePurchaseOrderApi,
   submitPurchaseOrderApi,
+  sendDeliveryFollowupApi,
 } from '#/api';
 import {
   LINE_STATUS_DICT,
@@ -50,6 +51,8 @@ import { paymentTermsSnapshotLabel } from './item-display';
 import ActionProposalDetail from '#/views/ai/tasks/ActionProposalDetail.vue';
 import { cancelActionProposalApi, confirmActionProposalApi, createActionProposalApi, getActionProposalApi, reviseActionProposalApi } from '#/api/ai';
 import { canPrepareFollowup, useFollowupProposal } from './followup-proposal';
+import { canSendFollowup, useFollowupSend } from './followup-send';
+import FollowupHistory from './modules/followup-history.vue';
 
 defineOptions({ name: 'PurchaseOrderDetail' });
 
@@ -62,6 +65,11 @@ const order = ref<PurchaseOrderApi.PurchaseOrder>();
 const insightDrawer = ref<{ open: (kind: string, id: number) => void }>();
 const loading = ref(false);
 const acting = ref(false);
+const followupHistory = ref<InstanceType<typeof FollowupHistory>>();
+const followupSend = useFollowupSend(sendDeliveryFollowupApi);
+const sentFollowupIds = ref(new Set<string>());
+const canSendSavedFollowup = computed(() => canSendFollowup(followup.proposal.value, canFollowup.value) &&
+  !sentFollowupIds.value.has(followup.proposal.value?.confirmation_id || ''));
 const followup = useFollowupProposal({
   prepare: (orderId, key) => createActionProposalApi('deliveries.followup_draft', { order_id: orderId }, key),
   get: getActionProposalApi,
@@ -82,6 +90,29 @@ async function prepareFollowup() {
 
 async function confirmFollowup() {
   if (await followup.confirm()) message.success('催办草稿已保存，尚未向供应商发送');
+}
+function sendSavedFollowup() {
+  const current = followup.proposal.value;
+  const currentOrder = order.value;
+  if (!current || !currentOrder || !canSendSavedFollowup.value || followupSend.busy.value) return;
+  Modal.confirm({
+    title: `向 ${resolveSupplier.value(currentOrder.supplier_id)} 发送催办`,
+    content: h('div', { class: 'whitespace-pre-wrap break-words' }, String(current.diff.find((item) => item.field === 'followup_message')?.after || '')),
+    okText: '确认发送至供应商门户',
+    async onOk() {
+      try {
+        if (await followupSend.send(currentOrder.id, current.confirmation_id, current.preview_version)) {
+          sentFollowupIds.value.add(current.confirmation_id);
+          message.success('催办已发送至供应商门户');
+          followup.open.value = false;
+          await followupHistory.value?.open(currentOrder.id);
+        }
+      } catch {
+        await followup.refresh();
+        throw new Error('发送未确认成功，请核对最新状态后重试');
+      }
+    },
+  });
 }
 let viewActive = false;
 const resolveSupplier = ref<(id?: null | number) => string>(() => '-');
@@ -221,9 +252,18 @@ const orderPayload = computed(() => ({
   poNo: order.value?.po_no ?? '',
 }));
 
-onMounted(() => {
+async function openFollowupFromRoute() {
+  if (!order.value) return;
+  if (route.query.followup) await followupHistory.value?.open(order.value.id);
+  if (typeof route.query.followup_proposal === 'string' && canFollowup.value) {
+    await followup.resume(order.value.id, route.query.followup_proposal);
+  }
+}
+watch(() => [route.query.followup, route.query.followup_proposal], openFollowupFromRoute);
+onMounted(async () => {
   viewActive = true;
-  void load();
+  await load();
+  await openFollowupFromRoute();
 });
 onBeforeUnmount(() => {
   viewActive = false;
@@ -236,7 +276,8 @@ onBeforeUnmount(() => {
     <BusinessInsightDrawer ref="insightDrawer" />
     <Approve @success="load" />
     <Cancel @success="load" />
-    <Modal v-model:open="followup.open.value" title="交期跟进与催办草稿" :footer="null" width="760px" :closable="!followup.busy.value" :mask-closable="!followup.busy.value" :keyboard="!followup.busy.value">
+    <FollowupHistory ref="followupHistory" />
+    <Modal v-model:open="followup.open.value" title="交期跟进与催办草稿" :footer="null" width="760px" :closable="!followup.busy.value && !followupSend.busy.value" :mask-closable="!followup.busy.value && !followupSend.busy.value" :keyboard="!followup.busy.value && !followupSend.busy.value">
       <div v-if="followup.busy.value" role="status" aria-live="polite" class="py-4 text-center text-muted-foreground">正在读取最新提案状态…</div>
       <ActionProposalDetail
         v-else-if="followup.proposal.value"
@@ -247,7 +288,7 @@ onBeforeUnmount(() => {
         @revise="followup.revise"
       />
       <div v-else-if="followup.error.value" role="alert" class="py-4 text-center text-sm text-muted-foreground">草稿准备或操作未完成，请核对订单状态与权限后刷新；原预览不能继续使用。</div>
-      <div class="mt-2 flex justify-end"><Button :disabled="followup.busy.value" @click="followup.refresh">刷新状态</Button></div>
+      <div class="mt-2 flex justify-end gap-2"><Button :disabled="followup.busy.value || followupSend.busy.value" @click="followup.refresh">刷新状态</Button><Button v-if="canSendSavedFollowup" type="primary" :loading="followupSend.busy.value" :disabled="followup.busy.value" @click="sendSavedFollowup">发送至供应商门户</Button></div>
     </Modal>
     <Spin :spinning="loading">
       <Empty v-if="!order && !loading" description="未找到该采购订单" />
@@ -265,6 +306,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="flex flex-wrap gap-2">
             <Button v-if="canFollowup" :loading="followup.busy.value" @click="prepareFollowup">交期跟进</Button>
+            <Button v-if="hasAccessByCodes(['procurement.orders.read'])" @click="followupHistory?.open(order.id)">催办记录</Button>
             <Button
               v-if="order.id && hasAccessByCodes(['finance.reconciliations.read']) && hasAccessByCodes(['ai.workspace.read'])"
               @click="insightDrawer?.open('finance-difference', order.id)"

@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_permission
 from app.core.db import get_db
 from app.modules.supplier_portal import service
+from app.modules.purchase_orders import followup_service
+from app.modules.purchase_orders.followup_schema import FollowupPage, FollowupRead, FollowupReply
 from app.modules.supplier_portal.schema import (
     SupplierPortalQuoteCreate,
     SupplierRFQDetail,
@@ -36,6 +38,23 @@ from app.modules.system.model import User
 router = APIRouter(prefix="/supplier-portal/orders", tags=["供应商门户"])
 rfqs_router = APIRouter(prefix="/supplier-portal/rfqs", tags=["供应商门户询价"])
 collaboration_router = APIRouter(prefix="/supplier-portal", tags=["供应商履约协同"])
+
+
+@collaboration_router.get('/delivery-followups/{followup_id}', response_model=FollowupRead, summary='读取本供应商催办及订单引用')
+def resolve_followup(followup_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission('supplier.portal.delivery.read'))):
+    return followup_service.resolve_followup(db, user, followup_id, supplier=True)
+
+
+@router.get('/{order_id}/followups', response_model=FollowupPage, summary='查询本供应商订单催办')
+def list_followups(order_id: int, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+                   db: Session = Depends(get_db), user: User = Depends(require_permission('supplier.portal.delivery.read'))):
+    return followup_service.list_followups(db, user, order_id, supplier=True, page=page, page_size=page_size)
+
+
+@router.post('/{order_id}/followups/{followup_id}/reply', response_model=FollowupRead, summary='回复本供应商交期催办')
+def reply_followup(order_id: int, followup_id: int, data: FollowupReply, db: Session = Depends(get_db),
+                   user: User = Depends(require_permission('supplier.portal.delivery.update'))):
+    return followup_service.reply_followup(db, user, order_id, followup_id, data)
 
 
 @rfqs_router.get("", response_model=SupplierRFQPage, summary="查询邀请本供应商的询价")

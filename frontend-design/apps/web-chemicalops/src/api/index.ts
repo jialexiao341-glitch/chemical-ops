@@ -11,3 +11,4 @@ export * from './ai';
 export * from './insights';
 export * from './supplier-portal';
 export * from './technical-documents';
+export * from './delivery-followups';

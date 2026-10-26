@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_permission
 from app.core.db import get_db
 from app.modules.purchase_orders import service
+from app.modules.purchase_orders import followup_service
+from app.modules.purchase_orders.followup_schema import FollowupPage, FollowupRead, FollowupSend
 from app.modules.purchase_orders.schema import (
     PurchaseOrderApprovalAction,
     PurchaseOrderCancelAction,
@@ -18,6 +20,23 @@ from app.modules.system.model import User
 
 
 router = APIRouter(prefix="/purchase-orders", tags=["采购订单"])
+
+
+@router.get('/followups/{followup_id}', response_model=FollowupRead, summary='读取授权催办及订单引用')
+def resolve_followup(followup_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission('procurement.orders.read'))):
+    return followup_service.resolve_followup(db, user, followup_id)
+
+
+@router.get('/{order_id}/followups', response_model=FollowupPage, summary='查询订单催办历史')
+def list_followups(order_id: int, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+                   db: Session = Depends(get_db), user: User = Depends(require_permission('procurement.orders.read'))):
+    return followup_service.list_followups(db, user, order_id, page=page, page_size=page_size)
+
+
+@router.post('/{order_id}/followups', response_model=FollowupRead, summary='确认向供应商门户发送已保存催办')
+def send_followup(order_id: int, data: FollowupSend, db: Session = Depends(get_db),
+                  user: User = Depends(require_permission('procurement.orders.write'))):
+    return followup_service.send_followup(db, user, order_id, data)
 
 
 @router.post("", response_model=PurchaseOrderRead, status_code=status.HTTP_201_CREATED, summary="生成采购订单")
