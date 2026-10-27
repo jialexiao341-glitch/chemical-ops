@@ -19,7 +19,8 @@ class SupplierOrderItemRead(BaseModel):
     unit_id: int
     unit_price: Decimal
     tax_rate: Decimal | None
-    tax_included: bool | None
+    # 历史订单未保存含税口径，不能从税率反推；缺少快照时明确返回未知。
+    tax_included: bool | None = None
     planned_arrival_date: date | None
     received_quantity: Decimal
     status: str

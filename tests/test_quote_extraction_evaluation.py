@@ -97,6 +97,7 @@ def test_manual_corrections_reach_quote_and_total_cost_without_being_replaced_by
         def add(self,quote): self.quote=quote
         def flush(self): self.quote.id=201
         def commit(self): self.commits+=1
+        def expire(self, *_args): pass
     db=Db(); rfq=NS(id=14,status='RESPONDING',items=[NS(id=31)])
     monkeypatch.setattr(service.crud,'get_supplier',lambda *_:NS(status='ACTIVE',supplier_code='DEMO'))
     monkeypatch.setattr(service.crud,'get_invitation',lambda *_:NS(response_status='PENDING'))

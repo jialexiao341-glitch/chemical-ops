@@ -87,7 +87,7 @@ def decide(db: Session, user: User, exception_id: int, data: DecisionInput, resu
     if data.decision == "ADOPTED":
         if exception.owner_id is None:
             raise BusinessValidationError("请先在异常详情指定负责人")
-        exception_service._validate_assignee(db, user, exception.owner_id)
+        exception_service.validate_assignee(db, user, exception.owner_id)
     snapshot = InsightSnapshot(kind="exception-action", object_id=exception.id, result_json=result, created_by=user.id)
     db.add(snapshot)
     db.flush()

@@ -1,6 +1,6 @@
 """采购、到货、质量和运营异常的端到端状态机测试。"""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -123,12 +123,19 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
         json={
             "supplier_id": supplier.id,
             "quote_date": date.today().isoformat(),
+            "currency_code": "CNY",
+            "valid_until": (date.today() + timedelta(days=30)).isoformat(),
             "items": [
                 {
                     "rfq_item_id": rfq_item_id,
                     "quoted_quantity": "2",
                     "unit_id": unit.id,
                     "unit_price": "12.50",
+                    "tax_rate": "13",
+                    "tax_included": False,
+                    "freight_amount": "0",
+                    "freight_tax_rate": "0",
+                    "freight_tax_included": False,
                 }
             ],
         },

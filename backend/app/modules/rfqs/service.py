@@ -257,6 +257,8 @@ def create_quote_for_supplier(
     rfq.status = "RESPONDING"
     add_audit_log(db, actor_id=user.id, action_type="SUBMIT_QUOTE", resource_type="RFQ", resource_id=rfq.id, request_summary=f"录入供应商 {supplier.supplier_code} 报价", result_status="SUCCESS")
     db.commit()
+    # 会话保留已加载对象；按 rfq_id 新增报价不会更新已有 quotes 集合。
+    db.expire(rfq, ["quotes"])
     return crud.get_by_id(db, rfq.id)
 
 

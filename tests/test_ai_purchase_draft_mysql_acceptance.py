@@ -20,7 +20,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.modules.ai import purchase_draft_confirmations as confirmations
-from app.modules.ai.model import AIPurchaseDraftConfirmation
+from app.modules.ai.model import AIAgentActionProposal, AIPurchaseDraftConfirmation
 from app.modules.ai.schema import AIPurchaseDraftConfirm
 from app.modules.purchase_requests.model import (
     PurchaseRequest,
@@ -76,6 +76,8 @@ def isolated_mysql_engine():
                 "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB"
             )
         AIPurchaseDraftConfirmation.__table__.create(engine)
+        # The legacy confirmation endpoint first checks the unified action ledger.
+        AIAgentActionProposal.__table__.create(engine)
         yield engine
     finally:
         if engine is not None:

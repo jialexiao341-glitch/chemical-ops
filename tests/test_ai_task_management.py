@@ -18,8 +18,11 @@ from app.modules.system.model import User
 
 
 def test_task_list_is_owner_scoped_and_paged(db_session, monkeypatch):
-    user = db_session.scalar(select(User).where(User.username == 'system_admin'))
-    foreign = db_session.scalar(select(User).where(User.username == 'buyer'))
+    # 独立身份避免把开发库中已有 FAILED 任务计入固定分页预期。
+    user, foreign = [User(username=f'task-page-{uuid4().hex[:12]}', display_name='任务分页测试',
+                          password_hash='unused-test-account') for _ in range(2)]
+    db_session.add_all([user, foreign])
+    db_session.flush()
     monkeypatch.setattr(agent_runtime, '_check_trace_access', lambda *_: [])
     for owner, count in ((user, 3), (foreign, 1)):
         for _ in range(count):

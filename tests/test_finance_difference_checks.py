@@ -1,6 +1,7 @@
 """Finance differences keep receipt lines separate from document totals."""
 
 from decimal import Decimal
+import re
 from datetime import date
 from uuid import uuid4
 
@@ -56,10 +57,21 @@ def test_receipt_line_and_document_review_are_separate(client, db_session, demo_
     analysis = client.get(base, headers=clerk)
     assert analysis.status_code == 200, analysis.text
     evidence = analysis.json()["evidence"]
-    assert any("已验收到货 6" in row["value"] and "660.00" in row["value"] for row in evidence)
-    assert any("短交 4" in row["value"] for row in evidence)
-    assert any(row["label"] == "已核验发票 / 未开票差额" and "550.00 / 550.00" in row["value"] for row in evidence)
-    assert any(row["label"] == "已付款 / 未付款差额" and "200.00 / 900.00" in row["value"] for row in evidence)
+    # 展示层会去掉小数尾零；按数值验证业务结果，不依赖金额展示为 660 或 660.00。
+    def number_after(value, label):
+        match = re.search(re.escape(label) + r"\s+(-?\d+(?:\.\d+)?)", value)
+        assert match is not None, value
+        return Decimal(match.group(1))
+
+    line_evidence = next(row['value'] for row in evidence if row['label'].startswith('订单行 '))
+    assert number_after(line_evidence, '已验收到货') == Decimal('6')
+    assert number_after(line_evidence, '已验收到货含税估算') == Decimal('660')
+    arrival = next(row['value'] for row in evidence if row['label'].startswith('到货行 '))
+    assert number_after(arrival, '短交') == Decimal('4')
+    for label, expected in [('已核验发票 / 未开票差额', (Decimal('550'), Decimal('550'))),
+                            ('已付款 / 未付款差额', (Decimal('200'), Decimal('900')))]:
+        value = next(row['value'] for row in evidence if row['label'] == label)
+        assert tuple(Decimal(part.strip()) for part in value.removesuffix(' CNY').split('/')) == expected
     assert any("发票和付款没有订单行分摊字段" in item for item in analysis.json()["limitations"])
 
     snapshot = client.post(f"{base}/snapshots", headers=clerk)
