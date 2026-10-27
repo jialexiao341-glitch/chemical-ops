@@ -1,0 +1,427 @@
+{
+  "production_revision": "2275ff7e9e66968b00ff9ef5fee64815ef46754d",
+  "production_file_sha256": {
+    "backend/app/modules/rfqs/quote_extraction.py": "e0e0b39aa59d9d070cdb1759cca7675887815a5776b21fa1db56e35caec89d43"
+  },
+  "current_reproducer_sha256": "2f56c5af39102e925d89da53c5ec5cc795214f6f38690a0fdb34eb5cc61fafa2",
+  "dependencies": {
+    "pypdf": "6.19.0",
+    "openpyxl": "3.1.5",
+    "Pillow": "12.3.0",
+    "pydantic": "2.13.5"
+  },
+  "reports": {
+    "quote-extraction-contract-baseline.json": {
+      "sha256": "cfd804fa1d0cb835b02c33718a819dff09b9a13deaad90a70b038d05597b31e0",
+      "summary": {
+        "total": 12,
+        "passed": 8,
+        "failed": 4
+      },
+      "retained_input_matches": {
+        "csv": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "pdf": [
+          "quote-extraction-synthetic-v1/pdf.pdf",
+          "quote-extraction-live-inputs/pdf.pdf"
+        ],
+        "xlsx": [],
+        "scan_without_ocr": [],
+        "scan_stub_ocr": [],
+        "corrupt_pdf": [
+          "quote-extraction-synthetic-v1/corrupt_pdf.pdf",
+          "quote-extraction-live-inputs/corrupt_pdf.pdf"
+        ],
+        "infected": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "fabricated_quote": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "unsupported_fields": [
+          "quote-extraction-synthetic-v1/unsupported_fields.csv",
+          "quote-extraction-live-inputs/unsupported_fields.csv"
+        ],
+        "header_mismatch": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "wrong_existing_rfq_line": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "duplicate_rfq_candidates": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ]
+      }
+    },
+    "quote-extraction-contract-verified.json": {
+      "sha256": "421a779afeb05a26666f39c8c3ea86619b1cc565941377a5d1b13a5089b59123",
+      "summary": {
+        "total": 12,
+        "passed": 8,
+        "failed": 4
+      },
+      "retained_input_matches": {
+        "csv": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "pdf": [
+          "quote-extraction-synthetic-v1/pdf.pdf",
+          "quote-extraction-live-inputs/pdf.pdf"
+        ],
+        "xlsx": [
+          "quote-extraction-synthetic-v1/xlsx.xlsx"
+        ],
+        "scan_without_ocr": [
+          "quote-extraction-synthetic-v1/scan_stub_ocr.pdf",
+          "quote-extraction-synthetic-v1/scan_without_ocr.pdf"
+        ],
+        "scan_stub_ocr": [
+          "quote-extraction-synthetic-v1/scan_stub_ocr.pdf",
+          "quote-extraction-synthetic-v1/scan_without_ocr.pdf"
+        ],
+        "corrupt_pdf": [
+          "quote-extraction-synthetic-v1/corrupt_pdf.pdf",
+          "quote-extraction-live-inputs/corrupt_pdf.pdf"
+        ],
+        "infected": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "fabricated_quote": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "unsupported_fields": [
+          "quote-extraction-synthetic-v1/unsupported_fields.csv",
+          "quote-extraction-live-inputs/unsupported_fields.csv"
+        ],
+        "header_mismatch": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "wrong_existing_rfq_line": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "duplicate_rfq_candidates": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ]
+      }
+    },
+    "quote-extraction-live-smoke.json": {
+      "sha256": "ce72f4743319b2a2b7a760dc2cea03f31d753b20cd439656a478fe5b3827869b",
+      "summary": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "retained_input_matches": {
+        "csv": [
+          "quote-extraction-synthetic-v1/csv.csv",
+          "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+          "quote-extraction-synthetic-v1/fabricated_quote.csv",
+          "quote-extraction-synthetic-v1/header_mismatch.csv",
+          "quote-extraction-synthetic-v1/infected.csv",
+          "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+          "quote-extraction-live-inputs/csv.csv",
+          "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+          "quote-extraction-live-inputs/fabricated_quote.csv",
+          "quote-extraction-live-inputs/header_mismatch.csv",
+          "quote-extraction-live-inputs/infected.csv",
+          "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+        ],
+        "pdf": [
+          "quote-extraction-synthetic-v1/pdf.pdf",
+          "quote-extraction-live-inputs/pdf.pdf"
+        ],
+        "xlsx": []
+      }
+    },
+    "quote-extraction-live-ocr.json": {
+      "sha256": "030af2305fee3e91b4d621414382189fd1791a8b05d9cbc9ef3a4ab555649c91",
+      "summary": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0
+      },
+      "retained_input_matches": {
+        "scan": [
+          "quote-extraction-live-inputs/scan_stub_ocr.pdf",
+          "quote-extraction-live-inputs/scan_without_ocr.pdf"
+        ]
+      }
+    }
+  },
+  "inputs": {
+    "quote-extraction-synthetic-v1/corrupt_pdf.pdf": "a0143b84060e0006d26427db90009d86bd3bc314fc0fea433759f3c112d1eb77",
+    "quote-extraction-synthetic-v1/csv.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-synthetic-v1/fabricated_quote.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-synthetic-v1/header_mismatch.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-synthetic-v1/infected.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-synthetic-v1/pdf.pdf": "a1f4bfe9e823637f734254a8818c0d88582f8b401ace57f6c1aef1d13dc7082f",
+    "quote-extraction-synthetic-v1/scan_stub_ocr.pdf": "44c34c550ac64d9c38f83b122ec846c55b45a7f9acc467559bf9e349f2053b3a",
+    "quote-extraction-synthetic-v1/scan_without_ocr.pdf": "44c34c550ac64d9c38f83b122ec846c55b45a7f9acc467559bf9e349f2053b3a",
+    "quote-extraction-synthetic-v1/unsupported_fields.csv": "89fce0d91431db6362f8c44c5f19b418f3da6766610e952e7a2bfcd288561fb2",
+    "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-synthetic-v1/xlsx.xlsx": "66b26f9129b6b7fc286230f7c92ecb9a2498f8893d062e304edd07f21edeb372",
+    "quote-extraction-live-inputs/corrupt_pdf.pdf": "a0143b84060e0006d26427db90009d86bd3bc314fc0fea433759f3c112d1eb77",
+    "quote-extraction-live-inputs/csv.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-live-inputs/duplicate_rfq_candidates.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-live-inputs/fabricated_quote.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-live-inputs/header_mismatch.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-live-inputs/infected.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-live-inputs/pdf.pdf": "a1f4bfe9e823637f734254a8818c0d88582f8b401ace57f6c1aef1d13dc7082f",
+    "quote-extraction-live-inputs/scan_stub_ocr.pdf": "06c08f9c902918ec2172af479eb8bac2ab9499a256cd080b8485d1eb1f66fb51",
+    "quote-extraction-live-inputs/scan_without_ocr.pdf": "06c08f9c902918ec2172af479eb8bac2ab9499a256cd080b8485d1eb1f66fb51",
+    "quote-extraction-live-inputs/unsupported_fields.csv": "89fce0d91431db6362f8c44c5f19b418f3da6766610e952e7a2bfcd288561fb2",
+    "quote-extraction-live-inputs/wrong_existing_rfq_line.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "quote-extraction-live-inputs/xlsx.xlsx": "778e3fbf745413b7ec9c94f24c75ceb54596ab4778980f4e9e6a7d76bfaf9c8a"
+  },
+  "provenance_limit": "retained_input_matches 为空表示没有保留当次二进制字节；不能用另一次生成的 Excel ZIP 冒充该输入。正常样本为同一英文单行报价的多格式表现。",
+  "real_model_responses": 4,
+  "real_ocr_successes": 1,
+  "business_database_used": false,
+  "final_oracle_review": {
+    "report": "quote-extraction-contract-final.json",
+    "report_sha256": "b165959cf631c63c8c752ab737790fc35a00f00bc03c7318a6e13fd4fd26936f",
+    "independent_oracle": true,
+    "related_pytest_passed": 34,
+    "reproducer_sha256": "76109e0e13e3b7e79dbdd32ac865ce2269c04a68d017f2398264959da1125c56",
+    "summary": {
+      "total": 12,
+      "passed": 8,
+      "failed": 4
+    },
+    "retained_input_matches": {
+      "csv": [
+        "quote-extraction-synthetic-v1/csv.csv",
+        "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+        "quote-extraction-synthetic-v1/fabricated_quote.csv",
+        "quote-extraction-synthetic-v1/header_mismatch.csv",
+        "quote-extraction-synthetic-v1/infected.csv",
+        "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+        "quote-extraction-live-inputs/csv.csv",
+        "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+        "quote-extraction-live-inputs/fabricated_quote.csv",
+        "quote-extraction-live-inputs/header_mismatch.csv",
+        "quote-extraction-live-inputs/infected.csv",
+        "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+      ],
+      "pdf": [
+        "quote-extraction-synthetic-v1/pdf.pdf",
+        "quote-extraction-live-inputs/pdf.pdf"
+      ],
+      "xlsx": [],
+      "scan_without_ocr": [],
+      "scan_stub_ocr": [],
+      "corrupt_pdf": [
+        "quote-extraction-synthetic-v1/corrupt_pdf.pdf",
+        "quote-extraction-live-inputs/corrupt_pdf.pdf"
+      ],
+      "infected": [
+        "quote-extraction-synthetic-v1/csv.csv",
+        "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+        "quote-extraction-synthetic-v1/fabricated_quote.csv",
+        "quote-extraction-synthetic-v1/header_mismatch.csv",
+        "quote-extraction-synthetic-v1/infected.csv",
+        "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+        "quote-extraction-live-inputs/csv.csv",
+        "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+        "quote-extraction-live-inputs/fabricated_quote.csv",
+        "quote-extraction-live-inputs/header_mismatch.csv",
+        "quote-extraction-live-inputs/infected.csv",
+        "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+      ],
+      "fabricated_quote": [
+        "quote-extraction-synthetic-v1/csv.csv",
+        "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+        "quote-extraction-synthetic-v1/fabricated_quote.csv",
+        "quote-extraction-synthetic-v1/header_mismatch.csv",
+        "quote-extraction-synthetic-v1/infected.csv",
+        "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+        "quote-extraction-live-inputs/csv.csv",
+        "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+        "quote-extraction-live-inputs/fabricated_quote.csv",
+        "quote-extraction-live-inputs/header_mismatch.csv",
+        "quote-extraction-live-inputs/infected.csv",
+        "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+      ],
+      "unsupported_fields": [
+        "quote-extraction-synthetic-v1/unsupported_fields.csv",
+        "quote-extraction-live-inputs/unsupported_fields.csv"
+      ],
+      "header_mismatch": [
+        "quote-extraction-synthetic-v1/csv.csv",
+        "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+        "quote-extraction-synthetic-v1/fabricated_quote.csv",
+        "quote-extraction-synthetic-v1/header_mismatch.csv",
+        "quote-extraction-synthetic-v1/infected.csv",
+        "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+        "quote-extraction-live-inputs/csv.csv",
+        "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+        "quote-extraction-live-inputs/fabricated_quote.csv",
+        "quote-extraction-live-inputs/header_mismatch.csv",
+        "quote-extraction-live-inputs/infected.csv",
+        "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+      ],
+      "wrong_existing_rfq_line": [
+        "quote-extraction-synthetic-v1/csv.csv",
+        "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+        "quote-extraction-synthetic-v1/fabricated_quote.csv",
+        "quote-extraction-synthetic-v1/header_mismatch.csv",
+        "quote-extraction-synthetic-v1/infected.csv",
+        "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+        "quote-extraction-live-inputs/csv.csv",
+        "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+        "quote-extraction-live-inputs/fabricated_quote.csv",
+        "quote-extraction-live-inputs/header_mismatch.csv",
+        "quote-extraction-live-inputs/infected.csv",
+        "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+      ],
+      "duplicate_rfq_candidates": [
+        "quote-extraction-synthetic-v1/csv.csv",
+        "quote-extraction-synthetic-v1/duplicate_rfq_candidates.csv",
+        "quote-extraction-synthetic-v1/fabricated_quote.csv",
+        "quote-extraction-synthetic-v1/header_mismatch.csv",
+        "quote-extraction-synthetic-v1/infected.csv",
+        "quote-extraction-synthetic-v1/wrong_existing_rfq_line.csv",
+        "quote-extraction-live-inputs/csv.csv",
+        "quote-extraction-live-inputs/duplicate_rfq_candidates.csv",
+        "quote-extraction-live-inputs/fabricated_quote.csv",
+        "quote-extraction-live-inputs/header_mismatch.csv",
+        "quote-extraction-live-inputs/infected.csv",
+        "quote-extraction-live-inputs/wrong_existing_rfq_line.csv"
+      ]
+    }
+  }
+}

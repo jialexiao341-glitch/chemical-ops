@@ -1,0 +1,4 @@
+# Preserve archived evaluation input bytes and their recorded SHA256 hashes.
+docs/evaluation/quote-extraction-*/*.csv -text
+docs/evaluation/quote-extraction-*/*.pdf binary
+docs/evaluation/quote-extraction-*/*.xlsx binary

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { QuoteItemRow } from '../data';
 
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
@@ -14,6 +14,7 @@ import {
   Input,
   InputNumber,
   message,
+  Modal as AntModal,
   Select,
   Spin,
   Table,
@@ -22,6 +23,8 @@ import {
 import { createQuoteApi, getRfqApi, getUnitListApi, parseQuoteFileApi } from '#/api';
 import { formatQuantity } from '#/utils/format';
 import { getSupplierNameMap } from '#/utils/lookup';
+
+import { replaceQuoteCandidate } from './quote-candidate';
 
 const { hasAccessByCodes } = useAccess();
 const canConfirm = computed(() => hasAccessByCodes(['procurement.rfqs.quote']));
@@ -47,10 +50,20 @@ const fileInput = ref<HTMLInputElement>();
 const rows = ref<QuoteItemRow[]>([]);
 const unitOptions = ref<Array<{ label: string; value: number }>>([]);
 const loading = ref(false);
+const submitting = ref(false);
+const busy = computed(() => loading.value || parseLoading.value || submitting.value);
+let contextVersion = 0;
+let initialRows: QuoteItemRow[] = [];
+let importConfirmation: ReturnType<typeof AntModal.confirm> | undefined;
+
+onBeforeUnmount(() => {
+  contextVersion += 1;
+  importConfirmation?.destroy();
+});
 
 const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
   async onConfirm() {
-    if (!canConfirm.value) return;
+    if (!canConfirm.value || busy.value) return;
     if (!supplierId.value) {
       message.warning('请选择报价供应商');
       return;
@@ -66,9 +79,17 @@ const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
       message.warning('请为每条明细填写单价、税率并选择含税口径');
       return;
     }
+    if (rows.value.length === 0 || rows.value.some((row) =>
+      !Number.isFinite(Number(row.quoted_quantity)) || Number(row.quoted_quantity) <= 0 || !row.unit_id,
+    )) {
+      message.warning('请为每条明细填写有效的报价数量并选择报价单位');
+      return;
+    }
     if (!rfqId.value) {
       return;
     }
+    const version = contextVersion;
+    submitting.value = true;
     modalApi.lock();
     try {
       await createQuoteApi(rfqId.value, {
@@ -96,6 +117,7 @@ const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
         supplier_id: supplierId.value,
         valid_until: validUntil.value,
       });
+      if (version !== contextVersion) return;
       message.success('报价已录入');
       emit('success');
       modalApi.close();
@@ -103,10 +125,20 @@ const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
       // 请求层已统一弹出后端返回的中文错误，这里保持弹窗打开，
       // 让用户修正后重新提交；不吞掉异常会导致未捕获的 Promise 拒绝。
     } finally {
-      modalApi.unlock();
+      if (version === contextVersion) {
+        submitting.value = false;
+        modalApi.unlock();
+      }
     }
   },
   async onOpenChange(isOpen) {
+    const version = ++contextVersion;
+    importConfirmation?.destroy();
+    importConfirmation = undefined;
+    parseLoading.value = false;
+    loading.value = false;
+    submitting.value = false;
+    modalApi.unlock();
     if (!isOpen) {
       return;
     }
@@ -121,6 +153,9 @@ const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
     sourceFileId.value = undefined;
     parseCandidate.value = undefined;
     rows.value = [];
+    initialRows = [];
+    supplierOptions.value = [];
+    unitOptions.value = [];
     if (!rfqId.value) {
       return;
     }
@@ -131,6 +166,7 @@ const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
         getUnitListApi({ silent: true }),
         getSupplierNameMap(),
       ]);
+      if (version !== contextVersion) return;
       const unitMap = new Map(units.map((item) => [item.id, item.unit_name]));
       unitOptions.value = units
         .filter((item) => item.status === 'ACTIVE')
@@ -160,8 +196,11 @@ const [Modal, modalApi] = useVbenModal<null | { id: number; rfqNo: string }>({
         unitName: unitMap.get(item.unit_id) ?? `#${item.unit_id}`,
         unit_price: undefined,
       }));
+      initialRows = rows.value.map((row) => ({ ...row }));
+    } catch {
+      // 请求层显示加载错误；旧上下文不会写入新弹窗。
     } finally {
-      loading.value = false;
+      if (version === contextVersion) loading.value = false;
     }
   },
 });
@@ -170,49 +209,57 @@ async function parseQuoteFile(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = '';
-  if (!file || !rfqId.value) return;
+  if (!file || !rfqId.value || busy.value || !canConfirm.value) return;
+  const version = contextVersion;
+  const id = rfqId.value;
+  // Also block edits while the replacement confirmation is open.
   parseLoading.value = true;
+  const hasInput = sourceFileId.value != null || supplierId.value != null
+    || quoteDate.value || validUntil.value || note.value || currencyCode.value
+    || JSON.stringify(rows.value) !== JSON.stringify(initialRows);
+  if (hasInput) {
+    importConfirmation = AntModal.confirm({
+      title: '替换当前报价内容？',
+      content: '成功解析后将替换当前全部报价字段，文件未提供的字段会清空，供应商需要重新选择。解析失败时保留当前内容。',
+      okText: '确认替换',
+      cancelText: '取消',
+      keyboard: false,
+      maskClosable: false,
+      onOk: async () => {
+        if (version !== contextVersion) return;
+        importConfirmation?.update({ cancelButtonProps: { disabled: true } });
+        await importQuoteFile(id, file, version);
+        if (version === contextVersion) importConfirmation = undefined;
+      },
+      onCancel: () => {
+        if (version !== contextVersion) return;
+        parseLoading.value = false;
+        importConfirmation = undefined;
+      },
+    });
+    return;
+  }
+  await importQuoteFile(id, file, version);
+}
+
+async function importQuoteFile(id: number, file: File, version: number) {
   try {
-    const candidate = await parseQuoteFileApi(rfqId.value, file);
-    parseCandidate.value = candidate;
-    sourceFileId.value = candidate.file_id;
-    currencyCode.value = candidate.currency_code ?? '';
-    quoteDate.value = candidate.quote_date ?? quoteDate.value;
-    validUntil.value = candidate.valid_until ?? validUntil.value;
-    note.value = candidate.note ?? note.value;
-    for (const item of candidate.items) {
-      const row = rows.value.find((entry) => entry.rfq_item_id === item.rfq_item_id);
-      if (!row || !item.rfq_item_id) continue;
-      if (item.supplier_model) row.supplier_model = item.supplier_model;
-      if (item.quoted_quantity && Number.isFinite(Number(item.quoted_quantity))) row.quoted_quantity = Number(item.quoted_quantity);
-      if (item.unit_price && Number.isFinite(Number(item.unit_price))) row.unit_price = Number(item.unit_price);
-      if (item.tax_rate != null && Number.isFinite(Number(item.tax_rate))) row.tax_rate = Number(item.tax_rate);
-      if (item.tax_included !== null && item.tax_included !== undefined) row.tax_basis = item.tax_included ? 'INCLUDED' : 'EXCLUDED';
-      if (item.moq_quantity && Number.isFinite(Number(item.moq_quantity))) row.moq_quantity = Number(item.moq_quantity);
-      if (item.moq_unit_name) {
-        const matchingMoqUnit = unitOptions.value.find((unit) => unit.label.trim().toLowerCase() === item.moq_unit_name?.trim().toLowerCase());
-        if (matchingMoqUnit) row.moq_unit_id = matchingMoqUnit.value;
-      }
-      if (item.freight_amount != null && Number.isFinite(Number(item.freight_amount))) row.freight_amount = Number(item.freight_amount);
-      if (item.freight_tax_rate != null && Number.isFinite(Number(item.freight_tax_rate))) row.freight_tax_rate = Number(item.freight_tax_rate);
-      if (item.freight_tax_included != null) row.freight_tax_basis = item.freight_tax_included ? 'INCLUDED' : 'EXCLUDED';
-      if (item.lead_days !== null && item.lead_days !== undefined) row.lead_days = item.lead_days;
-      if (item.payment_terms) row.payment_terms = item.payment_terms;
-      if (item.unit_name) {
-        const matchingUnit = unitOptions.value.find(
-          (unit) => unit.label.trim().toLowerCase() === item.unit_name?.trim().toLowerCase(),
-        );
-        if (matchingUnit) {
-          row.unit_id = matchingUnit.value;
-          row.unitName = matchingUnit.label;
-        }
-      }
-    }
-    message.success('解析完成，请核对候选字段与原文依据');
+    const candidate = await parseQuoteFileApi(id, file);
+    if (version !== contextVersion) return;
+    const replacement = replaceQuoteCandidate(initialRows, candidate, unitOptions.value);
+    rows.value = replacement.rows;
+    sourceFileId.value = replacement.sourceFileId;
+    supplierId.value = replacement.supplierId;
+    currencyCode.value = replacement.currencyCode;
+    quoteDate.value = replacement.quoteDate;
+    validUntil.value = replacement.validUntil;
+    note.value = replacement.note;
+    parseCandidate.value = { ...candidate, warnings: replacement.warnings };
+    message.success('解析完成，请重新选择供应商并核对候选字段与原文依据');
   } catch {
     // 请求层显示后端错误；解析失败时保留用户已编辑的报价表单。
   } finally {
-    parseLoading.value = false;
+    if (version === contextVersion) parseLoading.value = false;
   }
 }
 
@@ -246,8 +293,8 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
 </script>
 
 <template>
-  <Modal :show-confirm-button="canConfirm" :title="title" class="w-[1200px] max-w-[100vw]">
-    <Spin :spinning="loading">
+  <Modal :confirm-disabled="busy" :show-confirm-button="canConfirm" :title="title" class="w-[1200px] max-w-[100vw]">
+    <Spin :spinning="loading || parseLoading">
       <div class="space-y-4 px-1">
         <Alert
           message="请核对报价、运费、税费和 MOQ 单位。未提供运费按未知处理；填写 0 表示明确无运费。"
@@ -262,7 +309,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
             type="file"
             @change="parseQuoteFile"
           />
-          <Button v-if="canConfirm" :loading="parseLoading" @click="fileInput?.click()">
+          <Button v-if="canConfirm" :disabled="busy" :loading="parseLoading" @click="fileInput?.click()">
             上传并解析报价文件
           </Button>
           <span v-if="parseCandidate" class="text-xs text-muted-foreground">
@@ -282,6 +329,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
               报价供应商 <span class="text-red-500">*</span>
             </div>
             <Select
+              :disabled="busy"
               v-model:value="supplierId"
               :options="supplierOptions"
               class="w-full"
@@ -292,6 +340,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
           <div>
             <div class="mb-2 text-sm">报价日期</div>
             <DatePicker
+              :disabled="busy"
               v-model:value="quoteDate"
               class="w-full"
               value-format="YYYY-MM-DD"
@@ -300,6 +349,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
           <div>
             <div class="mb-2 text-sm">有效期至</div>
             <DatePicker
+              :disabled="busy"
               v-model:value="validUntil"
               class="w-full"
               value-format="YYYY-MM-DD"
@@ -307,12 +357,12 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
           </div>
           <div>
             <div class="mb-2 text-sm">币种</div>
-            <Input v-model:value="currencyCode" :maxlength="3" />
+            <Input :disabled="busy" v-model:value="currencyCode" :maxlength="3" />
           </div>
         </div>
         <div>
           <div class="mb-2 text-sm">备注</div>
-          <Input v-model:value="note" :maxlength="500" />
+          <Input :disabled="busy" v-model:value="note" :maxlength="500" />
         </div>
 
         <Empty v-if="rows.length === 0 && !loading" description="该询价单没有明细" />
@@ -328,6 +378,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'quoted_quantity'">
               <InputNumber
+                :disabled="busy"
                 v-model:value="record.quoted_quantity"
                 :min="0"
                 class="w-full"
@@ -335,6 +386,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
             </template>
             <template v-else-if="column.key === 'unit_price'">
               <InputNumber
+                :disabled="busy"
                 v-model:value="record.unit_price"
                 :min="0"
                 :precision="6"
@@ -343,6 +395,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
             </template>
             <template v-else-if="column.key === 'tax_rate'">
               <InputNumber
+                :disabled="busy"
                 v-model:value="record.tax_rate"
                 :max="100"
                 :min="0"
@@ -351,6 +404,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
             </template>
             <template v-else-if="column.key === 'tax_included'">
               <Select
+                :disabled="busy"
                 v-model:value="record.tax_basis"
                 :options="[
                   { label: '含税价', value: 'INCLUDED' },
@@ -362,6 +416,7 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
             </template>
             <template v-else-if="column.key === 'lead_days'">
               <InputNumber
+                :disabled="busy"
                 v-model:value="record.lead_days"
                 :min="0"
                 class="w-full"
@@ -369,31 +424,32 @@ const title = computed(() => `录入报价 · ${rfqNo.value}`);
             </template>
             <template v-else-if="column.key === 'moq_quantity'">
               <InputNumber
+                :disabled="busy"
                 v-model:value="record.moq_quantity"
                 :min="0"
                 class="w-full"
               />
             </template>
             <template v-else-if="column.key === 'freight_amount'">
-              <InputNumber v-model:value="record.freight_amount" :min="0" :precision="6" class="w-full" />
+              <InputNumber :disabled="busy" v-model:value="record.freight_amount" :min="0" :precision="6" class="w-full" />
             </template>
             <template v-else-if="column.key === 'freight_tax_rate'">
-              <InputNumber v-model:value="record.freight_tax_rate" :min="0" :max="100" class="w-full" />
+              <InputNumber :disabled="busy" v-model:value="record.freight_tax_rate" :min="0" :max="100" class="w-full" />
             </template>
             <template v-else-if="column.key === 'freight_tax_included'">
-              <Select v-model:value="record.freight_tax_basis" :options="[{ label: '含税', value: 'INCLUDED' }, { label: '未税', value: 'EXCLUDED' }]" class="w-full" placeholder="请选择" />
+              <Select :disabled="busy" v-model:value="record.freight_tax_basis" :options="[{ label: '含税', value: 'INCLUDED' }, { label: '未税', value: 'EXCLUDED' }]" class="w-full" placeholder="请选择" />
             </template>
             <template v-else-if="column.key === 'moq_unit_id'">
-              <Select v-model:value="record.moq_unit_id" :options="unitOptions" class="w-full" />
+              <Select :disabled="busy" v-model:value="record.moq_unit_id" :options="unitOptions" class="w-full" />
             </template>
             <template v-else-if="column.key === 'supplier_model'">
-              <Input v-model:value="record.supplier_model" :maxlength="100" />
+              <Input :disabled="busy" v-model:value="record.supplier_model" :maxlength="100" />
             </template>
             <template v-else-if="column.key === 'unit_id'">
-              <Select v-model:value="record.unit_id" :options="unitOptions" class="w-full" />
+              <Select :disabled="busy" v-model:value="record.unit_id" :options="unitOptions" class="w-full" />
             </template>
             <template v-else-if="column.key === 'payment_terms'">
-              <Input v-model:value="record.payment_terms" :maxlength="100" />
+              <Input :disabled="busy" v-model:value="record.payment_terms" :maxlength="100" />
             </template>
           </template>
         </Table>

@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +12,7 @@ def _rfq(status="RESPONDING"):
     return SimpleNamespace(
         id=14,
         status=status,
-        items=[SimpleNamespace(id=31, requested_name="乙醇", specification="纯度99%", quantity="10")],
+        items=[SimpleNamespace(id=31, requested_name="乙醇", specification=None, quantity="10")],
     )
 
 
@@ -47,6 +48,14 @@ def _model_result(*, item_id=31, quote="物料：乙醇，数量：10 L，单价
             "lead_days": 7,
             "payment_terms": "月结30天",
             "quote": quote,
+            "evidence": {
+                "product_label": "乙醇", "supplier_model": "E-99",
+                "quoted_quantity": "10 L", "unit_name": "CNY/L", "unit_price": "12.5 CNY/L",
+                "tax_rate": "税率 13%", "tax_included": "未税",
+                "moq_quantity": "MOQ 20 L", "moq_unit_name": "MOQ 20 L",
+                "freight_amount": "运费 25.50 元", "freight_tax_rate": "税率 6%",
+                "freight_tax_included": "未税", "lead_days": "交期7天", "payment_terms": "月结30天",
+            },
         }],
     }
 
@@ -190,3 +199,106 @@ def test_quote_create_rejects_source_file_owned_by_another_user():
         rfq_service.create_quote_for_supplier(
             FakeDb(), SimpleNamespace(id=5), _rfq(), 8, data,
         )
+
+
+def test_fields_without_individual_evidence_are_not_prefilled(monkeypatch):
+    prediction = _model_result()
+    prediction['items'][0].pop('evidence')
+    _configure(monkeypatch, prediction)
+    result = _run_immediate(quote_extraction.parse_quote_file(SimpleNamespace(), SimpleNamespace(id=5), 14,
+        file_name='quote.csv', mime_type='text/csv', content=prediction['items'][0]['quote'].encode()))
+    assert result.items[0].unit_price is None
+    assert result.items[0].tax_rate is None
+    assert result.items[0].rfq_item_id is None
+
+
+def test_header_value_must_match_its_actual_evidence(monkeypatch):
+    prediction = _model_result()
+    prediction['currency_code'] = 'USD'
+    _configure(monkeypatch, prediction)
+    result = _run_immediate(quote_extraction.parse_quote_file(SimpleNamespace(), SimpleNamespace(id=5), 14,
+        file_name='quote.csv', mime_type='text/csv', content=('币种：CNY\n'+prediction['items'][0]['quote']).encode()))
+    assert result.currency_code is None
+
+
+@pytest.mark.parametrize(('field', 'value', 'proof', 'expected'), [
+    ('unit_price', '12.5', '单价12.5元', True),
+    ('unit_price', '12.5', '数量10 单价12.5', False),
+    ('unit_price', '99', '型号E99', False),
+    ('unit_price', '-1', '单价-1', False),
+    ('unit_price', 'NaN', 'NaN', False),
+    ('quoted_quantity', '0', '数量0', False),
+    ('tax_rate', '101', '税率101%', False),
+    ('tax_included', True, '不含税', False),
+    ('tax_included', False, 'not included', True),
+    ('tax_included', True, '含税与未税', False),
+    ('currency_code', 'USD', 'Currency CNY', False),
+])
+def test_field_evidence_boundaries(field, value, proof, expected):
+    assert quote_extraction.supported(field, value, proof) is expected
+
+
+def _parse_prediction(monkeypatch, prediction, *, source=None):
+    _configure(monkeypatch, prediction)
+    return _run_immediate(quote_extraction.parse_quote_file(
+        SimpleNamespace(), SimpleNamespace(id=5), 14, file_name='quote.csv',
+        mime_type='text/csv', content=(source or '\n'.join(item['quote'] for item in prediction['items'])).encode()))
+
+
+def test_other_row_evidence_cannot_fill_current_row(monkeypatch):
+    prediction = _model_result()
+    prediction['items'][0]['tax_rate'] = '13'
+    result = _parse_prediction(monkeypatch, prediction, source=prediction['items'][0]['quote']+'\n甲醇 税率 13%')
+    assert result.items[0].tax_rate is None
+
+
+def test_matching_requires_verified_specification(monkeypatch):
+    prediction = _model_result()
+    _configure(monkeypatch, prediction)
+    rfq = _rfq()
+    rfq.items[0].specification = '纯度99%'
+    monkeypatch.setattr(rfq_service, 'get_rfq', lambda *_args: rfq)
+    result = _run_immediate(quote_extraction.parse_quote_file(
+        SimpleNamespace(), SimpleNamespace(id=5), 14, file_name='quote.csv',
+        mime_type='text/csv', content=prediction['items'][0]['quote'].encode()))
+    assert result.items[0].rfq_item_id is None
+
+
+@pytest.mark.parametrize('ambiguous', [False, True])
+def test_verified_name_and_specification_bind_only_one_inquiry_row(monkeypatch, ambiguous):
+    prediction = _model_result(quote='乙醇 纯度99% 单价12.5 CNY/L')
+    prediction['items'][0]['specification'] = '纯度99%'
+    prediction['items'][0]['evidence']['specification'] = '纯度99%'
+    _configure(monkeypatch, prediction)
+    rfq = _rfq()
+    rfq.items[0].specification = '纯度99%'
+    if ambiguous:
+        rfq.items.append(SimpleNamespace(id=32, requested_name='乙醇', specification='纯度99%', quantity='20'))
+    monkeypatch.setattr(rfq_service, 'get_rfq', lambda *_args: rfq)
+    result = _run_immediate(quote_extraction.parse_quote_file(
+        SimpleNamespace(), SimpleNamespace(id=5), 14, file_name='quote.csv',
+        mime_type='text/csv', content=prediction['items'][0]['quote'].encode()))
+    assert result.items[0].rfq_item_id == (None if ambiguous else 31)
+
+
+def test_identical_candidates_are_deduplicated(monkeypatch):
+    prediction = _model_result()
+    prediction['items'].append(deepcopy(prediction['items'][0]))
+    result = _parse_prediction(monkeypatch, prediction)
+    assert len(result.items) == 1
+    assert result.items[0].rfq_item_id == 31
+
+
+@pytest.mark.parametrize('second_id', [31, None, 999])
+def test_conflicting_prices_are_not_bound_automatically(monkeypatch, second_id):
+    prediction = _model_result()
+    other = deepcopy(prediction['items'][0])
+    other['quote'] = other['quote'].replace('12.5', '15.5')
+    other['unit_price'] = '15.5'
+    other['rfq_item_id'] = second_id
+    other['evidence']['unit_price'] = '15.5 CNY/L'
+    prediction['items'].append(other)
+    result = _parse_prediction(monkeypatch, prediction)
+    assert len(result.items) == 2
+    assert all(item.rfq_item_id is None for item in result.items)
+    assert any('冲突候选' in warning for warning in result.warnings)

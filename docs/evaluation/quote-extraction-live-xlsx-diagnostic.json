@@ -1,0 +1,189 @@
+{
+  "suite": "quote-extraction-synthetic-v1",
+  "created_at": "2026-10-27T00:40:00.029566+00:00",
+  "real_model_requested": true,
+  "real_ocr_requested": false,
+  "real_model_evaluated": true,
+  "real_ocr_evaluated": false,
+  "business_writes": false,
+  "scope": "合成文档的解析与候选字段契约；上传、业务权限和业务库隔离；不代表真实供应商文件准确率或业务收益",
+  "model": "deepseek-flash",
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1
+  },
+  "cases": [
+    {
+      "id": "xlsx",
+      "format": "xlsx",
+      "input_sha256": "18de54837a56d9af09717f3f9ade7ca73eff473b9ec005850e470095784a5316",
+      "passed": false,
+      "checks": {
+        "supplier_name": true,
+        "currency_code": true,
+        "quote_date": true,
+        "valid_until": true,
+        "note": true,
+        "item_count": true,
+        "items[0].rfq_item_id": false,
+        "items[0].product_label": true,
+        "items[0].supplier_model": true,
+        "items[0].quoted_quantity": true,
+        "items[0].unit_name": true,
+        "items[0].unit_price": true,
+        "items[0].tax_rate": false,
+        "items[0].tax_included": true,
+        "items[0].moq_quantity": true,
+        "items[0].moq_unit_name": true,
+        "items[0].lead_days": true,
+        "items[0].payment_terms": true,
+        "items[0].freight_amount": true,
+        "items[0].freight_tax_rate": true,
+        "items[0].freight_tax_included": true,
+        "source_quotes_present": true,
+        "manual_review_warning": true
+      },
+      "failed_checks": [
+        "items[0].rfq_item_id",
+        "items[0].tax_rate"
+      ],
+      "error_type": null,
+      "model_calls": 1,
+      "model_responses": 1,
+      "ocr_responses": 0,
+      "source_file_upload_stub_calls": 1,
+      "candidate": {
+        "file_id": 1,
+        "file_name": "synthetic-quote.xlsx",
+        "supplier_name": "Demo A",
+        "currency_code": "CNY",
+        "quote_date": "2026-10-20",
+        "valid_until": "2026-11-20",
+        "note": null,
+        "items": [
+          {
+            "rfq_item_id": null,
+            "product_label": "Ethanol",
+            "supplier_model": "E99",
+            "quoted_quantity": "10",
+            "unit_name": "L",
+            "unit_price": "12.50",
+            "tax_rate": null,
+            "tax_included": false,
+            "moq_quantity": "20",
+            "moq_unit_name": "L",
+            "freight_amount": null,
+            "freight_tax_rate": null,
+            "freight_tax_included": null,
+            "lead_days": 7,
+            "payment_terms": "net 30 days",
+            "source_quote": "Ethanol | Model E99 | Quantity 10 L | Unit price 12.50 CNY/L | Tax 13% excluded | MOQ 20 L | Lead 7 days | Payment net 30 days",
+            "source_location": "工作表：Quote · 第 6 行"
+          }
+        ],
+        "evidence": [
+          {
+            "field": "supplier_name",
+            "value": "Demo A",
+            "source_quote": "Demo A",
+            "source_location": "工作表：Quote · 第 1 行"
+          },
+          {
+            "field": "currency_code",
+            "value": "CNY",
+            "source_quote": "CNY",
+            "source_location": "工作表：Quote · 第 2 行"
+          },
+          {
+            "field": "quote_date",
+            "value": "2026-10-20",
+            "source_quote": "2026-10-20",
+            "source_location": "工作表：Quote · 第 3 行"
+          },
+          {
+            "field": "valid_until",
+            "value": "2026-11-20",
+            "source_quote": "2026-11-20",
+            "source_location": "工作表：Quote · 第 4 行"
+          }
+        ],
+        "warnings": [
+          "解析结果仅为候选值，请逐项核对后再录入报价。",
+          "部分字段缺少一致的逐字段原文依据，已清空：tax_rate",
+          "有 1 条明细未能可靠匹配询价行，请人工检查。",
+          "报价明细未覆盖全部询价行，系统不会自动补齐或提交。"
+        ]
+      },
+      "parse_stages": [
+        {
+          "status": "SUCCEEDED",
+          "parser": "openpyxl",
+          "references": [
+            {
+              "type": "sheet_row",
+              "sheet": "Quote",
+              "row": 1
+            },
+            {
+              "type": "sheet_row",
+              "sheet": "Quote",
+              "row": 2
+            },
+            {
+              "type": "sheet_row",
+              "sheet": "Quote",
+              "row": 3
+            },
+            {
+              "type": "sheet_row",
+              "sheet": "Quote",
+              "row": 4
+            },
+            {
+              "type": "sheet_row",
+              "sheet": "Quote",
+              "row": 5
+            },
+            {
+              "type": "sheet_row",
+              "sheet": "Quote",
+              "row": 6
+            }
+          ],
+          "text_sha256": "79f4cab05ba2eda388143fb8c181015a9231c938adbfa435569e249aa8c1f6d5"
+        }
+      ],
+      "expected": {
+        "supplier_name": "Demo A",
+        "currency_code": "CNY",
+        "quote_date": "2026-10-20",
+        "valid_until": "2026-11-20",
+        "note": null,
+        "items": [
+          {
+            "rfq_item_id": 31,
+            "product_label": "Ethanol",
+            "supplier_model": "E99",
+            "quoted_quantity": "10",
+            "unit_name": "L",
+            "unit_price": "12.50",
+            "tax_rate": "13",
+            "tax_included": false,
+            "moq_quantity": "20",
+            "moq_unit_name": "L",
+            "lead_days": 7,
+            "payment_terms": "net 30 days",
+            "freight_amount": null,
+            "freight_tax_rate": null,
+            "freight_tax_included": null
+          }
+        ]
+      },
+      "ocr_stubbed": false,
+      "synthetic_model_outputs": [
+        "{\"supplier_name\":\"Demo A\",\"currency_code\":\"CNY\",\"quote_date\":\"2026-10-20\",\"valid_until\":\"2026-11-20\",\"note\":null,\"items\":[{\"rfq_item_id\":null,\"product_label\":\"Ethanol\",\"specification\":null,\"supplier_model\":\"E99\",\"quoted_quantity\":\"10\",\"unit_name\":\"L\",\"unit_price\":\"12.50\",\"tax_rate\":\"13%\",\"tax_included\":false,\"moq_quantity\":\"20\",\"moq_unit_name\":\"L\",\"freight_amount\":null,\"freight_tax_rate\":null,\"freight_tax_included\":null,\"lead_days\":7,\"payment_terms\":\"net 30 days\",\"quote\":\"Ethanol | Model E99 | Quantity 10 L | Unit price 12.50 CNY/L | Tax 13% excluded | MOQ 20 L | Lead 7 days | Payment net 30 days\",\"evidence\":{\"product_label\":\"Ethanol\",\"specification\":null,\"supplier_model\":\"Model E99\",\"quoted_quantity\":\"Quantity 10 L\",\"unit_name\":\"L\",\"unit_price\":\"12.50\",\"tax_rate\":\"13%\",\"tax_included\":\"excluded\",\"moq_quantity\":\"MOQ 20 L\",\"moq_unit_name\":\"L\",\"freight_amount\":null,\"freight_tax_rate\":null,\"freight_tax_included\":null,\"lead_days\":\"7 days\",\"payment_terms\":\"net 30 days\"}}],\"evidence\":{\"supplier_name\":\"Demo A\",\"currency_code\":\"CNY\",\"quote_date\":\"2026-10-20\",\"valid_until\":\"2026-11-20\",\"note\":null}}"
+      ]
+    }
+  ]
+}

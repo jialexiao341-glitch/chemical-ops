@@ -1,0 +1,272 @@
+{
+  "scope": "合成样本修复复测，不代表生产准确率或真实数据库/浏览器验收",
+  "source_snapshot_timing": "最终验证后采集；不冒充历史调用时逐文件快照",
+  "live_retest_note": "三格式真实模型复测进程启动于最终冲突分组修正之前；该修正另有31/null/999回归，单条正常样本无冲突候选。",
+  "sources": {
+    "backend/app/modules/rfqs/quote_extraction.py": "4fd262f4f8fa069988a82408cef1a9de5ac866025bfb55806dd7a76d29c1b856",
+    "backend/app/modules/rfqs/quote_evidence.py": "69b19963c497bf168361cc17c7139436063b1e16d77f6e85e64cf75fc9222129",
+    "scripts/evaluate_quote_extraction.py": "49ceeb651a06e33ca105436b34480983353064fe9ec6d981b97de50d5da5984c",
+    "tests/test_rfq_quote_extraction.py": "e3ca15e61a10a69359b4bf8070bf455615f857e116297e1503d91c754018e5a3",
+    "tests/test_quote_extraction_evaluation.py": "e0a62c0617565944bdfc9acf62f84568eac7e70b4ba0e6a0b84664ebe39dd0c0",
+    "frontend-design/apps/web-chemicalops/src/views/procurement/rfqs/modules/quote.vue": "e8e22e1c8f1632824ba4d0094eafef1a7a3266dcf55f8ecdb2b247e75a8a02c4",
+    "frontend-design/apps/web-chemicalops/src/views/procurement/rfqs/modules/quote-candidate.ts": "38dcbf2dc698dd2c89c37ec9cb84cd9f58909e3f110c21cd9f16bc2ae0db40e0",
+    "frontend-design/apps/web-chemicalops/src/views/procurement/rfqs/modules/quote.test.ts": "ec5de60f712c4af8809edb17749e541b678bf2c9dddac6031046d53f104659d1",
+    "frontend-design/apps/web-chemicalops/src/views/procurement/rfqs/modules/quote-candidate.test.ts": "181c3697032277589a77dcc4d7bc01974f7f82ca5fd60602d4e0eb9346a3f275"
+  },
+  "reports": [
+    {
+      "path": "docs/evaluation/quote-extraction-contract-release-check.json",
+      "sha256": "f8c4357790870f385d69b40c5974d5ec4001b5f147293a833e003743b671a330",
+      "summary": {
+        "total": 12,
+        "passed": 12,
+        "failed": 0
+      },
+      "inputs": [
+        {
+          "id": "csv",
+          "sha256": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/wrong_existing_rfq_line.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/wrong_existing_rfq_line.csv"
+          ]
+        },
+        {
+          "id": "pdf",
+          "sha256": "a1f4bfe9e823637f734254a8818c0d88582f8b401ace57f6c1aef1d13dc7082f",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/pdf.pdf",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/pdf.pdf"
+          ]
+        },
+        {
+          "id": "xlsx",
+          "sha256": "f37f9e4af0247d09facc440bd840063ad41aa7b504884031ea6b53a42c492a49",
+          "matching_archive_paths": []
+        },
+        {
+          "id": "scan_without_ocr",
+          "sha256": "386238fb2f6a9d8162eccc1f48c7897ba3ec357a7c16bce07670cd299855ef31",
+          "matching_archive_paths": []
+        },
+        {
+          "id": "scan_stub_ocr",
+          "sha256": "386238fb2f6a9d8162eccc1f48c7897ba3ec357a7c16bce07670cd299855ef31",
+          "matching_archive_paths": []
+        },
+        {
+          "id": "corrupt_pdf",
+          "sha256": "a0143b84060e0006d26427db90009d86bd3bc314fc0fea433759f3c112d1eb77",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/corrupt_pdf.pdf",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/corrupt_pdf.pdf"
+          ]
+        },
+        {
+          "id": "infected",
+          "sha256": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/wrong_existing_rfq_line.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/wrong_existing_rfq_line.csv"
+          ]
+        },
+        {
+          "id": "fabricated_quote",
+          "sha256": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/wrong_existing_rfq_line.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/wrong_existing_rfq_line.csv"
+          ]
+        },
+        {
+          "id": "unsupported_fields",
+          "sha256": "89fce0d91431db6362f8c44c5f19b418f3da6766610e952e7a2bfcd288561fb2",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/unsupported_fields.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/unsupported_fields.csv"
+          ]
+        },
+        {
+          "id": "header_mismatch",
+          "sha256": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/wrong_existing_rfq_line.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/wrong_existing_rfq_line.csv"
+          ]
+        },
+        {
+          "id": "wrong_existing_rfq_line",
+          "sha256": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/wrong_existing_rfq_line.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/wrong_existing_rfq_line.csv"
+          ]
+        },
+        {
+          "id": "duplicate_rfq_candidates",
+          "sha256": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/wrong_existing_rfq_line.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/wrong_existing_rfq_line.csv"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "docs/evaluation/quote-extraction-live-remediated-retest.json",
+      "sha256": "ee0364912fb1f4ccdb4900c427aad5ba05cd036cce12ecc7a7f6bc889cfee078",
+      "summary": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "inputs": [
+        {
+          "id": "csv",
+          "sha256": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/wrong_existing_rfq_line.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/csv.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/duplicate_rfq_candidates.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/fabricated_quote.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/header_mismatch.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/infected.csv",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/wrong_existing_rfq_line.csv"
+          ]
+        },
+        {
+          "id": "pdf",
+          "sha256": "a1f4bfe9e823637f734254a8818c0d88582f8b401ace57f6c1aef1d13dc7082f",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/pdf.pdf",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/pdf.pdf"
+          ]
+        },
+        {
+          "id": "xlsx",
+          "sha256": "f85cc36fcbe3e67a2bfdf53711b427e62d1e0ec15c23c51439d4e7ae6f90a81f",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-remediated-retest-inputs/xlsx.xlsx"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "docs/evaluation/quote-extraction-live-ocr-remediated.json",
+      "sha256": "71604dc2ed10bff90a8d7d87264b61d2842479bd70cd89983abaf5dbddafa849",
+      "summary": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0
+      },
+      "inputs": [
+        {
+          "id": "scan",
+          "sha256": "0ed612cd368e9338f7e766bba0ad44f3aef2e0458aa16bccf7e2fcc3ed2ce7fb",
+          "matching_archive_paths": [
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/scan_stub_ocr.pdf",
+            "docs/evaluation/quote-extraction-ocr-remediated-inputs/scan_without_ocr.pdf"
+          ]
+        }
+      ]
+    }
+  ],
+  "input_archives": {
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/corrupt_pdf.pdf": "a0143b84060e0006d26427db90009d86bd3bc314fc0fea433759f3c112d1eb77",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/csv.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/duplicate_rfq_candidates.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/fabricated_quote.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/header_mismatch.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/infected.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/pdf.pdf": "a1f4bfe9e823637f734254a8818c0d88582f8b401ace57f6c1aef1d13dc7082f",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/scan_stub_ocr.pdf": "006c7bb3f93f76e609fce8dfe3b93c51e3a84351a4b19a04c0d19add70bf2753",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/scan_without_ocr.pdf": "006c7bb3f93f76e609fce8dfe3b93c51e3a84351a4b19a04c0d19add70bf2753",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/unsupported_fields.csv": "89fce0d91431db6362f8c44c5f19b418f3da6766610e952e7a2bfcd288561fb2",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/wrong_existing_rfq_line.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-remediated-retest-inputs/xlsx.xlsx": "f85cc36fcbe3e67a2bfdf53711b427e62d1e0ec15c23c51439d4e7ae6f90a81f",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/corrupt_pdf.pdf": "a0143b84060e0006d26427db90009d86bd3bc314fc0fea433759f3c112d1eb77",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/csv.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/duplicate_rfq_candidates.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/fabricated_quote.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/header_mismatch.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/infected.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/pdf.pdf": "a1f4bfe9e823637f734254a8818c0d88582f8b401ace57f6c1aef1d13dc7082f",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/scan_stub_ocr.pdf": "0ed612cd368e9338f7e766bba0ad44f3aef2e0458aa16bccf7e2fcc3ed2ce7fb",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/scan_without_ocr.pdf": "0ed612cd368e9338f7e766bba0ad44f3aef2e0458aa16bccf7e2fcc3ed2ce7fb",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/unsupported_fields.csv": "89fce0d91431db6362f8c44c5f19b418f3da6766610e952e7a2bfcd288561fb2",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/wrong_existing_rfq_line.csv": "c9df0c51a36a73c7d460eba8fc9823bfdcc40cc89cac69ce9b74a6812a522991",
+    "docs/evaluation/quote-extraction-ocr-remediated-inputs/xlsx.xlsx": "88ea5ece5a1721d63a1165c3066d7e140bf147156525c45bc2ff8973e1efd2d0"
+  },
+  "verification": {
+    "backend_tests_passed": 55,
+    "frontend_tests_passed": 8,
+    "frontend_typecheck": "passed",
+    "browser_acceptance": false,
+    "business_database_writes": false
+  }
+}
