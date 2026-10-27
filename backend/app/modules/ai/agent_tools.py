@@ -29,6 +29,7 @@ from app.modules.ai.schema import (
     ReplenishmentPlanResult,
     QualityAcceptanceInput,
     QualityAcceptanceResult,
+    QualityReportEvidence,
     DeliveryInput,
     DeliveryResult,
     FinanceReconciliationInput,
@@ -544,6 +545,52 @@ def trace_purchase_order(db: Session, user: User, arguments: PurchaseOrderTraceI
     return PurchaseOrderTraceResult(**trace_service(db, user, arguments.po_no))
 
 
+def _quality_report_evidence(db: Session, user: User, acceptance_id: int) -> QualityReportEvidence:
+    """读取最近可见快照；逐文件重验权限，冲突仅基于返回范围。"""
+    from app.modules.quality_acceptances import report_review
+    history = report_review.list_review_history(db, user, acceptance_id)
+    seen: set[tuple[int | None, int]] = set()
+    reviews = []
+    groups: dict[tuple[int, str], list[str]] = {}
+    truncated = len(history) >= 100
+    for item in history:
+        try:
+            snapshot = report_review.get_review_record(db, user, acceptance_id, item.id)
+        except ResourceNotFoundError:
+            continue
+        key = (snapshot.delivery_item_id, snapshot.file_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(reviews) >= 8:
+            truncated = True
+            break
+        if len(snapshot.checks) > 15 or len(snapshot.warnings) > 8:
+            truncated = True
+        checks = []
+        for check in snapshot.checks[:15]:
+            quote = check.source_quote
+            if quote and len(quote) > 500:
+                quote = quote[:500]
+                truncated = True
+            checks.append({"item_name": check.item_name, "report_value": check.report_value,
+                "recorded_value": check.recorded_value, "status": check.status,
+                "standard_requirement": check.standard_requirement, "standard_status": check.standard_status,
+                "source_quote": quote, "source_location": check.source_location})
+            if snapshot.delivery_item_id is not None and check.report_value:
+                group = (snapshot.delivery_item_id, check.standard_criterion or check.item_name)
+                groups.setdefault(group, []).append(check.report_value)
+        reviews.append({"review_id": item.id, "file_name": snapshot.file_name,
+            "delivery_item_id": snapshot.delivery_item_id, "batch_no": item.batch_no,
+            "standard_version": snapshot.standard_version, "product_status": snapshot.product_status,
+            "batch_status": snapshot.batch_status, "warnings": snapshot.warnings[:8], "review_status": item.status,
+            "reviewer_note": item.reviewer_note, "reviewed_at": getattr(item, "reviewed_at", None), "checks": checks})
+    conflicts = [{"delivery_item_id": item_id, "item_name": name, "values": values}
+        for (item_id, name), values in groups.items()
+        if len(values) > 1 and any(not report_review._same_value(values[0], v) for v in values[1:])]
+    return QualityReportEvidence(reviews=reviews, conflicts=conflicts, truncated=truncated)
+
+
 def get_quality_acceptance(db: Session, user: User, arguments: QualityAcceptanceInput) -> QualityAcceptanceResult:
     """按精确验收编号读取当前用户可见的质量验收事实，不推断质量结论。"""
     from app.modules.quality_acceptances import service as acceptance_service
@@ -559,6 +606,7 @@ def get_quality_acceptance(db: Session, user: User, arguments: QualityAcceptance
         "certificate_complete": bool(acceptance.certificate_complete),
         "report_available": acceptance.report_file_id is not None,
         "conclusion": acceptance.conclusion,
+        "report_reviews": _quality_report_evidence(db, user, acceptance.id),
     }
     return QualityAcceptanceResult(total_rows=1, rows=[row],
         sources=[Source(resource="quality_acceptances", record_id=acceptance.id)])
@@ -584,8 +632,20 @@ def get_delivery(db: Session, user: User, arguments: DeliveryInput) -> DeliveryR
             "document_complete": bool(item.document_complete),
         } for item in delivery.items],
     }
-    return DeliveryResult(total_rows=1, rows=[row],
-        sources=[Source(resource="deliveries", record_id=delivery.id)])
+    sources = [Source(resource="deliveries", record_id=delivery.id)]
+    roles = set(get_user_role_codes(db, user.id))
+    permissions = set(get_user_permission_codes(db, user.id))
+    if "SYS_ADMIN" in roles or "quality.acceptances.read" in permissions:
+        from app.modules.quality_acceptances.model import QualityAcceptance
+        from app.modules.quality_acceptances.scope import acceptance_read_condition
+        acceptances = list(db.scalars(select(QualityAcceptance).where(
+            QualityAcceptance.delivery_id == delivery.id, acceptance_read_condition(user, roles)
+        ).order_by(QualityAcceptance.id.desc()).limit(6)).all())
+        row["quality_reports_truncated"] = len(acceptances) > 5
+        row["quality_reports"] = [{"acceptance_no": acceptance.acceptance_no,
+            "report_reviews": _quality_report_evidence(db, user, acceptance.id)} for acceptance in acceptances[:5]]
+        sources.extend(Source(resource="quality_acceptances", record_id=acceptance.id) for acceptance in acceptances[:5])
+    return DeliveryResult(total_rows=1, rows=[row], sources=sources)
 
 
 def get_finance_reconciliation(db: Session, user: User,
@@ -702,11 +762,11 @@ TOOLS = {
                  "procurement.orders.read", PurchaseOrderTraceInput, PurchaseOrderTraceResult, trace_purchase_order,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
-        ToolSpec("quality_acceptances.get_by_no", "按精确验收编号读取当前用户可见的验收状态、检测记录及报告/证书状态",
+        ToolSpec("quality_acceptances.get_by_no", "按精确验收编号读取可见的验收事实和已保存的报告核对、人工复核及冲突",
                  "quality.acceptances.read", QualityAcceptanceInput, QualityAcceptanceResult, get_quality_acceptance,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
-        ToolSpec("deliveries.get_by_no", "按精确到货单号读取当前用户可见的收货状态、预计/实际日期、短交及单证状态",
+        ToolSpec("deliveries.get_by_no", "按精确到货单号读取可见的收货事实及有权限查看的质量报告核对",
                  "warehouse.deliveries.read", DeliveryInput, DeliveryResult, get_delivery,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),

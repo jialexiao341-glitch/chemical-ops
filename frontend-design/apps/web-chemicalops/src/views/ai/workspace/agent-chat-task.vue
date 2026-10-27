@@ -5,6 +5,7 @@ import { computed, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { Button } from 'antdv-next';
 import { formatDate, formatDateTime } from '#/utils/format';
+import { renderMarkdown } from '#/utils/markdown';
 import { agentDisplayNumber, inventoryProductLabel, inventorySummary, primaryTaskResults } from './task-view';
 import AgentSourcePopover from './agent-source-popover.vue';
 import { inventorySource, TASK_ERROR_HELP, TASK_LABELS, TOOL_LABELS, waitingCandidates } from './task-view';
@@ -85,8 +86,8 @@ function quoteRecommendationLines(result?: AgentApi.Result) {
       <p class="agent-muted">查询进度会自动更新，已完成结果会保留。</p>
     </template>
     <template v-else>
-      <p v-if="task.status !== 'SUCCEEDED' || !results.length" class="agent-reply">{{ task.status === 'RUNNING' ? '正在核对产品和业务数据…' : task.reply }}</p>
-      <p v-else-if="!hasDedicatedResult && task.reply" class="agent-reply">{{ task.reply }}</p>
+      <div v-if="task.status !== 'SUCCEEDED' || !results.length" class="agent-reply agent-markdown" v-html="renderMarkdown(task.status === 'RUNNING' ? '正在核对产品和业务数据…' : task.reply)"></div>
+      <div v-else-if="!hasDedicatedResult && task.reply" class="agent-reply agent-markdown" v-html="renderMarkdown(task.reply)"></div>
       <p v-if="task.status === 'RUNNING'" class="agent-muted">查询结果会自动更新。</p>
     </template>
     <p v-if="task.error_code" class="agent-error">{{ TASK_ERROR_HELP[task.error_code] || '请核对条件、权限及模型服务后重新查询。' }}（{{ task.error_code }}）</p>
@@ -202,6 +203,14 @@ function quoteRecommendationLines(result?: AgentApi.Result) {
 .is-failed .agent-state-icon { color: hsl(var(--destructive)); background: hsl(var(--destructive) / .08); }
 .agent-readonly { margin-left: 4px; padding-left: 12px; border-left: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); font-size: 12px; font-weight: 400; }
 .agent-reply { margin: 12px 0; white-space: pre-wrap; }
+.agent-markdown { white-space: normal; line-height: 1.7; overflow-wrap: anywhere; }
+.agent-markdown :deep(p) { margin: 6px 0; }
+.agent-markdown :deep(h3), .agent-markdown :deep(h4) { margin: 18px 0 6px; font-weight: 600; }
+.agent-markdown :deep(ul), .agent-markdown :deep(ol) { margin: 6px 0; padding-left: 22px; }
+.agent-markdown :deep(ul) { list-style: disc; }
+.agent-markdown :deep(ol) { list-style: decimal; }
+.agent-markdown :deep(li) { margin: 4px 0; }
+.agent-markdown :deep(a) { color: hsl(var(--primary)); text-decoration: underline; }
 .agent-muted, .agent-comparison { color: hsl(var(--muted-foreground)); font-size: 12px; margin: 8px 0; }
 .agent-result { margin-top: 16px; }
 .agent-result + .agent-result { padding-top: 20px; border-top: 1px solid hsl(var(--border)); }

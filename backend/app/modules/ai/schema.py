@@ -842,6 +842,49 @@ class PurchaseRequestResult(ToolSchema):
     sources: list["Source"]
 
 
+class QualityReportEvidenceCheck(ToolSchema):
+    item_name: str
+    report_value: str | None = None
+    recorded_value: str | None = None
+    status: str
+    standard_requirement: str | None = None
+    standard_status: str
+    source_quote: str | None = None
+    source_location: str | None = None
+
+
+class QualityReportEvidenceReview(ToolSchema):
+    review_id: int
+    file_name: str
+    delivery_item_id: int | None
+    batch_no: str | None
+    standard_version: int | None
+    product_status: str
+    batch_status: str
+    warnings: list[str]
+    review_status: str
+    reviewer_note: str | None
+    reviewed_at: datetime | None = None
+    checks: list[QualityReportEvidenceCheck]
+
+
+class QualityReportEvidenceConflict(ToolSchema):
+    delivery_item_id: int
+    item_name: str
+    values: list[str]
+
+
+class QualityReportEvidence(ToolSchema):
+    reviews: list[QualityReportEvidenceReview]
+    conflicts: list[QualityReportEvidenceConflict]
+    truncated: bool
+
+
+class DeliveryQualityReports(ToolSchema):
+    acceptance_no: str
+    report_reviews: QualityReportEvidence
+
+
 class QualityAcceptanceRow(ToolSchema):
     acceptance_no: str
     result: str
@@ -850,6 +893,7 @@ class QualityAcceptanceRow(ToolSchema):
     certificate_complete: bool
     report_available: bool
     conclusion: str | None
+    report_reviews: QualityReportEvidence | None = None
 
 
 class QualityAcceptanceResult(ToolSchema):
@@ -873,6 +917,8 @@ class DeliveryRow(ToolSchema):
     expected_arrival_date: date | None
     actual_arrival_date: date | None
     items: list[DeliveryItemRow]
+    quality_reports: list[DeliveryQualityReports] | None = None
+    quality_reports_truncated: bool = False
 
 
 class DeliveryResult(ToolSchema):

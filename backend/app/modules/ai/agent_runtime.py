@@ -82,7 +82,7 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 多个产品/询价候选由服务端暂停。只读查询不需要用户提供采购用途或采购数量。
 
 # 参数与执行顺序
-采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询、供应商资料查询与供应商 360 不需要产品目录定位；补货量建议 replenishment_plan 必须先通过 catalog.search_products 定位唯一产品，再调用 inventory.replenishment_plan，不得自行估算补货量。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code；supplier_profile 只能调用 suppliers.profile，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收只复述系统已记录的状态、检测项、报告/证书状态与结论，不判断产品质量是否合格。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询可以复述系统保存的订单/到货/验收/退货/对账行、发票行占用与核验金额、来源变化提示及付款状态和理论上限。必须保留来源未匹配、旧版本或已变化等核查提示；理论付款上限不等于对任一具体金额的审批通过，不得建议或执行付款，付款服务在提交/审批时仍会重新校验。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险；供应商 360 可复述工具返回的订单、到货、质量、异常与财务汇总，但必须保留各段权限状态和“仅代表当前范围”的限制，不得补算或推断未返回的指标。
+采购申请查询、订单追溯、质量验收查询、到货查询、财务对账查询、供应商资料查询与供应商 360 不需要产品目录定位；补货量建议 replenishment_plan 必须先通过 catalog.search_products 定位唯一产品，再调用 inventory.replenishment_plan，不得自行估算补货量。purchase_request_query 只能调用 purchase_requests.get_by_no，并使用 understanding.slots.request_no 中的准确编号；purchase_order_trace 只能调用 purchase_orders.trace_by_no，并使用 understanding.slots.po_no；quality_acceptance_query 只能调用 quality_acceptances.get_by_no，并使用 understanding.slots.acceptance_no；delivery_query 只能调用 deliveries.get_by_no，并使用 understanding.slots.delivery_no；finance_reconciliation_query 只能调用 finance_reconciliations.get_by_no，并使用 understanding.slots.reconciliation_no；supplier_query 只能调用 suppliers.get_by_code，并使用 understanding.slots.supplier_code；supplier_profile 只能调用 suppliers.profile，并使用 understanding.slots.supplier_code。不得改写编号、补猜编号或调用库存/报价工具。质量验收及到货中的报告核对仅复述当前可见快照、检测项、标准、人工复核状态和跨报告冲突；保留截断及权限范围，引用报告名和原文位置，不将辅助核对或人工复核等同正式验收结论。没有可见报告不能断言不存在报告。到货查询只复述已记录的状态、预计/实际到货日期、短交数量和单证状态，不推断质量或财务结论。财务对账查询可以复述系统保存的订单/到货/验收/退货/对账行、发票行占用与核验金额、来源变化提示及付款状态和理论上限。必须保留来源未匹配、旧版本或已变化等核查提示；理论付款上限不等于对任一具体金额的审批通过，不得建议或执行付款，付款服务在提交/审批时仍会重新校验。供应商查询只复述工具返回的主数据，不据此推断历史绩效或风险；供应商 360 可复述工具返回的订单、到货、质量、异常与财务汇总，但必须保留各段权限状态和“仅代表当前范围”的限制，不得补算或推断未返回的指标。
 根据已返回结果决定后续工具；不要重复调用同工具同参数。未授权工具不在目录中。
 用户指定返回条数时，必须在对应业务工具 arguments.limit 中保留该值（不超过工具上限）。
 库存 totals 已按全部授权余额计算，即使 limit=1 也无需扩大明细条数获取全范围合计。
@@ -333,6 +333,30 @@ def _check_trace_access(db: Session, user: User, trace: list[dict]) -> list[dict
                 scope = scope.where(RFQ.requester_id == user.id)
             if ids - set(db.scalars(scope)):
                 raise AuthorizationError("询价授权范围已变化，历史结果不可访问")
+        if entry["tool"] in {"quality_acceptances.get_by_no", "deliveries.get_by_no"}:
+            from app.modules.quality_acceptances import report_review, service as acceptance_service
+            from app.modules.deliveries import service as delivery_service
+            for row in result.get("rows", []):
+                if entry["tool"] == "quality_acceptances.get_by_no":
+                    acceptance = acceptance_service.get_acceptance_by_no(db, user, row["acceptance_no"])
+                    if acceptance is None:
+                        raise AuthorizationError("质量验收数据范围已变化，历史结果不可访问")
+                    evidence_groups = [(acceptance, row.get("report_reviews"))]
+                else:
+                    if delivery_service.get_delivery_by_no(db, user, row["delivery_no"]) is None:
+                        raise AuthorizationError("到货数据范围已变化，历史结果不可访问")
+                    quality_reports = row.get("quality_reports")
+                    if quality_reports is not None and "SYS_ADMIN" not in roles and "quality.acceptances.read" not in set(tools.get_user_permission_codes(db, user.id)):
+                        raise AuthorizationError("质量验收权限已变化，历史结果不可访问")
+                    evidence_groups = []
+                    for group in quality_reports or []:
+                        acceptance = acceptance_service.get_acceptance_by_no(db, user, group["acceptance_no"])
+                        if acceptance is None:
+                            raise AuthorizationError("质量验收数据范围已变化，历史结果不可访问")
+                        evidence_groups.append((acceptance, group.get("report_reviews")))
+                for acceptance, evidence in evidence_groups:
+                    for review in (evidence or {}).get("reviews", []):
+                        report_review.get_review_record(db, user, acceptance.id, review["review_id"])
         if entry["tool"] == "suppliers.profile" and "SYS_ADMIN" not in roles:
             permissions = set(tools.get_user_permission_codes(db, user.id))
             for section in result.get("sections", []):
@@ -344,11 +368,30 @@ def _check_trace_access(db: Session, user: User, trace: list[dict]) -> list[dict
     return catalog
 
 
+def _formatted_task_reply(task) -> str:
+    """根据已保存的完成证据重新呈现结果；不修改任务或查询业务数据。"""
+    if task.status != "SUCCEEDED":
+        return task.reply
+    trace = (task.payload or {}).get("trace") or []
+    finish = next((entry for entry in reversed(trace) if entry.get("action") == "finish"), None)
+    if not finish or not finish.get("evidence_steps"):
+        return task.reply
+    selected = set(finish["evidence_steps"])
+    entries = [entry for entry in trace if entry.get("step") in selected
+               and entry.get("status") == "SUCCEEDED" and entry.get("result")]
+    if {entry.get("step") for entry in entries} != selected:
+        return task.reply
+    try:
+        return _summary(entries) or task.reply
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return task.reply
+
+
 def get_task(db: Session, user: User, task_id: str) -> TaskRead:
     """返回本人任务的公开步骤/结果；不返回提示词、模型思维链或服务端异常原文。"""
     task = _reap_unclaimed_task(db, _load(db, user, task_id))
     _check_trace_access(db, user, task.payload["trace"])
-    return TaskRead(id=task.id, status=task.status, revision=task.revision, reply=task.reply,
+    return TaskRead(id=task.id, status=task.status, revision=task.revision, reply=_formatted_task_reply(task),
         can_select_all_products=(task.payload.get('memory_state') or {}).get('goal', {}).get('intent') == 'inventory_query',
         error_code=task.error_code, messages=task.payload["messages"], trace=task.payload["trace"],
         conversation_id=(task.payload.get("chat") or {}).get("conversation_id"))
@@ -373,7 +416,7 @@ def list_tasks(db: Session, user: User, *, page: int = 1, page_size: int = 20,
     for task in rows:
         try:
             _check_trace_access(db, user, task.payload.get("trace", []))
-            items.append(TaskRead(id=task.id, status=task.status, revision=task.revision, reply=task.reply,
+            items.append(TaskRead(id=task.id, status=task.status, revision=task.revision, reply=_formatted_task_reply(task),
                 can_select_all_products=(task.payload.get('memory_state') or {}).get('goal', {}).get('intent') == 'inventory_query',
                 error_code=task.error_code, messages=task.payload.get("messages", []), trace=task.payload.get("trace", []),
                 conversation_id=(task.payload.get("chat") or {}).get("conversation_id")))
@@ -713,6 +756,43 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
                 raise BusinessValidationError("CONTEXT_LIMIT") from None
 
 
+def _quality_report_summary(evidence: dict | None) -> list[str]:
+    if evidence is None:
+        return []
+    reports = evidence.get("reviews") or []
+    if not reports:
+        return ["最近 100 条核对历史中没有可见报告记录。"]
+    status_labels = {"PENDING": "待人工复核", "CONFIRMED": "人工已复核", "NEEDS_CORRECTION": "需要修正", "CORRECTION_SUBMITTED": "修正待复核"}
+    lines = ["以下为最近 100 条核对历史中当前可见的报告快照。"]
+    for index, report in enumerate(reports, 1):
+        status = status_labels.get(report.get("review_status"), report.get("review_status") or "未知")
+        lines.append(f"### 报告 {index}")
+        lines.append(f"**来源：** {report['file_name']}  ·  **复核：** {status}  ·  **核对时标准版本：** {report.get('standard_version') or '未登记'}")
+        for warning in report.get("warnings") or []:
+            lines.append(f"- 核对提示：{warning}")
+        if report.get("reviewer_note"):
+            lines.append(f"- 人工复核意见：{report['reviewer_note']}")
+        comparisons = {"MATCH": "与录入一致", "MISMATCH": "与录入不一致", "NOT_RECORDED": "系统未录入", "NOT_COMPARABLE": "无法对照", "REPORT_MISSING": "报告未检出"}
+        standards = {"WITHIN_STANDARD": "在标准范围内", "OUTSIDE_STANDARD": "超出标准范围", "UNVERIFIED": "待核对", "NOT_CONFIGURED": "未配置标准", "MISSING": "报告缺少指标"}
+        for check in report.get("checks") or []:
+            value = check.get("report_value") or "未提取"
+            standard = standards.get(check.get("standard_status"), check.get("standard_status") or "未核对")
+            comparison = comparisons.get(check.get("status"), check.get("status") or "未对照")
+            location = f"（{check['source_location']}）" if check.get("source_location") else ""
+            recorded = f"，系统值 {check['recorded_value']}" if check.get("recorded_value") else ""
+            requirement = f"，标准要求 {check['standard_requirement']}" if check.get("standard_requirement") else ""
+            source = f"；原文：{check['source_quote']}" if check.get("source_quote") else ""
+            lines.append(f"- **{check['item_name']}**：报告值 {value}{recorded}，{comparison}，{standard}{requirement}{location}{source}。")
+    if evidence.get("conflicts"):
+        lines.append("### 报告间差异")
+    for conflict in evidence.get("conflicts") or []:
+        lines.append(f"- **{conflict['item_name']}**：{'、'.join(conflict['values'])}。")
+    if evidence.get("truncated"):
+        lines.append("报告或检测项较多，仅展示部分可见记录；冲突判断仅覆盖已展示范围。")
+    lines.append("报告核对及人工复核不等同正式验收结论。")
+    return lines
+
+
 def _summary(entries: list[dict]) -> str:
     """从后端已验证数据生成数值摘要，避免模型自由改写金额、数量或来源。"""
     requests = [entry["result"] for entry in entries if entry.get("tool") == "purchase_requests.get_by_no"]
@@ -734,7 +814,7 @@ def _summary(entries: list[dict]) -> str:
                 lines.append("当前可访问范围内没有找到该采购申请编号。")
                 continue
             row = result["rows"][0]
-            lines.append(f"采购申请 {row['request_no']}：{row['status']}；用途：{row['purpose']}；明细 {len(row['items'])} 项。")
+            lines.append(f"采购申请 **{row['request_no']}**：**{row['status']}**；用途：{row['purpose']}；明细 {len(row['items'])} 项。")
         for result in orders:
             lines.append(result["answer"])
         for result in acceptances:
@@ -744,10 +824,13 @@ def _summary(entries: list[dict]) -> str:
             row = result["rows"][0]
             certificate = "证书齐全" if row["certificate_complete"] else "证书未齐全"
             report = "报告已上传" if row["report_available"] else "报告未上传"
-            summary = f"质量验收 {row['acceptance_no']}：状态 {row['result']}；{certificate}；{report}"
+            if not row["report_available"] and (row.get("report_reviews") or {}).get("reviews"):
+                report = "主报告未登记"
+            summary = f"质量验收 **{row['acceptance_no']}**：状态 **{row['result']}**；{certificate}；{report}"
             if row.get("conclusion"):
-                summary += f"；结论：{row['conclusion']}"
+                summary += f"；结论：{row['conclusion'].rstrip('。')}"
             lines.append(summary + "。")
+            lines.extend(_quality_report_summary(row.get("report_reviews")))
         for result in deliveries:
             if not result["rows"]:
                 lines.append("当前可访问范围内没有找到该到货单号。")
@@ -759,7 +842,12 @@ def _summary(entries: list[dict]) -> str:
                 f"第{item['line_no']}行短交 {item['short_quantity']}，单证{'齐全' if item['document_complete'] else '未齐'}"
                 for item in row["items"]
             ) or "无到货明细"
-            lines.append(f"到货单 {row['delivery_no']}：状态 {row['status']}；预计到货 {expected}；实际到货 {actual}；{item_text}。")
+            lines.append(f"到货单 **{row['delivery_no']}**：状态 **{row['status']}**；预计到货 {expected}；实际到货 {actual}；{item_text}。")
+            for quality in row.get("quality_reports") or []:
+                lines.append(f"关联质量验收 {quality['acceptance_no']}：")
+                lines.extend(_quality_report_summary(quality.get("report_reviews")))
+            if row.get("quality_reports_truncated"):
+                lines.append("关联验收单较多，仅展示部分可见记录。")
         for result in reconciliations:
             if not result["rows"]:
                 lines.append("当前可访问范围内没有找到该对账单号。")
@@ -773,7 +861,7 @@ def _summary(entries: list[dict]) -> str:
                 f"{item['status']} {item['count']} 笔/{item['amount']} {row['currency_code']}"
                 for item in row["payments"]
             ) or "无付款记录"
-            lines.append(f"对账单 {row['reconciliation_no']}：状态 {row['status']}；金额 {row['total_amount']} {row['currency_code']}；发票 {invoice_summary}；付款 {payment_summary}。")
+            lines.append(f"对账单 **{row['reconciliation_no']}**：状态 **{row['status']}**；金额 **{row['total_amount']} {row['currency_code']}**；发票 {invoice_summary}；付款 {payment_summary}。")
             for item in row.get("lines", []):
                 lines.append(
                     f"第 {item['line_no']} 行 {item['product_name']}：验收 {item['accepted_quantity']}，对账 {item['reconciliation_quantity']}；"
@@ -788,7 +876,7 @@ def _summary(entries: list[dict]) -> str:
             precheck = row.get("payment_precheck")
             if precheck:
                 lines.append(
-                    f"当前数据下单笔付款理论上限 {precheck['max_new_payment_amount']} {precheck['currency_code']}；"
+                    f"当前数据下单笔付款理论上限 **{precheck['max_new_payment_amount']} {precheck['currency_code']}**；"
                     f"已核验发票 {precheck['verified_invoice_amount']}，有效付款占用 {precheck['active_payment_amount']}。"
                 )
                 lines.extend(f"付款前置条件未满足：{blocker}。" for blocker in precheck.get("blockers", []))
@@ -797,7 +885,7 @@ def _summary(entries: list[dict]) -> str:
                 lines.append("当前可访问范围内没有找到该供应商编码。")
                 continue
             row = result["rows"][0]
-            lines.append(f"供应商 {row['supplier_code']}（{row['supplier_name']}）：状态 {row['status']}；合作级别 {row['cooperation_level'] or '未登记'}；地区 {row['region'] or '未登记'}；默认交期 {row['default_lead_days'] if row['default_lead_days'] is not None else '未登记'} 天。")
+            lines.append(f"供应商 **{row['supplier_code']}（{row['supplier_name']}）**：状态 **{row['status']}**；合作级别 {row['cooperation_level'] or '未登记'}；地区 {row['region'] or '未登记'}；默认交期 {row['default_lead_days'] if row['default_lead_days'] is not None else '未登记'} 天。")
         return "\n".join(lines)
     from app.modules.ai.product_query_summary import summarize_product_evidence
     return summarize_product_evidence(entries)
@@ -1400,10 +1488,23 @@ def _attach_chat_turn(db: Session, user: User, state: RunState, question: str, c
         .limit(8)
     ).all())
     memory["recent_context"] = []
+    from app.modules.ai.history_access import visible_message
     for message in reversed(recent_messages):
         role = "user" if message.message_role == "USER" else "assistant"
-        if message.content.strip():
-            _append_memory_context(memory, role, message.content)
+        refs = [item for item in (message.citations or []) if isinstance(item, dict) and item.get("type") == "agent_task"]
+        if refs:
+            content = message.content
+            try:
+                for ref in refs:
+                    prior = _load(db, user, ref["task_id"])
+                    _check_trace_access(db, user, prior.payload.get("trace", []))
+            except (AuthorizationError, ResourceNotFoundError, BusinessValidationError, KeyError):
+                if role == "assistant":
+                    content = "任务结果当前不可访问，请核对权限或服务状态。"
+        else:
+            content, _ = visible_message(db, user, message)
+        if content.strip():
+            _append_memory_context(memory, role, content)
     memory["schema_version"] = 1
     memory["turn"] = int(memory.get("turn", 0)) + 1
     goal = memory.setdefault("goal", {})

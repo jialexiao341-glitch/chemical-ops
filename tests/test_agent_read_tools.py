@@ -370,6 +370,7 @@ def test_quality_acceptance_tool_reads_only_exact_visible_acceptance(tool_db, mo
     monkeypatch.setattr(acceptance_service, "get_acceptance_by_no",
         lambda _db, _user, number: seen.append(number) or (acceptance if number == acceptance.acceptance_no else None))
 
+    monkeypatch.setattr(tools, "_quality_report_evidence", lambda *_args: tools.QualityReportEvidence(reviews=[], conflicts=[], truncated=False))
     result = call(tool_db, name="quality_acceptances.get_by_no", acceptance_no=acceptance.acceptance_no)
 
     assert result.total_rows == 1

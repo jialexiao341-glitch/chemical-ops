@@ -912,14 +912,14 @@ def test_numbered_agent_summaries_are_deterministic_and_use_trace_answer():
         "total_rows": 1, "rows": [{"supplier_code": "SUP-0001", "supplier_name": "示例供应商",
             "status": "ACTIVE", "cooperation_level": "STRATEGIC", "region": "华东",
             "default_lead_days": 12}]}}])
-    assert request_reply == "采购申请 PR20261022000031：APPROVING；用途：乙醇采购；明细 1 项。"
+    assert request_reply == "采购申请 **PR20261022000031**：**APPROVING**；用途：乙醇采购；明细 1 项。"
     assert order_reply == "追溯结论"
-    assert acceptance_reply == "质量验收 QA20261022000031：状态 PENDING；证书齐全；报告未上传；结论：等待检验。"
-    assert delivery_reply == "到货单 DL20261022000031：状态 RECEIVED；预计到货 2026-10-22；实际到货 未登记；第1行短交 2，单证未齐。"
-    assert "对账单 FR20261022000031：状态 CONFIRMED；金额 100 CNY；发票 VERIFIED 1 张/80 CNY；付款 PAID 1 笔/30 CNY。" in finance_reply
+    assert acceptance_reply == "质量验收 **QA20261022000031**：状态 **PENDING**；证书齐全；报告未上传；结论：等待检验。"
+    assert delivery_reply == "到货单 **DL20261022000031**：状态 **RECEIVED**；预计到货 2026-10-22；实际到货 未登记；第1行短交 2，单证未齐。"
+    assert "对账单 **FR20261022000031**：状态 **CONFIRMED**；金额 **100 CNY**；发票 VERIFIED 1 张/80 CNY；付款 PAID 1 笔/30 CNY。" in finance_reply
     assert "第 1 行 乙醇：验收 8，对账 8；发票已核验 60/100 CNY。" in finance_reply
-    assert "当前数据下单笔付款理论上限 70 CNY" in finance_reply
-    assert supplier_reply == "供应商 SUP-0001（示例供应商）：状态 ACTIVE；合作级别 STRATEGIC；地区 华东；默认交期 12 天。"
+    assert "当前数据下单笔付款理论上限 **70 CNY**" in finance_reply
+    assert supplier_reply == "供应商 **SUP-0001（示例供应商）**：状态 **ACTIVE**；合作级别 STRATEGIC；地区 华东；默认交期 12 天。"
 
 
 @pytest.mark.parametrize("intent,tool_name,result", [

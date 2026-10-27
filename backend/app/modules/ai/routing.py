@@ -67,7 +67,8 @@ agent 模式的任务必须在 capabilities.agent_tasks 中，该列表已包含
 - 多产品请求不得折叠成一个 agent 目标；同一产品的库存和报价可以由一个 agent 目标共同表达。执行器无法完整覆盖的混合请求（包括查询夹带写操作）整体澄清或拒绝，execution_mode=none、tasks=[]、sub_tasks=[]，不先执行可行部分。
 - dialogue_action: new、continue、modify、switch、cancel。否定的任务记入 excluded_tasks，并从 tasks 删除。
 - tasks: inventory（指定产品可用库存）、quotes（指定产品报价比较）、purchase_request（按准确编号读取可见申请）、order_trace（按准确订单号进行逐环节授权追溯）、quality_acceptance（按准确编号读取验收记录）、analytics（统计/流水/预警等业务查询）、document（化学品性质/安全资料）。
-- delivery（按准确到货单号读取可见收货状态、预计/实际到货日期、短交和单证状态）。
+- 按准确质量验收编号查询质量报告核对、报告指标、复核状态或报告冲突，使用 quality_acceptance；按准确到货单号查询上述信息，使用 delivery。仅返回有权限查看的已保存核对结果，不代表正式验收结论。
+- delivery（按准确到货单号读取可见收货状态、预计/实际到货日期、短交、单证及授权的报告核对）。
 - finance_reconciliation（按准确对账单号读取可见对账状态、币种/金额及发票和付款状态汇总）。
 - supplier（按准确供应商编码读取可见供应商合作状态与基本业务资料）。
 - supplier_profile（按准确供应商编码汇总可见订单、到货、质量验收、运营异常与财务进度，各段按权限裁剪）。

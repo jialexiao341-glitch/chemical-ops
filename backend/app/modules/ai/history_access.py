@@ -84,7 +84,11 @@ def visible_message(db, user, message, *, allow_stale_snapshot: bool = False) ->
                     return unavailable("该查询的权限、范围或数据已变化，请重新查询。")
         elif kind == "agent_task":
             try:
-                agent_runtime.get_task(db, user, citation["task_id"])
+                task = agent_runtime.get_task(db, user, citation["task_id"])
+                if message.message_role == "ASSISTANT" and task.status == "SUCCEEDED":
+                    saved_task = agent_runtime._load(db, user, citation["task_id"])
+                    if message.content == saved_task.reply:
+                        return task.reply, citations
             except (AuthorizationError, ResourceNotFoundError, BusinessValidationError, KeyError):
                 return unavailable("任务结果当前不可访问，请核对权限或服务状态。")
     return message.content, citations
