@@ -5,7 +5,7 @@ import type {
 } from '#/adapter/vxe-table';
 import type { PurchaseOrderApi } from '#/api';
 
-import { onMounted, ref, watch } from 'vue';
+import { onActivated, onDeactivated, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
@@ -20,6 +20,7 @@ import {
 } from '#/api';
 import { getSupplierNameMap } from '#/utils/lookup';
 import { applyAiFiltersToList } from '#/utils/ai-list-filters';
+import { clearOrderListCopilotContext, setOrderListCopilotContext } from '#/utils/page-copilot-context';
 
 import { useColumns, useGridFormSchema } from './data';
 import ApproveModal from './modules/approve.vue';
@@ -28,6 +29,12 @@ import EditModal from './modules/edit.vue';
 
 defineOptions({ name: 'PurchaseOrderList' });
 const route = useRoute();
+let lastListFilters: { keyword?: string; status?: string } = {};
+let listActive = true;
+let listQueryVersion = 0;
+onActivated(() => { listActive = true; setOrderListCopilotContext(lastListFilters); });
+onDeactivated(() => { listActive = false; clearOrderListCopilotContext(); });
+onBeforeUnmount(() => { listActive = false; clearOrderListCopilotContext(); });
 
 const router = useRouter();
 
@@ -59,11 +66,17 @@ const [Grid, gridApi] = useVbenVxeGrid({
     proxyConfig: {
       ajax: {
         query: async ({ page }, formValues) => {
-          return await getPurchaseOrderListApi({
+          const queryVersion = ++listQueryVersion;
+          const result = await getPurchaseOrderListApi({
             page: page.currentPage,
             page_size: page.pageSize,
             ...formValues,
           });
+          if (queryVersion === listQueryVersion) {
+            lastListFilters = { keyword: formValues.keyword || undefined, status: formValues.status || undefined };
+            if (listActive) setOrderListCopilotContext(lastListFilters);
+          }
+          return result;
         },
       },
     },

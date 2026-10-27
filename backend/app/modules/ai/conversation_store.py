@@ -170,7 +170,7 @@ def clear_query_context(db: Session, user: User, conversation_id: int) -> None:
 def list_conversations(db: Session, user: User, *, limit: int = 50) -> tuple[list[AIConversation], int]:
     """置顶优先，再按最近消息时间返回当前用户会话。"""
 
-    condition = AIConversation.user_id == user.id
+    condition = (AIConversation.user_id == user.id) & (AIConversation.business_scene != "FLOAT")
     total = db.scalar(select(func.count(AIConversation.id)).where(condition)) or 0
     items = list(db.scalars(select(AIConversation).where(condition).order_by(AIConversation.pinned.desc(), AIConversation.last_message_at.desc(), AIConversation.id.desc()).limit(limit)).all())
     return items, total
@@ -213,13 +213,15 @@ def ensure_conversation(db: Session, user: User, data: AIChatRequest) -> AIConve
 
     if data.conversation_id:
         conversation = get_owned_conversation(db, user, data.conversation_id)
+        if (conversation.business_scene == 'FLOAT') != (data.conversation_scene == 'FLOAT'):
+            raise BusinessValidationError('悬浮助手与工作台会话不能混用')
         conversation.permission_snapshot = permission_snapshot(db, user)
         return conversation
     first_user = next((message.content.strip() for message in data.messages if message.role == "user" and message.content.strip()), "新建对话")
     conversation = AIConversation(
         user_id=user.id,
         title=first_user[:80],
-        business_scene="GENERAL",
+        business_scene=data.conversation_scene,
         permission_snapshot=permission_snapshot(db, user),
         status="ACTIVE",
         last_message_at=datetime.now(),

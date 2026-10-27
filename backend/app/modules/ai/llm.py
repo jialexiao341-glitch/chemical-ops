@@ -382,12 +382,12 @@ async def chat(
             circuit_breakers.abandon_probe(profile.key)
 
 
-async def _stream_chat_impl(data: AIChatRequest, runtime: Settings, *, attachment_context: list[str] | None = None, image_parts: list[dict[str, object]] | None = None) -> AsyncIterator[str]:
+async def _stream_chat_impl(data: AIChatRequest, runtime: Settings, *, attachment_context: list[str] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None) -> AsyncIterator[str]:
     """只输出模型文本增量；HTTP/SSE 展示与持久化由调用方负责。"""
     if not runtime.agent_enabled or not runtime.openai_api_key.strip() or runtime.llm_provider != "openai_compatible":
         raise BusinessValidationError("AI 服务配置不可用，请检查服务开关、API key 和服务商配置")
     url = f"{runtime.openai_base_url.rstrip('/')}/chat/completions"
-    payload = _build_llm_payload(runtime, _build_messages(data, attachment_context, image_parts), stream=True)
+    payload = _build_llm_payload(runtime, _build_messages(data, attachment_context, image_parts, system_prompt), stream=True)
     if runtime.llm_stream_usage:
         payload["stream_options"] = {"include_usage": True}
     headers = {"Authorization": f"Bearer {runtime.openai_api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"}
@@ -460,6 +460,7 @@ async def stream_chat(
     image_parts: list[dict[str, object]] | None = None,
     model_name: str | None = None,
     _allow_fallback: bool = True,
+    system_prompt: str | None = None,
 ) -> AsyncIterator[str]:
     """经统一模型目录、并发配额和熔断策略输出文本增量。"""
 
@@ -493,6 +494,7 @@ async def stream_chat(
                         _effective_settings(runtime, profile),
                         attachment_context=attachment_context,
                         image_parts=image_parts,
+                        **({'system_prompt': system_prompt} if system_prompt is not None else {}),
                     )
                     try:
                         async for delta in stream:
@@ -522,6 +524,7 @@ async def stream_chat(
                 image_parts=image_parts,
                 model_name=profile.fallback_profile,
                 _allow_fallback=False,
+                system_prompt=system_prompt,
             ):
                 yield delta
             return

@@ -1,16 +1,18 @@
 <script lang="ts" setup>
 import type { AiApi } from '#/api';
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import PageCopilotDrawer from './page-copilot-drawer.vue';
-import { activePageCopilotContext } from '#/utils/page-copilot-context';
+import { activeListCopilotContext, activePageCopilotContext } from '#/utils/page-copilot-context';
 
-const router = useRouter();
 const route = useRoute();
 const drawer = ref<{
   open: (objectType: AiApi.ContextObjectType, id: number, question?: string) => void;
+  openList: (filters: { keyword?: string; status?: string }) => void;
+  openGeneral: () => void;
+  close: () => void;
 }>();
 const panelOpen = ref(false);
 const button = ref<HTMLButtonElement>();
@@ -22,7 +24,7 @@ let suppressClick = false;
 
 const label = computed(() => {
   const context = activePageCopilotContext.value;
-  if (!context) return '化工助手';
+  if (!context) return activeListCopilotContext.value ? '化工助手 · 采购订单列表' : '化工助手';
   const labels: Record<AiApi.ContextObjectType, string> = {
     delivery: '到货单',
     finance_reconciliation: '财务对账单',
@@ -37,6 +39,7 @@ const label = computed(() => {
   return `化工助手 · ${type}`;
 });
 const isWorkspace = computed(() => route.name === 'AiWorkspace');
+watch(() => route.fullPath, () => { if (panelOpen.value) drawer.value?.close(); });
 
 function restorePosition() {
   try {
@@ -117,7 +120,11 @@ function openAssistant() {
     drawer.value?.open(context.objectType, context.objectId, context.question);
     return;
   }
-  void router.push({ name: 'AiWorkspace' });
+  if (activeListCopilotContext.value) {
+    drawer.value?.openList(activeListCopilotContext.value.filters);
+    return;
+  }
+  drawer.value?.openGeneral();
 }
 
 onMounted(() => {

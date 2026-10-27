@@ -85,6 +85,7 @@ const {
   placement,
   showCancelButton,
   showConfirmButton,
+  sheetStyle,
   submitting,
   title,
   titleTooltip,
@@ -196,6 +197,7 @@ const getForceMount = computed(() => {
         )
       "
       :modal="modal"
+      :style="sheetStyle"
       :open="state?.isOpen"
       :side="placement"
       :z-index="zIndex"

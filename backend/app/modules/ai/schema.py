@@ -38,6 +38,7 @@ class AIChatRequest(BaseModel):
     """AI 对话请求；附件通过文件 ID 关联到当前用户已上传的文件。"""
 
     route_token: str | None = Field(default=None, max_length=64000)
+    conversation_scene: Literal['GENERAL', 'FLOAT'] = 'GENERAL'
     retry_failed: bool = Field(default=False, strict=True)
     batch_choice: BatchChoice | None = None
     messages: list[AIChatMessage] = Field(min_length=1, max_length=50)
@@ -702,6 +703,7 @@ class AIContextAskRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=2000)
+    previous_questions: list[Annotated[str, Field(min_length=1, max_length=2000)]] = Field(default_factory=list, max_length=4)
     context: AIContextRef
 
 
@@ -1327,3 +1329,17 @@ def schema_response_format(model: type[BaseModel], name: str) -> dict:
 
     strict(schema)
     return {"type": "json_schema", "json_schema": {"name": name, "strict": True, "schema": schema}}
+
+
+class AIOrderListFilters(BaseModel):
+    """仅接受订单列表已支持的筛选，禁止客户端提交数据或授权范围。"""
+    model_config = ConfigDict(extra='forbid')
+    keyword: str | None = Field(default=None, max_length=100)
+    status: Literal['DRAFT', 'APPROVING', 'APPROVED', 'ORDERED', 'PARTIAL', 'COMPLETED', 'CANCELLED'] | None = None
+
+
+class AIListContextAskRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    question: str = Field(min_length=1, max_length=2000)
+    previous_questions: list[Annotated[str, Field(min_length=1, max_length=2000)]] = Field(default_factory=list, max_length=4)
+    filters: AIOrderListFilters = Field(default_factory=AIOrderListFilters)

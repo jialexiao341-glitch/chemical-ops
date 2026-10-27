@@ -102,8 +102,8 @@ export namespace AiApi {
 
   /** 已按当前用户权限读取的业务上下文 */
   export interface ContextSnapshot {
-    object_id: number;
-    object_type: ContextObjectType;
+    object_id: null | number;
+    object_type: ContextObjectType | 'purchase_order_list';
     reference_no?: null | string;
     source_records: Array<{
       dataset?: string;
@@ -337,18 +337,19 @@ export async function streamChatApi(
   conversationId: null | number,
   handlers: AiApi.StreamHandlers,
   routeToken?: string,
-  options: { retryFailed?: boolean; signal?: AbortSignal } = {},
+  options: { independent?: boolean; retryFailed?: boolean; signal?: AbortSignal } = {},
 ): Promise<void> {
-  if (streaming) {
+  if (!options.independent && streaming) {
     throw new Error('上一条消息尚未回复完成');
   }
-  streaming = true;
+  if (!options.independent) streaming = true;
   const token = useAccessStore().accessToken;
   const base = import.meta.env.VITE_GLOB_API_URL || '/api/v1';
   try {
     const response = await fetch(`${base}/ai/chat/stream`, {
       body: JSON.stringify({
         conversation_id: conversationId ?? undefined,
+        conversation_scene: options.independent ? 'FLOAT' : 'GENERAL',
         messages,
         route_token: routeToken,
         retry_failed: options.retryFailed ?? false,
@@ -408,7 +409,7 @@ export async function streamChatApi(
         : String(error?.message ?? error),
     );
   } finally {
-    streaming = false;
+    if (!options.independent) streaming = false;
   }
 }
 
@@ -444,4 +445,50 @@ export function getOperationSuggestionApi(id: number) {
 }
 export function handleOperationSuggestionApi(id: number, action: 'ignore' | 'close' | 'handoff') {
   return requestClient.post<OperationSuggestion>(`/ai/operation-suggestions/${id}/${action}`);
+}
+
+export interface PurchaseOrderListFilters { keyword?: string; status?: string }
+export function askPurchaseOrderListContextApi(question: string, filters: PurchaseOrderListFilters) {
+  return requestClient.post<AiApi.ContextAskResult>('/ai/context/purchase-orders', { question, filters });
+}
+
+/** 业务上下文通过 SSE 输出真实模型增量；来源在完成事件中返回。 */
+export async function streamPageContextApi(
+  question: string,
+  target: { objectType: AiApi.ContextObjectType; objectId: number } | { filters: PurchaseOrderListFilters },
+  handlers: { onDelta: (text: string) => void; onDone: (result: AiApi.ContextAskResult) => void },
+  signal: AbortSignal,
+  previousQuestions: string[] = [],
+) {
+  const token = useAccessStore().accessToken;
+  const base = import.meta.env.VITE_GLOB_API_URL || '/api/v1';
+  const isList = 'filters' in target;
+  const response = await fetch(`${base}/ai/context/${isList ? 'purchase-orders/stream' : 'stream'}`, {
+    method: 'POST',
+    headers: { Accept: 'text/event-stream', Authorization: `Bearer ${token ?? ''}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(isList ? { question, previous_questions: previousQuestions, filters: target.filters } : { question, previous_questions: previousQuestions, context: { object_type: target.objectType, object_id: target.objectId } }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]),
+  });
+  if (!response.ok || !response.body) throw new Error(`上下文读取失败（HTTP ${response.status}）`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let terminal = false;
+  let failure = '';
+  const parse = createSseParser((event, raw) => {
+    if (terminal) return;
+    let payload: any;
+    try { payload = JSON.parse(raw); } catch { return; }
+    if (event === 'delta') handlers.onDelta(String(payload.content ?? ''));
+    else if (event === 'done') { terminal = true; handlers.onDone(payload as AiApi.ContextAskResult); }
+    else if (event === 'error') { terminal = true; failure = String(payload.message || '回答生成失败'); }
+  });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) { parse(decoder.decode(), true); break; }
+      parse(decoder.decode(value, { stream: true }));
+    }
+  } finally { reader.releaseLock(); }
+  if (failure) throw new Error(failure);
+  if (!terminal && !signal.aborted) throw new Error('响应连接已中断，请重试。');
 }

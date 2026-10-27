@@ -1,4 +1,4 @@
-import type { Component, Ref } from 'vue';
+import type { Component, CSSProperties, Ref } from 'vue';
 
 import type { ClassType, MaybePromise } from '@vben-core/typings';
 
@@ -48,6 +48,8 @@ export interface DrawerProps {
    */
   confirmText?: string;
   contentClass?: string;
+  /** 外层抽屉面板的样式，例如可调整宽度。 */
+  sheetStyle?: CSSProperties;
   /**
    * 弹窗描述
    */

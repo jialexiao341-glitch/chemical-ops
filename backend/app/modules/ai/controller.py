@@ -18,6 +18,7 @@ from app.modules.ai.schema import (
     AIChatRequest,
     AIChatResponse,
     AIContextAskRequest,
+    AIListContextAskRequest,
     AIContextAskResponse,
     AIConversationPage,
     AIConversationRead,
@@ -159,10 +160,50 @@ def agent_tool_catalog(db: Session = Depends(get_db), user: User = Depends(get_c
     return agent_tools.list_tools(db, user)
 
 
+@router.post("/context/purchase-orders", summary="按当前筛选查询采购订单列表")
+def order_list_context(data: AIListContextAskRequest, db: Session = Depends(get_db),
+                       user: User = Depends(require_permission("procurement.orders.read"))):
+    return context_service.ask_order_list(db, user, data)
+
+
+def _check_page_context_permission(db, user, object_type):
+    from app.core.errors import AuthorizationError
+    from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
+    permission = {
+        'purchase_order': 'procurement.orders.read', 'purchase_request': 'procurement.requests.read',
+        'delivery': 'warehouse.deliveries.read', 'inventory_balance': 'warehouse.inventory.read',
+        'quality_acceptance': 'quality.acceptances.read', 'finance_reconciliation': 'finance.reconciliations.read',
+        'supplier': 'master.suppliers.read', 'rfq': 'procurement.rfqs.read',
+    }[object_type]
+    if 'SYS_ADMIN' not in set(get_user_role_codes(db, user.id)) and permission not in set(get_user_permission_codes(db, user.id)):
+        raise AuthorizationError('当前账号没有该业务对象的读取权限')
+
+
+@router.post("/context/stream", summary="按当前页面对象流式回答")
+def stream_page_context(data: AIContextAskRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.modules.ai import context_stream
+    _check_page_context_permission(db, user, data.context.object_type)
+    # 完整上下文始终由服务端重新授权；问题不影响可读取范围。
+    full = data.model_copy(update={"question": "请展示当前业务对象的完整情况。"})
+    result = context_service.ask_context(db, user, full).model_dump(mode="json")
+    return StreamingResponse(context_stream.stream_answer(user, data.question, result, data.previous_questions), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/context/purchase-orders/stream", summary="按订单列表上下文流式回答")
+def stream_order_list_context(data: AIListContextAskRequest, db: Session = Depends(get_db),
+                              user: User = Depends(require_permission("procurement.orders.read"))):
+    from app.modules.ai import context_stream
+    result = context_service.ask_order_list(db, user, data)
+    return StreamingResponse(context_stream.stream_answer(user, data.question, result, data.previous_questions), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @router.post("/context/ask", response_model=AIContextAskResponse, summary="按当前页面对象提问")
 def context_ask(data: AIContextAskRequest, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)) -> AIContextAskResponse:
     """页面 Copilot 入口：服务端重新读取对象并鉴权，不信任客户端快照。"""
+    _check_page_context_permission(db, user, data.context.object_type)
     return context_service.ask_context(db, user, data)
 
 

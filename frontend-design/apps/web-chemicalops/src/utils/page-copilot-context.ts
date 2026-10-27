@@ -21,3 +21,10 @@ export function clearPageCopilotContext(objectType: AiApi.ContextObjectType, obj
     activePageCopilotContext.value = null;
   }
 }
+
+/** 已执行的列表筛选条件；业务行与权限由服务端重新读取。 */
+export const activeListCopilotContext = shallowRef<{ filters: { keyword?: string; status?: string } } | null>(null);
+export function setOrderListCopilotContext(filters: { keyword?: string; status?: string }) {
+  activeListCopilotContext.value = { filters: { ...filters } };
+}
+export function clearOrderListCopilotContext() { activeListCopilotContext.value = null; }

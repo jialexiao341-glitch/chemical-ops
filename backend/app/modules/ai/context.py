@@ -711,3 +711,36 @@ def ask_context(db: Session, user: User, request: AIContextAskRequest) -> AICont
         }],
         model="order-trace",
     )
+
+
+def ask_order_list(db: Session, user: User, request):
+    """按当前用户权限和列表筛选条件重新查询，返回有限且可核验的订单事实。"""
+    from datetime import date
+    from app.modules.purchase_orders import service as order_service
+    roles = set(get_user_role_codes(db, user.id))
+    permissions = set(get_user_permission_codes(db, user.id))
+    if 'SYS_ADMIN' not in roles and 'procurement.orders.read' not in permissions:
+        raise AuthorizationError('没有采购订单读取权限')
+    filters = request.filters
+    orders, total = order_service.list_orders(db, user, keyword=filters.keyword, status=filters.status, page=1, page_size=100)
+    sources = [{'dataset': 'purchase_orders', 'record_id': order.id, 'label': f'采购订单 {order.po_no}'} for order in orders]
+    scope = f"筛选条件：订单编号包含 {filters.keyword or '不限'}；状态 {filters.status or '不限'}。"
+    lines = [scope, f'当前账号范围内共有 {total} 条订单，本次读取 {len(orders)} 条。']
+    if total > len(orders):
+        lines.append('结果已截断，仅展示前 100 条；不能据此判断全部订单。')
+    if not orders:
+        lines.append('当前范围没有匹配订单。')
+    else:
+        lines.append('可见订单：')
+        lines.extend(f"- {order.po_no}：状态 {order.status}，预计到货 {order.expected_arrival_date.isoformat() if order.expected_arrival_date else '未填写'}" for order in orders)
+    active = [order for order in orders if order.status not in {'COMPLETED', 'CANCELLED'}]
+    past_due = [order for order in active if order.expected_arrival_date and order.expected_arrival_date < date.today()]
+    no_date = [order for order in active if order.expected_arrival_date is None]
+    lines.append(f"需关注：本次读取的未完成订单中，预计到货日期已过 {len(past_due)} 条，未填预计到货日期 {len(no_date)} 条。")
+    lines.append('日期提示不代表实际逾期或审批异常；未核验审批、履约及其他环节，不能作为完整风险判断。')
+    return {'answer': '\n'.join(lines), 'context': {'object_type': 'purchase_order_list', 'object_id': None,
+        'title': '采购订单列表', 'summary': [scope], 'source_records': sources,
+        'suggested_questions': [], 'status': None, 'reference_no': None},
+        'citations': [{'type': 'purchase-order-list', 'source_records': sources, 'total': total,
+                       'returned': len(orders), 'truncated': total > len(orders)}],
+        'model': 'order-list-context', 'provider': 'chemicalops'}
