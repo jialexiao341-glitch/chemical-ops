@@ -191,20 +191,24 @@ def update_conversation(db: Session, user: User, conversation_id: int, *, title:
     return conversation
 
 
-def list_messages(db: Session, user: User, conversation_id: int, *, limit: int = 100) -> tuple[list[AIMessageSnapshot], int]:
-    """读取当前用户会话消息。"""
+def list_messages(db: Session, user: User, conversation_id: int, *, limit: int = 100, before_id: int | None = None) -> tuple[list[AIMessageSnapshot], int]:
+    """读取本人消息，默认最近一页；可按消息 ID 向前分页。"""
 
     get_owned_conversation(db, user, conversation_id)
-    snapshot = cached(db, "ai_history", (user.id, conversation_id, limit), TypeAdapter(AIHistorySnapshot),
-                      lambda: _load_messages(db, conversation_id, limit),
+    snapshot = cached(db, "ai_history", (user.id, conversation_id, limit, before_id), TypeAdapter(AIHistorySnapshot),
+                      lambda: _load_messages(db, conversation_id, limit, before_id=before_id),
                       ttl=get_settings().redis_session_ttl_seconds)
     return snapshot.items, snapshot.total
 
 
-def _load_messages(db: Session, conversation_id: int, limit: int) -> AIHistorySnapshot:
+def _load_messages(db: Session, conversation_id: int, limit: int, *, before_id: int | None = None) -> AIHistorySnapshot:
     condition = AIMessage.conversation_id == conversation_id
     total = db.scalar(select(func.count(AIMessage.id)).where(condition)) or 0
-    items = list(db.scalars(select(AIMessage).where(condition).order_by(AIMessage.created_at.asc(), AIMessage.id.asc()).limit(limit)).all())
+    query = select(AIMessage).where(condition)
+    if before_id is not None:
+        query = query.where(AIMessage.id < before_id)
+    items = list(db.scalars(query.order_by(AIMessage.id.desc()).limit(limit)).all())
+    items.reverse()
     return AIHistorySnapshot(items=[AIMessageSnapshot.model_validate(item) for item in items], total=total)
 
 

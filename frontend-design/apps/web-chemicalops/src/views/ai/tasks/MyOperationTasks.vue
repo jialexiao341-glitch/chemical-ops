@@ -41,8 +41,7 @@ async function openTask(row: OperationExceptionApi.MyTask) {
 </script>
 <template>
   <div class="flex h-full flex-col gap-3">
-    <section class="rounded bg-card p-4 flex items-center justify-between gap-3">
-      <span class="font-medium">分配给当前账号的异常处理任务。</span>
+    <section class="rounded bg-card p-4 flex items-center justify-end gap-3">
       <div class="flex items-center gap-2"><Select v-model:value="status" :options="options" class="w-40" /><Button type="primary" @click="gridApi.query()">搜索</Button></div>
     </section>
     <Detail @success="gridApi.query()" />

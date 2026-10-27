@@ -478,11 +478,11 @@ watch(() => route.query.proposal_notification, async (value) => {
     <div class="flex h-full flex-col gap-3">
       <section class="rounded bg-card p-4">
         <div class="flex w-full flex-wrap items-center justify-between gap-3">
-          <span class="font-medium">{{ showAssignedTasks ? '分配给当前账号的异常处理任务。' : showSuggestions ? '按权限处理异常运营建议。' : showProposals ? (proposalInboxOnly ? '本人待确认及已失效的采购动作提案。' : '本人采购动作提案记录。') : inboxOnly ? '待补充或失败待处理的本人任务。' : '本人 AI 只读查询任务。' }}<template v-if="!showAssignedTasks && !showProposals && !showSuggestions">导出前会重新检查当前数据权限。</template></span>
+          <Button @click="router.push('/ai/workspace')">返回 AI 工作台</Button>
           <div class="ml-auto flex items-center gap-2">
             <Button v-if="hasAccessByCodes(['operations.exceptions.read'])" :type="showAssignedTasks ? 'primary' : 'default'" @click="showAssignedTasks = true; showSuggestions = false; showProposals = false">分配给我</Button>
             <Button v-if="hasAccessByCodes(['operations.exceptions.read'])" :type="showSuggestions ? 'primary' : 'default'" @click="showSuggestions = true; showAssignedTasks = false; showProposals = false">运营建议</Button>
-            <Button :type="!showAssignedTasks && !showSuggestions && !showProposals && inboxOnly ? 'primary' : 'default'" @click="showInbox(true)">Agent Inbox · 任务</Button>
+            <Button :type="!showAssignedTasks && !showSuggestions && !showProposals && inboxOnly ? 'primary' : 'default'" @click="showInbox(true)">待处理任务</Button>
             <Button :type="showProposals && proposalInboxOnly ? 'primary' : 'default'" @click="showProposalInbox(true)">待确认提案</Button>
             <Button :type="!showAssignedTasks && !showSuggestions && !showProposals && !inboxOnly ? 'primary' : 'default'" @click="showInbox(false)">全部任务</Button>
             <Button :type="showProposals && !proposalInboxOnly ? 'primary' : 'default'" @click="showProposalInbox(false)">全部提案</Button>

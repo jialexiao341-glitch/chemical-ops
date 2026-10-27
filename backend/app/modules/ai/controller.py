@@ -1,6 +1,7 @@
 """AI 助手 HTTP 接口。"""
 
 import logging
+from typing import Annotated
 from time import perf_counter
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
@@ -407,10 +408,10 @@ def update_conversation(conversation_id: int, data: AIConversationUpdate, db: Se
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=AIMessagePage, summary="查询 AI 会话消息")
-def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200), db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> AIMessagePage:
+def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200), db: Session = Depends(get_db), user: User = Depends(get_current_user), before_id: Annotated[int | None, Query(gt=0)] = None) -> AIMessagePage:
     """只读取当前用户自己的 AI 会话消息。"""
 
-    items, total = conversation_store.list_messages(db, user, conversation_id, limit=limit)
+    items, total = conversation_store.list_messages(db, user, conversation_id, limit=limit, before_id=before_id)
     LOGGER.info("AI HTTP 历史消息 user_id=%s conversation_id=%s count=%s", user.id, conversation_id, total)
     result = []
     for item in items:

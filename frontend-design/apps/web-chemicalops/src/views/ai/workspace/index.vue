@@ -40,6 +40,7 @@ import { canConfirmActionProposal } from './action-proposal-policy';
 import { acceptTask, primaryTaskResults } from './task-view';
 import { useConversation } from './use-conversation';
 import { useChatStream } from './use-chat-stream';
+import { historyFoldStart } from './history-fold';
 import assistantLogo from './chemicalops-ai.svg';
 
 defineOptions({ name: 'AiWorkspace' });
@@ -88,6 +89,7 @@ function canReadDataset(dataset?: string) {
 /** 聊天界面的一条消息 */
 interface UiMessage {
   content: string;
+  createdAt?: string;
   agentTaskId?: string;
   agentTask?: AgentApi.Task;
   agentError?: string;
@@ -122,6 +124,12 @@ const editingTitle = ref('');
 const activeConversationId = ref<number>();
 
 const messages = ref<UiMessage[]>([]);
+const showOlderMessages = ref(false);
+const olderMessagesRemaining = ref(0);
+const extraOlderLoaded = ref(0);
+const loadingOlderMessages = ref(false);
+const foldedMessageCount = computed(() => Math.max(historyFoldStart(messages.value), extraOlderLoaded.value));
+const visibleMessages = computed(() => showOlderMessages.value ? messages.value : messages.value.slice(foldedMessageCount.value));
 const inputText = ref('');
 const sending = ref(false);
 const stopping = ref(false);
@@ -335,6 +343,7 @@ function historyMessages(items: AiApi.Message[]): UiMessage[] {
   return items.map((item) => ({
     agentTaskId: item.citations?.find((citation: any) => citation.type === 'agent_task')?.task_id,
     content: item.content,
+    createdAt: item.created_at,
     citations: Array.isArray(item.citations) ? item.citations : [],
     id: String(item.id),
     queryTrace: (item.citations as any)?.[0]?.query_trace,
@@ -360,6 +369,9 @@ async function openConversation(conversation: AiApi.Conversation) {
     const res = await getAIMessagesApi(conversation.id);
     if (epoch !== chatEpoch) return;
     messages.value = historyMessages(res.items);
+    showOlderMessages.value = false;
+    extraOlderLoaded.value = 0;
+    olderMessagesRemaining.value = Math.max(0, res.total - res.items.length);
     // 一项任务只在最新助手回复中展示可交互结果，旧轮保留原追问文字。
     const latest = new Map<string, UiMessage>();
     for (const item of messages.value) if (item.role === 'assistant' && item.agentTaskId) latest.set(item.agentTaskId, item);
@@ -370,6 +382,35 @@ async function openConversation(conversation: AiApi.Conversation) {
     scrollToBottom();
   } finally {
     if (epoch === chatEpoch) historyLoading.value = false;
+  }
+}
+
+async function showEarlierMessages() {
+  if (loadingOlderMessages.value) return;
+  if (!showOlderMessages.value && foldedMessageCount.value > 0) {
+    showOlderMessages.value = true;
+    return;
+  }
+  const conversationId = activeConversationId.value;
+  const firstId = Number(messages.value.find((item) => /^\d+$/.test(item.id))?.id);
+  if (!conversationId || !Number.isSafeInteger(firstId) || firstId <= 0 || olderMessagesRemaining.value <= 0) return;
+  const epoch = chatEpoch;
+  loadingOlderMessages.value = true;
+  try {
+    const res = await getAIMessagesApi(conversationId, 100, firstId);
+    if (epoch !== chatEpoch || activeConversationId.value !== conversationId) return;
+    const existing = new Set(messages.value.map((item) => item.id));
+    const earlier = historyMessages(res.items).filter((item) => !existing.has(item.id));
+    messages.value = [...earlier, ...messages.value];
+    extraOlderLoaded.value += earlier.length;
+    olderMessagesRemaining.value = res.items.length ? Math.max(0, olderMessagesRemaining.value - res.items.length) : 0;
+    showOlderMessages.value = true;
+    await nextTick();
+    if (messagesRef.value) messagesRef.value.scrollTop = 0;
+  } catch {
+    if (epoch === chatEpoch) message.error('加载更早消息失败，请重试');
+  } finally {
+    loadingOlderMessages.value = false;
   }
 }
 
@@ -388,6 +429,9 @@ function newConversation() {
   draftFollowups.value = [];
   slashMenuOpen.value = false;
   messages.value = [];
+  showOlderMessages.value = false;
+  extraOlderLoaded.value = 0;
+  olderMessagesRemaining.value = 0;
   inputText.value = '';
 }
 
@@ -670,6 +714,9 @@ async function onSend(retryFailed = false) {
           const batch = latest?.citations?.find((citation: any) => citation.type === 'multi_intent')?.batch;
           if (lastUser?.content === text && batch && batch.tasks.every((task: any) => !['PENDING', 'PLANNED', 'RUNNING'].includes(task.status))) {
             messages.value = historyMessages(res.items);
+            olderMessagesRemaining.value = Math.max(0, res.total - res.items.length);
+            extraOlderLoaded.value = 0;
+            showOlderMessages.value = false;
             break;
           }
         } catch { /* 保留本地已完成结果，允许稍后刷新会话核对。 */ }
@@ -1036,7 +1083,7 @@ async function reloadActiveConversation() {
   if (!activeConversationId.value || sending.value) return;
   const epoch = chatEpoch;
   const res = await getAIMessagesApi(activeConversationId.value);
-  if (epoch === chatEpoch) { messages.value = historyMessages(res.items); scrollToBottom(); }
+  if (epoch === chatEpoch) { messages.value = historyMessages(res.items); olderMessagesRemaining.value = Math.max(0, res.total - res.items.length); extraOlderLoaded.value = 0; showOlderMessages.value = false; scrollToBottom(); }
 }
 
 async function previewPurchaseRequestDraft(freeText?: string) {
@@ -1629,7 +1676,7 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
             <div>
               <span class="ai-toolbar-title">化运 AI 助手</span>
             </div>
-            <Button size="small" @click="router.push('/ai/tasks')">Agent Inbox</Button>
+            <Button size="large" type="primary" @click="router.push('/ai/tasks')">Agent Inbox</Button>
           </div>
           <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
             <div class="mb-2 flex items-center justify-between">
@@ -1681,8 +1728,12 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
                 <p>采购、库存、质量与运营信息，随时为你解答。</p>
               </div>
             </div>
+            <div v-if="foldedMessageCount > 0 || olderMessagesRemaining > 0" class="flex flex-wrap items-center justify-center gap-2">
+              <Button v-if="!showOlderMessages || olderMessagesRemaining > 0" type="link" size="small" :loading="loadingOlderMessages" @click="showEarlierMessages">{{ showOlderMessages ? '加载更早消息' : '查看更早消息' }}</Button>
+              <Button v-if="showOlderMessages && foldedMessageCount > 0" type="link" size="small" @click="showOlderMessages = false">收起较早消息</Button>
+            </div>
             <div
-              v-for="item in messages"
+              v-for="item in visibleMessages"
               :key="item.id"
               class="ai-message-row flex"
               :class="item.role === 'user' ? 'justify-end' : 'justify-start'"

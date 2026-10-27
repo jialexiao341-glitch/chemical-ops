@@ -303,10 +303,10 @@ export async function getConversationListApi(limit = 50) {
 }
 
 /** 查询会话历史消息 */
-export async function getAIMessagesApi(conversationId: number, limit = 100) {
+export async function getAIMessagesApi(conversationId: number, limit = 100, beforeId?: number) {
   return requestClient.get<{ items: AiApi.Message[]; total: number }>(
     `/ai/conversations/${conversationId}/messages`,
-    { params: { limit } },
+    { params: { limit, before_id: beforeId } },
   );
 }
 
