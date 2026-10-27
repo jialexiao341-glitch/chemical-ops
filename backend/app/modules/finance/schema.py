@@ -67,6 +67,26 @@ class InvoiceCreate(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
 
 
+class InvoiceCandidateEvidence(BaseModel):
+    field: str
+    value: str
+    source_quote: str
+    source_location: str
+
+
+class InvoiceParseCandidate(BaseModel):
+    file_id: int
+    file_name: str
+    invoice_code: str | None = None
+    invoice_number: str | None = None
+    invoice_date: str | None = None
+    amount_excl_tax: str | None = None
+    tax_amount: str | None = None
+    amount_incl_tax: str | None = None
+    evidence: list[InvoiceCandidateEvidence] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class InvoiceReject(BaseModel):
     """驳回发票时提交的原因。"""
 

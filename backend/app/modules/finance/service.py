@@ -19,6 +19,7 @@ from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_role_codes
 from app.modules.system.model import User
+from app.modules.system.file_model import SysFile, SysFileAttachment
 
 
 def _now() -> datetime:
@@ -208,6 +209,14 @@ def create_invoice(db: Session, user: User, data: InvoiceCreate) -> FinanceInvoi
         raise BusinessValidationError("价税合计必须等于不含税金额加税额")
     if _sum_invoices(db, reconciliation.id) + data.amount_incl_tax > reconciliation.total_amount:
         raise BusinessValidationError("发票累计金额不能超过对账应付总额")
+    if db.scalar(select(FinanceInvoice.id).where(FinanceInvoice.supplier_id == reconciliation.supplier_id,
+                                                  FinanceInvoice.invoice_number == data.invoice_number).limit(1)):
+        raise DuplicateResourceError("该供应商已登记相同发票号码")
+    if data.source_file_id is not None:
+        source = db.scalar(select(SysFile).where(SysFile.id == data.source_file_id).with_for_update())
+        attached = db.scalar(select(SysFileAttachment.id).where(SysFileAttachment.file_id == data.source_file_id).limit(1))
+        if source is None or source.uploader_id != user.id or source.file_category != "FINANCE_INVOICE" or attached:
+            raise BusinessValidationError("发票来源文件无效或不可使用")
     invoice = FinanceInvoice(
         invoice_no=f"TEMP-FI-{uuid4().hex[:12]}",
         reconciliation_id=reconciliation.id,
@@ -226,8 +235,16 @@ def create_invoice(db: Session, user: User, data: InvoiceCreate) -> FinanceInvoi
         note=data.note,
     )
     db.add(invoice)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        if "uk_finance_invoice_supplier_number" in str(exc.orig):
+            db.rollback()
+            raise DuplicateResourceError("该供应商已登记相同发票号码") from exc
+        raise
     invoice.invoice_no = f"FI{date.today():%Y%m%d}{invoice.id:06d}"
+    if data.source_file_id is not None:
+        db.add(SysFileAttachment(file_id=data.source_file_id, resource_type="FINANCE_INVOICE", resource_id=invoice.id, created_by=user.id))
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="FINANCE_INVOICE", resource_id=invoice.id, request_summary="录入供应商发票", result_status="SUCCESS")
     db.commit()
     return _require_invoice(db, invoice.id)

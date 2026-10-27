@@ -63,6 +63,7 @@ export namespace FinanceApi {
     invoice_number: string;
     note?: string;
     reconciliation_id: number;
+    source_file_id?: number;
     tax_amount?: number | string;
   }
 
@@ -292,6 +293,28 @@ export async function getInvoiceListApi(params?: FinanceApi.ListParams) {
 /** 查询供应商发票详情 */
 export async function getInvoiceApi(id: number) {
   return requestClient.get<FinanceApi.Invoice>(`/finance/invoices/${id}`);
+}
+
+export interface InvoiceParseCandidate {
+  file_id: number;
+  file_name: string;
+  invoice_code: null | string;
+  invoice_number: null | string;
+  invoice_date: null | string;
+  amount_excl_tax: null | string;
+  tax_amount: null | string;
+  amount_incl_tax: null | string;
+  evidence: Array<{ field: string; value: string; source_quote: string; source_location: string }>;
+  warnings: string[];
+}
+
+export async function parseInvoiceFileApi(reconciliationId: number, file: File) {
+  const data = new FormData();
+  data.append('file', file);
+  return requestClient.post<InvoiceParseCandidate>(
+    `/finance/reconciliations/${reconciliationId}/invoices/parse-file`, data,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  );
 }
 
 /** 录入供应商发票（价税合计 = 不含税 + 税额） */

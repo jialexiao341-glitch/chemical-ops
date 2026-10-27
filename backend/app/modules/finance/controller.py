@@ -1,14 +1,17 @@
 """财务对账、发票、付款和结算 HTTP 接口。"""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
+from app.core.rate_limit import limit_document
+from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.errors import BusinessValidationError
 from app.modules.finance import service, reconciliation_items, invoice_matches
 from app.modules.finance.schema import (
     InvoiceCreate,
+    InvoiceParseCandidate,
     InvoicePage,
     InvoiceRead,
     InvoiceReject,
@@ -109,6 +112,17 @@ def dispute_reconciliation(reconciliation_id: int, data: ReconciliationAction, d
     if not data.reason:
         raise BusinessValidationError("发起对账争议必须填写原因")
     return service.dispute_reconciliation(db, user, reconciliation_id, data.reason)
+
+
+@router.post("/reconciliations/{reconciliation_id}/invoices/parse-file", response_model=InvoiceParseCandidate,
+             summary="解析发票文件候选", dependencies=[Depends(limit_document)])
+async def parse_invoice_file(reconciliation_id: int, file: UploadFile = File(...),
+    db: Session = Depends(get_db), user: User = Depends(require_permission("finance.invoices.write")),
+    _reader: User = Depends(require_permission("finance.reconciliations.read"))) -> InvoiceParseCandidate:
+    from app.modules.finance.invoice_extraction import parse_invoice_file as parse
+    content = await file.read(get_settings().document_max_size_mb * 1024 * 1024 + 1)
+    return await parse(db, user, reconciliation_id, file_name=file.filename or "",
+                       mime_type=file.content_type or "application/octet-stream", content=content)
 
 
 @router.post("/invoices", response_model=InvoiceRead, status_code=status.HTTP_201_CREATED, summary="录入供应商发票")
