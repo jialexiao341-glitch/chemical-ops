@@ -17,7 +17,7 @@ import {
   markNotificationReadApi,
 } from '#/api';
 import { useAuthStore } from '#/store';
-import { proposalNotificationLink } from '#/utils/proposal-notification';
+import { operationTaskNotificationLink, proposalNotificationLink } from '#/utils/proposal-notification';
 import LoginForm from '#/views/_core/authentication/login.vue';
 import ChemicalAgentFloat from '#/views/ai/workspace/modules/chemical-agent-float.vue';
 
@@ -103,7 +103,7 @@ async function loadNotifications() {
       isRead: item.is_read === 1,
       message: item.content,
       title: item.title,
-      link: proposalNotificationLink(item),
+      link: proposalNotificationLink(item) ?? operationTaskNotificationLink(item),
     }));
   } catch {
     // 通知加载失败不影响主流程

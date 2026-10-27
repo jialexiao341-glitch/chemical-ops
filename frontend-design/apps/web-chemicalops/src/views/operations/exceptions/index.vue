@@ -6,14 +6,15 @@ import type {
 import type { OperationExceptionApi } from '#/api';
 
 import { onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenDrawer } from '@vben/common-ui';
 
-import { Button } from 'antdv-next';
+import { Button, message } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getExceptionApi, getExceptionAssigneeOptionsApi, getExceptionListApi } from '#/api';
+import { getExceptionApi, getExceptionAssigneeOptionsApi, getExceptionListApi, getMyOperationTaskApi, resolveOperationTaskNotificationApi } from '#/api';
+import { parseProposalNotificationId } from '#/utils/proposal-notification';
 import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
@@ -21,6 +22,7 @@ import DetailDrawer from './modules/detail.vue';
 
 defineOptions({ name: 'OperationExceptionList' });
 const route = useRoute();
+const router = useRouter();
 
 const [Detail, detailApi] = useVbenDrawer({
   connectedComponent: DetailDrawer,
@@ -90,6 +92,27 @@ onMounted(async () => {
   );
   gridApi.query();
 });
+
+let taskNotificationVersion = 0;
+watch(() => route.query.task_notification, async (value) => {
+  const version = ++taskNotificationVersion;
+  const id = parseProposalNotificationId(value);
+  if (id === undefined) return;
+  try {
+    const reference = await resolveOperationTaskNotificationApi(id);
+    const task = await getMyOperationTaskApi(reference.task_id);
+    if (task.exception_id !== reference.exception_id) throw new Error('任务关联已变化');
+    const exception = await getExceptionApi(task.exception_id);
+    if (version === taskNotificationVersion) detailApi.setData({ ...exception, focus_task_id: task.id }).open();
+  } catch {
+    if (version === taskNotificationVersion) message.error('任务不可访问或已改派');
+  } finally {
+    if (version === taskNotificationVersion && route.query.task_notification === value) {
+      const query = { ...route.query }; delete query.task_notification;
+      void router.replace({ query });
+    }
+  }
+}, { immediate: true });
 
 watch(
   () => route.query.ai_filters,

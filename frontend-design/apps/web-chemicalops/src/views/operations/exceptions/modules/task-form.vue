@@ -6,7 +6,8 @@ import { useVbenModal } from '@vben/common-ui';
 
 import { DatePicker, Input, message, Select } from 'antdv-next';
 
-import { createTaskApi, getExceptionAssigneeOptionsApi } from '#/api';
+import type { OperationExceptionApi } from '#/api';
+import { createTaskApi, getExceptionAssigneeOptionsApi, updateTaskApi } from '#/api';
 import { PRIORITY_DICT } from '#/constants/dictionary';
 
 const { hasAccessByCodes } = useAccess();
@@ -15,6 +16,7 @@ const emit = defineEmits(['success']);
 
 /** 新建异常处理任务；创建后后端会把 OPEN/RESOLVED 异常推进为 PROCESSING */
 const exceptionId = ref<number>();
+const taskId = ref<number>();
 const title = ref('');
 const assigneeId = ref<number>();
 const priority = ref('NORMAL');
@@ -22,7 +24,7 @@ const dueAt = ref<string>();
 const userOptions = ref<Array<{ label: string; value: number }>>([]);
 const loadingUsers = ref(false);
 
-const [Modal, modalApi] = useVbenModal<null | { id: number }>({
+const [Modal, modalApi] = useVbenModal<null | { id: number; task?: OperationExceptionApi.Task }>({
   async onConfirm() {
     if (!canConfirm.value) return;
     if (!title.value.trim()) {
@@ -34,13 +36,15 @@ const [Modal, modalApi] = useVbenModal<null | { id: number }>({
     }
     modalApi.lock();
     try {
-      await createTaskApi(exceptionId.value, {
-        assignee_id: assigneeId.value,
-        due_at: dueAt.value ? `${dueAt.value}:00` : undefined,
+      const values = {
+        assignee_id: assigneeId.value ?? null,
+        due_at: dueAt.value ? `${dueAt.value}:00` : null,
         priority: priority.value,
         title: title.value.trim(),
-      });
-      message.success('任务已创建');
+      };
+      if (taskId.value) await updateTaskApi(exceptionId.value, taskId.value, values);
+      else await createTaskApi(exceptionId.value, values);
+      message.success(taskId.value ? '任务已更新' : '任务已创建');
       emit('success');
       modalApi.close();
     } catch {
@@ -53,11 +57,13 @@ const [Modal, modalApi] = useVbenModal<null | { id: number }>({
     if (!isOpen) {
       return;
     }
-    exceptionId.value = modalApi.getData()?.id;
-    title.value = '';
-    assigneeId.value = undefined;
-    priority.value = 'NORMAL';
-    dueAt.value = undefined;
+    const data = modalApi.getData();
+    exceptionId.value = data?.id;
+    taskId.value = data?.task?.id;
+    title.value = data?.task?.title ?? '';
+    assigneeId.value = data?.task?.assignee_id ?? undefined;
+    priority.value = data?.task?.priority ?? 'NORMAL';
+    dueAt.value = data?.task?.due_at?.slice(0, 16) ?? undefined;
     if (userOptions.value.length > 0) {
       return;
     }
@@ -74,7 +80,7 @@ const [Modal, modalApi] = useVbenModal<null | { id: number }>({
   },
 });
 
-const titleText = computed(() => '新建处理任务');
+const titleText = computed(() => taskId.value ? '编辑处理任务' : '新建处理任务');
 </script>
 
 <template>

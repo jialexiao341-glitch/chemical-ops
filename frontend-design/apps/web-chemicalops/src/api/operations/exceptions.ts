@@ -1,6 +1,7 @@
 import type { PageQuery, PageResult } from '#/api/request';
 
 import { requestClient } from '#/api/request';
+import { notifyNotificationChanged } from '../core/notification';
 
 export namespace OperationExceptionApi {
   /** 运营异常，对应后端 OperationExceptionRead */
@@ -46,6 +47,8 @@ export namespace OperationExceptionApi {
     title: string;
     updated_at?: string;
   }
+
+  export interface MyTask extends Task { exception_no: string }
 
   /** 任务处理记录 */
   export interface Comment {
@@ -135,15 +138,28 @@ export async function getTaskListApi(
   );
 }
 
+/** 按当前负责人分页读取待办；详情会再次核验是否已改派。 */
+export async function getMyOperationTasksApi(page: number, pageSize: number, status = 'ACTIVE') {
+  return requestClient.get<PageResult<OperationExceptionApi.MyTask>>('/operation-exceptions/my-tasks', { params: { page, page_size: pageSize, status } });
+}
+export async function getMyOperationTaskApi(taskId: number) {
+  return requestClient.get<OperationExceptionApi.MyTask>(`/operation-exceptions/my-tasks/${taskId}`);
+}
+export async function getOperationTaskApi(exceptionId: number, taskId: number) {
+  return requestClient.get<OperationExceptionApi.Task>(`/operation-exceptions/${exceptionId}/tasks/${taskId}`);
+}
+
 /** 创建处理任务（后端会把 OPEN/RESOLVED 异常推进为 PROCESSING） */
 export async function createTaskApi(
   exceptionId: number,
   data: OperationExceptionApi.TaskPayload,
 ) {
-  return requestClient.post<OperationExceptionApi.Task>(
+  const result = await requestClient.post<OperationExceptionApi.Task>(
     `/operation-exceptions/${exceptionId}/tasks`,
     data,
   );
+  notifyNotificationChanged();
+  return result;
 }
 
 /** 更新任务负责人、优先级、截止时间或状态 */
@@ -152,10 +168,12 @@ export async function updateTaskApi(
   taskId: number,
   data: OperationExceptionApi.TaskUpdate,
 ) {
-  return requestClient.request<OperationExceptionApi.Task>(
+  const result = await requestClient.request<OperationExceptionApi.Task>(
     `/operation-exceptions/${exceptionId}/tasks/${taskId}`,
     { data, method: 'PATCH' },
   );
+  notifyNotificationChanged();
+  return result;
 }
 
 /** 追加任务处理记录 */

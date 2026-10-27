@@ -29,6 +29,8 @@ def _proposal_notification_statuses(db: Session, user: User, items):
 
 def _safe_notification(item, proposal_statuses=None):
     result = NotificationRead.model_validate(item)
+    if item.notification_type == "OPERATION_TASK_ASSIGNED":
+        return result.model_copy(update={"related_id": None})
     if item.notification_type == "OPERATION_SUGGESTION":
         return result.model_copy(update={"title": "运营建议", "content": "有新的运营建议，请前往建议列表按权限查看。", "related_id": None})
     if item.notification_type == "AI_PROPOSAL_PENDING":
@@ -85,6 +87,23 @@ def resolve_proposal_notification(notification_id: int, db: Session = Depends(ge
     if proposal is None:
         raise ResourceNotFoundError("提案通知不存在")
     return {"confirmation_id": proposal.confirmation_id}
+
+
+@router.get("/{notification_id}/operation-task", summary="解析分配给本人的异常任务通知")
+def resolve_operation_task_notification(notification_id: int, db: Session = Depends(get_db),
+                                        user: User = Depends(require_permission("system.notifications.read")),
+                                        _task_user: User = Depends(require_permission("operations.exceptions.read"))):
+    from sqlalchemy import select
+    from app.core.errors import ResourceNotFoundError
+    from app.modules.operation_exceptions.model import OperationTask
+    notification = service.get_notification(db, user, notification_id)
+    if notification.notification_type != "OPERATION_TASK_ASSIGNED" or notification.related_type != "OPERATION_TASK":
+        raise ResourceNotFoundError("任务通知不存在")
+    task = db.scalar(select(OperationTask).where(OperationTask.id == notification.related_id,
+                                                OperationTask.assignee_id == user.id))
+    if task is None:
+        raise ResourceNotFoundError("任务通知不可用或已改派")
+    return {"exception_id": task.exception_id, "task_id": task.id}
 
 
 @router.patch("/{notification_id}/read", response_model=NotificationRead, summary="标记通知已读")

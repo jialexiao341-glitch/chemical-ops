@@ -26,6 +26,7 @@ import {
   createCommentApi,
   getCommentListApi,
   getExceptionApi,
+  getOperationTaskApi,
   getTaskListApi,
   getExceptionAssigneeOptionsApi,
   updateExceptionApi,
@@ -118,7 +119,7 @@ const [TaskFormModal, taskFormApi] = useVbenModal({
 });
 
 const [Drawer, drawerApi] = useVbenDrawer<
-  null | OperationExceptionApi.Exception
+  null | (OperationExceptionApi.Exception & { focus_task_id?: number })
 >({
   footer: false,
   async onOpenChange(isOpen) {
@@ -138,6 +139,11 @@ const [Drawer, drawerApi] = useVbenDrawer<
     try {
       const exception = await reload(data.id);
       ownerId.value = exception?.owner_id ?? undefined;
+      if (data.focus_task_id) {
+        const task = await getOperationTaskApi(data.id, data.focus_task_id);
+        if (!tasks.value.some((item) => item.id === task.id)) tasks.value.unshift(task);
+        await onSelectTask(task);
+      }
       // 负责人下拉按需加载一次
       if (canWriteExceptions && userOptions.value.length === 0) {
         const users = await getExceptionAssigneeOptionsApi();
@@ -555,6 +561,8 @@ defineExpose({ drawerApi });
                   >
                     处理记录
                   </Button>
+                  <Button v-if="canWriteExceptions && record.status !== 'CANCELLED'" size="small" type="link"
+                    @click.stop="taskFormApi.setData({ id: detail.id, task: record }).open()">编辑任务</Button>
                   <Button
                     v-for="action in taskActions(record)"
                     :key="action.value"

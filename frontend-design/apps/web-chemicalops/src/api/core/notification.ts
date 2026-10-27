@@ -72,3 +72,7 @@ export async function resolveProposalNotificationApi(id: number) {
 export function notifyNotificationChanged() {
   window.dispatchEvent(new Event('chemicalops:notifications-changed'));
 }
+
+export async function resolveOperationTaskNotificationApi(id: number) {
+  return requestClient.get<{ exception_id: number; task_id: number }>(`/notifications/${id}/operation-task`);
+}

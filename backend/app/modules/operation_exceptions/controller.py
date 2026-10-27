@@ -19,6 +19,8 @@ from app.modules.operation_exceptions.schema import (
     OperationTaskCreate,
     OperationTaskPage,
     OperationTaskRead,
+    OperationMyTaskPage,
+    OperationMyTaskRead,
     OperationTaskUpdate,
 )
 from app.modules.system.model import User
@@ -54,6 +56,20 @@ def list_exceptions(
 
     items, total = service.list_exceptions(db, user, exception_type=exception_type, status=exception_status, page=page, page_size=page_size)
     return OperationExceptionPage(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/my-tasks", response_model=OperationMyTaskPage, summary="分页查询分配给我的异常任务")
+def my_tasks(task_status: str = Query(default="ACTIVE", alias="status", pattern="^(ACTIVE|ALL|OPEN|PROCESSING|COMPLETED|CANCELLED)$"),
+             page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100),
+             db: Session = Depends(get_db), user: User = Depends(require_permission("operations.exceptions.read"))):
+    items, total = service.list_my_tasks(db, user, status=task_status, page=page, page_size=page_size)
+    return OperationMyTaskPage(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/my-tasks/{task_id}", response_model=OperationMyTaskRead, summary="查询分配给我的异常任务")
+def my_task(task_id: int, db: Session = Depends(get_db),
+            user: User = Depends(require_permission("operations.exceptions.read"))):
+    return service.get_my_task(db, user, task_id)
 
 
 @router.get("/{exception_id}", response_model=OperationExceptionRead, summary="查询运营异常详情")

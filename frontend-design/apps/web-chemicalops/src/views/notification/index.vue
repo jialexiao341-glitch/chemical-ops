@@ -85,6 +85,12 @@ function onOpenProposal(row: NotificationApi.Notification) {
   void router.push({ path: '/ai/tasks', query: { proposal_notification: String(row.id) } });
 }
 
+function onOpenOperationTask(row: NotificationApi.Notification) {
+  if (!hasAccessByCodes(['operations.exceptions.read'])) { message.warning('当前账号没有异常任务读取权限'); return; }
+  if (canWriteNotifications.value && row.is_read !== 1) void onRead(row).catch(() => {});
+  void router.push({ path: '/operations/exceptions', query: { task_notification: String(row.id) } });
+}
+
 async function onOpenFollowup(row: NotificationApi.Notification) {
   if (!row.related_id) return;
   const supplierMode = row.notification_type === 'DELIVERY_FOLLOWUP';
@@ -164,6 +170,7 @@ onMounted(load);
               </Tag>
             </template>
             <template v-else-if="column.key === '__action'">
+              <Button v-if="record.notification_type === 'OPERATION_TASK_ASSIGNED' && hasAccessByCodes(['operations.exceptions.read'])" size="small" type="link" @click="onOpenOperationTask(record)">查看任务</Button>
               <Button v-if="record.notification_type === 'AI_PROPOSAL_PENDING' && canUseAiWorkspace" size="small" type="link" @click="onOpenProposal(record)">查看提案</Button>
               <Button v-if="record.related_type === 'DELIVERY_FOLLOWUP'" size="small" type="link" @click="onOpenFollowup(record)">查看催办</Button>
               <Button

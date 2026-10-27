@@ -10,3 +10,8 @@ export function parseProposalNotificationId(value: unknown): number | undefined 
   const id = Number(value);
   return Number.isSafeInteger(id) ? id : undefined;
 }
+export function operationTaskNotificationLink(notification: { id: number; notification_type: string; related_type?: null | string }): string | undefined {
+  if (notification.notification_type !== 'OPERATION_TASK_ASSIGNED' || notification.related_type !== 'OPERATION_TASK') return;
+  if (!Number.isSafeInteger(notification.id) || notification.id <= 0) return;
+  return `/operations/exceptions?task_notification=${notification.id}`;
+}

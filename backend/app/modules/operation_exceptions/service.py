@@ -471,6 +471,41 @@ def list_tasks(db: Session, user: User, exception_id: int, *, status: str | None
     )
 
 
+def _notify_task_assignee(db: Session, task: OperationTask) -> None:
+    """同事务通知新负责人；通知正文不包含异常或任务敏感信息。"""
+    from app.modules.notifications.model import Notification
+    db.add(Notification(recipient_id=task.assignee_id, notification_type="OPERATION_TASK_ASSIGNED",
+        title="异常处理任务待办理", content="您有一项异常处理任务，请查看详情。",
+        related_type="OPERATION_TASK", related_id=task.id))
+
+
+def list_my_tasks(db: Session, user: User, *, status: str, page: int, page_size: int):
+    """仅返回当前用户被分派的任务；不因异常来源可见而扩大待办范围。"""
+    from app.modules.operation_exceptions.schema import OperationTaskRead
+    conditions = [OperationTask.assignee_id == user.id]
+    if status == "ACTIVE":
+        conditions.append(OperationTask.status.in_(("OPEN", "PROCESSING")))
+    elif status != "ALL":
+        conditions.append(OperationTask.status == status)
+    base = select(OperationTask, OperationException.exception_no).join(
+        OperationException, OperationException.id == OperationTask.exception_id).where(*conditions)
+    total = db.scalar(select(func.count()).select_from(base.order_by(None).subquery())) or 0
+    rows = db.execute(base.order_by(OperationTask.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    return [{**OperationTaskRead.model_validate(task).model_dump(), "exception_no": number} for task, number in rows], total
+
+
+def get_my_task(db: Session, user: User, task_id: int):
+    """待办详情始终检查当前负责人，不依赖过期列表或通知。"""
+    from app.modules.operation_exceptions.schema import OperationTaskRead
+    row = db.execute(select(OperationTask, OperationException.exception_no).join(
+        OperationException, OperationException.id == OperationTask.exception_id).where(
+        OperationTask.id == task_id, OperationTask.assignee_id == user.id)).first()
+    if row is None:
+        raise ResourceNotFoundError("任务不存在或已改派")
+    task, number = row
+    return {**OperationTaskRead.model_validate(task).model_dump(), "exception_no": number}
+
+
 def create_task(
     db: Session, user: User, exception_id: int, data: OperationTaskCreate, *, commit: bool = True,
 ) -> OperationTask:
@@ -486,16 +521,18 @@ def create_task(
         exception.status = "PROCESSING"
     db.flush()
     add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type="OPERATION_TASK", resource_id=task.id, request_summary="创建异常处理任务", result_status="SUCCESS")
+    if task.assignee_id is not None:
+        _notify_task_assignee(db, task)
     if commit:
         db.commit()
         db.refresh(task)
     return task
 
 
-def get_task(db: Session, user: User, task_id: int) -> OperationTask:
+def get_task(db: Session, user: User, task_id: int, *, for_update: bool = False) -> OperationTask:
     """查询任务并校验用户数据范围。"""
 
-    task = _require_task(db, task_id)
+    task = _require_task(db, task_id, for_update=for_update)
     if not _can_access_task(db, user, task):
         raise ResourceNotFoundError(f"异常任务 {task_id} 不存在")
     return task
@@ -504,7 +541,8 @@ def get_task(db: Session, user: User, task_id: int) -> OperationTask:
 def update_task(db: Session, user: User, task_id: int, data: OperationTaskUpdate) -> OperationTask:
     """更新任务内容、负责人或处理状态。"""
 
-    task = get_task(db, user, task_id)
+    task = get_task(db, user, task_id, for_update=True)
+    old_assignee = task.assignee_id
     values = data.model_dump(exclude_unset=True)
     if task.status == "CANCELLED":
         raise BusinessValidationError("已取消的任务不能修改")
@@ -530,6 +568,8 @@ def update_task(db: Session, user: User, task_id: int, data: OperationTaskUpdate
         if field in values:
             setattr(task, field, values[field])
     add_audit_log(db, actor_id=user.id, action_type="UPDATE", resource_type="OPERATION_TASK", resource_id=task.id, request_summary=f"更新异常任务状态 {task.status}", result_status="SUCCESS")
+    if task.assignee_id is not None and task.assignee_id != old_assignee and task.status in {"OPEN", "PROCESSING"}:
+        _notify_task_assignee(db, task)
     db.commit()
     db.refresh(task)
     return task

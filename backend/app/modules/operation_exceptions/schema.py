@@ -120,6 +120,17 @@ class OperationTaskPage(BaseModel):
     page_size: int
 
 
+class OperationMyTaskRead(OperationTaskRead):
+    exception_no: str
+
+
+class OperationMyTaskPage(BaseModel):
+    items: list[OperationMyTaskRead]
+    total: int
+    page: int
+    page_size: int
+
+
 class OperationTaskCommentCreate(BaseModel):
     """创建任务处理记录时提交的字段。"""
 
