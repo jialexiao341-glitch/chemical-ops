@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import and_, case, desc, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -24,6 +24,9 @@ from app.modules.products.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.purchase_requests.model import Unit
 from app.modules.system.model import Role, User, UserRole
+from app.modules.rfqs.model import RFQ, SupplierQuote
+from app.modules.suppliers.model import Supplier
+from app.modules.finance.model import FinanceInvoice, FinanceInvoiceMatch, FinanceReconciliation
 
 
 LOGGER = logging.getLogger("chemicalops.jobs")
@@ -350,6 +353,76 @@ def scan_low_inventory(db: Session, actor: User) -> dict[str, int]:
     return result
 
 
+def scan_expired_quotes(db: Session, actor: User) -> dict[str, int]:
+    """对进行中的询价，仅提醒各供应商最新一版已过期报价。"""
+    newer = aliased(SupplierQuote)
+    newer_exists = select(newer.id).where(
+        newer.rfq_id == SupplierQuote.rfq_id,
+        newer.supplier_id == SupplierQuote.supplier_id,
+        newer.quote_version > SupplierQuote.quote_version,
+    ).exists()
+    rows = db.execute(
+        select(SupplierQuote, RFQ, Supplier.supplier_name)
+        .join(RFQ, RFQ.id == SupplierQuote.rfq_id)
+        .join(Supplier, Supplier.id == SupplierQuote.supplier_id)
+        .where(RFQ.status.in_(("SENT", "RESPONDING")),
+               SupplierQuote.status == "SUBMITTED",
+               SupplierQuote.valid_until.is_not(None),
+               SupplierQuote.valid_until < date.today(), ~newer_exists)
+        .order_by(SupplierQuote.id)
+    ).all()
+    created = 0
+    for quote, rfq, supplier_name in rows:
+        exception = create_automatic_exception(
+            db, actor, exception_type="QUOTE_EXPIRED", source_type="SUPPLIER_QUOTE",
+            source_id=quote.id, owner_id=rfq.requester_id, severity="MEDIUM",
+            description=f"报价 {quote.quote_no}（供应商：{supplier_name}）有效期至 {quote.valid_until}，已过期；关联询价 {rfq.rfq_no}。请核实报价并联系供应商更新。",
+        )
+        if exception is not None:
+            created += 1
+            _publish_suggestion(db, exception)
+    db.commit()
+    metrics.increment("scheduler_jobs", labels={"job": "quote_expiry_scan", "status": "success"})
+    return {"scanned_count": len(rows), "created_count": created}
+
+
+def scan_invoice_differences(db: Session, actor: User) -> dict[str, int]:
+    """对已提交发票的当前行匹配执行既有领域校验并生成待核查建议。"""
+    from app.modules.finance import invoice_matches
+    newer = aliased(FinanceInvoiceMatch)
+    newer_exists = select(newer.id).where(
+        newer.invoice_id == FinanceInvoiceMatch.invoice_id,
+        newer.version_no > FinanceInvoiceMatch.version_no,
+    ).exists()
+    rows = db.execute(select(FinanceInvoice, FinanceReconciliation, FinanceInvoiceMatch)
+        .join(FinanceReconciliation, FinanceReconciliation.id == FinanceInvoice.reconciliation_id)
+        .join(FinanceInvoiceMatch, FinanceInvoiceMatch.invoice_id == FinanceInvoice.id)
+        .where(FinanceInvoice.status == "SUBMITTED", FinanceReconciliation.items_version > 0,
+               FinanceReconciliation.status.not_in(("CLOSED", "CANCELLED")), ~newer_exists)
+        .order_by(FinanceInvoice.id)).all()
+    created = 0
+    for invoice, reconciliation, match in rows:
+        issues = list(dict.fromkeys(invoice_matches.warnings(db, invoice, reconciliation, match, for_update=False)))
+        if (invoice.currency_code != reconciliation.currency_code or invoice.po_id != reconciliation.po_id
+                or invoice.supplier_id != reconciliation.supplier_id):
+            issues.append("发票币种、订单或供应商与对账单不一致")
+        if not issues:
+            continue
+        exception = create_automatic_exception(
+            db, actor, exception_type="INVOICE_DIFFERENCE", source_type="FINANCE_INVOICE_MATCH",
+            source_id=match.id, owner_id=invoice.submitted_by, severity="MEDIUM",
+            description=(f"扫描时发现发票 {invoice.invoice_no} 的行匹配（第 {match.version_no} 版）存在待核查问题，"
+                         f"关联对账单 {reconciliation.reconciliation_no}：" + "；".join(issues)
+                         + "。请核对当前单据后按财务流程处理。"),
+        )
+        if exception is not None:
+            created += 1
+            _publish_suggestion(db, exception)
+    db.commit()
+    metrics.increment("scheduler_jobs", labels={"job": "invoice_difference_scan", "status": "success"})
+    return {"scanned_count": len(rows), "created_count": created}
+
+
 def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
     """运行到货逾期、库存临期和超时待验收扫描。"""
 
@@ -361,10 +434,12 @@ def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
         threshold_hours=get_settings().quality_pending_alert_hours,
     )
     low_inventory = scan_low_inventory(db, actor)
+    quote_expiry = scan_expired_quotes(db, actor)
+    invoice_difference = scan_invoice_differences(db, actor)
     # 对历史活动异常及暂时生成失败的记录补偿；唯一约束保证并发和重复扫描去重。
     from app.modules.ai.model import AIOperationSuggestion
     missing = db.scalars(select(OperationException).where(
-        OperationException.exception_type.in_(("LOW_STOCK", "OVERDUE", "INVENTORY_EXPIRY", "QUALITY_PENDING")),
+        OperationException.exception_type.in_(("LOW_STOCK", "OVERDUE", "INVENTORY_EXPIRY", "QUALITY_PENDING", "QUOTE_EXPIRED", "INVOICE_DIFFERENCE")),
         OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED")),
         ~select(AIOperationSuggestion.id).where(AIOperationSuggestion.exception_id == OperationException.id).exists(),
     ).order_by(OperationException.id).limit(100)).all()
@@ -372,6 +447,10 @@ def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
         _publish_suggestion(db, exception)
     db.commit()
     return {
+        "invoice_difference_scanned_count": invoice_difference["scanned_count"],
+        "invoice_difference_created_count": invoice_difference["created_count"],
+        "quote_expiry_scanned_count": quote_expiry["scanned_count"],
+        "quote_expiry_created_count": quote_expiry["created_count"],
         "overdue_scanned_count": overdue["scanned_count"],
         "overdue_created_count": overdue["created_count"],
         "inventory_expiry_scanned_count": expiry["scanned_count"],
@@ -383,6 +462,28 @@ def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
         "low_inventory_recovered_count": low_inventory["recovered_count"],
         "low_inventory_skipped_unit_mismatch_count": low_inventory["skipped_unit_mismatch_count"],
     }
+
+
+def latest_alert_run(db: Session) -> SchedulerJobRun | None:
+    return db.scalar(select(SchedulerJobRun).where(
+        SchedulerJobRun.task_name == "business_alert_scan"
+    ).order_by(SchedulerJobRun.started_at.desc(), SchedulerJobRun.id.desc()).limit(1))
+
+
+def run_manual_alert_scan(db: Session, actor: User) -> dict[str, int]:
+    """记录手动扫描结果；已完成的扫描阶段沿用原有提交边界。"""
+    run = start_scheduled_run(db, uuid4().hex, task_name="business_alert_scan")
+    run_id = run.id
+    try:
+        result = scan_active_alerts(db, actor)
+        update_scheduled_run(db, run, attempt_count=1, result=result)
+        return result
+    except Exception as exc:
+        db.rollback()
+        current = db.get(SchedulerJobRun, run_id)
+        if current is not None:
+            update_scheduled_run(db, current, attempt_count=1, error_type=type(exc).__name__)
+        raise
 
 
 def run_scheduled_alert_scan() -> None:

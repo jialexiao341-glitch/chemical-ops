@@ -1,12 +1,14 @@
 <script lang="ts" setup>
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { OperationSuggestion } from '#/api/ai';
-import { ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAccess } from '@vben/access';
 import { Button, Modal, Select, message } from 'antdv-next';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getOperationSuggestionApi, getOperationSuggestionsApi, handleOperationSuggestionApi } from '#/api/ai';
+import { requestClient } from '#/api/request';
+import { notifyNotificationChanged } from '#/api/core/notification';
 
 defineOptions({ name: 'OperationSuggestionInbox' });
 const { hasAccessByCodes } = useAccess();
@@ -15,6 +17,37 @@ const status = ref<string>();
 const selected = ref<OperationSuggestion>();
 const open = ref(false);
 const busy = ref(false);
+const scanning = ref(false);
+interface AlertRun { status: string; started_at: string; result_json: null | Record<string, number>; }
+interface AlertStatus { scheduler_enabled: boolean; scheduler_running: boolean; interval_seconds: number; last_run: AlertRun | null; }
+const alertStatus = ref<AlertStatus>();
+const statusText = computed(() => {
+  const state = alertStatus.value;
+  if (!state) return '扫描状态暂不可用';
+  const scheduler = state.scheduler_running ? '本实例定时扫描已启用' : state.scheduler_enabled ? '本实例定时扫描未运行' : '定时扫描已关闭';
+  if (!state.last_run) return `${scheduler} · 尚无运行记录`;
+  const run = state.last_run;
+  const result = run.status === 'SUCCEEDED' ? '成功' : run.status === 'FAILED' ? '失败' : '运行中';
+  const created = Object.entries(run.result_json || {}).filter(([key]) => key.endsWith('_created_count')).reduce((sum, [, value]) => sum + value, 0);
+  const details = run.status === 'SUCCEEDED' ? `，新增 ${created} 条异常` : '';
+  return `${scheduler} · 最近扫描 ${run.started_at.replace('T', ' ').slice(0, 19)} · ${result}${details}`;
+});
+async function refreshAlertStatus() {
+  try { alertStatus.value = await requestClient.get<AlertStatus>('/jobs/alert-scan/status'); }
+  catch { alertStatus.value = undefined; }
+}
+async function scanAlerts() {
+  if (scanning.value) return;
+  scanning.value = true;
+  try {
+    await requestClient.post('/jobs/alert-scan');
+    message.success('扫描完成');
+    notifyNotificationChanged();
+    await gridApi.query();
+  } catch { message.error('扫描未全部完成，部分提醒可能已生成，请稍后重试'); }
+  finally { await refreshAlertStatus(); scanning.value = false; }
+}
+onMounted(refreshAlertStatus);
 const labels: Record<OperationSuggestion['status'], string> = { OPEN: '待处理', IGNORED: '已忽略', CLOSED: '已关闭', HANDED_OFF: '已转人工' };
 const options = Object.entries(labels).map(([value, label]) => ({ value, label }));
 const columns = [
@@ -45,9 +78,9 @@ async function handle(action: 'ignore' | 'close' | 'handoff') {
 </script>
 <template>
   <div class="flex h-full flex-col gap-3">
-    <section class="rounded bg-card p-4 flex items-center justify-between gap-3">
-      <span class="font-medium">按当前异常权限查看和处理运营建议。</span>
-      <div class="flex items-center gap-2"><Select v-model:value="status" :options="options" allow-clear placeholder="全部状态" class="w-40" /><Button @click="status = undefined; gridApi.query()">重置</Button><Button type="primary" @click="gridApi.query()">搜索</Button></div>
+    <section class="rounded bg-card p-4 flex flex-wrap items-center justify-between gap-3">
+      <span class="text-sm text-muted-foreground" role="status">{{ statusText }}</span>
+      <div class="ml-auto flex items-center gap-2"><Button v-if="hasAccessByCodes(['operations.exceptions.write'])" :loading="scanning" @click="scanAlerts">立即扫描</Button><Select v-model:value="status" :options="options" allow-clear placeholder="全部状态" class="w-40" /><Button @click="status = undefined; gridApi.query()">重置</Button><Button type="primary" @click="gridApi.query()">搜索</Button></div>
     </section>
     <Grid table-title="Agent Inbox · 运营建议" />
     <Modal v-model:open="open" title="运营建议详情" :footer="null" width="760px">

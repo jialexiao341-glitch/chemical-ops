@@ -10,6 +10,16 @@ from app.modules.notifications.service import notify_users
 
 
 _SUGGESTION_TYPES = {
+    "INVOICE_DIFFERENCE": {
+        "title": "发票匹配差异核查建议",
+        "instruction": "核实发票与对账匹配差异并按财务流程处理，优先级 NORMAL，2 天内完成",
+        "roles": ("FINANCE_MANAGER",),
+    },
+    "QUOTE_EXPIRED": {
+        "title": "报价过期处理建议",
+        "instruction": "核实过期报价并联系供应商更新报价，优先级 NORMAL，2 天内完成",
+        "roles": ("PROCUREMENT_MANAGER",),
+    },
     "LOW_STOCK": {
         "title": "低库存补货建议",
         "instruction": "核实产品低库存原因，并准备补货申请，优先级 HIGH，3 天内完成",

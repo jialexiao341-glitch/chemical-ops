@@ -96,6 +96,7 @@ def resolve_operation_task_notification(notification_id: int, db: Session = Depe
     from sqlalchemy import select
     from app.core.errors import ResourceNotFoundError
     from app.modules.operation_exceptions.model import OperationTask
+    from app.modules.operation_exceptions.service import get_my_task
     notification = service.get_notification(db, user, notification_id)
     if notification.notification_type != "OPERATION_TASK_ASSIGNED" or notification.related_type != "OPERATION_TASK":
         raise ResourceNotFoundError("任务通知不存在")
@@ -103,6 +104,7 @@ def resolve_operation_task_notification(notification_id: int, db: Session = Depe
                                                 OperationTask.assignee_id == user.id))
     if task is None:
         raise ResourceNotFoundError("任务通知不可用或已改派")
+    get_my_task(db, user, task.id)
     return {"exception_id": task.exception_id, "task_id": task.id}
 
 

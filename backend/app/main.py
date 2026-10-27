@@ -228,7 +228,7 @@ def _check_minio() -> bool:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     """Log startup progress and critical middleware availability."""
 
     _configure_logging()
@@ -261,9 +261,11 @@ async def lifespan(_: FastAPI):
         if database_ready and settings.business_alerts_scheduler_enabled
         else None
     )
+    app.state.business_alert_scheduler_task = scheduler_task
     try:
         yield
     finally:
+        app.state.business_alert_scheduler_task = None
         if cleanup_task is not None:
             cleanup_task.cancel()
             with suppress(asyncio.CancelledError):

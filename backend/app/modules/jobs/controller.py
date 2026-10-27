@@ -1,6 +1,6 @@
 """后台扫描任务 HTTP 接口。"""
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -145,7 +145,22 @@ def inventory_expiry_scan(db: Session = Depends(get_db), user: User = Depends(re
 def alert_scan(db: Session = Depends(get_db), user: User = Depends(require_permission("operations.exceptions.write"))) -> dict[str, int]:
     """手工运行所有已配置的确定性业务提醒规则。"""
 
-    return service.scan_active_alerts(db, user)
+    return service.run_manual_alert_scan(db, user)
+
+
+@router.get("/alert-scan/status", summary="查看业务提醒扫描状态")
+def alert_scan_status(request: Request, db: Session = Depends(get_db),
+                      user: User = Depends(require_permission("operations.exceptions.read"))):
+    from app.core.config import get_settings
+    settings = get_settings()
+    task = getattr(request.app.state, "business_alert_scheduler_task", None)
+    latest = service.latest_alert_run(db)
+    return {
+        "scheduler_enabled": settings.business_alerts_scheduler_enabled,
+        "scheduler_running": task is not None and not task.done(),
+        "interval_seconds": max(1, settings.overdue_scan_interval_seconds),
+        "last_run": SchedulerJobRunRead.model_validate(latest).model_dump(mode="json") if latest else None,
+    }
 
 
 @router.get("/runs", response_model=list[SchedulerJobRunRead], summary="查询后台任务运行历史")

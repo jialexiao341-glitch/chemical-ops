@@ -21,8 +21,8 @@ def test_inventory_expiry_exception_schema_accepts_batch_source() -> None:
     assert exception.source_type == "INVENTORY_BATCH"
 
 
-def test_scheduled_alerts_require_explicit_rollout_enablement() -> None:
-    assert Settings().business_alerts_scheduler_enabled is False
+def test_scheduled_alerts_enabled_by_default() -> None:
+    assert Settings(_env_file=None).business_alerts_scheduler_enabled is True
     assert Settings().quality_pending_alert_hours == 24
 
 

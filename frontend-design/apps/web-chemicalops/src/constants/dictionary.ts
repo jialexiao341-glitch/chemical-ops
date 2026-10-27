@@ -207,6 +207,8 @@ export const EXPIRY_ALERT_LEVEL_DICT = buildDict([
 
 /** 运营异常类型 */
 export const EXCEPTION_TYPE_DICT = buildDict([
+  { color: 'orange', label: '发票匹配差异', value: 'INVOICE_DIFFERENCE' },
+  { color: 'orange', label: '报价过期', value: 'QUOTE_EXPIRED' },
   { color: 'orange', label: '短交', value: 'SHORT_DELIVERY' },
   { color: 'error', label: '质量异常', value: 'QUALITY' },
   { color: 'gold', label: '待验收超时', value: 'QUALITY_PENDING' },
@@ -285,6 +287,8 @@ export const SETTLEMENT_STATUS_DICT = buildDict([
 
 /** 业务附件所属资源类型 */
 export const ATTACHMENT_RESOURCE_DICT = buildDict([
+  { color: 'blue', label: '发票行匹配', value: 'FINANCE_INVOICE_MATCH' },
+  { color: 'blue', label: '供应商报价', value: 'SUPPLIER_QUOTE' },
   { color: 'blue', label: '采购订单', value: 'PURCHASE_ORDER' },
   { color: 'cyan', label: '到货单', value: 'DELIVERY' },
   { color: 'green', label: '质量验收', value: 'QUALITY_ACCEPTANCE' },
@@ -308,6 +312,8 @@ export const PARSE_STATUS_DICT = buildDict([
 
 /** 异常来源类型 */
 export const EXCEPTION_SOURCE_TYPE_DICT = buildDict([
+  { color: 'blue', label: '发票行匹配', value: 'FINANCE_INVOICE_MATCH' },
+  { color: 'blue', label: '供应商报价', value: 'SUPPLIER_QUOTE' },
   { color: 'blue', label: '采购订单', value: 'PURCHASE_ORDER' },
   { color: 'cyan', label: '到货单', value: 'DELIVERY' },
   { color: 'geekblue', label: '到货明细', value: 'DELIVERY_ITEM' },

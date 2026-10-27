@@ -28,6 +28,8 @@ from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.file_model import SysFile
 from app.modules.system.model import Department, User
+from app.modules.rfqs.model import RFQ, SupplierQuote
+from app.modules.finance.model import FinanceInvoice, FinanceInvoiceMatch
 
 
 def _now() -> datetime:
@@ -89,6 +91,18 @@ def _exception_scope_condition(db: Session, user: User):
             OperationException.source_id.in_(visible_products),
         ))
 
+    if "procurement.rfqs.read" in permissions:
+        rfq_scope = True if "PROCUREMENT_MANAGER" in roles else RFQ.requester_id == user.id
+        visible_quotes = select(SupplierQuote.id).join(RFQ, RFQ.id == SupplierQuote.rfq_id).where(rfq_scope)
+        scopes.append(and_(OperationException.source_type == "SUPPLIER_QUOTE", OperationException.source_id.in_(visible_quotes)))
+
+    if {"finance.invoices.read", "finance.reconciliations.read"} <= permissions:
+        visible_matches = (select(FinanceInvoiceMatch.id)
+            .join(FinanceInvoice, FinanceInvoice.id == FinanceInvoiceMatch.invoice_id)
+            .join(PurchaseOrder, PurchaseOrder.id == FinanceInvoice.po_id)
+            .where(order_scope))
+        scopes.append(and_(OperationException.source_type == "FINANCE_INVOICE_MATCH", OperationException.source_id.in_(visible_matches)))
+
     if "master.products.read" in permissions:
         scopes.append(and_(
             OperationException.source_type == "PRODUCT",
@@ -102,13 +116,15 @@ def _exception_record_scope_condition(db: Session, user: User):
 
     if "SYS_ADMIN" in set(get_user_role_codes(db, user.id)):
         return True
+    scope = _exception_scope_condition(db, user)
     return or_(
-        OperationException.owner_id == user.id,
-        exists(select(OperationTask.id).where(
-            OperationTask.exception_id == OperationException.id,
-            OperationTask.assignee_id == user.id,
-        )),
-        _exception_scope_condition(db, user),
+        and_(OperationException.source_type.in_(("SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH")), scope),
+        and_(OperationException.source_type.not_in(("SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH")), or_(
+            OperationException.owner_id == user.id,
+            exists(select(OperationTask.id).where(
+                OperationTask.exception_id == OperationException.id,
+                OperationTask.assignee_id == user.id,
+            ).correlate(OperationException)), scope)),
     )
 
 
@@ -238,7 +254,7 @@ def create_automatic_exception(
 ) -> OperationException | None:
     """为业务事件创建异常；已有未关闭同类异常时不重复创建。"""
 
-    source_model = {"DELIVERY": Delivery, "QUALITY_ACCEPTANCE": QualityAcceptance, "INVENTORY_BATCH": InventoryBatch, "PRODUCT": Product}.get(source_type)
+    source_model = {"DELIVERY": Delivery, "QUALITY_ACCEPTANCE": QualityAcceptance, "INVENTORY_BATCH": InventoryBatch, "PRODUCT": Product, "SUPPLIER_QUOTE": SupplierQuote, "FINANCE_INVOICE_MATCH": FinanceInvoiceMatch}.get(source_type)
     if source_model is not None:
         source = db.scalar(select(source_model).where(source_model.id == source_id).with_for_update())
         if source is None:
@@ -250,7 +266,7 @@ def create_automatic_exception(
         OperationException.source_id == source_id,
     ]
     # 定时库存临期和待验收提醒会重复扫描同一业务事实；关闭后不应每周期重新通知。
-    if exception_type not in {"INVENTORY_EXPIRY", "QUALITY_PENDING"}:
+    if exception_type not in {"INVENTORY_EXPIRY", "QUALITY_PENDING", "QUOTE_EXPIRED", "INVOICE_DIFFERENCE"}:
         duplicate_conditions.append(OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED")))
     existing = db.scalar(select(OperationException).where(*duplicate_conditions).with_for_update())
     if existing is not None:
@@ -317,7 +333,7 @@ def get_exception(db: Session, user: User, exception_id: int, *, for_update: boo
 def _require_task_creation_scope(db: Session, user: User, exception: OperationException) -> OperationException:
     """新增处理任务要求本人负责或来源记录处于可读范围。"""
 
-    if exception.owner_id != user.id and not _has_source_exception_scope(db, user, exception):
+    if (exception.source_type in {"SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH"} or exception.owner_id != user.id) and not _has_source_exception_scope(db, user, exception):
         raise ResourceNotFoundError(f"异常 {exception.id} 不存在")
     return exception
 
@@ -482,7 +498,7 @@ def _notify_task_assignee(db: Session, task: OperationTask) -> None:
 def list_my_tasks(db: Session, user: User, *, status: str, page: int, page_size: int):
     """仅返回当前用户被分派的任务；不因异常来源可见而扩大待办范围。"""
     from app.modules.operation_exceptions.schema import OperationTaskRead
-    conditions = [OperationTask.assignee_id == user.id]
+    conditions = [OperationTask.assignee_id == user.id, _exception_record_scope_condition(db, user)]
     if status == "ACTIVE":
         conditions.append(OperationTask.status.in_(("OPEN", "PROCESSING")))
     elif status != "ALL":
@@ -499,7 +515,8 @@ def get_my_task(db: Session, user: User, task_id: int):
     from app.modules.operation_exceptions.schema import OperationTaskRead
     row = db.execute(select(OperationTask, OperationException.exception_no).join(
         OperationException, OperationException.id == OperationTask.exception_id).where(
-        OperationTask.id == task_id, OperationTask.assignee_id == user.id)).first()
+        OperationTask.id == task_id, OperationTask.assignee_id == user.id,
+        _exception_record_scope_condition(db, user))).first()
     if row is None:
         raise ResourceNotFoundError("任务不存在或已改派")
     task, number = row
