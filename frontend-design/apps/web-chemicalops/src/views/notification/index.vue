@@ -71,13 +71,12 @@ function onToggleUnread(value: boolean | string | number) {
   load();
 }
 
-function onUseSuggestion(row: NotificationApi.Notification) {
-  if (!canUseAiWorkspace.value) {
-    message.warning('当前账号没有 AI 工作台权限');
+function onUseSuggestion() {
+  if (!canUseAiWorkspace.value || !hasAccessByCodes(['operations.exceptions.read'])) {
+    message.warning('当前账号没有查看运营建议的权限');
     return;
   }
-  const instruction = row.content.match(/建议指令：([\s\S]+)$/)?.[1]?.trim() || row.content;
-  void router.push({ path: '/ai/workspace', query: { prompt: instruction } });
+  void router.push({ path: '/ai/tasks', query: { inbox: 'suggestions' } });
 }
 
 async function onOpenFollowup(row: NotificationApi.Notification) {
@@ -164,9 +163,9 @@ onMounted(load);
                 v-if="record.notification_type === 'OPERATION_SUGGESTION' && canUseAiWorkspace"
                 size="small"
                 type="link"
-                @click="onUseSuggestion(record)"
+                @click="onUseSuggestion()"
               >
-                让 Agent 处理
+                查看运营建议
               </Button>
               <Button
                 v-if="canWriteNotifications"

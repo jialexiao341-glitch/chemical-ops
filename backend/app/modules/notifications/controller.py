@@ -13,6 +13,13 @@ from app.modules.system.model import User
 router = APIRouter(prefix="/notifications", tags=["站内通知"])
 
 
+def _safe_notification(item):
+    result = NotificationRead.model_validate(item)
+    if item.notification_type == "OPERATION_SUGGESTION":
+        return result.model_copy(update={"title": "运营建议", "content": "有新的运营建议，请前往建议列表按权限查看。", "related_id": None})
+    return result
+
+
 @router.get("", response_model=NotificationPage, summary="查询我的通知")
 def list_notifications(
     unread_only: bool = Query(default=False, description="是否只查询未读通知"),
@@ -24,7 +31,7 @@ def list_notifications(
     """分页查询当前登录用户的站内通知。"""
 
     items, total = service.list_notifications(db, user, unread_only=unread_only, page=page, page_size=page_size)
-    return NotificationPage(items=items, total=total, page=page, page_size=page_size)
+    return NotificationPage(items=[_safe_notification(item) for item in items], total=total, page=page, page_size=page_size)
 
 
 @router.get("/unread-count", response_model=NotificationUnreadCount, summary="查询未读通知数量")
@@ -45,4 +52,4 @@ def mark_all_read(db: Session = Depends(get_db), user: User = Depends(require_pe
 def mark_read(notification_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("system.notifications.write"))) -> NotificationRead:
     """将指定通知标记为已读。"""
 
-    return service.mark_read(db, user, notification_id)
+    return _safe_notification(service.mark_read(db, user, notification_id))

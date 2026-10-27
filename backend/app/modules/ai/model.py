@@ -153,3 +153,20 @@ class AIQueryLog(Base):
     unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     executed_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+
+class AIOperationSuggestion(Base):
+    """每个运营异常对应一条共享建议，处理状态由有权限的人员共同维护。"""
+
+    __tablename__ = 'ai_operation_suggestions'
+    __table_args__ = (UniqueConstraint('exception_id', name='uq_ai_operation_suggestion_exception'),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exception_id: Mapped[int] = mapped_column(ForeignKey('operation_exceptions.id'), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='OPEN')
+    handled_by: Mapped[int | None] = mapped_column(ForeignKey('sys_users.id'), nullable=True)
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    task_id: Mapped[int | None] = mapped_column(ForeignKey('operation_tasks.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)

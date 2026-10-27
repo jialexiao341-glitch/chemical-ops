@@ -3,7 +3,7 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { AgentApi, AiApi } from '#/api';
 
 import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 
 import { Page } from '@vben/common-ui';
@@ -28,6 +28,7 @@ import AgentChatTask from '../workspace/agent-chat-task.vue';
 import { acceptTask } from '../workspace/task-view';
 import { retryQuestion, taskActionFeedback, taskActions } from './task-actions';
 import ActionProposalDetail from './ActionProposalDetail.vue';
+import OperationSuggestionInbox from './OperationSuggestionInbox.vue';
 
 defineOptions({ name: 'AiTaskHistory' });
 
@@ -37,6 +38,7 @@ const { hasAccessByCodes } = useAccess();
 const status = ref<AgentApi.Task['status']>();
 const inboxOnly = ref(true);
 const showProposals = ref(false);
+const showSuggestions = ref(useRoute().query.inbox === 'suggestions' && hasAccessByCodes(['operations.exceptions.read']));
 const proposalInboxOnly = ref(true);
 const selectedTask = ref<AgentApi.Task>();
 const selectedProposal = ref<AiApi.ActionProposalRead>();
@@ -151,12 +153,14 @@ function search() { void gridApi.query(); }
 
 function showInbox(inbox: boolean) {
   inboxOnly.value = inbox;
+  showSuggestions.value = false;
   showProposals.value = false;
   status.value = undefined;
   void gridApi.query();
 }
 
 function showProposalInbox(inbox: boolean) {
+  showSuggestions.value = false;
   showProposals.value = true;
   proposalInboxOnly.value = inbox;
   void proposalGridApi.query();
@@ -438,13 +442,14 @@ function cancelProposal() {
     <div class="flex h-full flex-col gap-3">
       <section class="rounded bg-card p-4">
         <div class="flex w-full flex-wrap items-center justify-between gap-3">
-          <span class="font-medium">{{ showProposals ? (proposalInboxOnly ? '本人待确认及已失效的采购动作提案。' : '本人采购动作提案记录。') : inboxOnly ? '待补充或失败待处理的本人任务。' : '本人 AI 只读查询任务。' }}<template v-if="!showProposals">导出前会重新检查当前数据权限。</template></span>
+          <span class="font-medium">{{ showSuggestions ? '按权限处理异常运营建议。' : showProposals ? (proposalInboxOnly ? '本人待确认及已失效的采购动作提案。' : '本人采购动作提案记录。') : inboxOnly ? '待补充或失败待处理的本人任务。' : '本人 AI 只读查询任务。' }}<template v-if="!showProposals && !showSuggestions">导出前会重新检查当前数据权限。</template></span>
           <div class="ml-auto flex items-center gap-2">
-            <Button :type="!showProposals && inboxOnly ? 'primary' : 'default'" @click="showInbox(true)">Agent Inbox · 任务</Button>
+            <Button v-if="hasAccessByCodes(['operations.exceptions.read'])" :type="showSuggestions ? 'primary' : 'default'" @click="showSuggestions = true; showProposals = false">运营建议</Button>
+            <Button :type="!showSuggestions && !showProposals && inboxOnly ? 'primary' : 'default'" @click="showInbox(true)">Agent Inbox · 任务</Button>
             <Button :type="showProposals && proposalInboxOnly ? 'primary' : 'default'" @click="showProposalInbox(true)">待确认提案</Button>
-            <Button :type="!showProposals && !inboxOnly ? 'primary' : 'default'" @click="showInbox(false)">全部任务</Button>
+            <Button :type="!showSuggestions && !showProposals && !inboxOnly ? 'primary' : 'default'" @click="showInbox(false)">全部任务</Button>
             <Button :type="showProposals && !proposalInboxOnly ? 'primary' : 'default'" @click="showProposalInbox(false)">全部提案</Button>
-            <template v-if="!showProposals && !inboxOnly">
+            <template v-if="!showSuggestions && !showProposals && !inboxOnly">
               <Select v-model:value="status" :options="statusOptions" allow-clear placeholder="全部状态" class="w-40" />
               <Button @click="status = undefined; search()">重置</Button>
               <Button type="primary" @click="search">搜索</Button>
@@ -452,7 +457,8 @@ function cancelProposal() {
           </div>
         </div>
       </section>
-      <Grid v-if="!showProposals" :table-title="inboxOnly ? 'Agent Inbox · 待处理任务' : 'AI 任务记录'" />
+      <OperationSuggestionInbox v-if="showSuggestions" />
+      <Grid v-else-if="!showProposals" :table-title="inboxOnly ? 'Agent Inbox · 待处理任务' : 'AI 任务记录'" />
       <ProposalGrid v-else :table-title="proposalInboxOnly ? 'Agent Inbox · 待确认提案' : '动作提案记录'" />
     </div>
   </Page>

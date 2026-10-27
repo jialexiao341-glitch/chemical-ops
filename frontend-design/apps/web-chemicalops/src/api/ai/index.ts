@@ -421,3 +421,27 @@ export function routeAiRequestApi(question: string, conversationId?: number) {
     question, conversation_id: conversationId,
   });
 }
+export interface OperationSuggestion {
+  id: number;
+  exception_id: number;
+  exception_no: string;
+  exception_status: string;
+  title: string;
+  content: string;
+  instruction: string;
+  status: 'OPEN' | 'IGNORED' | 'CLOSED' | 'HANDED_OFF';
+  task_id: null | number;
+  handled_by: null | number;
+  handled_at: null | string;
+  created_at: string;
+}
+
+export function getOperationSuggestionsApi(page: number, pageSize: number, status?: string) {
+  return requestClient.get<{ items: OperationSuggestion[]; total: number }>('/ai/operation-suggestions', { params: { page, page_size: pageSize, status } });
+}
+export function getOperationSuggestionApi(id: number) {
+  return requestClient.get<OperationSuggestion>(`/ai/operation-suggestions/${id}`);
+}
+export function handleOperationSuggestionApi(id: number, action: 'ignore' | 'close' | 'handoff') {
+  return requestClient.post<OperationSuggestion>(`/ai/operation-suggestions/${id}/${action}`);
+}

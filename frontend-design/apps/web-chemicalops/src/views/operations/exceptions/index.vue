@@ -13,7 +13,7 @@ import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Button } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getExceptionAssigneeOptionsApi, getExceptionListApi } from '#/api';
+import { getExceptionApi, getExceptionAssigneeOptionsApi, getExceptionListApi } from '#/api';
 import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 
 import { useColumns, useGridFormSchema } from './data';
@@ -66,6 +66,10 @@ function onActionClick({
 }
 
 onMounted(async () => {
+  const linkedId = Number(route.query.exception_id);
+  if (Number.isSafeInteger(linkedId) && linkedId > 0) {
+    try { detailApi.setData(await getExceptionApi(linkedId)).open(); } catch { /* 原接口已执行权限校验 */ }
+  }
   // 负责人 ID → 姓名（失败时降级显示 #ID）
   try {
     const users = await getExceptionAssigneeOptionsApi();

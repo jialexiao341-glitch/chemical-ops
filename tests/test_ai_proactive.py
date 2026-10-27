@@ -33,7 +33,9 @@ def test_unknown_exception_type_does_not_create_suggestion():
 def test_publish_sends_suggestion_to_owner_and_roles(monkeypatch):
     calls = []
     monkeypatch.setattr(proactive, "notify_users", lambda _db, **kwargs: calls.append(kwargs))
-    proactive.publish_exception_suggestion(None, _exception(exception_type="OVERDUE"))
+    from contextlib import nullcontext
+    db = SimpleNamespace(scalar=lambda *_: None, begin_nested=lambda: nullcontext(), add=lambda *_: None, flush=lambda: None)
+    proactive.publish_exception_suggestion(db, _exception(exception_type="OVERDUE"))
 
     assert calls[0]["recipient_ids"] == [7]
     assert calls[0]["role_codes"] == ("PROCUREMENT_MANAGER",)

@@ -76,6 +76,33 @@ router = APIRouter(
 LOGGER = logging.getLogger('chemicalops.ai.http')
 
 
+@router.get("/operation-suggestions", summary="查询运营建议")
+def operation_suggestions(status: str | None = Query(default=None, pattern="^(OPEN|IGNORED|CLOSED|HANDED_OFF)$"),
+                          page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100),
+                          db: Session = Depends(get_db), user: User = Depends(require_permission("operations.exceptions.read"))):
+    from app.modules.ai import proactive
+    rows, total = proactive.list_suggestions(db, user, status=status, page=page, page_size=page_size)
+    return {"items": [proactive.suggestion_payload(db, row) for row in rows], "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/operation-suggestions/{suggestion_id}", summary="查询运营建议详情")
+def operation_suggestion(suggestion_id: int, db: Session = Depends(get_db),
+                         user: User = Depends(require_permission("operations.exceptions.read"))):
+    from app.modules.ai import proactive
+    return proactive.suggestion_payload(db, proactive.get_suggestion(db, user, suggestion_id))
+
+
+@router.post("/operation-suggestions/{suggestion_id}/{action}", summary="处理运营建议",
+             dependencies=[Depends(require_permission("operations.exceptions.read"))])
+def handle_operation_suggestion(suggestion_id: int, action: str, db: Session = Depends(get_db),
+                                user: User = Depends(require_permission("operations.exceptions.write"))):
+    from app.modules.ai import proactive
+    status = {"ignore": "IGNORED", "close": "CLOSED", "handoff": "HANDED_OFF"}.get(action)
+    if status is None:
+        raise BusinessValidationError("无效的建议操作")
+    return proactive.suggestion_payload(db, proactive.transition_suggestion(db, user, suggestion_id, status))
+
+
 @router.post("/action-proposals", response_model=AIActionProposalPreview, summary="生成待用户确认的 Agent 动作提案")
 def action_proposal_create(data: AIActionProposalCreate, db: Session = Depends(get_db),
                            user: User = Depends(get_current_user)) -> AIActionProposalPreview:

@@ -35,7 +35,8 @@ def _publish_suggestion(db: Session, exception: OperationException) -> None:
     try:
         from app.modules.ai.proactive import publish_exception_suggestion
 
-        publish_exception_suggestion(db, exception)
+        with db.begin_nested():
+            publish_exception_suggestion(db, exception)
     except Exception:
         LOGGER.exception("运营建议生成失败 exception_id=%s", exception.id)
 
@@ -360,6 +361,16 @@ def scan_active_alerts(db: Session, actor: User) -> dict[str, int]:
         threshold_hours=get_settings().quality_pending_alert_hours,
     )
     low_inventory = scan_low_inventory(db, actor)
+    # 对历史活动异常及暂时生成失败的记录补偿；唯一约束保证并发和重复扫描去重。
+    from app.modules.ai.model import AIOperationSuggestion
+    missing = db.scalars(select(OperationException).where(
+        OperationException.exception_type.in_(("LOW_STOCK", "OVERDUE", "INVENTORY_EXPIRY", "QUALITY_PENDING")),
+        OperationException.status.in_(("OPEN", "PROCESSING", "RESOLVED")),
+        ~select(AIOperationSuggestion.id).where(AIOperationSuggestion.exception_id == OperationException.id).exists(),
+    ).order_by(OperationException.id).limit(100)).all()
+    for exception in missing:
+        _publish_suggestion(db, exception)
+    db.commit()
     return {
         "overdue_scanned_count": overdue["scanned_count"],
         "overdue_created_count": overdue["created_count"],
