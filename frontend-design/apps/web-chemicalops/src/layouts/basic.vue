@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { NotificationItem } from '@vben/layouts';
 
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { AuthenticationLoginExpiredModal } from '@vben/common-ui';
@@ -17,6 +17,7 @@ import {
   markNotificationReadApi,
 } from '#/api';
 import { useAuthStore } from '#/store';
+import { proposalNotificationLink } from '#/utils/proposal-notification';
 import LoginForm from '#/views/_core/authentication/login.vue';
 import ChemicalAgentFloat from '#/views/ai/workspace/modules/chemical-agent-float.vue';
 
@@ -83,12 +84,16 @@ async function handleLogout() {
 }
 
 /** 把后端通知转成布局组件需要的结构 */
+let notificationRequestVersion = 0;
 async function loadNotifications() {
+  const version = ++notificationRequestVersion;
+  const token = accessStore.accessToken;
   try {
     const [list, count] = await Promise.all([
       getNotificationListApi({ page: 1, page_size: 10 }),
       getUnreadCountApi(),
     ]);
+    if (version !== notificationRequestVersion || token !== accessStore.accessToken || !canReadNotifications.value) return;
     unreadCount.value = count.unread_count;
     notifications.value = list.items.map((item) => ({
       // 后端通知没有头像，布局组件要求该字段存在，传空串走默认样式
@@ -98,6 +103,7 @@ async function loadNotifications() {
       isRead: item.is_read === 1,
       message: item.content,
       title: item.title,
+      link: proposalNotificationLink(item),
     }));
   } catch {
     // 通知加载失败不影响主流程
@@ -107,13 +113,16 @@ async function loadNotifications() {
 async function markRead(id: number | string) {
   if (!canWriteNotifications.value) return;
   const numericId = Number(id);
+  const token = accessStore.accessToken;
   try {
     await markNotificationReadApi(numericId);
+    if (token !== accessStore.accessToken || !canReadNotifications.value) return;
     const item = notifications.value.find((entry) => entry.id === numericId);
-    if (item) {
+    if (item && !item.isRead) {
       item.isRead = true;
+      unreadCount.value = Math.max(unreadCount.value - 1, 0);
     }
-    unreadCount.value = Math.max(unreadCount.value - 1, 0);
+    refreshNotifications();
   } catch {
     // 忽略单条已读失败
   }
@@ -121,10 +130,13 @@ async function markRead(id: number | string) {
 
 async function handleMakeAll() {
   if (!canWriteNotifications.value) return;
+  const token = accessStore.accessToken;
   try {
     await markAllNotificationsReadApi();
+    if (token !== accessStore.accessToken || !canReadNotifications.value) return;
     notifications.value.forEach((item) => (item.isRead = true));
     unreadCount.value = 0;
+    refreshNotifications();
   } catch {
     // 忽略
   }
@@ -147,9 +159,32 @@ function viewAll() {
 
 const handleClick = (item: NotificationItem) => {
   if (item.link) {
-    router.push({ path: item.link });
+    if (!item.isRead && item.id && canWriteNotifications.value) void markRead(item.id);
+    void router.push(item.link);
   }
 };
+
+function refreshNotifications() {
+  if (canReadNotifications.value && document.visibilityState === 'visible') void loadNotifications();
+}
+let notificationTimer: number | undefined;
+onMounted(() => {
+  window.addEventListener('chemicalops:notifications-changed', refreshNotifications);
+  document.addEventListener('visibilitychange', refreshNotifications);
+  notificationTimer = window.setInterval(refreshNotifications, 30_000);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('chemicalops:notifications-changed', refreshNotifications);
+  document.removeEventListener('visibilitychange', refreshNotifications);
+  if (notificationTimer !== undefined) window.clearInterval(notificationTimer);
+});
+
+watch(() => accessStore.accessToken, () => {
+  notificationRequestVersion++;
+  notifications.value = [];
+  unreadCount.value = 0;
+  if (accessStore.accessToken && canReadNotifications.value) void loadNotifications();
+});
 
 watch(
   canReadNotifications,
@@ -157,6 +192,7 @@ watch(
     if (allowed) {
       void loadNotifications();
     } else {
+      notificationRequestVersion++;
       notifications.value = [];
       unreadCount.value = 0;
     }
@@ -224,6 +260,7 @@ watch(
         @read="(item) => item.id && markRead(item.id)"
         @remove="(item) => item.id && remove(item.id)"
         @on-click="handleClick"
+        @opened="refreshNotifications"
         @view-all="viewAll"
       />
     </template>

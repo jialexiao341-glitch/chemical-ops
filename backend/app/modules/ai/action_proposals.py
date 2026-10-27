@@ -17,6 +17,15 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.model import User
 
 
+PROPOSAL_NOTIFICATION_LABELS = {
+    "purchase_request.create_draft": "采购申请", "purchase_request.update_draft": "采购申请修改",
+    "purchase_request.submit": "采购申请提交", "rfq.create_draft": "询价草稿",
+    "rfq.send": "询价发送", "rfq.select_quote": "报价中选",
+    "purchase_order.create_draft": "采购订单草稿", "purchase_order.submit": "采购订单提交审批",
+    "exceptions.create_task": "异常处理任务", "inventory.create_replenishment": "补货申请",
+    "deliveries.followup_draft": "交期催办草稿",
+}
+
 INBOX_ACTION_TYPES = ("purchase_request.create_draft", "purchase_request.update_draft", "purchase_request.submit", "rfq.create_draft", "rfq.send", "rfq.select_quote", "purchase_order.create_draft", "purchase_order.submit", "exceptions.create_task", "inventory.create_replenishment", "deliveries.followup_draft")
 
 
@@ -97,6 +106,13 @@ def propose_action(db: Session, user: User, action_type: str, payload: dict, *, 
         status="PENDING",
     )
     db.add(proposal)
+    if action_type in INBOX_ACTION_TYPES:
+        # 同一事务创建提醒；重放幂等键走上面的已有提案分支，不重复发通知。
+        from app.modules.notifications.model import Notification
+        db.flush()
+        db.add(Notification(recipient_id=user.id, notification_type="AI_PROPOSAL_PENDING",
+            title=f"{PROPOSAL_NOTIFICATION_LABELS.get(action_type, '动作')}提案待确认", content="您有一项动作提案待核对，请查看详情。",
+            related_type="AI_ACTION_PROPOSAL", related_id=proposal.id))
     db.commit()
     return _preview(proposal)
 

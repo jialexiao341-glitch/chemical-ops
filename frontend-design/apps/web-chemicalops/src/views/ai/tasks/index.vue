@@ -2,7 +2,7 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { AgentApi, AiApi } from '#/api';
 
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 
@@ -23,16 +23,19 @@ import {
   getActionProposalApi,
   getActionProposalPageApi,
   reviseActionProposalApi,
+  resolveProposalNotificationApi,
 } from '#/api';
 import AgentChatTask from '../workspace/agent-chat-task.vue';
 import { acceptTask } from '../workspace/task-view';
 import { retryQuestion, taskActionFeedback, taskActions } from './task-actions';
 import ActionProposalDetail from './ActionProposalDetail.vue';
+import { parseProposalNotificationId } from '#/utils/proposal-notification';
 import OperationSuggestionInbox from './OperationSuggestionInbox.vue';
 
 defineOptions({ name: 'AiTaskHistory' });
 
 const router = useRouter();
+const route = useRoute();
 const { hasAccessByCodes } = useAccess();
 
 const status = ref<AgentApi.Task['status']>();
@@ -302,15 +305,20 @@ async function openProposal(row: AiApi.ActionProposalRead) {
   await loadProposal(row.confirmation_id);
 }
 
+let proposalLoadVersion = 0;
 async function loadProposal(confirmationId: string) {
+  const version = ++proposalLoadVersion;
   proposalLoading.value = true;
   try {
-    selectedProposal.value = await getActionProposalApi(confirmationId);
+    const result = await getActionProposalApi(confirmationId);
+    if (version === proposalLoadVersion) selectedProposal.value = result;
   } catch {
-    selectedProposal.value = undefined;
-    message.error('提案详情无法读取，请刷新列表后重试');
+    if (version === proposalLoadVersion) {
+      selectedProposal.value = undefined;
+      message.error('提案详情无法读取，请刷新列表后重试');
+    }
   } finally {
-    proposalLoading.value = false;
+    if (version === proposalLoadVersion) proposalLoading.value = false;
   }
 }
 
@@ -403,6 +411,30 @@ function cancelProposal() {
     },
   });
 }
+
+let notificationRouteVersion = 0;
+watch(() => route.query.proposal_notification, async (value) => {
+  const version = ++notificationRouteVersion;
+  const notificationId = parseProposalNotificationId(value);
+  if (notificationId === undefined) return;
+  try {
+    const result = await resolveProposalNotificationApi(notificationId);
+    if (version !== notificationRouteVersion) return;
+    showProposalInbox(true);
+    selectedProposalId.value = result.confirmation_id;
+    selectedProposal.value = undefined;
+    proposalDetailOpen.value = true;
+    await loadProposal(result.confirmation_id);
+  } catch {
+    if (version === notificationRouteVersion) message.error('提案通知不可访问，请检查当前账号权限');
+  } finally {
+    if (version === notificationRouteVersion && route.query.proposal_notification === value) {
+      const query = { ...route.query };
+      delete query.proposal_notification;
+      void router.replace({ query });
+    }
+  }
+}, { immediate: true });
 </script>
 
 <template>

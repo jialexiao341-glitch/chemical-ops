@@ -50,12 +50,25 @@ export async function getUnreadCountApi() {
 
 /** 标记单条通知已读 */
 export async function markNotificationReadApi(id: number) {
-  return requestClient.request<NotificationApi.Notification>(`/notifications/${id}/read`, { method: 'PATCH' });
+  const result = await requestClient.request<NotificationApi.Notification>(`/notifications/${id}/read`, { method: 'PATCH' });
+  notifyNotificationChanged();
+  return result;
 }
 
 /** 全部标记为已读 */
 export async function markAllNotificationsReadApi() {
-  return requestClient.post<NotificationApi.ReadAllResult>(
+  const result = await requestClient.post<NotificationApi.ReadAllResult>(
     '/notifications/read-all',
   );
+  notifyNotificationChanged();
+  return result;
+}
+
+/** 解析本人通知对应的提案；详情接口会再次校验提案和资源。 */
+export async function resolveProposalNotificationApi(id: number) {
+  return requestClient.get<{ confirmation_id: string }>(`/notifications/${id}/proposal`);
+}
+
+export function notifyNotificationChanged() {
+  window.dispatchEvent(new Event('chemicalops:notifications-changed'));
 }

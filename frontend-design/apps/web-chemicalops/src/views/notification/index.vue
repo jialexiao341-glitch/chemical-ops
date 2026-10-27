@@ -79,6 +79,12 @@ function onUseSuggestion() {
   void router.push({ path: '/ai/tasks', query: { inbox: 'suggestions' } });
 }
 
+function onOpenProposal(row: NotificationApi.Notification) {
+  if (!canUseAiWorkspace.value) { message.warning('当前账号没有 AI 工作台权限'); return; }
+  if (canWriteNotifications.value && row.is_read !== 1) void onRead(row).catch(() => {});
+  void router.push({ path: '/ai/tasks', query: { proposal_notification: String(row.id) } });
+}
+
 async function onOpenFollowup(row: NotificationApi.Notification) {
   if (!row.related_id) return;
   const supplierMode = row.notification_type === 'DELIVERY_FOLLOWUP';
@@ -158,6 +164,7 @@ onMounted(load);
               </Tag>
             </template>
             <template v-else-if="column.key === '__action'">
+              <Button v-if="record.notification_type === 'AI_PROPOSAL_PENDING' && canUseAiWorkspace" size="small" type="link" @click="onOpenProposal(record)">查看提案</Button>
               <Button v-if="record.related_type === 'DELIVERY_FOLLOWUP'" size="small" type="link" @click="onOpenFollowup(record)">查看催办</Button>
               <Button
                 v-if="record.notification_type === 'OPERATION_SUGGESTION' && canUseAiWorkspace"

@@ -12,6 +12,7 @@ import {
 } from '@vben-core/shadcn-ui';
 
 import { useToggle } from '@vueuse/core';
+import { watch } from 'vue';
 
 defineOptions({ name: 'NotificationPopup' });
 
@@ -35,16 +36,23 @@ const emit = defineEmits<{
   clear: [];
   makeAll: [];
   onClick: [NotificationItem];
+  opened: [];
   read: [NotificationItem];
   remove: [NotificationItem];
   viewAll: [];
 }>();
 
 const [open, toggle] = useToggle();
+watch(open, (value) => { if (value) emit('opened'); });
 
 const close = () => {
   open.value = false;
 };
+
+function handleClick(item: NotificationItem) {
+  emit('onClick', item);
+  if (item.link) close();
+}
 
 function handleViewAll() {
   emit('viewAll');
@@ -92,7 +100,7 @@ defineExpose({ toggle });
           <template v-for="item in notifications" :key="item.id ?? item.title">
             <li
               class="relative flex w-full cursor-pointer items-start gap-5 border-t border-border p-3 hover:bg-accent"
-              @click="emit('onClick', item)"
+              @click="handleClick(item)"
             >
               <slot name="content" :item="item">
                 <span

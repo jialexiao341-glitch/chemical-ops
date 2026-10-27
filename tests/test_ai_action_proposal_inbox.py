@@ -46,6 +46,15 @@ def proposal_db(monkeypatch):
             )
             """
         ))
+        connection.execute(text("""
+            CREATE TABLE sys_notifications (
+                id INTEGER PRIMARY KEY, recipient_id INTEGER NOT NULL,
+                notification_type VARCHAR(32) NOT NULL, title VARCHAR(255) NOT NULL,
+                content TEXT NOT NULL, related_type VARCHAR(64), related_id INTEGER,
+                is_read INTEGER NOT NULL DEFAULT 0, read_at DATETIME,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
     session = Session(engine, autoflush=False, expire_on_commit=False)
     try:
         yield session
@@ -728,3 +737,19 @@ def test_create_draft_inbox_shows_sources_when_current_permissions_allow(proposa
         "inventory.query_available", "catalog.search_products"]
     assert result.availability == "AVAILABLE"
     assert result.requires_user_confirmation is True
+
+
+def test_notification_failure_rolls_back_proposal(proposal_db, followup_source):
+    from sqlalchemy import event, func, select
+    from app.modules.notifications.model import Notification
+    _, user, order = followup_source
+    @event.listens_for(proposal_db, "before_flush")
+    def reject_notification(session, *_args):
+        if any(isinstance(item, Notification) for item in session.new):
+            raise RuntimeError("notification storage failure")
+    with pytest.raises(RuntimeError, match="notification storage failure"):
+        action_proposals.propose_action(proposal_db, user, "deliveries.followup_draft",
+            {"order_id": order.id}, idempotency_key="failed-notification")
+    proposal_db.rollback()
+    assert proposal_db.scalar(select(func.count()).select_from(AIAgentActionProposal)) == 0
+    assert proposal_db.scalar(select(func.count()).select_from(Notification)) == 0

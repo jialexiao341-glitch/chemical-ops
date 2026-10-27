@@ -13,6 +13,7 @@
 import { useAccessStore } from '@vben/stores';
 
 import { requestClient } from '#/api/request';
+import { notifyNotificationChanged } from '../core/notification';
 import type { AiTaskStatus } from './task-status';
 import { createSseParser } from './sse-parser';
 
@@ -220,18 +221,22 @@ export async function proposePurchaseRequestDraftApi(
   input: string | import('../procurement/purchase-requests').PurchaseRequestApi.RequestPayload,
   conversationId?: number,
 ) {
-  return requestClient.post<AiApi.PurchaseDraftPreview>(
+  const result = await requestClient.post<AiApi.PurchaseDraftPreview>(
     '/ai/purchase-request-draft/preview',
     { ...(typeof input === 'string' ? { question: input } : { draft: input }), conversation_id: conversationId },
   );
+  if (result.confirmation_id) notifyNotificationChanged();
+  return result;
 }
 
 export async function createActionProposalApi(actionType: string, payload: Record<string, unknown>, idempotencyKey: string) {
-  return requestClient.post<AiApi.ActionProposalPreview>('/ai/action-proposals', {
+  const result = await requestClient.post<AiApi.ActionProposalPreview>('/ai/action-proposals', {
     action_type: actionType,
     idempotency_key: idempotencyKey,
     payload,
   });
+  notifyNotificationChanged();
+  return result;
 }
 
 export async function reviseActionProposalApi(confirmationId: string, previewVersion: number, payload: Record<string, unknown>) {
@@ -242,18 +247,22 @@ export async function reviseActionProposalApi(confirmationId: string, previewVer
 }
 
 export async function cancelActionProposalApi(confirmationId: string, previewVersion: number) {
-  return requestClient.post<{ cancelled: boolean }>(`/ai/action-proposals/${encodeURIComponent(confirmationId)}/cancel`, {
+  const result = await requestClient.post<{ cancelled: boolean }>(`/ai/action-proposals/${encodeURIComponent(confirmationId)}/cancel`, {
     confirmation_id: confirmationId,
     preview_version: previewVersion,
   });
+  notifyNotificationChanged();
+  return result;
 }
 
 export async function confirmActionProposalApi<T = Record<string, unknown>>(confirmationId: string, previewVersion: number) {
-  return requestClient.post<T>(`/ai/action-proposals/${encodeURIComponent(confirmationId)}/confirm`, {
+  const result = await requestClient.post<T>(`/ai/action-proposals/${encodeURIComponent(confirmationId)}/confirm`, {
     confirmation_id: confirmationId,
     preview_version: previewVersion,
     confirm: true,
   });
+  notifyNotificationChanged();
+  return result;
 }
 
 export async function getActionProposalPageApi(page: number, pageSize: number, inboxOnly = true) {
