@@ -1,0 +1,74 @@
+{
+  "scope": "global_backend_regression_remediation",
+  "tests": 1519,
+  "passed": 1507,
+  "failed": 1,
+  "errors": 0,
+  "skipped": 11,
+  "seconds": 153.19,
+  "baseline": {
+    "passed": 1416,
+    "failed": 92,
+    "skipped": 11
+  },
+  "restored_cases": 91,
+  "failures": [
+    {
+      "test": "tests.test_evaluation_fixtures::test_frozen_offline_gate_has_no_real_model_quality_claim",
+      "message": "AssertionError: Frozen evaluation gate failed: manifest integrity mismatch"
+    }
+  ],
+  "skips": [
+    {
+      "test": "tests.test_delivery_followup_mysql_concurrency::test_mysql_repeatable_read_concurrent_send_replays_one_record",
+      "reason": "需要显式 FOLLOWUP_TEST_MYSQL_URL；不使用开发业务库做并发造数"
+    },
+    {
+      "test": "tests.test_redis_features::test_concurrent_limiter_is_exact_and_isolates_users_and_categories",
+      "reason": "设置 TEST_REDIS_URL 后运行真实 Redis 集成测试"
+    },
+    {
+      "test": "tests.test_redis_features::test_product_and_cas_cache_hit_then_invalidate_after_commit",
+      "reason": "设置 TEST_REDIS_URL 后运行真实 Redis 集成测试"
+    },
+    {
+      "test": "tests.test_redis_features::test_rollback_and_savepoint_preserve_cache_transaction_boundary",
+      "reason": "设置 TEST_REDIS_URL 后运行真实 Redis 集成测试"
+    },
+    {
+      "test": "tests.test_redis_features::test_old_concurrent_fill_is_not_visible_in_new_generation",
+      "reason": "设置 TEST_REDIS_URL 后运行真实 Redis 集成测试"
+    },
+    {
+      "test": "tests.test_redis_features::test_corrupt_cache_recovers_from_database",
+      "reason": "设置 TEST_REDIS_URL 后运行真实 Redis 集成测试"
+    },
+    {
+      "test": "tests.test_redis_features::test_session_cache_recovers_and_rechecks_ownership_and_evidence",
+      "reason": "设置 TEST_REDIS_URL 后运行真实 Redis 集成测试"
+    },
+    {
+      "test": "tests.test_redis_features::test_stream_is_rejected_before_opening_and_cancel_is_not_limited",
+      "reason": "设置 TEST_REDIS_URL 后运行真实 Redis 集成测试"
+    },
+    {
+      "test": "tests.test_redis_features::test_cache_latency_and_hit_ratio_sample",
+      "reason": "设置 TEST_REDIS_URL 后运行真实 Redis 集成测试"
+    },
+    {
+      "test": "tests.test_supplier_portal_api::test_supplier_quality_document_upload_and_download_are_binding_scoped[minio]",
+      "reason": "真实 MinIO 验收需显式设置 REAL_MINIO_ACCEPTANCE=1"
+    },
+    {
+      "test": "tests.test_task_queue_live_cli::test_live_database_worker_clis_and_crash_recovery",
+      "reason": "Explicit live worker fault exercise"
+    }
+  ],
+  "frozen_gate": {
+    "modified": false,
+    "manifest_v1_modified": false,
+    "manifest_v2_created": false,
+    "approval_required": "versioned reviewed baseline migration was rejected by automatic approval review"
+  },
+  "browser_acceptance": "deferred_until_all_blueprint_requirements_complete"
+}

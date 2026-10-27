@@ -207,7 +207,9 @@ def test_missing_permission_blocks_catalog_and_execution(tool_db):
     assert tools.list_tools(tool_db, user) == []
     with pytest.raises(AuthorizationError):
         call(tool_db, actor_id=20, product_id=1)
-    assert [item['name'] for item in tools.list_tools(tool_db, SimpleNamespace(id=8))] == ['inventory.query_available']
+    assert [item['name'] for item in tools.list_tools(tool_db, SimpleNamespace(id=8))] == [
+        'inventory.query_available', 'inventory.replenishment_plan',
+    ]
 
 
 def test_tool_catalog_exposes_explicit_governance_metadata(tool_db):

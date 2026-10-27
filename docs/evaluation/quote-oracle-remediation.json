@@ -1,0 +1,129 @@
+{
+  "scope": "six_quote_oracle_gaps",
+  "valid_result_accepted": true,
+  "mutations": [
+    {
+      "mutation": "total_rows",
+      "rejected": true
+    },
+    {
+      "mutation": "tax_exclusive",
+      "rejected": true
+    },
+    {
+      "mutation": "tax_unknown",
+      "rejected": true
+    },
+    {
+      "mutation": "currency",
+      "rejected": true
+    },
+    {
+      "mutation": "duplicate_row",
+      "rejected": true
+    },
+    {
+      "mutation": "duplicate_source",
+      "rejected": true
+    },
+    {
+      "mutation": "duplicate_both",
+      "rejected": true
+    },
+    {
+      "mutation": "complete_cost",
+      "rejected": true
+    },
+    {
+      "mutation": "total_cost",
+      "rejected": true
+    },
+    {
+      "mutation": "recommendation_status",
+      "rejected": true
+    },
+    {
+      "mutation": "recommendation_candidate",
+      "rejected": true
+    },
+    {
+      "mutation": "recommendation_supplier",
+      "rejected": true
+    },
+    {
+      "mutation": "recommendation_cost",
+      "rejected": true
+    },
+    {
+      "mutation": "recommendation_currency",
+      "rejected": true
+    },
+    {
+      "mutation": "unit_price",
+      "rejected": true
+    },
+    {
+      "mutation": "foreign_source",
+      "rejected": true
+    },
+    {
+      "mutation": "rank",
+      "rejected": true
+    },
+    {
+      "mutation": "missing_cost",
+      "rejected": true
+    },
+    {
+      "mutation": "missing_recommendation",
+      "rejected": true
+    },
+    {
+      "mutation": "goods_amount",
+      "rejected": true
+    },
+    {
+      "mutation": "missing_row",
+      "rejected": true
+    }
+  ],
+  "red_regression": {
+    "failed": 104,
+    "passed": 28
+  },
+  "green_regression": {
+    "passed": 272,
+    "failed": 0
+  },
+  "previous_audit": "baseline-independent-audit.json",
+  "baseline_changed": true,
+  "full_regression_before_baseline_migration": {
+    "tests": 1651,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 11,
+    "passed": 1639
+  },
+  "baseline_version": "offline-guards-v2",
+  "baseline_scope": "five reviewed fixture/oracle files; v1 manifest retained",
+  "gate_and_oracle_regression": {
+    "passed": 280,
+    "failed": 0,
+    "skipped": 0
+  },
+  "full_regression_final": {
+    "tests": 1655,
+    "passed": 1644,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 11,
+    "seconds": 160.775
+  },
+  "gate_verification": {
+    "mode": "deterministic_no_llm_no_writes",
+    "files_verified": 5,
+    "numeric_cases_verified": 12,
+    "real_model_evaluated": false,
+    "quality_scope": "fixture integrity and deterministic guards only; no current model quality claim"
+  }
+}

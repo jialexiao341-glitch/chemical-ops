@@ -8,16 +8,23 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = "docs/evaluation/offline-guards-v1-manifest.json"
+MANIFEST = "docs/evaluation/offline-guards-v2-manifest.json"
 # 题集更新必须同时审阅 manifest 与此锚点，不能只改清单绕过文件校验。
-MANIFEST_SHA256 = "c417d355a8a6499c09c76d625579128dc640e93b0fac9877ded46f5557b1cc80"
+MANIFEST_SHA256 = "cbc82f69fe1a19afed5ca5fa9ab47e90bc4054941cb7a4fb8307b45d1f9d387f"
+
+
+def text_digest(raw: bytes) -> str:
+    """仅统一 CRLF/LF，不忽略其他空白、字段顺序、尾部空行或业务值。"""
+    return hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
 
 
 def check_fixtures(root: Path, manifest_path: str = MANIFEST) -> dict:
     raw = (root / manifest_path).read_bytes()
-    if hashlib.sha256(raw).hexdigest() != MANIFEST_SHA256:
+    if text_digest(raw) != MANIFEST_SHA256:
         raise ValueError("manifest integrity mismatch")
     manifest = json.loads(raw)
+    if manifest.get("hash_mode") != "utf8-lf":
+        raise ValueError("unsupported frozen hash mode")
     files = manifest["files"]
     if not files:
         raise ValueError("empty frozen manifest")
@@ -25,7 +32,7 @@ def check_fixtures(root: Path, manifest_path: str = MANIFEST) -> dict:
         path = (root / entry["path"]).resolve()
         if not path.is_relative_to(root.resolve()):
             raise ValueError("fixture outside repository")
-        if hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]:
+        if text_digest(path.read_bytes()) != entry["sha256"]:
             raise ValueError(f"fixture integrity mismatch: {entry['path']}")
     cases = json.loads((root / manifest["numeric_cases"]).read_text(encoding="utf-8"))
     if len({case["id"] for case in cases}) != len(cases) or len(cases) != manifest["numeric_case_count"]:

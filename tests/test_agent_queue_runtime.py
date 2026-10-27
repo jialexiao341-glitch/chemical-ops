@@ -133,7 +133,7 @@ def test_selected_rfq_continuation_recovers_after_product_checkpoint(queued_db, 
     """候选选择的新一代执行崩溃后，从已核验产品继续，不能重解释编号或重复查产品。"""
     from sqlalchemy import text
     queued_db.execute(text("INSERT INTO rfqs VALUES (4, 'LEGACY-B', 7, 'SENT')"))
-    queued_db.execute(text("INSERT INTO rfq_items VALUES (41, 4, 1, '工业级', NULL)"))
+    queued_db.execute(text("INSERT INTO rfq_items (id, rfq_id, product_id, specification, technical_requirements, unit_id, quantity) VALUES (41, 4, 1, '工业级', NULL, 1, 20)"))
     queued_db.commit()
     task = runtime.schedule_async(queued_db, USER, BackgroundTasks(), runtime.prepare_chat_task,
                                  runtime.ChatTaskCreate(question='查测试乙醇库存并比较报价' if combined else '比较测试乙醇报价'))

@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import text
 
 from scripts.agent_evaluation_data import evaluation_db
-from scripts.evaluate_agent_tasks import Case
+from scripts.evaluate_agent_tasks import Case, quote_evidence_correct
 
 
 @dataclass(frozen=True)
@@ -99,11 +99,11 @@ def business_db(case):
         db.execute(text('UPDATE inventory_balances SET quantity=quantity*:scale, locked_quantity=locked_quantity*:scale'), {'scale': case.seed})
         db.execute(text('UPDATE supplier_quote_items SET unit_price=unit_price*:scale'), {'scale': case.seed})
         if case.variant == 'products':
-            db.execute(text("INSERT INTO md_products VALUES (:id, :name, 'ACTIVE', :code, '工业级', '桶', 1)"),
+            db.execute(text("INSERT INTO md_products (id, product_name, status, product_code, model, packaging_spec, unit_id, chemical_id) VALUES (:id, :name, 'ACTIVE', :code, '工业级', '桶', 1, 1)"),
                 dict(id=offset+3, name=f'合成{PRODUCTS[case.seed-1]}', code=f'EVAL-P{case.seed:02}-B'))
         if case.variant == 'rfqs':
             db.execute(text("INSERT INTO rfqs VALUES (4, :name, 7, 'SENT')"), {'name': f'EVAL-R{case.seed:02}-B'})
-            db.execute(text("INSERT INTO rfq_items VALUES (:id, 4, :product, '工业级', NULL)"),
+            db.execute(text("INSERT INTO rfq_items (id, rfq_id, product_id, specification, technical_requirements, unit_id, quantity) VALUES (:id, 4, :product, '工业级', NULL, 1, 20)"),
                 dict(id=offset+41, product=case.expected_product))
         db.commit()
         yield db
@@ -123,14 +123,10 @@ def evidence_correct(task, case):
             if {r['balance_id'] for r in result['rows']} - allowed: return False
             key, resource = 'balance_id', 'inventory_balances'
         elif tool == COMPARE:
-            if result['product_id'] != case.expected_product or result['rfq_item_id'] != case.expected_item: return False
-            ids = {r['quote_item_id'] for r in result['rows']}
-            if ids != ({2} if result['truncated'] else {2, 3, 5, 6, 7, 8, 9}): return False
-            prices = {2: 10, 3: 8, 5: 3, 6: 1, 7: 1, 8: 1, 9: 1}
-            for row in result['rows']:
-                if Decimal(str(row['unit_price'])) != Decimal(prices[row['quote_item_id']])*case.seed: return False
-                if row['rank'] != (None if result['truncated'] else {2: 2, 3: 1}.get(row['quote_item_id'])): return False
-            if any(s['parent_id'] != 1 for s in sources): return False
+            if not quote_evidence_correct(result, product_id=case.expected_product,
+                    rfq_item_id=case.expected_item, price_scale=case.seed,
+                    limit=case.requested_limit if case.limit_tool == COMPARE else None):
+                return False
             key, resource = 'quote_item_id', 'supplier_quote_items'
         elif tool == CATALOG:
             key, resource = 'product_id', 'md_products'

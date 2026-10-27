@@ -1,0 +1,398 @@
+{
+  "case": "B004",
+  "fixture_raw_rows": [
+    {
+      "id": 1,
+      "supplier_id": 1,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 5,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 2,
+      "supplier_id": 1,
+      "quote_version": 2,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 10,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 3,
+      "supplier_id": 2,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 8,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 4,
+      "supplier_id": 3,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-10-26",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 5,
+      "supplier_id": 4,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": null,
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 3,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 6,
+      "supplier_id": 5,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "USD",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 7,
+      "supplier_id": 6,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 2,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 8,
+      "supplier_id": 7,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": null,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 9,
+      "supplier_id": 8,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "B"
+    },
+    {
+      "id": 10,
+      "supplier_id": 9,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 11,
+      "supplier_id": 9,
+      "quote_version": 2,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "WITHDRAWN",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 2,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 12,
+      "supplier_id": 10,
+      "quote_version": 1,
+      "quote_date": "2026-11-01",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 13,
+      "supplier_id": 11,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "INACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 14,
+      "supplier_id": 12,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 3,
+      "unit_status": "INACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 1,
+      "supplier_model": "A"
+    },
+    {
+      "id": 15,
+      "supplier_id": 12,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": 0,
+      "supplier_model": "A"
+    },
+    {
+      "id": 16,
+      "supplier_id": 13,
+      "quote_version": 1,
+      "quote_date": "2026-10-27",
+      "valid_until": "2026-11-01",
+      "currency_code": "CNY",
+      "status": "SUBMITTED",
+      "supplier_status": "ACTIVE",
+      "unit_id": 1,
+      "unit_status": "ACTIVE",
+      "unit_price": 1,
+      "tax_rate": 13,
+      "tax_included": null,
+      "supplier_model": "A"
+    }
+  ],
+  "expected_visible_ids": [
+    2,
+    3,
+    5,
+    6,
+    7,
+    8,
+    9,
+    15,
+    16
+  ],
+  "actual_visible_ids": [
+    2,
+    3,
+    5,
+    6,
+    7,
+    8,
+    9,
+    15,
+    16
+  ],
+  "expected_ranks": {
+    "2": 2,
+    "3": 1
+  },
+  "actual_ranks": {
+    "2": 2,
+    "3": 1,
+    "5": null,
+    "6": null,
+    "7": null,
+    "8": null,
+    "9": null,
+    "15": null,
+    "16": null
+  },
+  "valid_result_accepted": true,
+  "mutation_checks": [
+    {
+      "mutation": "wrong_price",
+      "rejected": true
+    },
+    {
+      "mutation": "omitted_quote",
+      "rejected": true
+    },
+    {
+      "mutation": "wrong_ranking",
+      "rejected": true
+    },
+    {
+      "mutation": "foreign_source",
+      "rejected": true
+    },
+    {
+      "mutation": "wrong_total_rows",
+      "rejected": false
+    },
+    {
+      "mutation": "tax_basis_changed",
+      "rejected": false
+    },
+    {
+      "mutation": "currency_changed",
+      "rejected": false
+    },
+    {
+      "mutation": "duplicate_quote_row",
+      "rejected": false
+    },
+    {
+      "mutation": "invented_total_cost",
+      "rejected": false
+    },
+    {
+      "mutation": "invented_recommendation",
+      "rejected": false
+    }
+  ],
+  "recommendation": {
+    "status": "NO_RECOMMENDATION",
+    "candidate_quote_id": null,
+    "candidate_supplier_id": null,
+    "currency_code": null,
+    "total_cost": null,
+    "reasons": [
+      "报价 2 的总成本不完整，不参与建议。",
+      "报价 3 的总成本不完整，不参与建议。",
+      "报价 5 含不可比明细，不参与建议。",
+      "报价 6 含不可比明细，不参与建议。",
+      "报价 7 含不可比明细，不参与建议。",
+      "报价 8 含不可比明细，不参与建议。",
+      "报价 9 含不可比明细，不参与建议。",
+      "报价 15 含不可比明细，不参与建议。",
+      "报价 16 含不可比明细，不参与建议。",
+      "没有满足完整、可比和成本完整条件的报价。"
+    ],
+    "risks": []
+  },
+  "baseline_changed": false,
+  "independent_recalculation": {
+    "as_of": "2026-10-27",
+    "visible_ids": [
+      2,
+      3,
+      5,
+      6,
+      7,
+      8,
+      9,
+      15,
+      16
+    ],
+    "ranks": {
+      "2": 2,
+      "3": 1,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "15": null,
+      "16": null
+    },
+    "excluded_ids": [
+      1,
+      4,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "method": "raw fixture SQL + independent Python rules; no production filter/rank/cost helpers"
+  },
+  "audit_conclusion": "expected_quote_rows_and_price_ranks_correct_but_six_mutation_classes_not_rejected"
+}

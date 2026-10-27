@@ -66,7 +66,10 @@ def test_report_marks_answer_quality_as_unmeasured_for_synthetic_samples(tmp_pat
 
 def test_samples_use_real_rbac_and_actor_specific_inventory():
     with evaluation_db() as db:
-        assert len(tools.list_tools(db, SimpleNamespace(id=7))) == 4
+        assert {tool['name'] for tool in tools.list_tools(db, SimpleNamespace(id=7))} == {
+            'catalog.search_products', 'inventory.query_available', 'inventory.replenishment_plan',
+            'supplier_quotes.find_rfq_items', 'supplier_quotes.compare',
+        }
         assert tools.list_tools(db, SimpleNamespace(id=20)) == []
         result = tools.execute_tool(db, SimpleNamespace(id=8), tools.ToolCall(tool='inventory.query_available', arguments={'product_id': 1}))
         task = runtime.TaskRead(id='sample', status='SUCCEEDED', revision=1, reply='', error_code=None, messages=[], trace=[

@@ -9,7 +9,7 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from time import perf_counter
 from types import SimpleNamespace
@@ -61,6 +61,80 @@ CASES = (
 )
 
 
+def quote_evidence_correct(output: dict, *, product_id: int, rfq_item_id: int,
+                           price_scale: int = 1, limit: int | None = None) -> bool:
+    """独立核验 evaluation_db 报价事实；不调用被测筛选、排名或成本函数。
+
+    本夹具所有报价均未登记运费，故不能生成完整总成本或推荐结论。
+    适用固定合成样本，不作为任意真实业务报价的校验规则。
+    """
+    prices = {2: 10, 3: 8, 5: 3, 6: 1, 7: 1, 8: 1, 9: 1, 15: 1, 16: 1}
+    suppliers = {2: 1, 3: 2, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8, 15: 12, 16: 13}
+    expected_ids = list(prices)[:limit] if limit is not None else list(prices)
+    truncated = len(expected_ids) < len(prices)
+    try:
+        if (output['product_id'], output['rfq_item_id'], output['rfq_id']) != (product_id, rfq_item_id, 1):
+            return False
+        if type(output['total_rows']) is not int or output['total_rows'] != len(prices):
+            return False
+        if output['truncated'] is not truncated:
+            return False
+        rows, sources = output['rows'], output['sources']
+        # 同时比较长度与集合，防止重复行/重复来源被集合去重后误判为正确。
+        if len(rows) != len(expected_ids) or {r['quote_item_id'] for r in rows} != set(expected_ids):
+            return False
+        if len(sources) != len(expected_ids) or {s['record_id'] for s in sources} != set(expected_ids):
+            return False
+        if any(s['resource'] != 'supplier_quote_items' or s['parent_id'] != 1 for s in sources):
+            return False
+        for row in rows:
+            key = row['quote_item_id']
+            currency = 'USD' if key == 6 else 'CNY'
+            included = False if key == 15 else None if key == 16 else True
+            price = Decimal(prices[key]) * price_scale
+            rank = None if truncated else {2: 2, 3: 1}.get(key)
+            if row['quote_id'] != key or row['supplier_id'] != suppliers[key]:
+                return False
+            if row['currency_code'] != currency or row['tax_included'] is not included:
+                return False
+            if row['unit_id'] != (2 if key == 7 else 1) or row['supplier_model'] != ('B' if key == 9 else 'A'):
+                return False
+            if key == 8:
+                if row['tax_rate'] is not None: return False
+            elif Decimal(str(row['tax_rate'])) != 13:
+                return False
+            if Decimal(str(row['unit_price'])) != price or Decimal(str(row['quoted_quantity'])) != 20:
+                return False
+            if row['rank'] != rank or row['comparison_status'] != ('COMPARABLE' if rank is not None else 'NOT_COMPARABLE'):
+                return False
+            cost = row['cost_analysis']
+            if cost['currency_code'] != currency or cost['complete'] is not False:
+                return False
+            if any(cost[field] is not None for field in ('freight_amount', 'freight_tax', 'total_cost')):
+                return False
+            amount = None if key == 7 else price * 20
+            tax = None if key in {7, 8, 16} else (
+                amount * 13 / (100 if included is False else 113)
+            ).quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
+            for field, expected in (('purchase_quantity', None if key == 7 else Decimal(20)),
+                                    ('moq_extra_quantity', None if key == 7 else Decimal(0)),
+                                    ('goods_amount', amount), ('goods_tax', tax)):
+                actual = cost[field]
+                if expected is None and actual is not None:
+                    return False
+                if expected is not None and Decimal(str(actual)) != expected:
+                    return False
+        recommendation = output['recommendation']
+        if recommendation['status'] != 'NO_RECOMMENDATION':
+            return False
+        if any(recommendation[field] is not None for field in
+               ('candidate_quote_id', 'candidate_supplier_id', 'currency_code', 'total_cost')):
+            return False
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return False
+    return True
+
+
 def check_evidence(result: runtime.TaskRead, actor: int = 7) -> bool:
     """来源与关键数值使用独立样本预期值；不从被测函数生成数值期望。"""
     for step in result.trace:
@@ -76,16 +150,9 @@ def check_evidence(result: runtime.TaskRead, actor: int = 7) -> bool:
             if any(r['balance_id'] not in ({3, 4} if actor == 8 else {1, 2, 4}) for r in output['rows']):
                 return False
         elif step['tool'] == 'supplier_quotes.compare':
-            if output['truncated']:
-                if any(r['rank'] is not None for r in output['rows']): return False
-            elif {r['quote_item_id'] for r in output['rows']} != {2, 3, 5, 6, 7, 8, 9}:
+            if not quote_evidence_correct(output, product_id=1, rfq_item_id=11,
+                                          limit=1 if output.get('truncated') else None):
                 return False
-            for row in output['rows']:
-                if row['rank'] != (None if output['truncated'] else {2: 2, 3: 1}.get(row['quote_item_id'])):
-                    return False
-            if {s['record_id'] for s in output['sources']} != {r['quote_item_id'] for r in output['rows']}:
-                return False
-            if any(s['parent_id'] != 1 for s in output['sources']): return False
         elif step['tool'] == 'catalog.search_products':
             if {s['record_id'] for s in output['sources']} != {r['product_id'] for r in output['rows']}: return False
         elif step['tool'] == 'supplier_quotes.find_rfq_items':

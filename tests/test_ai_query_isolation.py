@@ -71,7 +71,8 @@ def test_quote_statistics_are_isolated_by_requester(tool_db, monkeypatch):
     plan = text2sql.QueryPlan(dataset="supplier_quotes", metric="count")
     own = citation_for(tool_db, SimpleNamespace(id=7), plan)
     other = citation_for(tool_db, SimpleNamespace(id=8), plan)
-    assert own["query_trace"]["rows"] == [{"metric_value": 14}]
+    # 共享夹具新增“未税”和“含税口径缺失”两份报价；统计仍须仅覆盖本人询价。
+    assert own["query_trace"]["rows"] == [{"metric_value": 16}]
     assert other["query_trace"]["rows"] == [{"metric_value": 0}]
     assert not history_access.query_accessible(tool_db, SimpleNamespace(id=8), own)
 

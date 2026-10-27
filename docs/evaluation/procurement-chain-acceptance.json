@@ -1,0 +1,418 @@
+{
+  "scope": "procurement_chain_api_acceptance",
+  "model": "fixed_response_not_live_model",
+  "browser_acceptance": "deferred_until_all_blueprint_requirements_complete",
+  "focused_regression": {
+    "passed": 203,
+    "failed": 0,
+    "skipped": 0,
+    "log": ".tmp/procurement-focused-regression.log"
+  },
+  "mysql_legacy_confirmation": {
+    "passed": 5,
+    "included_in_focused_regression": true
+  },
+  "mysql_followup_concurrency": {
+    "passed": 1,
+    "database": "random_isolated_database_created_and_dropped"
+  },
+  "full_regression": {
+    "tests": 1519,
+    "failed": 92,
+    "errors": 0,
+    "skipped": 11,
+    "passed": 1416,
+    "seconds": 159.334,
+    "failure_counts_by_module": {
+      "tests.test_agent_queue_runtime": 2,
+      "tests.test_agent_read_tools": 1,
+      "tests.test_agent_rfq_continuation": 9,
+      "tests.test_agent_task_evaluation": 1,
+      "tests.test_ai_conversation_delete": 1,
+      "tests.test_ai_query_isolation": 1,
+      "tests.test_ai_task_management": 1,
+      "tests.test_business_evaluation_metrics": 70,
+      "tests.test_evaluation_fixtures": 1,
+      "tests.test_exception_action_decision": 1,
+      "tests.test_finance_difference_checks": 1,
+      "tests.test_procurement_state_machines": 1,
+      "tests.test_supplier_portal_api": 2
+    },
+    "failures": [
+      {
+        "test": "tests.test_agent_queue_runtime::test_selected_rfq_continuation_recovers_after_product_checkpoint[False]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_queue_runtime::test_selected_rfq_continuation_recovers_after_product_checkpoint[True]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_read_tools::test_missing_permission_blocks_catalog_and_execution",
+        "message": "AssertionError: assert ['inventory.q...ishment_plan'] == ['inventory.query_available']"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_pending_rfq_is_structured_and_resume_reads_current_quotes",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_text_selection_matches_full_number_and_rehydrates_workflow",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_wrong_entity_selection_cannot_reuse_old_product_candidate",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_stale_selection_waits_again_without_quote_execution[UPDATE rfqs SET status='CLOSED' WHERE id=1]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_stale_selection_waits_again_without_quote_execution[UPDATE md_products SET status='INACTIVE' WHERE id=1]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_stale_selection_waits_again_without_quote_execution[UPDATE rfq_items SET product_id=2 WHERE id=11]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_changed_rfq_owner_blocks_continuation",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_combined_resume_refreshes_inventory_and_preserves_limit",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_rfq_continuation::test_explicit_product_switch_clears_previous_ids_and_rfq",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_agent_task_evaluation::test_samples_use_real_rbac_and_actor_specific_inventory",
+        "message": "AssertionError: assert 5 == 4"
+      },
+      {
+        "test": "tests.test_ai_conversation_delete::test_manage_own_ai_conversation",
+        "message": "assert False"
+      },
+      {
+        "test": "tests.test_ai_query_isolation::test_quote_statistics_are_isolated_by_requester",
+        "message": "AssertionError: assert [{'metric_value': 16}] == [{'metric_value': 14}]"
+      },
+      {
+        "test": "tests.test_ai_task_management::test_task_list_is_owner_scoped_and_paged",
+        "message": "AssertionError: assert (9 == 3)"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B004]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B007]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B008]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B009]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B010]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B016]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B019]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B020]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B021]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B022]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B028]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B031]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B032]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B033]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B034]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B040]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B043]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B044]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B045]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B046]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B052]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B055]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B056]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B057]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B058]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B064]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B067]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B068]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B069]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B070]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B076]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B079]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B080]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B081]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B082]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B088]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B091]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B092]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B093]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B094]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B100]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B103]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B104]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B105]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B106]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B112]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B115]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B116]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B117]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table md_products has 8 columns but 7 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[B118]",
+        "message": "sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table rfq_items has 7 columns but 5 values were supplied"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F001]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F002]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F003]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F004]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F005]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F006]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F007]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F008]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F009]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F010]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F011]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F012]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F013]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F014]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F015]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F016]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F017]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F018]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F019]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_business_evaluation_metrics::test_all_fixtures_and_independent_numeric_oracle[F020]",
+        "message": "AssertionError: assert False"
+      },
+      {
+        "test": "tests.test_evaluation_fixtures::test_frozen_offline_gate_has_no_real_model_quality_claim",
+        "message": "AssertionError: Frozen evaluation gate failed: manifest integrity mismatch"
+      },
+      {
+        "test": "tests.test_exception_action_decision::test_exception_suggestion_decision_is_idempotent_and_blocks_early_close",
+        "message": "AttributeError: module 'app.modules.operation_exceptions.service' has no attribute '_validate_assignee'"
+      },
+      {
+        "test": "tests.test_finance_difference_checks::test_receipt_line_and_document_review_are_separate",
+        "message": "assert False"
+      },
+      {
+        "test": "tests.test_procurement_state_machines::test_rfq_to_purchase_order_to_quality_acceptance",
+        "message": "AssertionError: {\"code\":422,\"message\":\"请求参数校验失败\",\"detail\":[{\"location\":[\"body\",\"currency_code\"],\"message\":\"Field required\",\"type\":\"missing\"}]}"
+      },
+      {
+        "test": "tests.test_supplier_portal_api::test_supplier_portal_isolated_and_confirmation_is_idempotent",
+        "message": "pydantic_core._pydantic_core.ValidationError: 25 validation errors for SupplierOrderPage"
+      },
+      {
+        "test": "tests.test_supplier_portal_api::test_supplier_eta_and_shipment_notice_are_scoped_and_quantity_checked",
+        "message": "pydantic_core._pydantic_core.ValidationError: 20 validation errors for SupplierOrderPage"
+      }
+    ]
+  },
+  "cleanup_checks": {
+    "remaining_chain_products": 0,
+    "remaining_chain_suppliers": 0,
+    "remaining_chain_requests": 0,
+    "remaining_isolated_acceptance_databases": 0
+  }
+}
