@@ -104,7 +104,7 @@ export function useColumns(
           {
             code: 'execute',
             text: '执行盘点',
-            auth: 'warehouse.inventory.stocktake.write',
+            auth: 'warehouse.inventory.stocktake.execute',
             show: (row: StocktakeApi.StocktakeRequest) => row.status === 'APPROVED',
           },
           {

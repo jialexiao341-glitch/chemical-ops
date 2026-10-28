@@ -331,7 +331,7 @@ def cancel_stocktake_request(stocktake_id: int, db: Session = Depends(get_db), u
 
 
 @router.post("/stocktakes/{stocktake_id}/execute", response_model=InventoryStocktakeRequestRead, summary="执行库存盘点")
-def execute_stocktake_request(stocktake_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.stocktake.write"))) -> InventoryStocktakeRequestRead:
+def execute_stocktake_request(stocktake_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.stocktake.execute"))) -> InventoryStocktakeRequestRead:
     """校验账面快照并执行盘点差异调整。"""
 
     return service.execute_stocktake_request(db, user, stocktake_id)

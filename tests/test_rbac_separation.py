@@ -38,6 +38,7 @@ from app.modules.system.crud import get_user_permission_codes, get_user_role_cod
 from app.modules.system.schema import RoleUpdate, UserUpdate
 from app.modules.system import service as system_service
 from app.modules.suppliers.model import Supplier
+from .conftest import grant_test_warehouse
 from tests.conftest import login
 from scripts.seed_demo_accounts import ROLE_SCOPES
 
@@ -222,6 +223,7 @@ def test_combined_technical_and_warehouse_roles_keep_warehouse_scope(
             "warehouse.inventory.transfer.write",
             "warehouse.inventory.stocktake.read",
             "warehouse.inventory.stocktake.write",
+            "warehouse.inventory.stocktake.execute",
             "warehouse.inventory.transfers.export",
         }))
     ).all()
@@ -244,6 +246,7 @@ def test_combined_technical_and_warehouse_roles_keep_warehouse_scope(
     )
     db_session.add_all((own_warehouse, foreign_warehouse))
     db_session.flush()
+    grant_test_warehouse(db_session, user.id, own_warehouse.id)
     source_balance = db_session.scalar(
         select(InventoryBalance).where(InventoryBalance.quantity > 0).order_by(InventoryBalance.id)
     )
@@ -512,6 +515,15 @@ def test_procurement_approver_cannot_review_own_work(client: TestClient, db_sess
                                          applicant_id=actor.id, reason="审批分离", status="SUBMITTED")
         db_session.add(record)
         db_session.flush()
+        if resource == "inventory/returns":
+            from app.modules.inventory_returns.model import InventoryReturnItem
+            balance = db_session.scalar(select(InventoryBalance).where(InventoryBalance.quantity > 0).limit(1))
+            grant_test_warehouse(db_session, actor.id, balance.warehouse_id)
+            db_session.add(InventoryReturnItem(return_request_id=record.id, line_no=1,
+                product_id=balance.product_id, warehouse_id=balance.warehouse_id,
+                location_id=balance.location_id, batch_id=balance.batch_id,
+                unit_id=balance.unit_id, requested_quantity=1))
+            db_session.flush()
         status_before = record.status
         response = client.post(f"/api/v1/{resource}/{record.id}/{action}",
                                json={"opinion": "审批分离", "reason": "审批分离"})
@@ -955,6 +967,7 @@ def test_warehouse_exception_scope_follows_inventory_and_task_assignment(
     )
     db_session.add_all((own_warehouse, foreign_warehouse))
     db_session.flush()
+    grant_test_warehouse(db_session, user.id, own_warehouse.id)
     own_location = WarehouseLocation(
         warehouse_id=own_warehouse.id, location_code=f"EX-OWN-{user.id}",
         location_name="本人库位", status="ACTIVE",

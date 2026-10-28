@@ -55,6 +55,7 @@ PERMISSIONS = (
     ("warehouse.inventory.transfer.approve", "审批库存调拨", "API", "warehouse.inventory.transfer", "approve"),
     ("warehouse.inventory.stocktake.read", "查看库存盘点", "API", "warehouse.inventory.stocktake", "read"),
     ("warehouse.inventory.stocktake.write", "管理库存盘点", "API", "warehouse.inventory.stocktake", "write"),
+    ("warehouse.inventory.stocktake.execute", "执行库存盘点", "API", "warehouse.inventory.stocktake", "execute"),
     ("warehouse.inventory.stocktake.approve", "审批库存盘点", "API", "warehouse.inventory.stocktake", "approve"),
     ("warehouse.inventory.freeze.write", "冻结和解冻库存", "API", "warehouse.inventory.freeze", "write"),
     ("operations.exceptions.read", "查看运营异常", "API", "operations.exceptions", "read"),
@@ -221,6 +222,7 @@ ROLE_SCOPES = {
 }
 
 ROLE_SCOPES["WAREHOUSE"].add("warehouse.inventory.transfer.execute")
+ROLE_SCOPES["WAREHOUSE"].add("warehouse.inventory.stocktake.execute")
 for _role_code in ("FINANCE_CLERK", "FINANCE_MANAGER"):
     ROLE_SCOPES[_role_code].add("finance.payments.pay")
 
