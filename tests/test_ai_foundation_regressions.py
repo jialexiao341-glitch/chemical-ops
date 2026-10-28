@@ -196,13 +196,17 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
         record = OperationException(exception_no=f"SQL-EX-{suffix}", exception_type="DELIVERY", source_type="OTHER", source_id=order.id, owner_id=other.id, description="scope regression")
         authorize = lambda: setattr(record, "owner_id", actor.id)
     else:
+        from app.modules.system.model import UserWarehouseGrant, UserWarehouseScope
         template = db_session.scalar(select(InventoryBalance))
         warehouse = Warehouse(warehouse_code=f"SQL-WH-{suffix}", warehouse_name="scope regression", manager_id=other.id)
         db_session.add(warehouse); db_session.flush()
         location = WarehouseLocation(warehouse_id=warehouse.id, location_code=f"SQL-LOC-{suffix}", location_name="scope regression")
         db_session.add(location); db_session.flush()
         record = InventoryBalance(product_id=template.product_id, batch_id=template.batch_id, warehouse_id=warehouse.id, location_id=location.id, unit_id=template.unit_id, quantity=Decimal("1"), locked_quantity=Decimal("0"), status="AVAILABLE")
-        authorize = lambda: setattr(warehouse, "manager_id", actor.id)
+        if db_session.get(UserWarehouseScope, actor.id) is None:
+            db_session.add(UserWarehouseScope(user_id=actor.id))
+            db_session.flush()
+        authorize = lambda: db_session.add(UserWarehouseGrant(user_id=actor.id, warehouse_id=warehouse.id))
     db_session.add(record); db_session.flush()
     model = type(record)
     plan = QueryPlan(dataset=dataset, metric="count", time_field=None)

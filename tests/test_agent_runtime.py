@@ -32,6 +32,7 @@ USER = SimpleNamespace(id=7)
 def task_db(tool_db, monkeypatch):
     """复用真实 SQL 的隔离业务样本，额外建立任务表和有限预算配置。"""
     monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system.data_scope.warehouse_scope_snapshot", lambda *_: None)
     AIAgentTask.__table__.create(tool_db.bind)
     monkeypatch.setattr(runtime, "get_settings", lambda: Settings(_env_file=None, agent_execution_mode="in_process", openai_api_key="test-key"))
     return tool_db
@@ -679,7 +680,7 @@ def test_history_private_and_scope_revalidated_even_for_truncated_total(task_db,
     result = start(task_db)
     with pytest.raises(ResourceNotFoundError):
         runtime.get_task(task_db, SimpleNamespace(id=9), result.id)
-    task_db.execute(text('UPDATE warehouses SET manager_id=8 WHERE id=3'))
+    task_db.execute(text('DELETE FROM sys_user_warehouse_grants WHERE user_id=7 AND warehouse_id=3'))
     task_db.commit()
     with pytest.raises(AuthorizationError, match='仓库'):
         runtime.get_task(task_db, USER, result.id)
@@ -1132,10 +1133,10 @@ def test_chat_history_rechecks_permissions_and_cancel_updates_reply(chat_task_db
     history = messages(cid, limit=100, db=chat_task_db, user=USER)
     assert '80.000000' in history.items[-1].content
     # 修改历史授权范围，不可从普通聊天历史接口读到旧库存摘要。
-    chat_task_db.execute(text('UPDATE warehouses SET manager_id=8 WHERE id=1'))
+    chat_task_db.execute(text('DELETE FROM sys_user_warehouse_grants WHERE user_id=7 AND warehouse_id=1'))
     chat_task_db.commit()
     assert '80.000000' not in messages(cid, limit=100, db=chat_task_db, user=USER).items[-1].content
-    chat_task_db.execute(text('UPDATE warehouses SET manager_id=7 WHERE id=1'))
+    chat_task_db.execute(text('INSERT INTO sys_user_warehouse_grants VALUES (7, 1)'))
     chat_task_db.commit()
     runtime.cancel_task(chat_task_db, USER, state.task_id)
     assert messages(cid, limit=100, db=chat_task_db, user=USER).items[-1].content == '任务已取消。'

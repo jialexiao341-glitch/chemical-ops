@@ -51,7 +51,7 @@ def test_retry_only_failed_items_and_rechecks_retained_evidence(tool_db, monkeyp
         previous_tasks=[task.model_dump(mode="json") for task in first.tasks], retry_failed=True))
     assert calls == ["t2"] and retried.status == BatchStatus.SUCCEEDED
     assert retried.tasks[0] == first.tasks[0]
-    tool_db.execute(text("UPDATE warehouses SET manager_id=8 WHERE id=1"))
+    tool_db.execute(text("DELETE FROM sys_user_warehouse_grants WHERE user_id=7 AND warehouse_id=1"))
     with pytest.raises(BusinessValidationError, match="权限、范围或数据已变化"):
         asyncio.run(multi.execute_batch(tool_db, USER, route, Settings(_env_file=None),
             previous_tasks=[task.model_dump(mode="json") for task in first.tasks], retry_failed=True))

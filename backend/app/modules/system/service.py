@@ -16,6 +16,7 @@ from app.modules.system import crud
 from app.modules.suppliers.model import Supplier
 from app.modules.supplier_portal.model import SupplierPortalAccount
 from app.modules.system.model import Department, Permission, Role, RolePermission, User, UserRole, UserDepartmentScope, UserDepartmentGrant
+from app.modules.system.model import UserWarehouseScope, UserWarehouseGrant
 from app.modules.system.audit import add_audit_log
 from app.modules.system.schema import (
     DepartmentCreate,
@@ -52,6 +53,49 @@ def get_user_department_scope(db: Session, user_id: int) -> dict:
         UserDepartmentGrant.user_id == user_id
     ).order_by(UserDepartmentGrant.department_id)).all()) if scope else []
     return {"enabled": scope is not None, "department_ids": ids}
+
+
+def get_user_warehouse_scope(db: Session, user_id: int) -> dict:
+    _require_user(db, user_id)
+    enabled = True
+    ids = list(db.scalars(select(UserWarehouseGrant.warehouse_id).where(
+        UserWarehouseGrant.user_id == user_id).order_by(UserWarehouseGrant.warehouse_id)).all()) if enabled else []
+    return {"enabled": enabled, "warehouse_ids": ids}
+
+
+def set_user_warehouse_scope(db: Session, user_id: int, *, enabled: bool, warehouse_ids: list[int], actor_id: int) -> dict:
+    from app.modules.inventory.model import Warehouse
+    require_authorization_admin(db, actor_id)
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None:
+        raise ResourceNotFoundError("用户不存在")
+    roles = set(crud.get_user_role_codes(db, user_id))
+    if not enabled:
+        raise BusinessValidationError("仓库授权始终生效；如需禁止访问，请清空授权仓库")
+    if enabled and "SYS_ADMIN" in roles:
+        raise BusinessValidationError("系统管理员不受仓库范围限制")
+    if enabled and roles == {"SUPPLIER_PORTAL"}:
+        raise BusinessValidationError("供应商账号不能配置仓库授权")
+    if len(warehouse_ids) != len(set(warehouse_ids)) or any(value <= 0 for value in warehouse_ids):
+        raise BusinessValidationError("仓库授权包含重复或无效仓库")
+    ids = sorted(warehouse_ids)
+    if ids and set(db.scalars(select(Warehouse.id).where(Warehouse.id.in_(ids), Warehouse.status == "ACTIVE")).all()) != set(ids):
+        raise BusinessValidationError("授权仓库不存在或已停用")
+    previous = get_user_warehouse_scope(db, user_id)
+    if previous == {"enabled": enabled, "warehouse_ids": ids}:
+        return previous
+    db.execute(delete(UserWarehouseGrant).where(UserWarehouseGrant.user_id == user_id))
+    scope = db.get(UserWarehouseScope, user_id)
+    if enabled:
+        if scope is None:
+            db.add(UserWarehouseScope(user_id=user_id))
+            db.flush()
+        db.add_all(UserWarehouseGrant(user_id=user_id, warehouse_id=value) for value in ids)
+    user.token_version += 1
+    add_audit_log(db, actor_id=actor_id, action_type="UPDATE_WAREHOUSE_SCOPE", resource_type="USER", resource_id=user.id,
+                  request_summary=f"仓库授权 {previous} -> {{'enabled': {enabled}, 'warehouse_ids': {ids}}}", result_status="SUCCESS")
+    db.commit()
+    return {"enabled": enabled, "warehouse_ids": ids}
 
 
 def set_user_department_scope(db: Session, user_id: int, *, enabled: bool, department_ids: list[int], actor_id: int) -> dict:

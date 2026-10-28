@@ -17,8 +17,15 @@ def test_dashboard_overview_returns_core_metrics(client: TestClient, demo_passwo
     assert response.status_code == 200, response.text
     body = response.json()
     assert set(body) == {"purchase_orders_total", "purchase_orders_in_progress", "deliveries_overdue", "inventory_quantity", "inventory_units", "inventory_available", "open_exceptions", "confirmed_reconciliations", "paid_amount", "expiry_alerts"}
-    assert body["inventory_available"] is True
-    assert isinstance(body["inventory_units"], list)
+    assert body["inventory_available"] is False
+    assert body["inventory_units"] == []
+
+
+def test_supplier_keeps_global_dashboard(client: TestClient, demo_password: str) -> None:
+    headers = login(client, "supplier_portal", demo_password)
+    response = client.get("/api/v1/dashboard/overview", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["inventory_available"] is True
 
 
 def test_buyer_cannot_trigger_overdue_scan(client: TestClient, demo_password: str) -> None:

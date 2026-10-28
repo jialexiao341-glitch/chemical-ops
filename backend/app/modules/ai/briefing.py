@@ -47,8 +47,8 @@ def json_safe(value: Any) -> Any:
 def build_snapshot(db: Session, *, user: User | None = None) -> dict[str, Any]:
     """聚合晨报需要的指标快照（全部来自 dashboard 既有查询）。"""
 
-    from app.modules.system.data_scope import is_department_restricted
-    if user is not None and is_department_restricted(db, user):
+    from app.modules.system.data_scope import is_department_restricted, is_warehouse_restricted
+    if user is not None and (is_department_restricted(db, user) or is_warehouse_restricted(db, user)):
         from app.modules.dashboard.service import get_department_overview, get_department_report
         overview = get_department_overview(db, user)
         report = get_department_report(db, user, date_from=None, date_to=None)
@@ -88,8 +88,8 @@ async def generate_briefing(
     db: Session, user: User, request: BriefingRequest
 ) -> BriefingResponse:
     """生成运营晨报；request.push=True 时同时发送站内通知。"""
-    from app.modules.system.data_scope import is_department_restricted
-    restricted = is_department_restricted(db, user)
+    from app.modules.system.data_scope import is_department_restricted, is_warehouse_restricted
+    restricted = is_department_restricted(db, user) or is_warehouse_restricted(db, user)
 
     can_push = {"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(
         get_user_role_codes(db, user.id)

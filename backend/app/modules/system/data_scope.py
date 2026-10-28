@@ -20,6 +20,21 @@ def is_department_restricted(db, user):
     return db.get(UserDepartmentScope, user.id) is not None
 
 
+def is_warehouse_restricted(db, user):
+    roles = set(get_user_role_codes(db, user.id))
+    return 'SYS_ADMIN' not in roles and roles != {'SUPPLIER_PORTAL'}
+
+
+def warehouse_scope_snapshot(db, user):
+    from app.modules.system.model import UserWarehouseGrant
+    from app.modules.inventory.model import Warehouse
+    if not is_warehouse_restricted(db, user):
+        return None
+    return sorted(db.scalars(select(UserWarehouseGrant.warehouse_id).join(
+        Warehouse, Warehouse.id == UserWarehouseGrant.warehouse_id
+    ).where(UserWarehouseGrant.user_id == user.id, Warehouse.status == 'ACTIVE')).all())
+
+
 def department_scope_snapshot(db, user):
     """返回当前授权部门；None 表示沿用未限制范围。"""
     if not is_department_restricted(db, user):

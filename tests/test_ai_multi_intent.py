@@ -220,7 +220,7 @@ def test_inventory_sums_all_matching_specifications_and_rechecks_history(tool_db
     assert "110 千克" in task.answer and "5 升" in task.answer and "2 个规格" in task.answer
     assert [call['arguments']['product_id'] for call in task.tool_calls if call['tool']=='inventory.query_available'] == [1, 3]
     assert multi.history_accessible(tool_db, USER, batch.model_dump(mode='json'))
-    tool_db.execute(text("UPDATE warehouses SET manager_id=8 WHERE id=1"))
+    tool_db.execute(text("DELETE FROM sys_user_warehouse_grants WHERE user_id=7 AND warehouse_id=1"))
     assert not multi.history_accessible(tool_db, USER, batch.model_dump(mode='json'))
 
 
@@ -336,7 +336,7 @@ def test_history_rechecks_current_warehouse_scope(tool_db):
     from sqlalchemy import text
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task(), product_task("t2")), Settings(_env_file=None)))
     assert multi.history_accessible(tool_db, USER, batch.model_dump(mode="json"))
-    tool_db.execute(text("UPDATE warehouses SET manager_id=8 WHERE id=1"))
+    tool_db.execute(text("DELETE FROM sys_user_warehouse_grants WHERE user_id=7 AND warehouse_id=1"))
     assert not multi.history_accessible(tool_db, USER, batch.model_dump(mode="json"))
 
 

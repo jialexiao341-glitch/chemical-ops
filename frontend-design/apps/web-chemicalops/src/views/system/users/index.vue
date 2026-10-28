@@ -19,6 +19,7 @@ import {
   deleteUserApi, getSupplierBindingOptionsApi, getUserApi, getUserListApi,
   getUserSupplierBindingApi, setUserSupplierBindingApi, getDepartmentListApi,
   getUserDepartmentScopeApi, setUserDepartmentScopeApi,
+  getUserWarehouseScopeApi, setUserWarehouseScopeApi, getWarehouseListApi,
   reviewRegistrationApi,
 } from '#/api';
 
@@ -69,6 +70,43 @@ const scopeUser = ref<SystemUserApi.SystemUser>();
 const scopeMode = ref<'all' | 'selected'>('all');
 const scopeDepartments = ref<number[]>([]);
 const scopeOptions = ref<{ label: string; value: number }[]>([]);
+const warehouseOpen = ref(false);
+const warehouseLoading = ref(false);
+const warehouseSaving = ref(false);
+const warehouseUser = ref<SystemUserApi.SystemUser>();
+const warehouseIds = ref<number[]>([]);
+const warehouseOptions = ref<{ label: string; value: number }[]>([]);
+
+async function openWarehouseScope(row: SystemUserApi.SystemUser) {
+  if (!isAdmin || warehouseLoading.value || warehouseSaving.value) return;
+  warehouseUser.value = row;
+  warehouseOpen.value = true;
+  warehouseLoading.value = true;
+  try {
+    const [scope, warehouses] = await Promise.all([getUserWarehouseScopeApi(row.id), getWarehouseListApi()]);
+    warehouseOptions.value = warehouses.map((item) => ({ label: `${item.warehouse_code} · ${item.warehouse_name}`, value: item.id }));
+    warehouseIds.value = scope.warehouse_ids;
+  } catch {
+    warehouseOpen.value = false;
+  } finally {
+    warehouseLoading.value = false;
+  }
+}
+
+async function saveWarehouseScope() {
+  if (!isAdmin || !warehouseUser.value || warehouseLoading.value || warehouseSaving.value) return;
+  warehouseSaving.value = true;
+  try {
+    await setUserWarehouseScopeApi(warehouseUser.value.id, {
+      enabled: true,
+      warehouse_ids: warehouseIds.value,
+    });
+    message.success('仓库授权已保存，用户需重新登录');
+    warehouseOpen.value = false;
+  } finally {
+    warehouseSaving.value = false;
+  }
+}
 
 async function openDepartmentScope(row: SystemUserApi.SystemUser) {
   if (!isAdmin || scopeLoading.value || scopeSaving.value) return;
@@ -210,6 +248,10 @@ function onActionClick({
       void openDepartmentScope(row);
       break;
     }
+    case 'warehouse-scope': {
+      void openWarehouseScope(row);
+      break;
+    }
     case 'delete': {
       onDelete(row);
       break;
@@ -282,6 +324,16 @@ function onRefresh() {
         <div><div class="mb-1 text-sm text-muted-foreground">申请角色</div><div>{{ reviewUser.role_names.join('、') || '角色已失效' }}</div></div>
         <div><label for="registration-decision" class="mb-1 block text-sm text-muted-foreground">审核结果</label><Select id="registration-decision" v-model:value="reviewDecision" class="w-full" :disabled="reviewSaving" :options="[{ label: '批准注册', value: 'approve' }, { label: '拒绝注册', value: 'reject' }]" /></div>
         <div><label for="registration-reason" class="mb-1 block text-sm text-muted-foreground">审核说明</label><Input.TextArea id="registration-reason" v-model:value="reviewReason" :disabled="reviewSaving" :maxlength="500" :rows="3" placeholder="填写审核说明（选填）" /></div>
+      </div>
+    </Modal>
+    <Modal v-model:open="warehouseOpen" :confirm-loading="warehouseSaving" title="仓库授权"
+      :closable="!warehouseSaving" :mask-closable="!warehouseSaving" :keyboard="!warehouseSaving"
+      :ok-button-props="{ disabled: warehouseLoading || !isAdmin }"
+      :cancel-button-props="{ disabled: warehouseSaving }" @ok="saveWarehouseScope">
+      <div v-if="warehouseUser" class="space-y-4 py-2">
+        <div><div class="mb-1 text-sm text-muted-foreground">登录账号</div><div class="font-medium">{{ warehouseUser.username }} · {{ warehouseUser.display_name }}</div></div>
+        <div><label for="warehouse-ids" class="mb-1 block text-sm text-muted-foreground">授权仓库</label><Select id="warehouse-ids" v-model:value="warehouseIds" class="w-full" mode="multiple" show-search option-filter-prop="label" :options="warehouseOptions" :loading="warehouseLoading" :disabled="warehouseLoading || warehouseSaving" placeholder="选择允许访问的仓库" /></div>
+        <div class="text-sm text-muted-foreground">未选择仓库时，用户无法访问任何仓库；保存后用户需重新登录。</div>
       </div>
     </Modal>
     <Modal v-model:open="scopeOpen" :confirm-loading="scopeSaving" title="部门授权"

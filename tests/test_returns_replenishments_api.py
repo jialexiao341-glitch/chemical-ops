@@ -10,7 +10,7 @@ from app.modules.inventory.model import InventoryBalance, InventoryBatch, Wareho
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.system.model import User
 
-from .conftest import login
+from .conftest import login, grant_test_warehouse
 
 
 pytestmark = pytest.mark.integration
@@ -23,6 +23,9 @@ def test_return_repeat_execute_is_rejected(client: TestClient, db_session, demo_
     assert balance is not None
     batch = db_session.get(InventoryBatch, balance.batch_id)
     assert batch is not None and batch.supplier_id is not None
+    for username in ('warehouse_receiver', 'procurement_manager'):
+        actor = db_session.scalar(select(User).where(User.username == username))
+        grant_test_warehouse(db_session, actor.id, balance.warehouse_id)
     warehouse = login(client, "warehouse_receiver", demo_password)
     manager = login(client, "procurement_manager", demo_password)
     body = {
@@ -67,8 +70,7 @@ def test_warehouse_user_can_only_read_returns_in_authorized_warehouses(
     warehouse_record = db_session.get(Warehouse, balance.warehouse_id)
     batch = db_session.get(InventoryBatch, balance.batch_id)
     assert warehouse_record is not None and batch is not None and batch.supplier_id is not None
-    warehouse_record.manager_id = warehouse_user.id
-    db_session.flush()
+    grant_test_warehouse(db_session, warehouse_user.id, warehouse_record.id)
 
     headers = login(client, "warehouse_receiver", demo_password)
     created = client.post(
@@ -93,7 +95,8 @@ def test_warehouse_user_can_only_read_returns_in_authorized_warehouses(
     assert before_scope_change.status_code == 200
     assert return_id in {row["id"] for row in before_scope_change.json()["items"]}
 
-    warehouse_record.manager_id = other_user.id
+    from app.modules.system.model import UserWarehouseGrant
+    db_session.delete(db_session.get(UserWarehouseGrant, (warehouse_user.id, warehouse_record.id)))
     db_session.flush()
     scoped = client.get("/api/v1/inventory/returns", headers=headers)
     assert scoped.status_code == 200
@@ -134,6 +137,9 @@ def test_return_insufficient_stock_rolls_back(client: TestClient, db_session, de
     assert balance is not None
     batch = db_session.get(InventoryBatch, balance.batch_id)
     assert batch is not None and batch.supplier_id is not None
+    for username in ('warehouse_receiver', 'procurement_manager'):
+        actor = db_session.scalar(select(User).where(User.username == username))
+        grant_test_warehouse(db_session, actor.id, balance.warehouse_id)
     before = Decimal(balance.quantity)
     warehouse = login(client, "warehouse_receiver", demo_password)
     manager = login(client, "procurement_manager", demo_password)

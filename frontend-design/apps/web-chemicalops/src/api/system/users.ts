@@ -3,6 +3,10 @@ import type { PageQuery, PageResult } from '#/api/request';
 import { requestClient } from '#/api/request';
 
 export namespace SystemUserApi {
+  export interface WarehouseScope {
+    enabled: boolean;
+    warehouse_ids: number[];
+  }
   export interface DepartmentScope {
     enabled: boolean;
     department_ids: number[];
@@ -104,6 +108,14 @@ export async function getUserDepartmentScopeApi(id: number) {
 
 export async function setUserDepartmentScopeApi(id: number, data: SystemUserApi.DepartmentScope) {
   return requestClient.put<SystemUserApi.DepartmentScope>(`/system/users/${id}/department-scope`, data);
+}
+
+export async function getUserWarehouseScopeApi(id: number) {
+  return requestClient.get<SystemUserApi.WarehouseScope>(`/system/users/${id}/warehouse-scope`);
+}
+
+export async function setUserWarehouseScopeApi(id: number, data: SystemUserApi.WarehouseScope) {
+  return requestClient.put<SystemUserApi.WarehouseScope>(`/system/users/${id}/warehouse-scope`, data);
 }
 
 export async function reviewRegistrationApi(id: number, decision: 'approve' | 'reject', reason = '') {

@@ -61,6 +61,21 @@ def _exception_department_scope(user: User, roles: set[str]):
     )
 
 
+def _exception_warehouse_scope(db: Session, user: User, roles: set[str]):
+    """仓库授权为异常来源的上限，负责人或任务指派不能绕过。"""
+    if 'SYS_ADMIN' in roles:
+        return True
+    from app.modules.inventory.service import accessible_warehouse_ids
+    warehouse_ids = accessible_warehouse_ids(db, user) or set()
+    allowed = exists(select(InventoryBalance.id).where(
+        InventoryBalance.batch_id == OperationException.source_id,
+        InventoryBalance.warehouse_id.in_(warehouse_ids)))
+    outside = exists(select(InventoryBalance.id).where(
+        InventoryBalance.batch_id == OperationException.source_id,
+        InventoryBalance.warehouse_id.not_in(warehouse_ids)))
+    return or_(OperationException.source_type != 'INVENTORY_BATCH', and_(allowed, ~outside))
+
+
 def _exception_scope_condition(db: Session, user: User):
     """按来源对象读取范围或用户责任部门限制异常记录。"""
 
@@ -99,11 +114,9 @@ def _exception_scope_condition(db: Session, user: User):
         ))
 
     if "warehouse.inventory.read" in permissions:
-        from app.modules.inventory.service import _can_access_all_warehouses
-        warehouse_scope = True if _can_access_all_warehouses(db, user, roles) else or_(
-            Warehouse.manager_id == user.id,
-            Warehouse.manager_id.is_(None),
-        )
+        from app.modules.inventory.service import accessible_warehouse_ids
+        warehouse_ids = accessible_warehouse_ids(db, user)
+        warehouse_scope = True if warehouse_ids is None else Warehouse.id.in_(warehouse_ids)
         visible_batches = select(InventoryBalance.batch_id).join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(warehouse_scope)
         scopes.append(and_(
             OperationException.source_type == "INVENTORY_BATCH",
@@ -133,7 +146,7 @@ def _exception_scope_condition(db: Session, user: User):
             OperationException.source_type == "PRODUCT",
             OperationException.source_id.in_(select(Product.id).where(Product.status == "ACTIVE")),
         ))
-    return and_(or_(*scopes) if scopes else false(), _exception_department_scope(user, roles))
+    return and_(or_(*scopes) if scopes else false(), _exception_department_scope(user, roles), _exception_warehouse_scope(db, user, roles))
 
 
 def _exception_record_scope_condition(db: Session, user: User):
@@ -143,7 +156,7 @@ def _exception_record_scope_condition(db: Session, user: User):
     if "SYS_ADMIN" in roles:
         return True
     scope = _exception_scope_condition(db, user)
-    return and_(_exception_department_scope(user, roles), or_(
+    return and_(_exception_department_scope(user, roles), _exception_warehouse_scope(db, user, roles), or_(
         and_(OperationException.source_type.in_(("SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH")), scope),
         and_(OperationException.source_type.not_in(("SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH")), or_(
             OperationException.owner_id == user.id,
@@ -190,8 +203,9 @@ def _has_source_scope(db: Session, user: User, data: OperationExceptionCreate) -
         acceptance_scope = acceptance_read_condition(user, roles)
         return db.scalar(select(QualityAcceptance.id).where(QualityAcceptance.id == data.source_id, acceptance_scope)) is not None
     if data.source_type == "INVENTORY_BATCH" and "warehouse.inventory.read" in permissions:
-        from app.modules.inventory.service import _can_access_all_warehouses
-        warehouse_scope = True if _can_access_all_warehouses(db, user, roles) else or_(Warehouse.manager_id == user.id, Warehouse.manager_id.is_(None))
+        from app.modules.inventory.service import accessible_warehouse_ids
+        warehouse_ids = accessible_warehouse_ids(db, user)
+        warehouse_scope = True if warehouse_ids is None else Warehouse.id.in_(warehouse_ids)
         return db.scalar(select(InventoryBalance.id).join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(InventoryBalance.batch_id == data.source_id, warehouse_scope).limit(1)) is not None
     if data.source_type == "PRODUCT" and "master.products.read" in permissions:
         return db.scalar(select(Product.id).where(Product.id == data.source_id, Product.status == "ACTIVE")) is not None
@@ -362,7 +376,7 @@ def _require_task_creation_scope(db: Session, user: User, exception: OperationEx
 
     roles = set(get_user_role_codes(db, user.id))
     if db.scalar(select(OperationException.id).where(
-        OperationException.id == exception.id, _exception_department_scope(user, roles)
+        OperationException.id == exception.id, _exception_department_scope(user, roles), _exception_warehouse_scope(db, user, roles)
     )) is None:
         raise ResourceNotFoundError(f"异常 {exception.id} 不存在")
     if (exception.source_type in {"SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH"} or exception.owner_id != user.id) and not _has_source_exception_scope(db, user, exception):
@@ -464,6 +478,7 @@ def _can_access_task(db: Session, user: User, task: OperationTask) -> bool:
     department_visible = db.scalar(select(OperationException.id).where(
         OperationException.id == exception.id,
         _exception_department_scope(user, set(get_user_role_codes(db, user.id))),
+        _exception_warehouse_scope(db, user, set(get_user_role_codes(db, user.id))),
     )) is not None
     return department_visible and (
         _has_source_exception_scope(db, user, exception) or exception.owner_id == user.id or task.assignee_id == user.id
@@ -511,6 +526,7 @@ def list_tasks(db: Session, user: User, exception_id: int, *, status: str | None
     if db.scalar(select(OperationException.id).where(
         OperationException.id == exception.id,
         _exception_department_scope(user, set(get_user_role_codes(db, user.id))),
+        _exception_warehouse_scope(db, user, set(get_user_role_codes(db, user.id))),
     )) is None:
         raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
     has_full_exception_scope = _has_source_exception_scope(db, user, exception) or exception.owner_id == user.id

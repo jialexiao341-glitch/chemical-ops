@@ -31,16 +31,8 @@ def _ensure_return_scope(db: Session, user: User, value: InventoryReturnRequest)
     """退货整单必须完全落在用户可见的仓库范围内。"""
     roles = set(get_user_role_codes(db, user.id))
     if db.scalar(select(InventoryReturnRequest.id).where(
-        InventoryReturnRequest.id == value.id, _return_department_scope(user, roles)
+        InventoryReturnRequest.id == value.id, return_read_condition(db, user, roles=roles)
     )) is None:
-        raise ResourceNotFoundError(f"退货申请 {value.id} 不存在")
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
-        return
-    if "WAREHOUSE" in roles:
-        for item in value.items:
-            inventory_service._require_warehouse_scope(db, user, item.warehouse_id)
-        return
-    if value.applicant_id != user.id:
         raise ResourceNotFoundError(f"退货申请 {value.id} 不存在")
 
 
@@ -253,6 +245,15 @@ def return_read_condition(db: Session, user: User, *, roles: set[str] | None = N
             base = ~exists(outside_scope)
     else:
         base = InventoryReturnRequest.applicant_id == user.id
+    if "SYS_ADMIN" not in roles:
+        warehouse_ids = inventory_service.accessible_warehouse_ids(db, user) or set()
+        scoped_items = select(InventoryReturnItem.id).where(
+            InventoryReturnItem.return_request_id == InventoryReturnRequest.id,
+            InventoryReturnItem.warehouse_id.in_(warehouse_ids))
+        outside_items = select(InventoryReturnItem.id).where(
+            InventoryReturnItem.return_request_id == InventoryReturnRequest.id,
+            InventoryReturnItem.warehouse_id.not_in(warehouse_ids))
+        base = and_(base, exists(scoped_items), ~exists(outside_items))
     return and_(base, _return_department_scope(user, roles))
 
 

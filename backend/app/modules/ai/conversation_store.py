@@ -32,10 +32,13 @@ def get_owned_conversation(db: Session, user: User, conversation_id: int, *, all
     if conversation is None:
         raise BusinessValidationError("AI 会话不存在或无权访问")
     if not allow_stale:
-        from app.modules.system.data_scope import department_scope_snapshot
+        from app.modules.system.data_scope import department_scope_snapshot, warehouse_scope_snapshot
         scope = department_scope_snapshot(db, user)
         if scope is not None and (conversation.permission_snapshot or {}).get("department_scope") != scope:
             raise BusinessValidationError("会话创建后的部门授权已变化，请新建会话")
+        warehouses = warehouse_scope_snapshot(db, user)
+        if (conversation.permission_snapshot or {}).get("warehouse_scope") != warehouses:
+            raise BusinessValidationError("会话创建后的仓库授权已变化，请新建会话")
     return conversation
 
 
@@ -51,9 +54,9 @@ def conversation_state_enabled(db: Session) -> bool:
 
 
 def permission_snapshot(db: Session, user: User) -> dict[str, list[str]]:
-    from app.modules.system.data_scope import department_scope_snapshot
+    from app.modules.system.data_scope import department_scope_snapshot, warehouse_scope_snapshot
     return {"roles": get_user_role_codes(db, user.id), "permissions": get_user_permission_codes(db, user.id),
-            "department_scope": department_scope_snapshot(db, user)}
+            "department_scope": department_scope_snapshot(db, user), "warehouse_scope": warehouse_scope_snapshot(db, user)}
 
 
 def load_conversation_state(db: Session, conversation: AIConversation) -> AIConversationState | None:
@@ -178,17 +181,15 @@ def list_conversations(db: Session, user: User, *, limit: int = 50) -> tuple[lis
     """置顶优先，再按最近消息时间返回当前用户会话。"""
 
     condition = (AIConversation.user_id == user.id) & (AIConversation.business_scene != "FLOAT")
-    from app.modules.system.data_scope import department_scope_snapshot
+    from app.modules.system.data_scope import department_scope_snapshot, warehouse_scope_snapshot
     scope = department_scope_snapshot(db, user)
-    if scope is not None:
-        conversations = db.scalars(select(AIConversation).where(condition).order_by(
-            AIConversation.pinned.desc(), AIConversation.last_message_at.desc(), AIConversation.id.desc()
-        ))
-        visible = [item for item in conversations if (item.permission_snapshot or {}).get("department_scope") == scope]
-        return visible[:limit], len(visible)
-    total = db.scalar(select(func.count(AIConversation.id)).where(condition)) or 0
-    items = list(db.scalars(select(AIConversation).where(condition).order_by(AIConversation.pinned.desc(), AIConversation.last_message_at.desc(), AIConversation.id.desc()).limit(limit)).all())
-    return items, total
+    warehouses = warehouse_scope_snapshot(db, user)
+    conversations = db.scalars(select(AIConversation).where(condition).order_by(
+        AIConversation.pinned.desc(), AIConversation.last_message_at.desc(), AIConversation.id.desc()
+    ))
+    visible = [item for item in conversations if (scope is None or (item.permission_snapshot or {}).get("department_scope") == scope)
+               and (item.permission_snapshot or {}).get("warehouse_scope") == warehouses]
+    return visible[:limit], len(visible)
 
 
 def update_conversation(db: Session, user: User, conversation_id: int, *, title: str | None = None, pinned: bool | None = None) -> AIConversation:

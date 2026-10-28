@@ -32,6 +32,7 @@ def test_unauthorized_units_fall_back(answer):
 def test_briefing_swapped_values_fall_back(monkeypatch):
     from app.modules.system import data_scope
     monkeypatch.setattr(data_scope, "is_department_restricted", lambda *_: False)
+    monkeypatch.setattr(data_scope, "is_warehouse_restricted", lambda *_: False)
     monkeypatch.setattr(briefing, "build_snapshot", lambda *_, **__: {"overview": {"purchase_orders_total": 12, "open_exceptions": 3}})
     monkeypatch.setattr(briefing, "get_user_role_codes", lambda *_: ["SYS_ADMIN"])
     async def chat(*_, **__):

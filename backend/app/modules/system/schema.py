@@ -62,6 +62,17 @@ class UserDepartmentScopeRead(BaseModel):
     department_ids: list[int]
 
 
+class UserWarehouseScopeUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+    warehouse_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+class UserWarehouseScopeRead(BaseModel):
+    enabled: bool
+    warehouse_ids: list[int]
+
+
 class UserRead(BaseModel):
     """用户响应，不返回密码哈希。"""
 

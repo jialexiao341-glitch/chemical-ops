@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
 from app.core.db import get_db
+from app.core.errors import ResourceNotFoundError
 from app.modules.notifications import service
 from app.modules.notifications.schema import NotificationPage, NotificationRead, NotificationReadAllResult, NotificationUnreadCount
 from app.modules.system.model import User
@@ -21,15 +22,23 @@ def _proposal_notification_statuses(db: Session, user: User, items):
            and item.related_type == "AI_ACTION_PROPOSAL" and item.related_id is not None}
     if not ids:
         return {}
-    rows = db.execute(select(AIAgentActionProposal.id, AIAgentActionProposal.status, AIAgentActionProposal.expires_at)
-                      .where(AIAgentActionProposal.id.in_(ids), AIAgentActionProposal.user_id == user.id)).all()
+    from app.modules.ai.action_proposals import _require_proposal_department_scope
+    rows = db.scalars(select(AIAgentActionProposal).where(
+        AIAgentActionProposal.id.in_(ids), AIAgentActionProposal.user_id == user.id)).all()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    return {row.id: "EXPIRED" if row.status == "PENDING" and row.expires_at <= now else row.status for row in rows}
+    statuses = {}
+    for row in rows:
+        try:
+            _require_proposal_department_scope(db, user, row)
+        except ResourceNotFoundError:
+            continue
+        statuses[row.id] = "EXPIRED" if row.status == "PENDING" and row.expires_at <= now else row.status
+    return statuses
 
 
 def _safe_notification(item, proposal_statuses=None, *, restricted=False):
     result = NotificationRead.model_validate(item)
-    if restricted:
+    if restricted and item.notification_type != "AI_PROPOSAL_PENDING":
         return result.model_copy(update={"title": "业务通知", "content": "请前往相关业务页面查看当前可访问的记录。", "related_id": None})
     if item.notification_type == "OPERATION_TASK_ASSIGNED":
         return result.model_copy(update={"related_id": None})
@@ -40,8 +49,8 @@ def _safe_notification(item, proposal_statuses=None, *, restricted=False):
         status = statuses.get(item.related_id, "UNAVAILABLE")
         label = {"PENDING": "待确认", "EXECUTED": "已执行", "CANCELLED": "已取消",
                  "EXPIRED": "已过期", "INVALIDATED": "已失效"}.get(status, "不可用")
-        title = item.title.replace("待确认", label)
-        return result.model_copy(update={"title": title, "content": f"提案{label}，请查看详情。"})
+        title = f"动作提案{label}" if restricted else item.title.replace("待确认", label)
+        return result.model_copy(update={"title": title, "content": f"提案{label}，请查看详情。", "related_id": None if restricted else result.related_id})
     return result
 
 
@@ -57,8 +66,8 @@ def list_notifications(
 
     items, total = service.list_notifications(db, user, unread_only=unread_only, page=page, page_size=page_size)
     statuses = _proposal_notification_statuses(db, user, items)
-    from app.modules.system.data_scope import is_department_restricted
-    restricted = is_department_restricted(db, user)
+    from app.modules.system.data_scope import is_department_restricted, is_warehouse_restricted
+    restricted = is_department_restricted(db, user) or is_warehouse_restricted(db, user)
     return NotificationPage(items=[_safe_notification(item, statuses, restricted=restricted) for item in items], total=total, page=page, page_size=page_size)
 
 
@@ -117,5 +126,5 @@ def mark_read(notification_id: int, db: Session = Depends(get_db), user: User = 
     """将指定通知标记为已读。"""
 
     item = service.mark_read(db, user, notification_id)
-    from app.modules.system.data_scope import is_department_restricted
-    return _safe_notification(item, _proposal_notification_statuses(db, user, [item]), restricted=is_department_restricted(db, user))
+    from app.modules.system.data_scope import is_department_restricted, is_warehouse_restricted
+    return _safe_notification(item, _proposal_notification_statuses(db, user, [item]), restricted=is_department_restricted(db, user) or is_warehouse_restricted(db, user))

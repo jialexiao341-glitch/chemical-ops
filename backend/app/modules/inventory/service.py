@@ -52,23 +52,24 @@ def _now() -> datetime:
 
 
 def _can_access_all_warehouses(db: Session, user: User, roles: set[str]) -> bool:
-    from app.modules.system.model import UserDepartmentScope
-    return "SYS_ADMIN" in roles or ("PROCUREMENT_MANAGER" in roles and db.get(UserDepartmentScope, user.id) is None)
+    return "SYS_ADMIN" in roles
 
 
 def _must_check_warehouse(db: Session, user: User) -> bool:
-    from app.modules.system.model import UserDepartmentScope
     roles = set(get_user_role_codes(db, user.id))
-    return "WAREHOUSE" in roles or ("SYS_ADMIN" not in roles and db.get(UserDepartmentScope, user.id) is not None)
+    return "SYS_ADMIN" not in roles
 
 
 def _can_access_warehouse(db: Session, user: User, warehouse_id: int) -> bool:
-    """按仓库负责人限制非管理员的数据范围；未配置负责人时保持兼容。"""
+    """非管理员只能访问明确授权的启用仓库。"""
     roles = set(get_user_role_codes(db, user.id))
     if _can_access_all_warehouses(db, user, roles):
         return True
+    if roles == {"SUPPLIER_PORTAL"}:
+        return False
+    from app.modules.system.model import UserWarehouseGrant
     warehouse = db.get(Warehouse, warehouse_id)
-    return warehouse is not None and (warehouse.manager_id is None or warehouse.manager_id == user.id)
+    return warehouse is not None and warehouse.status == "ACTIVE" and db.get(UserWarehouseGrant, (user.id, warehouse_id)) is not None
 
 
 def _require_warehouse_scope(db: Session, user: User, warehouse_id: int) -> None:
@@ -93,7 +94,10 @@ def accessible_warehouse_ids(db: Session, user: User) -> set[int] | None:
     roles = set(get_user_role_codes(db, user.id))
     if _can_access_all_warehouses(db, user, roles):
         return None
-    return {value.id for value in db.scalars(select(Warehouse).where(Warehouse.status == "ACTIVE", (Warehouse.manager_id == user.id) | Warehouse.manager_id.is_(None))).all()}
+    if roles == {"SUPPLIER_PORTAL"}:
+        return set()
+    from app.modules.system.model import UserWarehouseGrant
+    return set(db.scalars(select(Warehouse.id).join(UserWarehouseGrant, UserWarehouseGrant.warehouse_id == Warehouse.id).where(UserWarehouseGrant.user_id == user.id, Warehouse.status == "ACTIVE")).all())
 
 def create_warehouse(db: Session, user: User, data: WarehouseCreate) -> Warehouse:
     """创建仓库主数据。"""
@@ -131,8 +135,10 @@ def list_warehouses(db: Session, user: User | None = None) -> list[Warehouse]:
     """查询启用仓库。"""
 
     statement = select(Warehouse).where(Warehouse.status == "ACTIVE")
-    if user is not None and not _can_access_all_warehouses(db, user, set(get_user_role_codes(db, user.id))):
-        statement = statement.where((Warehouse.manager_id == user.id) | Warehouse.manager_id.is_(None))
+    if user is not None:
+        ids = accessible_warehouse_ids(db, user)
+        if ids is not None:
+            statement = statement.where(Warehouse.id.in_(ids))
     return list(db.scalars(statement.order_by(Warehouse.id)).all())
 
 
@@ -294,13 +300,16 @@ def _get_issue_for_user(db: Session, user: User, issue_id: int, *, for_update: b
     roles = set(get_user_role_codes(db, user.id))
     if _can_access_all_warehouses(db, user, roles):
         return issue
-    if "WAREHOUSE" in roles:
+    if roles.intersection({"WAREHOUSE", "PROCUREMENT_MANAGER"}):
         if not issue.items:
             raise ResourceNotFoundError(f"库存领用申请 {issue_id} 不存在")
         for item in issue.items:
             _require_warehouse_scope(db, user, item.warehouse_id)
     elif issue.applicant_id != user.id:
         raise ResourceNotFoundError(f"库存领用申请 {issue_id} 不存在")
+    if _must_check_warehouse(db, user):
+        for item in issue.items:
+            _require_warehouse_scope(db, user, item.warehouse_id)
     return issue
 
 
@@ -380,10 +389,10 @@ def list_issue_requests(db: Session, user: User, *, status: str | None, page: in
     roles = set(get_user_role_codes(db, user.id))
     if _can_access_all_warehouses(db, user, roles):
         applicant_id, warehouse_ids = None, None
-    elif "WAREHOUSE" in roles:
+    elif roles.intersection({"WAREHOUSE", "PROCUREMENT_MANAGER"}):
         applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
     else:
-        applicant_id, warehouse_ids = user.id, None
+        applicant_id, warehouse_ids = user.id, accessible_warehouse_ids(db, user) if _must_check_warehouse(db, user) else None
     return crud.list_issue_requests(db, applicant_id=applicant_id, warehouse_ids=warehouse_ids, status=status, page=page, page_size=page_size)
 
 
@@ -594,7 +603,7 @@ def _get_transfer_for_user(db: Session, user: User, transfer_id: int, *, for_upd
     roles = set(get_user_role_codes(db, user.id))
     if _can_access_all_warehouses(db, user, roles):
         return transfer
-    if "WAREHOUSE" in roles:
+    if roles.intersection({"WAREHOUSE", "PROCUREMENT_MANAGER"}):
         if not transfer.items:
             raise ResourceNotFoundError(f"库存调拨申请 {transfer_id} 不存在")
         for item in transfer.items:
@@ -602,6 +611,10 @@ def _get_transfer_for_user(db: Session, user: User, transfer_id: int, *, for_upd
             _require_warehouse_scope(db, user, item.target_warehouse_id)
     elif transfer.applicant_id != user.id:
         raise ResourceNotFoundError(f"库存调拨申请 {transfer_id} 不存在")
+    if _must_check_warehouse(db, user):
+        for item in transfer.items:
+            _require_warehouse_scope(db, user, item.source_warehouse_id)
+            _require_warehouse_scope(db, user, item.target_warehouse_id)
     return transfer
 
 
@@ -679,10 +692,10 @@ def list_transfer_requests(db: Session, user: User, *, status: str | None, page:
     roles = set(get_user_role_codes(db, user.id))
     if _can_access_all_warehouses(db, user, roles):
         applicant_id, warehouse_ids = None, None
-    elif "WAREHOUSE" in roles:
+    elif roles.intersection({"WAREHOUSE", "PROCUREMENT_MANAGER"}):
         applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
     else:
-        applicant_id, warehouse_ids = user.id, None
+        applicant_id, warehouse_ids = user.id, accessible_warehouse_ids(db, user) if _must_check_warehouse(db, user) else None
     return crud.list_transfer_requests(db, applicant_id=applicant_id, warehouse_ids=warehouse_ids, status=status, page=page, page_size=page_size)
 
 
@@ -915,10 +928,12 @@ def _get_stocktake_for_user(db: Session, user: User, stocktake_id: int, *, for_u
     roles = set(get_user_role_codes(db, user.id))
     if _can_access_all_warehouses(db, user, roles):
         return stocktake
-    if "WAREHOUSE" in roles:
+    if roles.intersection({"WAREHOUSE", "PROCUREMENT_MANAGER"}):
         _require_warehouse_scope(db, user, stocktake.warehouse_id)
     elif stocktake.applicant_id != user.id:
         raise ResourceNotFoundError(f"库存盘点申请 {stocktake_id} 不存在")
+    if _must_check_warehouse(db, user):
+        _require_warehouse_scope(db, user, stocktake.warehouse_id)
     return stocktake
 
 
@@ -1010,10 +1025,10 @@ def list_stocktake_requests(db: Session, user: User, *, status: str | None, page
     roles = set(get_user_role_codes(db, user.id))
     if _can_access_all_warehouses(db, user, roles):
         applicant_id, warehouse_ids = None, None
-    elif "WAREHOUSE" in roles:
+    elif roles.intersection({"WAREHOUSE", "PROCUREMENT_MANAGER"}):
         applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
     else:
-        applicant_id, warehouse_ids = user.id, None
+        applicant_id, warehouse_ids = user.id, accessible_warehouse_ids(db, user) if _must_check_warehouse(db, user) else None
     return crud.list_stocktake_requests(db, applicant_id=applicant_id, warehouse_ids=warehouse_ids, status=status, page=page, page_size=page_size)
 
 

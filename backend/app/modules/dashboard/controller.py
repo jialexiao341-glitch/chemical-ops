@@ -18,8 +18,8 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 @router.get("/overview", response_model=DashboardOverview, summary="查询运营 Dashboard 概览")
 def overview(db: Session = Depends(get_db), user: User = Depends(require_permission("dashboard.read"))) -> DashboardOverview:
     """查询采购、库存、异常和财务核心指标。"""
-    from app.modules.system.data_scope import is_department_restricted
-    if is_department_restricted(db, user):
+    from app.modules.system.data_scope import is_department_restricted, is_warehouse_restricted
+    if is_department_restricted(db, user) or is_warehouse_restricted(db, user):
         from app.modules.dashboard.service import get_department_overview
         return get_department_overview(db, user)
     return get_overview(db)
@@ -33,8 +33,8 @@ def report(
     user: User = Depends(require_permission("dashboard.read")),
 ) -> DashboardReport:
     """按日期范围聚合订单状态、供应商采购金额和逾期到货数量。"""
-    from app.modules.system.data_scope import is_department_restricted
-    if is_department_restricted(db, user):
+    from app.modules.system.data_scope import is_department_restricted, is_warehouse_restricted
+    if is_department_restricted(db, user) or is_warehouse_restricted(db, user):
         from app.modules.dashboard.service import get_department_report
         return get_department_report(db, user, date_from=date_from, date_to=date_to)
     return get_report(db, date_from=date_from, date_to=date_to)

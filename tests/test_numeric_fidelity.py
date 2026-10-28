@@ -31,6 +31,7 @@ def test_query_rewrite_does_not_trust_question_numbers(monkeypatch, answer):
 def test_briefing_falls_back_before_push(monkeypatch):
     from app.modules.system import data_scope
     monkeypatch.setattr(data_scope, "is_department_restricted", lambda *_: False)
+    monkeypatch.setattr(data_scope, "is_warehouse_restricted", lambda *_: False)
     snapshot = {"date": "2026-10-21", "overview": {"purchase_orders_total": 12, "open_exceptions": 3}}
     monkeypatch.setattr(briefing, "build_snapshot", lambda *_, **__: snapshot)
     monkeypatch.setattr(briefing, "get_user_role_codes", lambda *_: ["SYS_ADMIN"])

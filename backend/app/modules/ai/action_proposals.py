@@ -71,10 +71,13 @@ def _preview(proposal: AIAgentActionProposal) -> AIActionProposalPreview:
 
 
 def _require_proposal_department_scope(db: Session, user: User, proposal: AIAgentActionProposal) -> None:
-    from app.modules.system.data_scope import department_scope_snapshot
+    from app.modules.system.data_scope import department_scope_snapshot, warehouse_scope_snapshot
     current = department_scope_snapshot(db, user)
     if current is not None and proposal.department_scope_snapshot != current:
         raise ResourceNotFoundError("动作提案不存在或当前部门授权已变化")
+    warehouses = warehouse_scope_snapshot(db, user)
+    if proposal.warehouse_scope_snapshot != warehouses:
+        raise ResourceNotFoundError("动作提案不存在或当前仓库授权已变化")
 
 
 def propose_action(db: Session, user: User, action_type: str, payload: dict, *, idempotency_key: str, evidence: list[dict] | None = None) -> AIActionProposalPreview:
@@ -93,7 +96,7 @@ def propose_action(db: Session, user: User, action_type: str, payload: dict, *, 
         if existing.action_type != action_type or existing.payload_hash != _hash(normalized):
             raise DuplicateResourceError("幂等键已用于其他动作或参数")
         return _preview(existing)
-    from app.modules.system.data_scope import department_scope_snapshot
+    from app.modules.system.data_scope import department_scope_snapshot, warehouse_scope_snapshot
     proposal = AIAgentActionProposal(
         confirmation_id=uuid4().hex,
         user_id=user.id,
@@ -105,6 +108,7 @@ def propose_action(db: Session, user: User, action_type: str, payload: dict, *, 
         payload_hash=_hash(normalized),
         expected_resource_snapshot=prepared.get("snapshot", {}),
         department_scope_snapshot=department_scope_snapshot(db, user),
+        warehouse_scope_snapshot=warehouse_scope_snapshot(db, user),
         diff=prepared.get("diff", []),
         evidence=evidence if evidence is not None else prepared.get("evidence", []),
         warnings=prepared.get("warnings", []),

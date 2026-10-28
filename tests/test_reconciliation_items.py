@@ -15,7 +15,7 @@ from app.modules.products.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
 from app.modules.suppliers.model import Supplier
 from app.modules.system.model import User
-from .conftest import login
+from .conftest import login, grant_test_warehouse
 
 pytestmark = pytest.mark.integration
 
@@ -28,6 +28,8 @@ def scenario(client, db_session, demo_password):
     products = list(db_session.scalars(select(Product).where(Product.status == "ACTIVE").limit(2)))
     supplier = db_session.scalar(select(Supplier).where(Supplier.status == "ACTIVE"))
     location = db_session.scalar(select(WarehouseLocation).where(WarehouseLocation.status == "ACTIVE"))
+    approver = db_session.scalar(select(User).where(User.username == "procurement_manager"))
+    grant_test_warehouse(db_session, approver.id, location.warehouse_id)
     suffix = uuid4().hex[:10]
     order = PurchaseOrder(po_no=f"TEST-ROW-{suffix}", supplier_id=supplier.id, buyer_id=user.id, order_amount=Decimal("314.3950528"), currency_code="CNY", status="COMPLETED")
     db_session.add(order); db_session.flush()

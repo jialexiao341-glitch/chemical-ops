@@ -107,6 +107,15 @@ def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session
     """同一领用申请执行两次时，第二次不会重复扣减。"""
 
     balance = get_available_balance(db_session)
+    from app.modules.system.model import User, UserWarehouseGrant, UserWarehouseScope
+    for username in ('technical_engineer', 'warehouse_receiver'):
+        actor = db_session.scalar(select(User).where(User.username == username))
+        if db_session.get(UserWarehouseScope, actor.id) is None:
+            db_session.add(UserWarehouseScope(user_id=actor.id))
+            db_session.flush()
+        if db_session.get(UserWarehouseGrant, (actor.id, balance.warehouse_id)) is None:
+            db_session.add(UserWarehouseGrant(user_id=actor.id, warehouse_id=balance.warehouse_id))
+    db_session.flush()
     quantity = min(Decimal("0.000001"), balance.quantity)
     technical = login(client, "technical_engineer", demo_password)
     manager = login(client, "procurement_manager", demo_password)

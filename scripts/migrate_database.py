@@ -313,6 +313,12 @@ def _apply_migration(connection, migration: Migration) -> None:
         _apply_purchase_order_source_guard(connection, migration)
     elif migration.version == "057":
         _apply_rfq_total_cost_repair(connection)
+    elif migration.version == "066":
+        # 授权回填依赖临时表识别原本未配置的账号；所有数据修改必须同一事务提交。
+        for statement in migration.path.read_text(encoding="utf-8").split(";"):
+            if statement.strip():
+                connection.exec_driver_sql(statement.strip())
+        connection.commit()
     else:
         _execute_sql_file(connection, migration)
 

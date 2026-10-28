@@ -69,6 +69,7 @@ class AIAgentActionProposal(Base):
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     expected_resource_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
     department_scope_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    warehouse_scope_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
     diff: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     evidence: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     warnings: Mapped[list] = mapped_column(JSON, nullable=False, default=list)

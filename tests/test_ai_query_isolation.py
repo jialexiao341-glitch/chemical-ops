@@ -61,7 +61,7 @@ def test_inventory_aggregate_and_sources_use_current_warehouse_scope(tool_db, mo
     citation = citation_for(tool_db, user, plan)
     assert {row["warehouse"] for row in citation["query_trace"]["rows"]} == {"本人仓库", "公共仓库"}
     assert history_access.query_accessible(tool_db, user, citation)
-    tool_db.execute(text("UPDATE warehouses SET manager_id=8 WHERE id=1"))
+    tool_db.execute(text("DELETE FROM sys_user_warehouse_grants WHERE user_id=7 AND warehouse_id=1"))
     assert not history_access.query_accessible(tool_db, user, citation)
 
 
@@ -137,7 +137,8 @@ def test_cross_user_cannot_load_conversation_or_routing_context(db_session):
 
 def test_revoked_history_is_not_sent_to_understanding_model(db_session, monkeypatch):
     user = db_session.scalar(select(User).where(User.username == "buyer"))
-    conversation = AIConversation(user_id=user.id, title="权限撤销", business_scene="GENERAL", status="ACTIVE")
+    conversation = AIConversation(user_id=user.id, title="权限撤销", business_scene="GENERAL", status="ACTIVE",
+                                  permission_snapshot=conversation_store.permission_snapshot(db_session, user))
     db_session.add(conversation)
     db_session.flush()
     db_session.add(AIMessage(conversation_id=conversation.id, message_role="ASSISTANT", content="不可再见的付款数字",

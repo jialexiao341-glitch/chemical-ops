@@ -125,3 +125,15 @@ class UserDepartmentGrant(Base):
     __tablename__ = "sys_user_department_grants"
     user_id: Mapped[int] = mapped_column(ForeignKey("sys_user_department_scopes.user_id", ondelete="CASCADE"), primary_key=True)
     department_id: Mapped[int] = mapped_column(ForeignKey("sys_departments.id"), primary_key=True)
+
+
+class UserWarehouseScope(Base):
+    """存在记录表示启用显式仓库授权，空授权表示不可访问。"""
+    __tablename__ = "sys_user_warehouse_scopes"
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_users.id", ondelete="CASCADE"), primary_key=True)
+
+
+class UserWarehouseGrant(Base):
+    __tablename__ = "sys_user_warehouse_grants"
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_user_warehouse_scopes.user_id", ondelete="CASCADE"), primary_key=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), primary_key=True)

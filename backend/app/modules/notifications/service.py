@@ -51,6 +51,14 @@ def notify_users(
     if exclude_scoped and active_ids:
         from app.modules.system.model import UserDepartmentScope
         restricted = set(db.scalars(select(UserDepartmentScope.user_id).where(UserDepartmentScope.user_id.in_(active_ids))).all())
+        role_sets = {}
+        for user_id, role_code in db.execute(select(UserRole.user_id, Role.role_code).join(
+            Role, Role.id == UserRole.role_id
+        ).where(UserRole.user_id.in_(active_ids), Role.status == "ACTIVE")):
+            role_sets.setdefault(user_id, set()).add(role_code)
+        unrestricted = {user_id for user_id, roles in role_sets.items()
+                        if "SYS_ADMIN" in roles or roles == {"SUPPLIER_PORTAL"}}
+        restricted.update(active_ids - unrestricted)
         admin_ids = set(db.scalars(select(UserRole.user_id).join(Role, Role.id == UserRole.role_id).where(
             UserRole.user_id.in_(restricted), Role.role_code == "SYS_ADMIN", Role.status == "ACTIVE"
         )).all()) if restricted else set()

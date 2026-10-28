@@ -35,6 +35,8 @@ from app.modules.system.schema import (
     UserUpdate,
     UserDepartmentScopeUpdate,
     UserDepartmentScopeRead,
+    UserWarehouseScopeUpdate,
+    UserWarehouseScopeRead,
     RegistrationCreate,
     RegistrationRead,
     RegistrationReview,
@@ -190,6 +192,16 @@ def get_user_supplier_binding(
 @router.get("/system/users/{user_id}/department-scope", response_model=UserDepartmentScopeRead, summary="查询用户部门授权")
 def get_user_department_scope(user_id: int, db: Session = Depends(get_db), user: User = Depends(_registration_admin)):
     return service.get_user_department_scope(db, user_id)
+
+
+@router.get("/system/users/{user_id}/warehouse-scope", response_model=UserWarehouseScopeRead, summary="查询用户仓库授权")
+def get_user_warehouse_scope(user_id: int, db: Session = Depends(get_db), user: User = Depends(_registration_admin)):
+    return service.get_user_warehouse_scope(db, user_id)
+
+
+@router.put("/system/users/{user_id}/warehouse-scope", response_model=UserWarehouseScopeRead, summary="设置用户仓库授权")
+def set_user_warehouse_scope(user_id: int, data: UserWarehouseScopeUpdate, db: Session = Depends(get_db), user: User = Depends(_registration_admin)):
+    return service.set_user_warehouse_scope(db, user_id, enabled=data.enabled, warehouse_ids=data.warehouse_ids, actor_id=user.id)
 
 
 @router.put("/system/users/{user_id}/department-scope", response_model=UserDepartmentScopeRead, summary="设置用户部门授权")

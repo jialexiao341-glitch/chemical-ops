@@ -23,6 +23,17 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.core.db import engine, get_db  # noqa: E402
+
+
+def grant_test_warehouse(db: Session, user_id: int, warehouse_id: int) -> None:
+    """在测试事务中为样本账号显式授权仓库。"""
+    from app.modules.system.model import UserWarehouseScope, UserWarehouseGrant
+    if db.get(UserWarehouseScope, user_id) is None:
+        db.add(UserWarehouseScope(user_id=user_id))
+        db.flush()
+    if db.get(UserWarehouseGrant, (user_id, warehouse_id)) is None:
+        db.add(UserWarehouseGrant(user_id=user_id, warehouse_id=warehouse_id))
+        db.flush()
 from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
 from app.modules.system.model import User  # noqa: E402
