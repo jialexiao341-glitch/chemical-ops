@@ -78,6 +78,22 @@ router = APIRouter(
 LOGGER = logging.getLogger('chemicalops.ai.http')
 
 
+@router.get('/documents', summary='查询业务文档')
+def document_list(kind: str | None = Query(default=None, pattern='^(quote|quality|invoice)$'),
+                  keyword: str | None = Query(default=None, max_length=255),
+                  page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100),
+                  db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.modules.ai import document_center
+    return document_center.list_documents(db, user, kind=kind, keyword=keyword, page=page, page_size=page_size)
+
+
+@router.get('/documents/{kind}/{object_id}/{file_id}/references', summary='查询文档引用')
+def document_references(kind: str, object_id: int, file_id: int,
+                        db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.modules.ai import document_center
+    return document_center.references(db, user, kind, object_id, file_id)
+
+
 @router.get("/operation-suggestions", summary="查询运营建议")
 def operation_suggestions(status: str | None = Query(default=None, pattern="^(OPEN|IGNORED|CLOSED|HANDED_OFF)$"),
                           page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100),

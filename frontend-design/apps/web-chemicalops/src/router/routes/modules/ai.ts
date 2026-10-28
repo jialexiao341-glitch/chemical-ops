@@ -32,6 +32,12 @@ const routes: RouteRecordRaw[] = [
     path: '/ai/tasks',
     component: () => import('#/views/ai/tasks/index.vue'),
   },
+  {
+    meta: { authority: ['ai.workspace.read'], hideInMenu: true, title: '业务文档' },
+    name: 'AiDocuments',
+    path: '/ai/documents',
+    component: () => import('#/views/ai/documents/index.vue'),
+  },
 ];
 
 export default routes;
