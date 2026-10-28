@@ -10,7 +10,7 @@ from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.deliveries import crud
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.deliveries.schema import DeliveryCreate, DeliveryReceive
-from app.modules.purchase_orders.scope import order_read_condition, ORDER_READ_ALL_ROLES
+from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderEvent
 from app.modules.operation_exceptions.service import create_automatic_exception
 from app.modules.notifications.service import notify_users
@@ -49,6 +49,10 @@ def _require_order(db: Session, user: User, po_id: int, *, for_update: bool = Fa
     if order is None:
         raise ResourceNotFoundError(f"采购订单 {po_id} 不存在")
     if not _can_manage_all(db, user) and not ((user.department_id is not None and order.department_id == user.department_id) or (user.department_id is None and order.buyer_id == user.id)):
+        raise ResourceNotFoundError(f"采购订单 {po_id} 不存在")
+    from sqlalchemy import literal
+    from app.modules.system.data_scope import department_scope_condition
+    if not db.scalar(select(department_scope_condition(user, get_user_role_codes(db, user.id), literal(order.department_id)))):
         raise ResourceNotFoundError(f"采购订单 {po_id} 不存在")
     return order
 
@@ -118,11 +122,8 @@ def create_delivery(db: Session, user: User, data: DeliveryCreate) -> Delivery:
 def list_deliveries(db: Session, user: User, *, keyword: str | None, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询到货单。"""
 
-    po_ids = None
     roles = set(get_user_role_codes(db, user.id))
-    if not _can_manage_all(db, user) and not ORDER_READ_ALL_ROLES.intersection(roles):
-        conditions = [order_read_condition(user, roles)]
-        po_ids = {order.id for order in db.scalars(select(PurchaseOrder).where(*conditions)).all()}
+    po_ids = {order.id for order in db.scalars(select(PurchaseOrder).where(order_read_condition(user, roles))).all()}
     return crud.list_page(db, po_ids=po_ids, keyword=keyword, status=status, page=page, page_size=page_size)
 
 
@@ -130,9 +131,8 @@ def get_delivery(db: Session, user: User, delivery_id: int) -> Delivery:
     """查询到货单详情并校验关联订单数据范围。"""
 
     delivery = _require_delivery(db, delivery_id)
-    if not _can_manage_all(db, user):
-        from app.modules.purchase_orders.service import read_order
-        read_order(db, user, delivery.po_id)
+    from app.modules.purchase_orders.service import read_order
+    read_order(db, user, delivery.po_id)
     return delivery
 
 

@@ -29,11 +29,8 @@ def _require_request(db: Session, request_id: int) -> InventoryFifoOutboundReque
 def _require_warehouse_scope(db: Session, user: User, warehouse: Warehouse) -> None:
     """FIFO 出库与普通仓储操作使用同一负责人范围。"""
 
-    roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
-        return
-    if warehouse.manager_id not in {None, user.id}:
-        raise ResourceNotFoundError(f"仓库 {warehouse.id} 不存在")
+    from app.modules.inventory.service import _require_warehouse_scope as require_inventory_scope
+    require_inventory_scope(db, user, warehouse.id)
 
 
 def allocate_outbound_cost(db: Session, transaction: InventoryTransaction, quantity: Decimal) -> Decimal:

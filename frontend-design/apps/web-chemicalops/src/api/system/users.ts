@@ -3,6 +3,10 @@ import type { PageQuery, PageResult } from '#/api/request';
 import { requestClient } from '#/api/request';
 
 export namespace SystemUserApi {
+  export interface DepartmentScope {
+    enabled: boolean;
+    department_ids: number[];
+  }
   export interface SupplierBindingOption {
     id: number;
     supplier_code: string;
@@ -92,6 +96,14 @@ export async function getUserSupplierBindingApi(id: number) {
 
 export async function setUserSupplierBindingApi(id: number, supplierId: number) {
   return requestClient.put<SystemUserApi.SupplierBinding>(`/system/users/${id}/supplier-binding`, { supplier_id: supplierId });
+}
+
+export async function getUserDepartmentScopeApi(id: number) {
+  return requestClient.get<SystemUserApi.DepartmentScope>(`/system/users/${id}/department-scope`);
+}
+
+export async function setUserDepartmentScopeApi(id: number, data: SystemUserApi.DepartmentScope) {
+  return requestClient.put<SystemUserApi.DepartmentScope>(`/system/users/${id}/department-scope`, data);
 }
 
 export async function reviewRegistrationApi(id: number, decision: 'approve' | 'reject', reason = '') {

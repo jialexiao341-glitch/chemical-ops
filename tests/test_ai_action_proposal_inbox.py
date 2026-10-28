@@ -12,6 +12,7 @@ from app.modules.ai.model import AIAgentActionProposal
 
 @pytest.fixture
 def proposal_db(monkeypatch):
+    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
     # The production model uses MySQL CURRENT_TIMESTAMP(3) for onupdate;
     # SQLite does not support that expression, so keep timestamp updates DB-neutral here.
     monkeypatch.setattr(AIAgentActionProposal.__table__.c.updated_at, "onupdate", None)
@@ -30,6 +31,7 @@ def proposal_db(monkeypatch):
                 payload JSON NOT NULL,
                 payload_hash VARCHAR(64) NOT NULL,
                 expected_resource_snapshot JSON NOT NULL,
+                department_scope_snapshot JSON,
                 diff JSON NOT NULL,
                 evidence JSON NOT NULL,
                 warnings JSON NOT NULL,

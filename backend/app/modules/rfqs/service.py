@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.purchase_requests.service import get_request as get_scoped_purchase_request
 from app.modules.rfqs import crud
+from app.modules.rfqs.scope import rfq_read_condition, rfq_write_condition
 from app.modules.rfqs.model import QuoteComparison, QuoteComparisonItem, RFQ, RFQItem, RFQSupplier, SupplierQuote, SupplierQuoteItem
 from app.modules.rfqs.schema import (
     QuoteSelection,
@@ -104,6 +105,9 @@ def create_rfq(db: Session, user: User, data: RFQCreate, *, commit: bool = True)
 
     if data.source_request_id is not None:
         get_scoped_purchase_request(db, user, data.source_request_id)
+    else:
+        from app.modules.purchase_requests.service import _validate_department_scope
+        _validate_department_scope(db, user, user.department_id)
     _validate_item_refs(db, data.items, data.source_request_id)
     _validate_suppliers(db, data.supplier_ids)
     rfq = RFQ(
@@ -129,26 +133,27 @@ def create_rfq(db: Session, user: User, data: RFQCreate, *, commit: bool = True)
 def list_rfqs(db: Session, user: User, *, keyword: str | None, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询询价单。"""
 
-    requester_id = None if bool({"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(get_user_role_codes(db, user.id))) else user.id
-    return crud.list_page(db, requester_id=requester_id, keyword=keyword, status=status, page=page, page_size=page_size)
+    scope = rfq_read_condition(user, get_user_role_codes(db, user.id))
+    return crud.list_page(db, scope_condition=scope, keyword=keyword, status=status, page=page, page_size=page_size)
 
 
-def get_rfq(db: Session, user: User, rfq_id: int, *, for_update: bool = False) -> RFQ:
+def get_rfq(db: Session, user: User, rfq_id: int, *, for_update: bool = False, for_write: bool = False) -> RFQ:
     """查询询价详情并执行基础数据范围校验。"""
 
     rfq = crud.get_by_id(db, rfq_id, for_update=for_update)
     if rfq is None:
         raise ResourceNotFoundError("询价单不存在")
-    if rfq.requester_id != user.id:
-        if not bool({"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(get_user_role_codes(db, user.id))):
-            raise BusinessValidationError("无权查看其他用户创建的询价单")
+    roles = get_user_role_codes(db, user.id)
+    scope = rfq_write_condition(user, roles) if for_write else rfq_read_condition(user, roles)
+    if db.scalar(select(RFQ.id).where(RFQ.id == rfq_id, scope)) is None:
+        raise BusinessValidationError("无权查看其他用户创建的询价单")
     return rfq
 
 
 def update_rfq(db: Session, user: User, rfq_id: int, data: RFQUpdate) -> RFQ:
     """更新询价草稿。"""
 
-    rfq = get_rfq(db, user, rfq_id)
+    rfq = get_rfq(db, user, rfq_id, for_write=True)
     if rfq.status != "DRAFT":
         raise BusinessValidationError("只有草稿状态的询价单可以修改")
     values = data.model_dump(exclude_unset=True)
@@ -172,7 +177,7 @@ def update_rfq(db: Session, user: User, rfq_id: int, data: RFQUpdate) -> RFQ:
 def send_rfq(db: Session, user: User, rfq_id: int, *, commit: bool = True) -> RFQ:
     """发送询价并进入等待报价状态。"""
 
-    rfq = get_rfq(db, user, rfq_id, for_update=True)
+    rfq = get_rfq(db, user, rfq_id, for_update=True, for_write=True)
     if rfq.status != "DRAFT":
         raise BusinessValidationError("只有草稿状态的询价单可以发送")
     if not rfq.items or not rfq.suppliers:
@@ -190,7 +195,7 @@ def send_rfq(db: Session, user: User, rfq_id: int, *, commit: bool = True) -> RF
 def create_quote(db: Session, user: User, rfq_id: int, data: SupplierQuoteCreate) -> RFQ:
     """录入一份供应商报价，并更新供应商响应状态。"""
 
-    rfq = get_rfq(db, user, rfq_id)
+    rfq = get_rfq(db, user, rfq_id, for_write=True)
     return create_quote_for_supplier(db, user, rfq, data.supplier_id, data)
 
 
@@ -265,7 +270,7 @@ def create_quote_for_supplier(
 def build_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
     """按统一币种、单位和税务口径生成可解释的报价比价快照。"""
 
-    rfq = get_rfq(db, user, rfq_id)
+    rfq = get_rfq(db, user, rfq_id, for_write=True)
     quotes = [quote for quote in rfq.quotes if quote.status == "SUBMITTED"]
     if not quotes:
         raise BusinessValidationError("当前询价单还没有可比较的报价")
@@ -509,7 +514,7 @@ def select_quote(db: Session, user: User, rfq_id: int, data: QuoteSelection, *, 
 
     # 固定锁序：询价单 -> 比价单；锁定读取刷新已有 identity map。
     db.scalar(select(RFQ).where(RFQ.id == rfq_id).with_for_update().execution_options(populate_existing=True))
-    rfq = get_rfq(db, user, rfq_id)
+    rfq = get_rfq(db, user, rfq_id, for_write=True)
     if rfq.status == "CLOSED":
         raise DuplicateResourceError("询价单已经完成定标，不能重复确认")
     comparison = db.scalar(select(QuoteComparison).where(

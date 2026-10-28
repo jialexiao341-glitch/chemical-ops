@@ -34,8 +34,11 @@ def test_upload_download_and_attach_file(
 
     _use_local_storage(monkeypatch, tmp_path, request)
     manager = login(client, "procurement_manager", demo_password)
-    order_id = db_session.scalar(select(PurchaseOrder.id).order_by(PurchaseOrder.id))
-    assert order_id is not None
+    order = db_session.scalar(select(PurchaseOrder).order_by(PurchaseOrder.id))
+    assert order is not None
+    order.status = "DRAFT"
+    db_session.flush()
+    order_id = order.id
     uploaded = client.post(
         "/api/v1/files",
         headers=manager,
@@ -55,6 +58,11 @@ def test_upload_download_and_attach_file(
     assert attached.status_code == 201, attached.text
     duplicate = client.post(f"/api/v1/files/{file_id}/attachments", headers=manager, json={"resource_type": "PURCHASE_ORDER", "resource_id": order_id})
     assert duplicate.status_code == 409
+    order.status = "COMPLETED"
+    db_session.flush()
+    admin = login(client, "system_admin", demo_password)
+    locked = client.post(f"/api/v1/files/{file_id}/attachments", headers=admin, json={"resource_type": "PURCHASE_ORDER", "resource_id": order_id})
+    assert locked.status_code == 400
     listed = client.get(f"/api/v1/files/attachments/PURCHASE_ORDER/{order_id}", headers=manager)
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
@@ -84,8 +92,11 @@ def test_linked_file_requires_business_resource_permission(
 
     _use_local_storage(monkeypatch, tmp_path, request)
     procurement_manager = login(client, "procurement_manager", demo_password)
-    order_id = db_session.scalar(select(PurchaseOrder.id).order_by(PurchaseOrder.id))
-    assert order_id is not None
+    order = db_session.scalar(select(PurchaseOrder).order_by(PurchaseOrder.id))
+    assert order is not None
+    order.status = "DRAFT"
+    db_session.flush()
+    order_id = order.id
     uploaded = client.post(
         "/api/v1/files",
         headers=procurement_manager,

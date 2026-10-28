@@ -31,6 +31,7 @@ USER = SimpleNamespace(id=7)
 @pytest.fixture
 def task_db(tool_db, monkeypatch):
     """复用真实 SQL 的隔离业务样本，额外建立任务表和有限预算配置。"""
+    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
     AIAgentTask.__table__.create(tool_db.bind)
     monkeypatch.setattr(runtime, "get_settings", lambda: Settings(_env_file=None, agent_execution_mode="in_process", openai_api_key="test-key"))
     return tool_db
@@ -546,7 +547,7 @@ def test_select_all_without_pending_candidates_is_rejected(task_db, model_script
 
 def test_multiple_rfqs_pause_and_keep_confirmed_product_on_continue(task_db, model_script):
     """多询价选择继续时保留产品上下文，但仍重新验证产品和询价范围。"""
-    task_db.execute(text("INSERT INTO rfqs VALUES (4, 'RFQ-OWN-2', 7, 'SENT')"))
+    task_db.execute(text("INSERT INTO rfqs (id, rfq_no, requester_id, status) VALUES (4, 'RFQ-OWN-2', 7, 'SENT')"))
     task_db.execute(text("INSERT INTO rfq_items VALUES (41, 4, 1, '工业级', NULL, 1, 10)"))
     task_db.commit()
     actions, _ = model_script
@@ -771,8 +772,7 @@ def test_actual_model_adapter_uses_planner_prompt_and_json_protocol(task_db, mon
 
 def test_background_api_returns_id_then_persists_wait_and_continues(task_db, model_script, monkeypatch):
     """202 先返回编号；后台独立会话保存追问；刷新、版本续跑与取消沿用本人鉴权。"""
-    task_db.execute(text("CREATE TABLE sys_users (id INTEGER PRIMARY KEY, status TEXT)"))
-    task_db.execute(text("INSERT INTO sys_users VALUES (7, 'ACTIVE')"))
+    task_db.execute(text("INSERT INTO sys_users (id, status) VALUES (7, 'ACTIVE')"))
     task_db.commit()
     monkeypatch.setattr(runtime, 'SessionLocal', lambda: Session(task_db.bind))
     app = FastAPI()
@@ -984,8 +984,7 @@ def test_agent_accepts_only_ticket_bound_pending_clarification(task_db, monkeypa
 
 def test_disabled_user_stops_background_before_model(task_db, model_script, monkeypatch):
     """启动后用户停用，后台使用当前用户状态停止。"""
-    task_db.execute(text("CREATE TABLE sys_users (id INTEGER PRIMARY KEY, status TEXT)"))
-    task_db.execute(text("INSERT INTO sys_users VALUES (7, 'INACTIVE')"))
+    task_db.execute(text("INSERT INTO sys_users (id, status) VALUES (7, 'INACTIVE')"))
     task_db.commit()
     monkeypatch.setattr(runtime, 'SessionLocal', lambda: Session(task_db.bind))
     prepared = runtime.prepare_task(task_db, USER, runtime.TaskCreate(question='查测试乙醇'))
@@ -1001,8 +1000,7 @@ def chat_task_db(task_db, monkeypatch):
         "CREATE TABLE ai_conversations (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, business_scene TEXT, permission_snapshot JSON, status TEXT, pinned BOOLEAN DEFAULT 0, last_message_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE ai_conversation_state (id INTEGER PRIMARY KEY, conversation_id INTEGER UNIQUE, thread_id TEXT UNIQUE, memory_state JSON, query_plan JSON, query_trace JSON, permission_snapshot JSON, attachment_refs JSON, state_version INTEGER DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE ai_messages (id INTEGER PRIMARY KEY, conversation_id INTEGER, message_role TEXT, content TEXT, citations JSON, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE TABLE sys_users (id INTEGER PRIMARY KEY, status TEXT)",
-        "INSERT INTO sys_users VALUES (7, 'ACTIVE')",
+        "INSERT INTO sys_users (id, status) VALUES (7, 'ACTIVE')",
     ):
         task_db.execute(text(ddl))
     task_db.commit()

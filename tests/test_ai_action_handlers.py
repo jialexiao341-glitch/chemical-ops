@@ -44,7 +44,7 @@ def test_create_draft_catalog_validation_uses_product_code_with_valid_limit(monk
 def test_update_request_flushes_without_committing_when_used_by_action_transaction(monkeypatch):
     request = SimpleNamespace(id=8, status="DRAFT", purpose="旧用途", items=[])
     db = _DB()
-    monkeypatch.setattr(service, "get_request", lambda *_args, **_kwargs: request)
+    monkeypatch.setattr(service, "get_request_for_write", lambda *_args, **_kwargs: request)
     monkeypatch.setattr(service, "_audit", lambda *_args: None)
     result = service.update_request(db, SimpleNamespace(id=5), 8, PurchaseRequestUpdate(purpose="新用途"), commit=False)
     assert result.purpose == "新用途"
@@ -56,7 +56,7 @@ def test_submit_request_flushes_without_committing_when_used_by_action_transacti
     request = SimpleNamespace(id=8, status="DRAFT", items=[object()], approvals=[], submitted_at=None,
                               rejected_at=None, cancelled_at=None, cancel_reason=None)
     db = _DB()
-    monkeypatch.setattr(service, "get_request", lambda *_args, **_kwargs: request)
+    monkeypatch.setattr(service, "get_request_for_write", lambda *_args, **_kwargs: request)
     monkeypatch.setattr(service.crud, "delete_approvals", lambda *_args: None)
     monkeypatch.setattr(service, "_validate_items", lambda *_args: None)
     monkeypatch.setattr(service, "_audit", lambda *_args: None)
@@ -68,6 +68,8 @@ def test_submit_request_flushes_without_committing_when_used_by_action_transacti
 
 
 def test_create_rfq_flushes_without_committing_when_used_by_action_transaction(monkeypatch):
+    from app.modules.purchase_requests import service as request_service
+    monkeypatch.setattr(request_service, "_validate_department_scope", lambda *_args: None)
     class RFQDB(_DB):
         def add(self, row):
             self.row = row
@@ -82,7 +84,7 @@ def test_create_rfq_flushes_without_committing_when_used_by_action_transaction(m
     monkeypatch.setattr(rfq_service, "_validate_suppliers", lambda *_args: None)
     monkeypatch.setattr(rfq_service, "add_audit_log", lambda *_args, **_kwargs: None)
     data = RFQCreate(items=[RFQItemCreate(requested_name="乙醇", quantity=1, unit_id=3)], supplier_ids=[7])
-    created = rfq_service.create_rfq(db, SimpleNamespace(id=5), data, commit=False)
+    created = rfq_service.create_rfq(db, SimpleNamespace(id=5, department_id=None), data, commit=False)
     assert isinstance(created, rfq_service.RFQ)
     assert created.rfq_no.startswith("RFQ")
     assert db.flushes == 1

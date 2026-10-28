@@ -87,3 +87,17 @@ def test_order_trace_route_returns_deterministic_citation_without_text2sql(monke
     assert trace.rows[0]["stage"] == "采购订单"
     assert trace.rows[0]["records"][0]["number"] == "PO-26001"
 
+
+
+def test_trace_uses_same_order_read_policy_as_detail(monkeypatch) -> None:
+    import pytest
+    from app.core.errors import ResourceNotFoundError
+    from app.modules.ai import order_trace
+    from app.modules.purchase_orders import service as orders
+    order = SimpleNamespace(id=4, po_no='PO-4', department_id=7, buyer_id=1)
+    user = SimpleNamespace(id=1, department_id=7)
+    def deny(*_args):
+        raise ResourceNotFoundError('不可见')
+    monkeypatch.setattr(orders, 'read_order', deny)
+    with pytest.raises(ResourceNotFoundError):
+        order_trace._require_order_scope(None, user, order, {'BUYER'})

@@ -72,6 +72,13 @@ def isolated_mysql_engine():
                 "CREATE TABLE sys_users (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
             )
             connection.exec_driver_sql(
+                "CREATE TABLE sys_user_department_scopes (user_id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+            )
+            connection.exec_driver_sql(
+                "CREATE TABLE sys_user_department_grants (user_id INT NOT NULL, department_id INT NOT NULL, "
+                "PRIMARY KEY (user_id, department_id)) ENGINE=InnoDB"
+            )
+            connection.exec_driver_sql(
                 "CREATE TABLE purchase_requests ("
                 "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB"
             )

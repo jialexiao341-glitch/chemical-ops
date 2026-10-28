@@ -38,12 +38,12 @@ def list_products(
     )
 
 
-def create_product(db: Session, data: ProductCreate) -> Product:
+def create_product(db: Session, data: ProductCreate, *, commit: bool = True) -> Product:
     """校验产品编码唯一后创建产品。关联 ID 的存在性由数据库外键保证。"""
 
     if crud.get_by_code(db, data.product_code):
         raise DuplicateResourceError(f"产品编码 {data.product_code} 已存在")
-    return crud.create(db, data)
+    return crud.create(db, data, commit=commit)
 
 
 def update_product(db: Session, product_id: int, data: ProductUpdate) -> Product:

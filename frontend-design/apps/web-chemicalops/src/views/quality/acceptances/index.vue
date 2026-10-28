@@ -114,6 +114,21 @@ async function openAiRecord(rawId: unknown) {
   }
 }
 
+async function openReportRecord(rawId: unknown) {
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return;
+  try {
+    const fileId = Number(route.query.report_file_id);
+    const reviewId = Number(route.query.report_review_id);
+    reportReviewApi.setData({ ...await getAcceptanceApi(id), preferred_report_file_id: Number.isInteger(fileId) && fileId > 0 ? fileId : undefined, preferred_review_id: Number.isInteger(reviewId) && reviewId > 0 ? reviewId : undefined }).open();
+  } catch {
+    // 详情接口负责重新校验当前权限。
+  }
+}
+
+onMounted(() => { if (route.query.report_id) void openReportRecord(route.query.report_id); });
+watch(() => [route.query.report_id, route.query.report_file_id, route.query.report_review_id], ([id]) => { if (id) void openReportRecord(id); });
+
 watch(
   () => route.query.ai_filters,
   async (rawQuery) => {

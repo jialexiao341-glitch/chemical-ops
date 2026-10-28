@@ -49,6 +49,28 @@ RESOURCE_READ_PERMISSIONS = {
     "SUPPLIER_QUALITY_DOCUMENT": "supplier.portal.quality.read",
 }
 
+RESOURCE_ATTACHMENT_PERMISSIONS = {
+    "PURCHASE_ORDER": "procurement.orders.write",
+    "DELIVERY": "warehouse.deliveries.write",
+    "QUALITY_ACCEPTANCE": "quality.acceptances.write",
+    "OPERATION_EXCEPTION": "operations.exceptions.write",
+    "FINANCE_INVOICE": "finance.invoices.write",
+    "INVENTORY_RETURN": "warehouse.inventory.return.write",
+    "REPLENISHMENT": "procurement.replenishment.write",
+    "SUPPLIER_QUALITY_DOCUMENT": "supplier.portal.quality.submit",
+}
+
+# 附件是业务记录的一部分；仅允许仍可编辑或办理的阶段追加。
+ATTACHMENT_ALLOWED_STATUSES = {
+    "PURCHASE_ORDER": frozenset({"DRAFT", "APPROVING", "APPROVED", "ORDERED", "PARTIAL"}),
+    "DELIVERY": frozenset({"IN_TRANSIT", "RECEIVED", "INSPECTING", "EXCEPTION"}),
+    "INVENTORY_RETURN": frozenset({"DRAFT", "REJECTED"}),
+    "REPLENISHMENT": frozenset({"DRAFT", "REJECTED"}),
+    "FINANCE_INVOICE": frozenset({"DRAFT", "REJECTED"}),
+    "OPERATION_EXCEPTION": frozenset({"OPEN", "PROCESSING", "RESOLVED"}),
+    "SUPPLIER_QUALITY_DOCUMENT": frozenset({"SUBMITTED"}),
+}
+
 _GENERIC_MIME_TYPES = {"", "application/octet-stream", "binary/octet-stream"}
 _EXTENSION_MIME_TYPES: dict[str, set[str]] = {
     "pdf": {"application/pdf"},
@@ -239,6 +261,32 @@ def _check_resource_access(db: Session, user: User, resource_type: str, resource
         raise ResourceNotFoundError(f"业务资源 {resource_type}:{resource_id} 不存在")
 
 
+def _check_resource_write_access(db: Session, user: User, resource_type: str, resource) -> None:
+    """关联附件须有业务办理权限，并遵循目标记录的办理范围。"""
+    if not _is_system_admin(db, user):
+        required = RESOURCE_ATTACHMENT_PERMISSIONS.get(resource_type)
+        if required is None or required not in get_user_permission_codes(db, user.id):
+            raise ResourceNotFoundError(f"业务资源 {resource_type}:{resource.id} 不存在")
+        if resource_type == "PURCHASE_ORDER":
+            from app.modules.purchase_orders.service import get_order
+            get_order(db, user, resource.id)
+        elif resource_type == "DELIVERY":
+            from app.modules.deliveries.service import _require_order
+            _require_order(db, user, resource.po_id)
+        elif resource_type == "OPERATION_EXCEPTION":
+            from app.modules.operation_exceptions.service import _require_task_creation_scope
+            _require_task_creation_scope(db, user, resource)
+        elif resource_type == "QUALITY_ACCEPTANCE":
+            roles = set(get_user_role_codes(db, user.id))
+            if "QUALITY_MANAGER" not in roles and resource.inspector_id != user.id:
+                raise ResourceNotFoundError(f"业务资源 {resource_type}:{resource.id} 不存在")
+    allowed_statuses = ATTACHMENT_ALLOWED_STATUSES.get(resource_type)
+    if allowed_statuses is not None and resource.status not in allowed_statuses:
+        raise BusinessValidationError("当前业务状态不允许关联附件")
+    if resource_type == "QUALITY_ACCEPTANCE" and resource.result not in {"PENDING", "REINSPECTION", "PASSED", "PARTIAL", "FAILED"}:
+        raise BusinessValidationError("当前验收状态不允许关联附件")
+
+
 def _check_file_access(db: Session, user: User, value: SysFile) -> None:
     """校验文件自身权限，并阻止通过文件 ID 绕过已关联资源权限。"""
 
@@ -386,6 +434,12 @@ def attach_file(db: Session, user: User, file_id: int, data: FileAttachmentCreat
     file_value = _require_file(db, file_id)
     _check_file_access(db, user, file_value)
     _check_resource_access(db, user, data.resource_type, data.resource_id)
+    resource = db.scalar(select(RESOURCE_MODELS[data.resource_type]).where(
+        RESOURCE_MODELS[data.resource_type].id == data.resource_id
+    ).with_for_update().execution_options(populate_existing=True))
+    if resource is None or not _can_access_resource_instance(db, user, data.resource_type, resource):
+        raise ResourceNotFoundError(f"业务资源 {data.resource_type}:{data.resource_id} 不存在")
+    _check_resource_write_access(db, user, data.resource_type, resource)
     if db.scalar(select(SysFileAttachment).where(SysFileAttachment.file_id == file_id, SysFileAttachment.resource_type == data.resource_type, SysFileAttachment.resource_id == data.resource_id)) is not None:
         raise DuplicateResourceError("该文件已经关联到此业务资源")
     value = SysFileAttachment(file_id=file_id, resource_type=data.resource_type, resource_id=data.resource_id, created_by=user.id)

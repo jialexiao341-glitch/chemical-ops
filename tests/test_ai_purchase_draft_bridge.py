@@ -46,6 +46,7 @@ def _trace():
 
 @pytest.fixture
 def bridge_db(monkeypatch):
+    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
     engine = create_engine("sqlite:///:memory:", echo=False, connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     with engine.begin() as connection:

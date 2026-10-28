@@ -19,6 +19,7 @@ const props = defineProps<{
   pageSize: number;
   keyword: string;
   status: string;
+  statusLabel?: string;
   statusOptions: { label: string; value: string }[];
   fetchRecords: () => Promise<void>;
   exportPermission?: string;
@@ -48,9 +49,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
         componentProps: { allowClear: true, class: 'w-full', placeholder: '请输入单据编号或关键词' },
       },
       {
-        component: 'Select', fieldName: 'status', label: '状态',
+        component: 'Select', fieldName: 'status', label: props.statusLabel || '状态',
         defaultValue: initialStatus,
-        componentProps: { allowClear: true, class: 'w-full', options: props.statusOptions, placeholder: '全部状态' },
+        componentProps: { allowClear: true, class: 'w-full', options: props.statusOptions, placeholder: props.statusLabel ? `全部${props.statusLabel}` : '全部状态' },
       },
     ],
   },

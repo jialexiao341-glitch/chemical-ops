@@ -80,11 +80,11 @@ def test_quote_statistics_are_isolated_by_requester(tool_db, monkeypatch):
 @pytest.mark.parametrize("department_id,expected", [(10, [1]), (None, [1])])
 def test_approved_unquoted_requests_do_not_cross_department_or_applicant(tool_db, monkeypatch, department_id, expected):
     monkeypatch.setattr(text2sql, "get_user_role_codes", lambda *_: [])
-    tool_db.execute(text("CREATE TABLE purchase_requests (id INTEGER PRIMARY KEY, request_no TEXT, purpose TEXT, priority TEXT, approved_at TEXT, expected_date TEXT, status TEXT, department_id INTEGER, applicant_id INTEGER)"))
+    for column in ('request_no TEXT', 'purpose TEXT', 'priority TEXT', 'approved_at TEXT', 'expected_date TEXT', 'status TEXT', 'applicant_id INTEGER'):
+        tool_db.execute(text(f"ALTER TABLE purchase_requests ADD COLUMN {column}"))
     tool_db.execute(text("CREATE TABLE purchase_request_items (id INTEGER PRIMARY KEY, request_id INTEGER)"))
-    tool_db.execute(text("ALTER TABLE rfqs ADD COLUMN source_request_id INTEGER"))
     tool_db.execute(text("ALTER TABLE rfq_items ADD COLUMN source_request_item_id INTEGER"))
-    tool_db.execute(text("INSERT INTO purchase_requests VALUES (1, 'OWN', '本人', 'NORMAL', NULL, NULL, 'APPROVED', 10, 7), (2, 'OTHER', '其他部门', 'NORMAL', NULL, NULL, 'APPROVED', 20, 8)"))
+    tool_db.execute(text("INSERT INTO purchase_requests (id, request_no, purpose, priority, approved_at, expected_date, status, department_id, applicant_id) VALUES (1, 'OWN', '本人', 'NORMAL', NULL, NULL, 'APPROVED', 10, 7), (2, 'OTHER', '其他部门', 'NORMAL', NULL, NULL, 'APPROVED', 20, 8)"))
     plan = text2sql.QueryPlan(dataset="approved_requests_without_rfq", metric="records", time_field=None)
     rows = tool_db.execute(text2sql.build_statement(plan, tool_db, SimpleNamespace(id=7, department_id=department_id))).mappings().all()
     assert [row["_source_record_id"] for row in rows] == expected

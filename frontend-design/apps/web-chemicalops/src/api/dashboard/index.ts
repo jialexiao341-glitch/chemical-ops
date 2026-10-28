@@ -13,8 +13,9 @@ export namespace DashboardApi {
   export interface Overview {
     confirmed_reconciliations: number;
     deliveries_overdue: number;
-    expiry_alerts: number;
-    inventory_quantity: string;
+    expiry_alerts: null | number;
+    inventory_available: boolean;
+    inventory_quantity: null | string;
     inventory_units: InventoryUnit[];
     open_exceptions: number;
     paid_amount: string;
@@ -77,6 +78,7 @@ export namespace DashboardApi {
   export interface Report {
     date_from?: null | string;
     date_to?: null | string;
+    inventory_available: boolean;
     inventory_alerts: InventoryAlertRow[];
     inventory_costs: CostRow[];
     order_statuses: StatusRow[];

@@ -71,7 +71,7 @@ TABLE_REFERENCE = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", re.I
 FORBIDDEN_SQL = re.compile(r"\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|CALL|LOAD|OUTFILE|INTO)\b", re.I)
 
 
-def validate_sql(sql: str, table_names: frozenset[str]) -> str:
+def _validate_sql_syntax(sql: str) -> str:
     normalized = re.sub(r"\s+", " ", sql.strip())
     if not normalized.upper().startswith("SELECT "):
         raise BusinessValidationError("只允许生成查询语句")
@@ -79,6 +79,11 @@ def validate_sql(sql: str, table_names: frozenset[str]) -> str:
         raise BusinessValidationError("查询语句包含不允许的分隔符或注释")
     if FORBIDDEN_SQL.search(normalized):
         raise BusinessValidationError("查询语句包含危险操作")
+    return normalized
+
+
+def validate_sql(sql: str, table_names: frozenset[str]) -> str:
+    normalized = _validate_sql_syntax(sql)
     referenced = set(TABLE_REFERENCE.findall(normalized.replace(chr(96), "")))
     if not referenced or not referenced.issubset(table_names):
         raise BusinessValidationError("查询使用了未授权的数据表")
@@ -135,6 +140,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
     if spec is None:
         raise BusinessValidationError("未授权的数据集")
     if plan.dataset == "approved_requests_without_rfq":
+        from app.modules.purchase_requests.scope import request_read_condition
         direct_rfq = exists(select(1).where(RFQ.source_request_id == PurchaseRequest.id))
         item_rfq = exists(
             select(1)
@@ -156,10 +162,8 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             .order_by(PurchaseRequest.approved_at.desc(), PurchaseRequest.id.desc())
             .limit(plan.limit + 1)
         )
-        if user is not None and db is not None and not {"SYS_ADMIN", "PROCUREMENT_MANAGER"}.intersection(get_user_role_codes(db, user.id)):
-            condition = (PurchaseRequest.department_id == user.department_id if user.department_id is not None
-                         else PurchaseRequest.applicant_id == user.id)
-            statement = statement.where(condition)
+        if user is not None and db is not None:
+            statement = statement.where(request_read_condition(user, get_user_role_codes(db, user.id)))
         return statement
     if plan.dataset == "overdue_unfulfilled_orders":
         from app.modules.inventory.service import accessible_warehouse_ids
@@ -571,6 +575,9 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
                 delivery_observations = delivery_observations.where(PurchaseOrder.department_id == user.department_id)
             else:
                 delivery_observations = delivery_observations.where(PurchaseOrder.buyer_id == user.id)
+        if user is not None and db is not None:
+            from app.modules.system.data_scope import department_scope_condition
+            delivery_observations = delivery_observations.where(department_scope_condition(user, role_codes, PurchaseOrder.department_id))
         delivery_observations = delivery_observations.subquery()
         actual_delivery = (
             select(
@@ -604,6 +611,10 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             from app.modules.operation_exceptions.service import _exception_record_scope_condition
 
             exception_scope = _exception_record_scope_condition(db, user)
+            if exception_scope is not True:
+                # 异常访问策略跨多个来源表；仅对此服务端谓词单独校验。
+                from sqlalchemy import true
+                exception_scope = (exception_scope.self_group() == true())._annotate({'trusted_exception_scope': True})
             supplier_exceptions = supplier_exceptions.where(exception_scope)
             open_supplier_exceptions = open_supplier_exceptions.where(exception_scope)
 
@@ -651,8 +662,9 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         )
         if product_ids:
             statement = statement.where(Product.id.in_(product_ids))
-        if user is not None and db is not None and not can_manage_all:
-            statement = statement.where(RFQ.requester_id == user.id)
+        if user is not None and db is not None:
+            from app.modules.rfqs.scope import rfq_read_condition
+            statement = statement.where(rfq_read_condition(user, role_codes))
         return statement
     stmt, model, aliases = _base_statement(plan)
     metric = func.count(model.id) if plan.metric in {"count", "amount"} else func.sum(_field(model, "quantity"))
@@ -685,8 +697,8 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         if plan.date_to: predicates.append(time_field < date.fromordinal(plan.date_to.toordinal() + 1))
     if predicates: stmt = stmt.where(and_(*predicates))
     if user is not None and db is not None and plan.dataset == "supplier_quotes":
-        if not {"SYS_ADMIN", "PROCUREMENT_MANAGER"}.intersection(get_user_role_codes(db, user.id)):
-            stmt = stmt.where(RFQ.requester_id == user.id)
+        from app.modules.rfqs.scope import rfq_read_condition
+        stmt = stmt.where(rfq_read_condition(user, get_user_role_codes(db, user.id)))
     if user is not None and db is not None and plan.dataset in {"inventory", "inventory_transactions"}:
         from app.modules.inventory.service import accessible_warehouse_ids
 
@@ -707,10 +719,8 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
 
         stmt = stmt.where(acceptance_read_condition(user, get_user_role_codes(db, user.id)))
     if user is not None and db is not None and plan.dataset == "purchase_requests":
-        if not {"SYS_ADMIN", "PROCUREMENT_MANAGER"}.intersection(get_user_role_codes(db, user.id)):
-            condition = (PurchaseRequest.department_id == user.department_id if user.department_id is not None
-                         else PurchaseRequest.applicant_id == user.id)
-            stmt = stmt.where(condition)
+        from app.modules.purchase_requests.scope import request_read_condition
+        stmt = stmt.where(request_read_condition(user, get_user_role_codes(db, user.id)))
     if user is not None and db is not None and plan.dataset == "exceptions":
         from app.modules.operation_exceptions.service import _exception_record_scope_condition
 
@@ -840,6 +850,28 @@ def _compile_statement(statement: Select[Any], db: Session, *, literal_binds: bo
     bind = db.get_bind() if callable(getattr(db, "get_bind", None)) else None
     dialect = getattr(bind, "dialect", None)
     return str(statement.compile(dialect=dialect, compile_kwargs={"literal_binds": literal_binds}))
+
+
+def _validate_scoped_statement(statement: Select[Any], db: Session, table_names: frozenset[str], *, literal_binds: bool) -> str:
+    """分别校验业务查询和服务端生成的部门范围条件。"""
+    from sqlalchemy import true
+    from sqlalchemy.sql import visitors
+
+    internal_tables = frozenset({"sys_user_department_scopes", "sys_user_department_grants", "sys_users", "purchase_requests"})
+
+    def replace_scope(node):
+        if node._annotations.get('trusted_department_scope') or node._annotations.get('trusted_exception_scope'):
+            scope_sql = _compile_statement(select(1).where(node), db, literal_binds=literal_binds)
+            scope_tables = table_names | internal_tables
+            if node._annotations.get('trusted_exception_scope'):
+                scope_tables |= CATALOG['exceptions'].tables
+            validate_sql(scope_sql, scope_tables)
+            return true()
+        return None
+
+    business_statement = visitors.replacement_traverse(statement, {}, replace_scope)
+    validate_sql(_compile_statement(business_statement, db, literal_binds=literal_binds), table_names)
+    return _validate_sql_syntax(_compile_statement(statement, db, literal_binds=literal_binds))
 
 
 def _validate_plan(db: Session, user: User, plan: QueryPlan) -> None:
@@ -1456,12 +1488,14 @@ async def run_text2sql(
         # ORM 语句由白名单映射生成；模型返回值只作为 QueryPlan，不进入执行器。
         statement = build_statement(state["plan"], db, user)
         tables = CATALOG[state["plan"].dataset].tables
-        parameterized_sql = validate_sql(_compile_statement(statement, db, literal_binds=False), tables)
-        sql = validate_sql(_compile_statement(statement, db, literal_binds=True), tables)
+        parameterized_sql = _validate_scoped_statement(statement, db, tables, literal_binds=False)
+        sql = _validate_scoped_statement(statement, db, tables, literal_binds=True)
         return {"sql": sql, "parameterized_sql": parameterized_sql, "stages": [*state.get("stages", []), "query_planning"]}
 
     def validate_sql_node(state: Text2SQLState) -> dict[str, Any]:
-        return {"sql": validate_sql(state["sql"], CATALOG[state["plan"].dataset].tables), "stages": [*state.get("stages", []), "sql_validation"]}
+        statement = build_statement(state["plan"], db, user)
+        sql = _validate_scoped_statement(statement, db, CATALOG[state["plan"].dataset].tables, literal_binds=True)
+        return {"sql": sql, "stages": [*state.get("stages", []), "sql_validation"]}
 
     def execute(state: Text2SQLState) -> dict[str, Any]:
         result = db.execute(build_statement(state["plan"], db, user)).mappings().all()

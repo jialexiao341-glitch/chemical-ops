@@ -52,7 +52,11 @@ def tool_db(monkeypatch):
             "CREATE TABLE warehouses (id INTEGER PRIMARY KEY, warehouse_name TEXT, manager_id INTEGER, status TEXT, warehouse_code TEXT, region TEXT, address TEXT, note TEXT, created_at DATETIME, updated_at DATETIME)",
             "CREATE TABLE inventory_batches (id INTEGER PRIMARY KEY, batch_no TEXT, expiry_date DATE)",
             "CREATE TABLE inventory_balances (id INTEGER PRIMARY KEY, warehouse_id INTEGER, batch_id INTEGER, product_id INTEGER, unit_id INTEGER, status TEXT, quantity NUMERIC, locked_quantity NUMERIC)",
-            "CREATE TABLE rfqs (id INTEGER PRIMARY KEY, rfq_no TEXT, requester_id INTEGER, status TEXT)",
+            "CREATE TABLE rfqs (id INTEGER PRIMARY KEY, rfq_no TEXT, requester_id INTEGER, status TEXT, source_request_id INTEGER)",
+            "CREATE TABLE sys_users (id INTEGER PRIMARY KEY, department_id INTEGER, status TEXT)",
+            "CREATE TABLE purchase_requests (id INTEGER PRIMARY KEY, department_id INTEGER)",
+            "CREATE TABLE sys_user_department_scopes (user_id INTEGER PRIMARY KEY)",
+            "CREATE TABLE sys_user_department_grants (user_id INTEGER, department_id INTEGER)",
             "CREATE TABLE rfq_items (id INTEGER PRIMARY KEY, rfq_id INTEGER, product_id INTEGER, specification TEXT, technical_requirements TEXT, unit_id INTEGER, quantity NUMERIC)",
             "CREATE TABLE suppliers (id INTEGER PRIMARY KEY, supplier_name TEXT, status TEXT)",
             "CREATE TABLE supplier_quotes (id INTEGER PRIMARY KEY, rfq_id INTEGER, supplier_id INTEGER, quote_no TEXT, quote_version INTEGER, quote_date DATE, valid_until DATE, currency_code TEXT, status TEXT)",
@@ -66,7 +70,7 @@ def tool_db(monkeypatch):
             "INSERT INTO warehouses (id, warehouse_code, warehouse_name, manager_id, status) VALUES (1, 'WH-OWN', '本人仓库', 7, 'ACTIVE'), (2, 'WH-OTHER', '其他仓库', 8, 'ACTIVE'), (3, 'WH-PUBLIC', '公共仓库', NULL, 'ACTIVE'), (4, 'WH-OFF', '停用仓库', NULL, 'INACTIVE')",
             "INSERT INTO inventory_batches VALUES (1, '批次A', '2020-01-01'), (2, '批次B', NULL)",
             "INSERT INTO inventory_balances VALUES (1, 1, 1, 1, 1, 'AVAILABLE', 100, 20), (2, 1, 2, 1, 1, 'FROZEN', 50, 0), (3, 2, 2, 1, 1, 'AVAILABLE', 999, 0), (4, 3, 2, 1, 2, 'AVAILABLE', 5, 0), (5, 4, 2, 1, 1, 'AVAILABLE', 888, 0)",
-            "INSERT INTO rfqs VALUES (1, 'RFQ-OWN', 7, 'RESPONDING'), (2, 'RFQ-OTHER', 8, 'RESPONDING'), (3, 'RFQ-CLOSED', 7, 'CLOSED')",
+            "INSERT INTO rfqs (id, rfq_no, requester_id, status) VALUES (1, 'RFQ-OWN', 7, 'RESPONDING'), (2, 'RFQ-OTHER', 8, 'RESPONDING'), (3, 'RFQ-CLOSED', 7, 'CLOSED')",
             "INSERT INTO rfq_items VALUES (11, 1, 1, '分析纯', '原始条件', 1, 10), (21, 2, 1, '分析纯', NULL, 1, 10), (31, 3, 1, '分析纯', NULL, 1, 10)",
         ):
             conn.exec_driver_sql(sql)
@@ -614,6 +618,10 @@ def test_supplier_tool_requires_permission_and_rejects_extra_fields(tool_db, mon
 def test_quality_acceptance_service_reuses_inspector_scope(tool_db, monkeypatch):
     from app.modules.quality_acceptances import service as acceptance_service
 
+    tool_db.execute(text("CREATE TABLE purchase_orders (id INTEGER PRIMARY KEY, department_id INTEGER)"))
+    tool_db.execute(text("CREATE TABLE deliveries (id INTEGER PRIMARY KEY, po_id INTEGER)"))
+    tool_db.execute(text("INSERT INTO purchase_orders VALUES (1, 1), (2, 2)"))
+    tool_db.execute(text("INSERT INTO deliveries VALUES (1, 1), (2, 2)"))
     tool_db.execute(text("""CREATE TABLE quality_acceptances (
         id INTEGER PRIMARY KEY, acceptance_no VARCHAR(32) NOT NULL, delivery_id INTEGER NOT NULL,
         inspector_id INTEGER NOT NULL, result VARCHAR(20) NOT NULL, inspection_time DATETIME,

@@ -34,6 +34,7 @@ from app.modules.rfqs.model import RFQ
 from app.modules.suppliers.model import Supplier
 from app.modules.suppliers.schema import SupplierCreate
 from app.modules.system import crud as system_crud
+from app.modules.system.audit import add_audit_log
 from app.modules.system.model import Department, Permission, Role, RolePermission, User
 
 
@@ -95,9 +96,12 @@ def _authorize(db: Session, user: User, permission: str | None) -> None:
         raise HTTPException(status_code=403, detail="没有执行该操作的权限")
 
 
-def _rows(db: Session, spec: Resource, ids: list[int]) -> list:
+def _rows(db: Session, spec: Resource, ids: list[int], *, for_update: bool = False) -> list:
     unique_ids = sorted(set(ids))
-    rows = list(db.scalars(select(spec.model).where(spec.model.id.in_(unique_ids)).order_by(spec.model.id)).all())
+    statement = select(spec.model).where(spec.model.id.in_(unique_ids)).order_by(spec.model.id)
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    rows = list(db.scalars(statement).all())
     found = {row.id for row in rows}
     missing = set(unique_ids) - found
     if missing:
@@ -108,14 +112,14 @@ def _rows(db: Session, spec: Resource, ids: list[int]) -> list:
 def _authorize_row_scope(db: Session, user: User, name: str, rows: list, *, write: bool = False) -> None:
     """复用业务详情查询的数据范围，防止批量接口通过猜测 ID 越权。"""
     if name == "procurement.requests":
-        from app.modules.purchase_requests.service import get_request
+        from app.modules.purchase_requests.service import get_request, get_request_for_write
         for row in rows:
-            get_request(db, user, row.id)
+            (get_request_for_write if write else get_request)(db, user, row.id)
     elif name == "procurement.rfqs":
         from app.modules.rfqs.service import get_rfq
         for row in rows:
             try:
-                get_rfq(db, user, row.id)
+                get_rfq(db, user, row.id, for_write=write)
             except BusinessValidationError:
                 raise ResourceNotFoundError(f"询价单 {row.id} 不存在") from None
     elif name == "procurement.orders":
@@ -173,7 +177,7 @@ def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db),
     if len(set(selection.ids)) != len(selection.ids):
         raise BusinessValidationError("所选记录包含重复 ID")
 
-    rows = _rows(db, spec, selection.ids)
+    rows = _rows(db, spec, selection.ids, for_update=True)
     _authorize_row_scope(db, user, name, rows, write=True)
     if spec.delete_mode == "draft" and any(row.status != "DRAFT" for row in rows):
         raise BusinessValidationError("只能批量删除草稿；请取消选择已提交或已生效记录")
@@ -184,6 +188,8 @@ def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db),
     if spec.delete_mode == "master" and name == "system.users" and user.id in selection.ids:
         raise BusinessValidationError("不能停用当前登录账号")
     if spec.delete_mode == "master" and name == "system.users":
+        if any(row.status in {"PENDING", "REJECTED"} for row in rows):
+            raise BusinessValidationError("注册申请只能通过专用审批操作处理")
         admin_user_ids = {
             row.id
             for row in rows
@@ -198,16 +204,41 @@ def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db),
         if used is not None:
             raise BusinessValidationError("所选权限仍被角色引用，不能删除")
 
+    if name in {"system.roles", "system.permissions"}:
+        from app.modules.system.service import require_authorization_admin
+        require_authorization_admin(db, user.id)
+    if name == "system.users":
+        from app.modules.system.service import _require_role_assignment
+        for row in rows:
+            _require_role_assignment(db, user.id, [], target_id=row.id)
+
     try:
         for row in rows:
-            if spec.delete_mode == "master":
-                row.status = "INACTIVE"
-                if name == "master.products":
-                    row.version_no += 1
+            if name.startswith("system."):
+                from app.modules.system import service as system_service
                 if name == "system.users":
-                    row.token_version += 1
+                    system_service.delete_user(db, row.id, actor_id=user.id, commit=False)
+                elif name == "system.departments":
+                    system_service.delete_department(db, row.id, commit=False)
+                elif name == "system.roles":
+                    system_service.delete_role(db, row.id, actor_id=user.id, commit=False)
+                elif name == "system.permissions":
+                    system_service.delete_permission(db, row.id, actor_id=user.id, commit=False)
+            elif spec.delete_mode == "master":
+                from app.modules.chemicals import crud as chemical_crud
+                from app.modules.products import crud as product_crud
+                from app.modules.suppliers import crud as supplier_crud
+                disable = {"master.chemicals": chemical_crud.disable,
+                           "master.products": product_crud.disable,
+                           "master.suppliers": supplier_crud.disable}[name]
+                disable(db, row, commit=False)
             else:
                 db.delete(row)
+            add_audit_log(db, actor_id=user.id,
+                          action_type="DISABLE" if spec.delete_mode == "master" else "DELETE",
+                          resource_type=name, resource_id=row.id,
+                          request_summary=f"批量{'停用' if spec.delete_mode == 'master' else '删除'} {name}",
+                          result_status="SUCCESS")
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -302,7 +333,7 @@ async def batch_import(name: str, file: UploadFile = File(...), db: Session = De
             raise BusinessValidationError("CSV 缺少表头")
         if len(set(reader.fieldnames)) != len(reader.fieldnames):
             raise BusinessValidationError("CSV 表头包含重复字段")
-        model, schema = IMPORT_MODELS[name]
+        _, schema = IMPORT_MODELS[name]
         allowed = set(schema.model_fields)
         if set(reader.fieldnames) - allowed:
             raise BusinessValidationError("CSV 包含不支持的字段")
@@ -314,16 +345,23 @@ async def batch_import(name: str, file: UploadFile = File(...), db: Session = De
             if None in record:
                 raise BusinessValidationError(f"第 {line_no} 行列数与表头不一致")
             try:
-                values = schema.model_validate({key: value for key, value in record.items() if value not in ("", None)}).model_dump()
+                values = schema.model_validate({key: value for key, value in record.items() if value not in ("", None)})
             except ValidationError as exc:
                 raise BusinessValidationError(f"第 {line_no} 行字段校验失败：{exc.errors()[0]['loc']}") from None
             validated.append(values)
-        for values in validated:
-            db.add(model(**values))
+        from app.modules.chemicals.service import create_chemical
+        from app.modules.products.service import create_product
+        from app.modules.suppliers.service import create_supplier
+        create = {"master.chemicals": create_chemical, "master.products": create_product,
+                  "master.suppliers": create_supplier}[name]
+        with db.begin_nested():
+            for values in validated:
+                row = create(db, values, commit=False)
+                add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type=name,
+                              resource_id=row.id, request_summary=f"批量导入 {name}", result_status="SUCCESS")
         db.commit()
     except UnicodeDecodeError:
         raise BusinessValidationError("CSV 请使用 UTF-8 编码") from None
     except IntegrityError:
-        db.rollback()
         raise BusinessValidationError("导入数据存在重复编码或无效关联 ID，整批未保存") from None
     return {"count": len(records)}

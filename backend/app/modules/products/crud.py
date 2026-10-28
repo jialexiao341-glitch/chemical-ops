@@ -26,13 +26,16 @@ def list_units(db: Session) -> list[Unit]:
     return list(db.scalars(select(Unit).order_by(Unit.id)).all())
 
 
-def create(db: Session, data: ProductCreate) -> Product:
+def create(db: Session, data: ProductCreate, *, commit: bool = True) -> Product:
     """新增产品并提交事务。"""
 
     product = Product(**data.model_dump())
     db.add(product)
-    db.commit()
-    db.refresh(product)
+    if commit:
+        db.commit()
+        db.refresh(product)
+    else:
+        db.flush()
     return product
 
 
@@ -79,11 +82,12 @@ def update(db: Session, product: Product, data: ProductUpdate) -> Product:
     return product
 
 
-def disable(db: Session, product: Product) -> Product:
+def disable(db: Session, product: Product, *, commit: bool = True) -> Product:
     """通过将状态改为 INACTIVE 执行软删除。"""
 
     product.status = "INACTIVE"
     product.version_no += 1
-    db.commit()
-    db.refresh(product)
+    if commit:
+        db.commit()
+        db.refresh(product)
     return product

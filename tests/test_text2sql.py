@@ -23,6 +23,34 @@ def test_text2sql_sql_validation_is_select_only_and_table_scoped():
         validate_sql("SELECT * FROM sys_users", CATALOG["purchase_orders"].tables)
 
 
+def test_department_filter_is_validated_separately_without_expanding_dataset_tables():
+    from sqlalchemy import select
+    from app.modules.purchase_orders.model import PurchaseOrder
+    from app.modules.system.data_scope import department_scope_condition
+    from app.modules.system.model import UserDepartmentGrant
+
+    user = SimpleNamespace(id=17)
+    scope = department_scope_condition(user, {'PROCUREMENT_MANAGER'}, PurchaseOrder.department_id)
+    statement = select(PurchaseOrder.id).where(scope)
+    db = SimpleNamespace()
+    sql = text2sql._validate_scoped_statement(statement, db, CATALOG['purchase_orders'].tables, literal_binds=False)
+    assert 'sys_user_department_grants' in sql
+
+    # 授权表只能出现在服务端生成的范围条件，不能作为查询数据源。
+    injected = statement.add_columns(UserDepartmentGrant.department_id).join(
+        UserDepartmentGrant, UserDepartmentGrant.department_id == PurchaseOrder.department_id)
+    with pytest.raises(BusinessValidationError):
+        text2sql._validate_scoped_statement(injected, db, CATALOG['purchase_orders'].tables, literal_binds=False)
+
+    # 范围条件自身也只能使用授权策略所需的表。
+    from app.modules.system.file_model import SysFile
+    foreign_department = select(SysFile.id).limit(1).scalar_subquery()
+    foreign_scope = department_scope_condition(user, {'PROCUREMENT_MANAGER'}, foreign_department)
+    with pytest.raises(BusinessValidationError):
+        text2sql._validate_scoped_statement(select(PurchaseOrder.id).where(foreign_scope), db,
+            CATALOG['purchase_orders'].tables, literal_binds=False)
+
+
 def test_text2sql_builds_parameterized_grouped_statement_from_whitelist():
     statement = build_statement(
         QueryPlan(

@@ -102,7 +102,7 @@ def business_db(case):
             db.execute(text("INSERT INTO md_products (id, product_name, status, product_code, model, packaging_spec, unit_id, chemical_id) VALUES (:id, :name, 'ACTIVE', :code, '工业级', '桶', 1, 1)"),
                 dict(id=offset+3, name=f'合成{PRODUCTS[case.seed-1]}', code=f'EVAL-P{case.seed:02}-B'))
         if case.variant == 'rfqs':
-            db.execute(text("INSERT INTO rfqs VALUES (4, :name, 7, 'SENT')"), {'name': f'EVAL-R{case.seed:02}-B'})
+            db.execute(text("INSERT INTO rfqs (id, rfq_no, requester_id, status) VALUES (4, :name, 7, 'SENT')"), {'name': f'EVAL-R{case.seed:02}-B'})
             db.execute(text("INSERT INTO rfq_items (id, rfq_id, product_id, specification, technical_requirements, unit_id, quantity) VALUES (:id, 4, :product, '工业级', NULL, 1, 20)"),
                 dict(id=offset+41, product=case.expected_product))
         db.commit()

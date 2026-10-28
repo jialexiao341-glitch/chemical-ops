@@ -2,7 +2,7 @@
 
 from collections.abc import Collection
 
-from sqlalchemy import select, true
+from sqlalchemy import and_, select, true
 
 from app.modules.deliveries.model import Delivery
 from app.modules.purchase_orders.model import PurchaseOrder
@@ -12,11 +12,17 @@ from app.modules.system.model import User
 
 
 def acceptance_read_condition(user: User, roles: Collection[str]):
-    if {"SYS_ADMIN", "PROCUREMENT_MANAGER", "QUALITY_MANAGER"}.intersection(roles):
-        return true()
-    if "QUALITY" in roles:
-        return QualityAcceptance.inspector_id == user.id
-    deliveries = select(Delivery.id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(
-        order_read_condition(user, roles)
+    from app.modules.system.data_scope import department_scope_condition
+    authorized_deliveries = select(Delivery.id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(
+        department_scope_condition(user, roles, PurchaseOrder.department_id)
     )
-    return QualityAcceptance.delivery_id.in_(deliveries)
+    if {"SYS_ADMIN", "PROCUREMENT_MANAGER", "QUALITY_MANAGER"}.intersection(roles):
+        base = true()
+    elif "QUALITY" in roles:
+        base = QualityAcceptance.inspector_id == user.id
+    else:
+        deliveries = select(Delivery.id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(
+            order_read_condition(user, roles)
+        )
+        base = QualityAcceptance.delivery_id.in_(deliveries)
+    return and_(base, QualityAcceptance.delivery_id.in_(authorized_deliveries))

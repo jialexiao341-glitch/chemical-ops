@@ -3,12 +3,14 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.products.model import Product
 from app.modules.purchase_orders.service import get_order
+from app.modules.purchase_orders.model import PurchaseOrder
+from app.modules.deliveries.model import Delivery
 from app.modules.deliveries.service import get_delivery
 from app.modules.purchase_requests.model import Unit
 from app.modules.replenishments.model import ReplenishmentItem, ReplenishmentRequest
@@ -27,6 +29,17 @@ def _now() -> datetime:
 def _can_manage_all(db: Session, user: User) -> bool:
     """判断用户是否可以处理全部补货申请。"""
     return bool({"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(get_user_role_codes(db, user.id)))
+
+
+def _department_scope(user: User, roles):
+    from app.modules.system.data_scope import department_scope_condition
+    order_department = select(PurchaseOrder.department_id).where(PurchaseOrder.id == ReplenishmentRequest.source_po_id).scalar_subquery()
+    delivery_department = select(PurchaseOrder.department_id).join(Delivery, Delivery.po_id == PurchaseOrder.id).where(Delivery.id == ReplenishmentRequest.source_delivery_id).scalar_subquery()
+    applicant_department = select(User.department_id).where(User.id == ReplenishmentRequest.applicant_id).scalar_subquery()
+    department = case((ReplenishmentRequest.source_po_id.is_not(None), order_department),
+                      (ReplenishmentRequest.source_delivery_id.is_not(None), delivery_department),
+                      else_=applicant_department)
+    return department_scope_condition(user, roles, department)
 
 
 def _enrich_header(db: Session, value: ReplenishmentRequest) -> None:
@@ -98,6 +111,7 @@ def create_replenishment(
 def list_replenishments(db: Session, user: User, *, status: str | None, page: int, page_size: int):
     """分页查询补货申请。"""
     conditions = [] if _can_manage_all(db, user) else [ReplenishmentRequest.applicant_id == user.id]
+    conditions.append(_department_scope(user, get_user_role_codes(db, user.id)))
     if status:
         conditions.append(ReplenishmentRequest.status == status)
     total = db.scalar(select(func.count(ReplenishmentRequest.id)).where(*conditions)) or 0
@@ -111,6 +125,8 @@ def get_replenishment(db: Session, user: User, replenishment_id: int) -> Repleni
     """查询补货详情。"""
     value = _require(db, replenishment_id)
     if not _can_manage_all(db, user) and value.applicant_id != user.id:
+        raise ResourceNotFoundError(f"补货申请 {replenishment_id} 不存在")
+    if db.scalar(select(ReplenishmentRequest.id).where(ReplenishmentRequest.id == replenishment_id, _department_scope(user, get_user_role_codes(db, user.id)))) is None:
         raise ResourceNotFoundError(f"补货申请 {replenishment_id} 不存在")
     return value
 
@@ -128,6 +144,7 @@ def submit_replenishment(db: Session, user: User, replenishment_id: int) -> Repl
 
 def approve_replenishment(db: Session, user: User, replenishment_id: int) -> ReplenishmentRequest:
     """审批补货申请。"""
+    get_replenishment(db, user, replenishment_id)
     value = _require(db, replenishment_id, for_update=True)
     if value.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的补货申请可以审批")
@@ -142,6 +159,7 @@ def approve_replenishment(db: Session, user: User, replenishment_id: int) -> Rep
 
 def reject_replenishment(db: Session, user: User, replenishment_id: int, reason: str) -> ReplenishmentRequest:
     """驳回补货申请。"""
+    get_replenishment(db, user, replenishment_id)
     value = _require(db, replenishment_id, for_update=True)
     if value.status != "SUBMITTED":
         raise BusinessValidationError("只有待审批的补货申请可以驳回")

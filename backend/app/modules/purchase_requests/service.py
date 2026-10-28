@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.products.model import Product
 from app.modules.purchase_requests import crud
+from app.modules.purchase_requests.scope import request_read_condition
 from app.modules.purchase_requests.model import (
     PurchaseRequest,
     PurchaseRequestApproval,
@@ -39,6 +40,10 @@ def _can_manage_all(db: Session, user: User) -> bool:
 def _validate_department_scope(db: Session, user: User, department_id: int | None) -> None:
     """阻止普通申请人把申请创建或转移到自身部门范围之外。"""
 
+    from sqlalchemy import literal
+    from app.modules.system.data_scope import department_scope_condition
+    if not db.scalar(select(department_scope_condition(user, get_user_role_codes(db, user.id), literal(department_id)))):
+        raise ResourceNotFoundError("采购申请部门不存在")
     if _can_manage_all(db, user):
         return
     if department_id != user.department_id:
@@ -138,13 +143,9 @@ def list_requests(
 ) -> tuple[list[PurchaseRequest], int]:
     """按用户数据范围查询采购申请。"""
 
-    can_manage_all = _can_manage_all(db, user)
-    applicant_id = None if can_manage_all or user.department_id is not None else user.id
-    department_id = user.department_id if not can_manage_all else None
     return crud.list_page(
         db,
-        applicant_id=applicant_id,
-        department_id=department_id,
+        scope_condition=request_read_condition(user, get_user_role_codes(db, user.id)),
         keyword=keyword,
         status=status,
         page=page,
@@ -156,7 +157,18 @@ def get_request(db: Session, user: User, request_id: int, *, for_update: bool = 
     """查询采购申请详情并执行数据范围校验。"""
 
     request = _require_request(db, request_id, for_update=for_update)
-    if not _can_manage_all(db, user) and not ((user.department_id is not None and request.department_id == user.department_id) or (user.department_id is None and request.applicant_id == user.id)):
+    if db.scalar(select(PurchaseRequest.id).where(
+        PurchaseRequest.id == request_id,
+        request_read_condition(user, get_user_role_codes(db, user.id)),
+    )) is None:
+        raise ResourceNotFoundError(f"采购申请 {request_id} 不存在")
+    return request
+
+
+def get_request_for_write(db: Session, user: User, request_id: int, *, for_update: bool = False) -> PurchaseRequest:
+    """办理范围独立于同部门的读取范围。"""
+    request = get_request(db, user, request_id, for_update=for_update)
+    if not _can_manage_all(db, user) and request.applicant_id != user.id:
         raise ResourceNotFoundError(f"采购申请 {request_id} 不存在")
     return request
 
@@ -175,7 +187,7 @@ def get_request_by_no(db: Session, user: User, request_no: str) -> PurchaseReque
 def update_request(db: Session, user: User, request_id: int, data: PurchaseRequestUpdate, *, commit: bool = True) -> PurchaseRequest:
     """更新草稿或被驳回的采购申请。"""
 
-    request = get_request(db, user, request_id, for_update=True)
+    request = get_request_for_write(db, user, request_id, for_update=True)
     if request.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的采购申请可以修改")
     values = data.model_dump(exclude_unset=True)
@@ -203,7 +215,7 @@ def update_request(db: Session, user: User, request_id: int, data: PurchaseReque
 def submit_request(db: Session, user: User, request_id: int, *, commit: bool = True) -> PurchaseRequest:
     """提交采购申请并创建首个审批节点。"""
 
-    request = get_request(db, user, request_id, for_update=True)
+    request = get_request_for_write(db, user, request_id, for_update=True)
     if request.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的采购申请可以提交")
     if not request.items:
@@ -275,7 +287,7 @@ def act_on_request(
 def cancel_request(db: Session, user: User, request_id: int, data: CancelAction) -> PurchaseRequest:
     """取消草稿或已驳回的采购申请。"""
 
-    request = get_request(db, user, request_id, for_update=True)
+    request = get_request_for_write(db, user, request_id, for_update=True)
     if request.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的采购申请可以取消")
     request.status = "CANCELLED"

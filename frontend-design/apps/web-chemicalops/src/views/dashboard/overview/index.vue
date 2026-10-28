@@ -42,6 +42,7 @@ function defaultRange(): [string, string] {
 
 /** 库存按计量单位汇总展示，避免把不同单位直接相加 */
 const inventoryText = computed(() => {
+  if (overview.value?.inventory_available === false) return '不适用';
   const units = overview.value?.inventory_units ?? [];
   if (units.length === 0) {
     return formatQuantity(overview.value?.inventory_quantity);
@@ -137,6 +138,7 @@ onMounted(async () => {
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-3">
             <h1 class="m-0 text-xl font-semibold tracking-normal">运营总览</h1>
+            <Tag v-if="overview?.inventory_available === false">库存指标未按部门归属，暂不可用</Tag>
             <Tag v-if="health" class="m-0 border-0 bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
               <span
                 class="mr-1 inline-block size-1.5 rounded-full align-middle"
@@ -260,7 +262,7 @@ onMounted(async () => {
         </div>
 
         <!-- 有效期预警 -->
-        <Card class="dashboard-panel expiry-panel" title="库存有效期预警">
+        <Card v-if="report?.inventory_available !== false" class="dashboard-panel expiry-panel" title="库存有效期预警">
           <template #extra>
             <span class="expiry-panel-count">
               {{ report?.inventory_alerts?.length ?? 0 }} 条预警

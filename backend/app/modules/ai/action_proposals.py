@@ -70,6 +70,13 @@ def _preview(proposal: AIAgentActionProposal) -> AIActionProposalPreview:
     )
 
 
+def _require_proposal_department_scope(db: Session, user: User, proposal: AIAgentActionProposal) -> None:
+    from app.modules.system.data_scope import department_scope_snapshot
+    current = department_scope_snapshot(db, user)
+    if current is not None and proposal.department_scope_snapshot != current:
+        raise ResourceNotFoundError("动作提案不存在或当前部门授权已变化")
+
+
 def propose_action(db: Session, user: User, action_type: str, payload: dict, *, idempotency_key: str, evidence: list[dict] | None = None) -> AIActionProposalPreview:
     handler = action_handlers.get_handler(action_type)
     _authorize(db, user, handler.permission_code, action_type=action_type)
@@ -82,9 +89,11 @@ def propose_action(db: Session, user: User, action_type: str, payload: dict, *, 
         AIAgentActionProposal.idempotency_key == idempotency_key,
     ))
     if existing is not None:
+        _require_proposal_department_scope(db, user, existing)
         if existing.action_type != action_type or existing.payload_hash != _hash(normalized):
             raise DuplicateResourceError("幂等键已用于其他动作或参数")
         return _preview(existing)
+    from app.modules.system.data_scope import department_scope_snapshot
     proposal = AIAgentActionProposal(
         confirmation_id=uuid4().hex,
         user_id=user.id,
@@ -95,6 +104,7 @@ def propose_action(db: Session, user: User, action_type: str, payload: dict, *, 
         payload=normalized,
         payload_hash=_hash(normalized),
         expected_resource_snapshot=prepared.get("snapshot", {}),
+        department_scope_snapshot=department_scope_snapshot(db, user),
         diff=prepared.get("diff", []),
         evidence=evidence if evidence is not None else prepared.get("evidence", []),
         warnings=prepared.get("warnings", []),
@@ -125,6 +135,7 @@ def _owned_proposal(db: Session, user: User, confirmation_id: str, *, for_update
     proposal = db.scalar(query.with_for_update() if for_update else query)
     if proposal is None:
         raise ResourceNotFoundError("动作提案不存在或不属于当前用户")
+    _require_proposal_department_scope(db, user, proposal)
     return proposal
 
 
@@ -161,6 +172,13 @@ def _revalidate_tool_evidence(db: Session, user: User, proposal: AIAgentActionPr
 
 def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> tuple[AIActionProposalRead, bool]:
     """Build a safe inbox view and persist only deterministic expiry/invalidation transitions."""
+    try:
+        _require_proposal_department_scope(db, user, proposal)
+    except ResourceNotFoundError:
+        base = _preview(proposal).model_dump()
+        base.update(resource_id=None, diff=[], evidence=[], warnings=[], blockers=[], requires_user_confirmation=False)
+        return AIActionProposalRead(**base, created_at=proposal.created_at,
+                                    availability="RESOURCE_UNAVAILABLE", unavailable_reason="部门授权已变化，请重新生成提案"), False
     changed = False
     availability = "AVAILABLE"
     reason = {

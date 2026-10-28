@@ -120,9 +120,10 @@ async def upload_report_file(
     user: User = Depends(require_permission("quality.acceptances.write")),
 ) -> QualityReportFile:
     """校验验收单和附件权限后，上传并关联一份质量报告。"""
-    service.get_acceptance(db, user, acceptance_id)
+    acceptance = service.get_acceptance(db, user, acceptance_id)
     # 上传前按现有附件权限检查，避免文件已存储却无法关联。
     file_service.list_attachments(db, user, "QUALITY_ACCEPTANCE", acceptance_id, page=1, page_size=1)
+    file_service._check_resource_write_access(db, user, "QUALITY_ACCEPTANCE", acceptance)
     settings = file_service.get_settings()
     content = await file.read(settings.document_max_size_mb * 1024 * 1024 + 1)
     value = file_service.upload_file(db, user, file_name=file.filename or "", mime_type=file.content_type or "application/octet-stream", content=content, file_category="QUALITY_REPORT", access_level="INTERNAL")

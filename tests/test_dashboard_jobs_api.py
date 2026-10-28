@@ -16,7 +16,8 @@ def test_dashboard_overview_returns_core_metrics(client: TestClient, demo_passwo
     response = client.get("/api/v1/dashboard/overview", headers=headers)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert set(body) == {"purchase_orders_total", "purchase_orders_in_progress", "deliveries_overdue", "inventory_quantity", "inventory_units", "open_exceptions", "confirmed_reconciliations", "paid_amount", "expiry_alerts"}
+    assert set(body) == {"purchase_orders_total", "purchase_orders_in_progress", "deliveries_overdue", "inventory_quantity", "inventory_units", "inventory_available", "open_exceptions", "confirmed_reconciliations", "paid_amount", "expiry_alerts"}
+    assert body["inventory_available"] is True
     assert isinstance(body["inventory_units"], list)
 
 

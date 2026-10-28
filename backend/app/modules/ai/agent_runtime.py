@@ -128,6 +128,7 @@ class RunState:
     llm_tokens_used: int = 0
     llm_tokens_estimated: int = 0
     llm_calls: int = 0
+    department_scope: list[int] | None = None
 
 
 class GraphState(TypedDict):
@@ -248,7 +249,15 @@ def _load(db: Session, user: User, task_id: str) -> AIAgentTask:
         AIAgentTask.user_id == user.id).execution_options(populate_existing=True))
     if task is None:
         raise ResourceNotFoundError("任务不存在或不可访问")
+    _require_task_department_scope(db, user, task)
     return task
+
+
+def _require_task_department_scope(db: Session, user: User, task: AIAgentTask) -> None:
+    from app.modules.system.data_scope import department_scope_snapshot
+    current = department_scope_snapshot(db, user)
+    if current is not None and (task.payload or {}).get("department_scope") != current:
+        raise ResourceNotFoundError("任务不存在或当前部门授权已变化")
 
 
 def _reap_unclaimed_task(db: Session, task: AIAgentTask) -> AIAgentTask:
@@ -329,8 +338,8 @@ def _check_trace_access(db: Session, user: User, trace: list[dict]) -> list[dict
         if entry["tool"] in {"supplier_quotes.compare", "supplier_quotes.find_rfq_items"}:
             ids = {source["parent_id"] for source in result["sources"]}
             scope = select(RFQ.id).where(RFQ.id.in_(ids))
-            if not roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
-                scope = scope.where(RFQ.requester_id == user.id)
+            from app.modules.rfqs.scope import rfq_read_condition
+            scope = scope.where(rfq_read_condition(user, roles))
             if ids - set(db.scalars(scope)):
                 raise AuthorizationError("询价授权范围已变化，历史结果不可访问")
         if entry["tool"] in {"quality_acceptances.get_by_no", "deliveries.get_by_no"}:
@@ -415,6 +424,7 @@ def list_tasks(db: Session, user: User, *, page: int = 1, page_size: int = 20,
     items = []
     for task in rows:
         try:
+            _require_task_department_scope(db, user, task)
             _check_trace_access(db, user, task.payload.get("trace", []))
             items.append(TaskRead(id=task.id, status=task.status, revision=task.revision, reply=_formatted_task_reply(task),
                 can_select_all_products=(task.payload.get('memory_state') or {}).get('goal', {}).get('intent') == 'inventory_query',
@@ -469,6 +479,7 @@ def _persist(db: Session, user: User, state: RunState) -> None:
         AIAgentTask.user_id == user.id, AIAgentTask.revision == state.revision,
         AIAgentTask.status == "RUNNING").values(
         payload={"messages": state.messages, "trace": state.trace,
+                 "department_scope": state.department_scope,
                  "chat": state.chat,
                  "memory_state": memory,
                  "workflow": state.workflow.model_dump(mode="json"),
@@ -1327,6 +1338,8 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
     state = RunState(task_id, 0, [data.question], [], 0, memory_state=_new_memory_state(data.question),
                      llm_token_limit=get_settings().agent_max_total_tokens,
                      workflow=Workflow())
+    from app.modules.system.data_scope import department_scope_snapshot
+    state.department_scope = department_scope_snapshot(db, user)
     if data.route_token:
         pending = (conversation_store.load_pending_clarification(db, user, conversation_id)
                    if conversation_id is not None else None)
@@ -1348,7 +1361,7 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
         state.memory_state["route_turn"] = 1
         state.memory_state["goal"]["intent"] = decision.agent_goal
     db.add(AIAgentTask(id=task_id, user_id=user.id, status="RUNNING", revision=0,
-        payload={"messages": state.messages, "trace": [], "turn_start": 0,
+        payload={"messages": state.messages, "trace": [], "turn_start": 0, "department_scope": state.department_scope,
                  "memory_state": state.memory_state, "workflow": state.workflow.model_dump(mode="json"),
                  "token_budget": {"limit": state.llm_token_limit,
                                   "used_tokens": 0, "estimated_tokens": 0, "calls": 0}},
@@ -1448,7 +1461,7 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
         raise DuplicateResourceError("任务已被其他请求继续或取消")
     state = RunState(task.id, data.revision + 1, messages,
         list(task.payload["trace"]), len(task.payload["trace"]), product, rfq_item,
-        chat=task.payload.get("chat"), memory_state=memory, workflow=workflow,
+        chat=task.payload.get("chat"), memory_state=memory, workflow=workflow, department_scope=task.payload.get("department_scope"),
         llm_token_limit=(task.payload.get("token_budget") or {}).get("limit", get_settings().agent_max_total_tokens),
         llm_tokens_used=(task.payload.get("token_budget") or {}).get("used_tokens", 0),
         llm_tokens_estimated=(task.payload.get("token_budget") or {}).get("estimated_tokens", 0),
@@ -1568,7 +1581,7 @@ def _restore_prepared_state(db: Session, task_id: str, user_id: int, revision: i
         return None, user, True
     state = RunState(task_id, revision, task.payload["messages"], list(task.payload["trace"]),
         task.payload.get("turn_start", 0), task.payload.get("selected_product"), task.payload.get("selected_rfq_item"),
-        chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {},
+        chat=task.payload.get("chat"), memory_state=task.payload.get("memory_state") or {}, department_scope=task.payload.get("department_scope"),
         workflow=Workflow.model_validate(task.payload.get("workflow") or {}),
         llm_token_limit=(task.payload.get("token_budget") or {}).get("limit", get_settings().agent_max_total_tokens),
         llm_tokens_used=(task.payload.get("token_budget") or {}).get("used_tokens", 0),

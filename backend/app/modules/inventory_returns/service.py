@@ -3,7 +3,7 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import and_, case, exists, false, func, select, true
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
@@ -30,6 +30,10 @@ def _now() -> datetime:
 def _ensure_return_scope(db: Session, user: User, value: InventoryReturnRequest) -> None:
     """退货整单必须完全落在用户可见的仓库范围内。"""
     roles = set(get_user_role_codes(db, user.id))
+    if db.scalar(select(InventoryReturnRequest.id).where(
+        InventoryReturnRequest.id == value.id, _return_department_scope(user, roles)
+    )) is None:
+        raise ResourceNotFoundError(f"退货申请 {value.id} 不存在")
     if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
         return
     if "WAREHOUSE" in roles:
@@ -214,24 +218,47 @@ def create_return(db: Session, user: User, data: ReturnCreate) -> InventoryRetur
     return _require(db, value.id)
 
 
-def list_returns(db: Session, user: User, *, status: str | None, page: int, page_size: int):
-    """分页查询退货申请。"""
-    roles = set(get_user_role_codes(db, user.id))
-    conditions = []
+def _return_department_scope(user: User, roles: set[str]):
+    from app.modules.system.data_scope import department_scope_condition
+    order_department = select(PurchaseOrder.department_id).where(PurchaseOrder.id == InventoryReturnRequest.po_id).scalar_subquery()
+    delivery_department = select(PurchaseOrder.department_id).join(Delivery, Delivery.po_id == PurchaseOrder.id).where(Delivery.id == InventoryReturnRequest.delivery_id).scalar_subquery()
+    applicant_department = select(User.department_id).where(User.id == InventoryReturnRequest.applicant_id).scalar_subquery()
+    header_department = case((InventoryReturnRequest.po_id.is_not(None), order_department),
+                             (InventoryReturnRequest.delivery_id.is_not(None), delivery_department),
+                             else_=applicant_department)
+    cap = department_scope_condition(user, roles, PurchaseOrder.department_id)
+    out_of_scope_order = select(InventoryReturnItem.id).join(PurchaseOrderItem, PurchaseOrderItem.id == InventoryReturnItem.source_po_item_id).join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.po_id).where(
+        InventoryReturnItem.return_request_id == InventoryReturnRequest.id, ~func.coalesce(cap, false()))
+    out_of_scope_delivery = select(InventoryReturnItem.id).join(DeliveryItem, DeliveryItem.id == InventoryReturnItem.source_delivery_item_id).join(Delivery, Delivery.id == DeliveryItem.delivery_id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(
+        InventoryReturnItem.return_request_id == InventoryReturnRequest.id, ~func.coalesce(cap, false()))
+    out_of_scope_batch = select(InventoryReturnItem.id).join(InventoryBatch, InventoryBatch.id == InventoryReturnItem.batch_id).join(Delivery, Delivery.id == InventoryBatch.source_delivery_id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(
+        InventoryReturnItem.return_request_id == InventoryReturnRequest.id, ~func.coalesce(cap, false()))
+    return and_(department_scope_condition(user, roles, header_department), ~exists(out_of_scope_order), ~exists(out_of_scope_delivery), ~exists(out_of_scope_batch))
+
+
+def return_read_condition(db: Session, user: User, *, roles: set[str] | None = None):
+    """生成与退货详情一致的人员或仓库范围，供关联查询复用。"""
+    roles = set(get_user_role_codes(db, user.id)) if roles is None else roles
     if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
-        pass
+        base = true()
     elif "WAREHOUSE" in roles:
         warehouse_ids = inventory_service.accessible_warehouse_ids(db, user) or set()
         if not warehouse_ids:
-            conditions.append(InventoryReturnRequest.id == -1)
+            base = false()
         else:
             outside_scope = select(InventoryReturnItem.id).where(
                 InventoryReturnItem.return_request_id == InventoryReturnRequest.id,
                 InventoryReturnItem.warehouse_id.not_in(warehouse_ids),
             )
-            conditions.append(~exists(outside_scope))
+            base = ~exists(outside_scope)
     else:
-        conditions.append(InventoryReturnRequest.applicant_id == user.id)
+        base = InventoryReturnRequest.applicant_id == user.id
+    return and_(base, _return_department_scope(user, roles))
+
+
+def list_returns(db: Session, user: User, *, status: str | None, page: int, page_size: int):
+    """分页查询退货申请。"""
+    conditions = [return_read_condition(db, user)]
     if status:
         conditions.append(InventoryReturnRequest.status == status)
     total = db.scalar(select(func.count(InventoryReturnRequest.id)).where(*conditions)) or 0

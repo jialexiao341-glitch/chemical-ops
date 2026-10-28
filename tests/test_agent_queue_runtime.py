@@ -132,7 +132,7 @@ def test_recovery_uses_latest_revision_without_creating_messages(queued_db, mode
 def test_selected_rfq_continuation_recovers_after_product_checkpoint(queued_db, model_script, monkeypatch, combined):
     """候选选择的新一代执行崩溃后，从已核验产品继续，不能重解释编号或重复查产品。"""
     from sqlalchemy import text
-    queued_db.execute(text("INSERT INTO rfqs VALUES (4, 'LEGACY-B', 7, 'SENT')"))
+    queued_db.execute(text("INSERT INTO rfqs (id, rfq_no, requester_id, status) VALUES (4, 'LEGACY-B', 7, 'SENT')"))
     queued_db.execute(text("INSERT INTO rfq_items (id, rfq_id, product_id, specification, technical_requirements, unit_id, quantity) VALUES (41, 4, 1, '工业级', NULL, 1, 20)"))
     queued_db.commit()
     task = runtime.schedule_async(queued_db, USER, BackgroundTasks(), runtime.prepare_chat_task,

@@ -106,6 +106,9 @@ def test_clarification_output_requires_a_bound_slot_and_finite_options():
 
 @pytest.fixture
 def clarification_db(monkeypatch):
+    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
+    # 生产环境的 MySQL CURRENT_TIMESTAMP(3) 不兼容 SQLite 更新语法。
+    monkeypatch.setattr(AIConversationState.__table__.c.updated_at, "onupdate", None)
     engine = create_engine("sqlite:///:memory:", echo=False, connect_args={"check_same_thread": False}, poolclass=StaticPool)
     with engine.begin() as connection:
         connection.execute(text("CREATE TABLE sys_users (id INTEGER PRIMARY KEY)"))

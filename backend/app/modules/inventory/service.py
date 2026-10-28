@@ -51,10 +51,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _can_access_all_warehouses(db: Session, user: User, roles: set[str]) -> bool:
+    from app.modules.system.model import UserDepartmentScope
+    return "SYS_ADMIN" in roles or ("PROCUREMENT_MANAGER" in roles and db.get(UserDepartmentScope, user.id) is None)
+
+
+def _must_check_warehouse(db: Session, user: User) -> bool:
+    from app.modules.system.model import UserDepartmentScope
+    roles = set(get_user_role_codes(db, user.id))
+    return "WAREHOUSE" in roles or ("SYS_ADMIN" not in roles and db.get(UserDepartmentScope, user.id) is not None)
+
+
 def _can_access_warehouse(db: Session, user: User, warehouse_id: int) -> bool:
     """按仓库负责人限制非管理员的数据范围；未配置负责人时保持兼容。"""
     roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+    if _can_access_all_warehouses(db, user, roles):
         return True
     warehouse = db.get(Warehouse, warehouse_id)
     return warehouse is not None and (warehouse.manager_id is None or warehouse.manager_id == user.id)
@@ -80,7 +91,7 @@ def get_balance_for_user(db: Session, user: User, balance_id: int) -> InventoryB
 
 def accessible_warehouse_ids(db: Session, user: User) -> set[int] | None:
     roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+    if _can_access_all_warehouses(db, user, roles):
         return None
     return {value.id for value in db.scalars(select(Warehouse).where(Warehouse.status == "ACTIVE", (Warehouse.manager_id == user.id) | Warehouse.manager_id.is_(None))).all()}
 
@@ -120,7 +131,7 @@ def list_warehouses(db: Session, user: User | None = None) -> list[Warehouse]:
     """查询启用仓库。"""
 
     statement = select(Warehouse).where(Warehouse.status == "ACTIVE")
-    if user is not None and not (set(get_user_role_codes(db, user.id)) & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}):
+    if user is not None and not _can_access_all_warehouses(db, user, set(get_user_role_codes(db, user.id))):
         statement = statement.where((Warehouse.manager_id == user.id) | Warehouse.manager_id.is_(None))
     return list(db.scalars(statement.order_by(Warehouse.id)).all())
 
@@ -281,7 +292,7 @@ def _get_issue_for_user(db: Session, user: User, issue_id: int, *, for_update: b
 
     issue = _require_issue(db, issue_id, for_update=for_update)
     roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+    if _can_access_all_warehouses(db, user, roles):
         return issue
     if "WAREHOUSE" in roles:
         if not issue.items:
@@ -294,7 +305,7 @@ def _get_issue_for_user(db: Session, user: User, issue_id: int, *, for_update: b
 
 
 def _validate_issue_warehouse_scope(db: Session, user: User, items: list) -> None:
-    if "WAREHOUSE" in set(get_user_role_codes(db, user.id)):
+    if _must_check_warehouse(db, user):
         for item in items:
             _require_warehouse_scope(db, user, item.warehouse_id)
 
@@ -367,7 +378,7 @@ def list_issue_requests(db: Session, user: User, *, status: str | None, page: in
     """按用户数据范围分页查询库存领用申请。"""
 
     roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+    if _can_access_all_warehouses(db, user, roles):
         applicant_id, warehouse_ids = None, None
     elif "WAREHOUSE" in roles:
         applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
@@ -581,7 +592,7 @@ def _get_transfer_for_user(db: Session, user: User, transfer_id: int, *, for_upd
 
     transfer = _require_transfer(db, transfer_id, for_update=for_update)
     roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+    if _can_access_all_warehouses(db, user, roles):
         return transfer
     if "WAREHOUSE" in roles:
         if not transfer.items:
@@ -595,7 +606,7 @@ def _get_transfer_for_user(db: Session, user: User, transfer_id: int, *, for_upd
 
 
 def _validate_transfer_warehouse_scope(db: Session, user: User, items: list) -> None:
-    if "WAREHOUSE" in set(get_user_role_codes(db, user.id)):
+    if _must_check_warehouse(db, user):
         for item in items:
             _require_warehouse_scope(db, user, item.source_warehouse_id)
             _require_warehouse_scope(db, user, item.target_warehouse_id)
@@ -666,7 +677,7 @@ def list_transfer_requests(db: Session, user: User, *, status: str | None, page:
     """按用户数据范围分页查询库存调拨申请。"""
 
     roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+    if _can_access_all_warehouses(db, user, roles):
         applicant_id, warehouse_ids = None, None
     elif "WAREHOUSE" in roles:
         applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
@@ -902,7 +913,7 @@ def _get_stocktake_for_user(db: Session, user: User, stocktake_id: int, *, for_u
 
     stocktake = _require_stocktake(db, stocktake_id, for_update=for_update)
     roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+    if _can_access_all_warehouses(db, user, roles):
         return stocktake
     if "WAREHOUSE" in roles:
         _require_warehouse_scope(db, user, stocktake.warehouse_id)
@@ -977,7 +988,7 @@ def _build_stocktake_items(db: Session, stocktake_id: int, items: list) -> list[
 def create_stocktake_request(db: Session, user: User, data: InventoryStocktakeRequestCreate) -> InventoryStocktakeRequest:
     """创建库存盘点申请草稿并保存账面数量快照。"""
 
-    if "WAREHOUSE" in set(get_user_role_codes(db, user.id)):
+    if _must_check_warehouse(db, user):
         _require_warehouse_scope(db, user, data.warehouse_id)
     _validate_stocktake_items(db, data.warehouse_id, data.location_id, data.items)
     stocktake = InventoryStocktakeRequest(
@@ -997,7 +1008,7 @@ def list_stocktake_requests(db: Session, user: User, *, status: str | None, page
     """按用户数据范围分页查询库存盘点申请。"""
 
     roles = set(get_user_role_codes(db, user.id))
-    if roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
+    if _can_access_all_warehouses(db, user, roles):
         applicant_id, warehouse_ids = None, None
     elif "WAREHOUSE" in roles:
         applicant_id, warehouse_ids = None, accessible_warehouse_ids(db, user) or set()
@@ -1020,7 +1031,7 @@ def update_stocktake_request(db: Session, user: User, stocktake_id: int, data: I
         raise BusinessValidationError("只有草稿或已驳回的盘点申请可以修改")
     values = data.model_dump(exclude_unset=True)
     if data.items is not None:
-        if "WAREHOUSE" in set(get_user_role_codes(db, user.id)):
+        if _must_check_warehouse(db, user):
             _require_warehouse_scope(db, user, stocktake.warehouse_id)
         _validate_stocktake_items(db, stocktake.warehouse_id, stocktake.location_id, data.items)
         stocktake.items.clear()

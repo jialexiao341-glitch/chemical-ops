@@ -44,11 +44,17 @@ def json_safe(value: Any) -> Any:
     return value
 
 
-def build_snapshot(db: Session) -> dict[str, Any]:
+def build_snapshot(db: Session, *, user: User | None = None) -> dict[str, Any]:
     """聚合晨报需要的指标快照（全部来自 dashboard 既有查询）。"""
 
-    overview = get_overview(db)
-    report = get_report(db, date_from=None, date_to=None)
+    from app.modules.system.data_scope import is_department_restricted
+    if user is not None and is_department_restricted(db, user):
+        from app.modules.dashboard.service import get_department_overview, get_department_report
+        overview = get_department_overview(db, user)
+        report = get_department_report(db, user, date_from=None, date_to=None)
+    else:
+        overview = get_overview(db)
+        report = get_report(db, date_from=None, date_to=None)
     trend = report.get("order_trend") or []
     return json_safe(
         {
@@ -82,14 +88,18 @@ async def generate_briefing(
     db: Session, user: User, request: BriefingRequest
 ) -> BriefingResponse:
     """生成运营晨报；request.push=True 时同时发送站内通知。"""
+    from app.modules.system.data_scope import is_department_restricted
+    restricted = is_department_restricted(db, user)
 
     can_push = {"SYS_ADMIN", "PROCUREMENT_MANAGER"} & set(
         get_user_role_codes(db, user.id)
     )
     if request.push and not can_push:
         raise AuthorizationError("只有系统管理员或采购经理可以推送运营晨报")
+    if request.push and restricted:
+        raise AuthorizationError("部门范围晨报暂不支持跨用户推送")
 
-    snapshot = build_snapshot(db)
+    snapshot = build_snapshot(db, user=user)
     result = await chat(
         AIChatRequest(
             messages=[AIChatMessage(role="user", content=build_prompt(snapshot))],
@@ -100,7 +110,7 @@ async def generate_briefing(
         overview = snapshot.get("overview", {})
         labels = {"purchase_orders_total": "采购订单总数", "purchase_orders_in_progress": "进行中订单",
                   "deliveries_overdue": "逾期到货", "open_exceptions": "未关闭异常", "expiry_alerts": "效期预警"}
-        facts = "；".join(f"{label}：{overview[key]}" for key, label in labels.items() if key in overview)
+        facts = "；".join(f"{label}：{overview[key]}" for key, label in labels.items() if overview.get(key) is not None)
         content = f"【概览】{facts or '暂无汇总指标'}。\n【需关注】请按快照核对逾期、异常与效期明细。\n【建议】结合单据明细安排处理。"
 
     pushed = False
@@ -110,6 +120,7 @@ async def generate_briefing(
         notifications = notify_users(
             db,
             role_codes=role_codes,
+            exclude_scoped=True,
             notification_type="AI_BRIEFING",
             title=f"AI 运营晨报 {snapshot['date']}",
             content=content,

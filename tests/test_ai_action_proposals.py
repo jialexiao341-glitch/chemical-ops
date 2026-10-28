@@ -43,6 +43,11 @@ from app.modules.ai import action_handlers, action_proposals
 from app.modules.ai.schema import AIActionProposalConfirm
 
 
+@pytest.fixture(autouse=True)
+def _unrestricted_scope(monkeypatch):
+    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
+
+
 class _DB:
     def __init__(self):
         self.rows = []

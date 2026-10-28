@@ -17,7 +17,8 @@ import { Button, Input, message, Modal, Select } from 'antdv-next';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   deleteUserApi, getSupplierBindingOptionsApi, getUserApi, getUserListApi,
-  getUserSupplierBindingApi, setUserSupplierBindingApi,
+  getUserSupplierBindingApi, setUserSupplierBindingApi, getDepartmentListApi,
+  getUserDepartmentScopeApi, setUserDepartmentScopeApi,
   reviewRegistrationApi,
 } from '#/api';
 
@@ -60,6 +61,56 @@ const supplierOptions = computed(() => bindingOptions.value.map((supplier) => ({
   label: `${supplier.supplier_code} · ${supplier.supplier_name}`,
   value: supplier.id,
 })));
+
+const scopeOpen = ref(false);
+const scopeLoading = ref(false);
+const scopeSaving = ref(false);
+const scopeUser = ref<SystemUserApi.SystemUser>();
+const scopeMode = ref<'all' | 'selected'>('all');
+const scopeDepartments = ref<number[]>([]);
+const scopeOptions = ref<{ label: string; value: number }[]>([]);
+
+async function openDepartmentScope(row: SystemUserApi.SystemUser) {
+  if (!isAdmin || scopeLoading.value || scopeSaving.value) return;
+  scopeUser.value = row;
+  scopeOpen.value = true;
+  scopeLoading.value = true;
+  scopeDepartments.value = [];
+  scopeOptions.value = [];
+  try {
+    const [scope, first] = await Promise.all([
+      getUserDepartmentScopeApi(row.id), getDepartmentListApi({ page: 1, page_size: 100, status: 'ACTIVE' }),
+    ]);
+    const departments = [...first.items];
+    for (let page = 2; departments.length < first.total; page++) {
+      const next = await getDepartmentListApi({ page, page_size: 100, status: 'ACTIVE' });
+      if (!next.items.length) break;
+      departments.push(...next.items);
+    }
+    scopeOptions.value = departments.map((item) => ({ label: `${item.department_code} · ${item.department_name}`, value: item.id }));
+    scopeMode.value = scope.enabled ? 'selected' : 'all';
+    scopeDepartments.value = scope.department_ids;
+  } catch {
+    scopeOpen.value = false;
+  } finally {
+    scopeLoading.value = false;
+  }
+}
+
+async function saveDepartmentScope() {
+  if (!isAdmin || !scopeUser.value || scopeLoading.value || scopeSaving.value) return;
+  scopeSaving.value = true;
+  try {
+    await setUserDepartmentScopeApi(scopeUser.value.id, {
+      enabled: scopeMode.value === 'selected',
+      department_ids: scopeMode.value === 'selected' ? scopeDepartments.value : [],
+    });
+    message.success('部门授权已保存，用户需重新登录');
+    scopeOpen.value = false;
+  } finally {
+    scopeSaving.value = false;
+  }
+}
 
 async function openSupplierBinding(row: SystemUserApi.SystemUser) {
   if (!canWriteUsers || row.status !== 'ACTIVE' || row.role_codes?.length !== 1 || row.role_codes[0] !== 'SUPPLIER_PORTAL' || bindingLoading.value || bindingSaving.value) return;
@@ -155,6 +206,10 @@ function onActionClick({
       void openSupplierBinding(row);
       break;
     }
+    case 'department-scope': {
+      void openDepartmentScope(row);
+      break;
+    }
     case 'delete': {
       onDelete(row);
       break;
@@ -227,6 +282,17 @@ function onRefresh() {
         <div><div class="mb-1 text-sm text-muted-foreground">申请角色</div><div>{{ reviewUser.role_names.join('、') || '角色已失效' }}</div></div>
         <div><label for="registration-decision" class="mb-1 block text-sm text-muted-foreground">审核结果</label><Select id="registration-decision" v-model:value="reviewDecision" class="w-full" :disabled="reviewSaving" :options="[{ label: '批准注册', value: 'approve' }, { label: '拒绝注册', value: 'reject' }]" /></div>
         <div><label for="registration-reason" class="mb-1 block text-sm text-muted-foreground">审核说明</label><Input.TextArea id="registration-reason" v-model:value="reviewReason" :disabled="reviewSaving" :maxlength="500" :rows="3" placeholder="填写审核说明（选填）" /></div>
+      </div>
+    </Modal>
+    <Modal v-model:open="scopeOpen" :confirm-loading="scopeSaving" title="部门授权"
+      :closable="!scopeSaving" :mask-closable="!scopeSaving" :keyboard="!scopeSaving"
+      :ok-button-props="{ disabled: scopeLoading || !isAdmin }"
+      :cancel-button-props="{ disabled: scopeSaving }" @ok="saveDepartmentScope">
+      <div v-if="scopeUser" class="space-y-4 py-2">
+        <div><div class="mb-1 text-sm text-muted-foreground">登录账号</div><div class="font-medium">{{ scopeUser.username }} · {{ scopeUser.display_name }}</div></div>
+        <div><label for="scope-mode" class="mb-1 block text-sm text-muted-foreground">数据范围</label><Select id="scope-mode" v-model:value="scopeMode" class="w-full" :disabled="scopeLoading || scopeSaving" :options="[{ label: '沿用角色默认范围', value: 'all' }, { label: '仅授权部门', value: 'selected' }]" /></div>
+        <div v-if="scopeMode === 'selected'"><label for="scope-departments" class="mb-1 block text-sm text-muted-foreground">授权部门</label><Select id="scope-departments" v-model:value="scopeDepartments" class="w-full" mode="multiple" show-search option-filter-prop="label" :options="scopeOptions" :loading="scopeLoading" :disabled="scopeLoading || scopeSaving" placeholder="选择允许访问的部门" /></div>
+        <div class="text-sm text-muted-foreground">部门限制适用于内部采购经理或财务岗位；未选择部门时，不能访问需要部门归属的业务记录。其他账号可在此解除既有授权；保存后用户需重新登录。</div>
       </div>
     </Modal>
     <Modal

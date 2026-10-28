@@ -215,7 +215,8 @@ def _finance_difference(db: Session, user: User, order_id: int) -> BusinessInsig
             _evidence(result, f"到货行 {delivery.delivery_no} · 第 {row.line_no} 行", f"到货 {row.actual_quantity}，短交 {row.short_quantity}，状态 {delivery.status}", f"到货明细 #{row.id}", "/warehouse/deliveries")
     if lines:
         _evidence(result, "已验收到货含税估算", f"{accepted_total:.2f} {order.currency_code}；与订单金额相差 {order.order_amount-accepted_total:.2f}", "按订单行单价、税率和已验收到货量计算")
-    returns = db.scalars(select(InventoryReturnRequest).where(InventoryReturnRequest.status == "COMPLETED", or_(InventoryReturnRequest.po_id == order.id, InventoryReturnRequest.delivery_id.in_(list(delivery_by_id))))).all() if can_read_returns else []
+    from app.modules.inventory_returns.service import return_read_condition
+    returns = db.scalars(select(InventoryReturnRequest).where(InventoryReturnRequest.status == "COMPLETED", or_(InventoryReturnRequest.po_id == order.id, InventoryReturnRequest.delivery_id.in_(list(delivery_by_id))), return_read_condition(db, user))).all() if can_read_returns else []
     for returned in returns:
         return_items = db.scalars(select(InventoryReturnItem).where(InventoryReturnItem.return_request_id == returned.id)).all()
         _evidence(result, f"已完成退货 {returned.return_no}", "；".join(f"产品 #{item.product_id} 退回 {item.returned_quantity} · 单位 #{item.unit_id}" for item in return_items) or "无退货明细", f"退货单 #{returned.id}", "/warehouse/returns")
@@ -334,8 +335,7 @@ def _supplier_score(db: Session, user: User, supplier_id: int) -> BusinessInsigh
     can_read_acceptances = _has_permission(db, user, "quality.acceptances.read")
     orders = db.scalars(select(PurchaseOrder).where(PurchaseOrder.supplier_id == supplier_id, PurchaseOrder.status.not_in({"DRAFT", "CANCELLED"}), order_read_condition(user, roles))).all() if can_read_orders else []
     delivery_query = select(Delivery).join(PurchaseOrder, Delivery.po_id == PurchaseOrder.id).where(Delivery.supplier_id == supplier_id)
-    if not delivery_service._can_manage_all(db, user):
-        delivery_query = delivery_query.where(order_read_condition(user, roles))
+    delivery_query = delivery_query.where(order_read_condition(user, roles))
     deliveries = db.scalars(delivery_query).all() if can_read_deliveries else []
     _evidence(result, "统计范围", "当前权限内该供应商全部已录入记录；订单排除草稿和取消，未限定日期", "按供应商筛选后统计完整样本")
     dated = [x for x in deliveries if x.expected_arrival_date and x.actual_arrival_date]

@@ -33,6 +33,8 @@ from app.modules.system.schema import (
     UserPage,
     UserRead,
     UserUpdate,
+    UserDepartmentScopeUpdate,
+    UserDepartmentScopeRead,
     RegistrationCreate,
     RegistrationRead,
     RegistrationReview,
@@ -183,6 +185,16 @@ def get_user_supplier_binding(
     _: User = Depends(require_permission("system.users.write")),
 ):
     return service.get_supplier_binding(db, user_id)
+
+
+@router.get("/system/users/{user_id}/department-scope", response_model=UserDepartmentScopeRead, summary="查询用户部门授权")
+def get_user_department_scope(user_id: int, db: Session = Depends(get_db), user: User = Depends(_registration_admin)):
+    return service.get_user_department_scope(db, user_id)
+
+
+@router.put("/system/users/{user_id}/department-scope", response_model=UserDepartmentScopeRead, summary="设置用户部门授权")
+def set_user_department_scope(user_id: int, data: UserDepartmentScopeUpdate, db: Session = Depends(get_db), user: User = Depends(_registration_admin)):
+    return service.set_user_department_scope(db, user_id, enabled=data.enabled, department_ids=data.department_ids, actor_id=user.id)
 
 
 @router.put("/system/users/{user_id}/supplier-binding", response_model=SupplierBindingRead, summary="保存用户供应商绑定")

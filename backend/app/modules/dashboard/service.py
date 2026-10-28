@@ -219,3 +219,67 @@ def get_report(db: Session, *, date_from: date | None, date_to: date | None) -> 
             for balance_id, product_name, batch_no, warehouse_name, location_name, quantity, unit_name, expiry_date in expiry_rows
         ],
     }
+
+
+def _department_dashboard_scope(db: Session, user):
+    from app.modules.system.crud import get_user_role_codes
+    from app.modules.system.data_scope import department_scope_condition
+    from app.modules.operation_exceptions.service import _exception_department_scope
+    roles = set(get_user_role_codes(db, user.id))
+    order_scope = department_scope_condition(user, roles, PurchaseOrder.department_id)
+    visible_orders = select(PurchaseOrder.id).where(order_scope)
+    visible_deliveries = select(Delivery.id).where(Delivery.po_id.in_(visible_orders))
+    return order_scope, visible_orders, visible_deliveries, _exception_department_scope(user, roles)
+
+
+def get_department_overview(db: Session, user) -> dict:
+    """仅聚合授权部门数据；仓库库存没有部门归属，明确返回不可用。"""
+    order_scope, orders, deliveries, exception_scope = _department_dashboard_scope(db, user)
+    total = db.scalar(select(func.count(PurchaseOrder.id)).where(order_scope)) or 0
+    progress = db.scalar(select(func.count(PurchaseOrder.id)).where(order_scope, PurchaseOrder.status.in_(("DRAFT", "APPROVING", "APPROVED", "ORDERED", "PARTIAL")))) or 0
+    overdue = db.scalar(select(func.count(Delivery.id)).where(Delivery.id.in_(deliveries), Delivery.status == 'IN_TRANSIT', Delivery.expected_arrival_date.is_not(None), Delivery.expected_arrival_date < date.today())) or 0
+    exceptions = db.scalar(select(func.count(OperationException.id)).where(exception_scope, OperationException.status.in_(("OPEN", "PROCESSING")))) or 0
+    reconciliations = db.scalar(select(func.count(FinanceReconciliation.id)).where(FinanceReconciliation.po_id.in_(orders), FinanceReconciliation.status == 'CONFIRMED')) or 0
+    paid = db.scalar(select(func.coalesce(func.sum(FinancePayment.amount), 0)).where(FinancePayment.po_id.in_(orders), FinancePayment.status == 'PAID')) or 0
+    return {'purchase_orders_total': total, 'purchase_orders_in_progress': progress, 'deliveries_overdue': overdue,
+            'inventory_quantity': None, 'inventory_units': [], 'inventory_available': False, 'expiry_alerts': None,
+            'open_exceptions': exceptions, 'confirmed_reconciliations': reconciliations, 'paid_amount': Decimal(paid)}
+
+
+def get_department_report(db: Session, user, *, date_from: date | None, date_to: date | None) -> dict:
+    """按部门生成采购、到货、验收和异常指标。"""
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise BusinessValidationError('统计开始日期不能晚于结束日期')
+    order_scope, orders, deliveries, exception_scope = _department_dashboard_scope(db, user)
+    order_conditions = [order_scope]
+    delivery_conditions = [Delivery.id.in_(deliveries), Delivery.status == 'IN_TRANSIT', Delivery.expected_arrival_date.is_not(None), Delivery.expected_arrival_date < date.today()]
+    if date_from is not None:
+        order_conditions.append(PurchaseOrder.order_date >= date_from)
+        delivery_conditions.append(func.date(Delivery.created_at) >= date_from)
+    if date_to is not None:
+        order_conditions.append(PurchaseOrder.order_date <= date_to)
+        delivery_conditions.append(func.date(Delivery.created_at) <= date_to)
+    start = date_from or date.fromordinal(date.today().toordinal() - 29)
+    end = date_to or date.today()
+    trend_rows = db.execute(select(PurchaseOrder.order_date, func.count(PurchaseOrder.id), func.coalesce(func.sum(PurchaseOrder.order_amount), 0)).where(
+        order_scope, PurchaseOrder.order_date.is_not(None), PurchaseOrder.order_date >= start, PurchaseOrder.order_date <= end
+    ).group_by(PurchaseOrder.order_date)).all()
+    trends = {day: (count, Decimal(amount)) for day, count, amount in trend_rows}
+    trend = []
+    for offset in range(max(0, (end - start).days) + 1):
+        day = date.fromordinal(start.toordinal() + offset)
+        count, amount = trends.get(day, (0, Decimal(0)))
+        trend.append({'date': day, 'order_count': count, 'order_amount': amount})
+    statuses = db.execute(select(PurchaseOrder.status, func.count(PurchaseOrder.id), func.coalesce(func.sum(PurchaseOrder.order_amount), 0)).where(*order_conditions).group_by(PurchaseOrder.status).order_by(PurchaseOrder.status)).all()
+    suppliers = db.execute(select(PurchaseOrder.supplier_id, Supplier.supplier_name, func.count(PurchaseOrder.id), func.coalesce(func.sum(PurchaseOrder.order_amount), 0)).join(Supplier, Supplier.id == PurchaseOrder.supplier_id).where(*order_conditions).group_by(PurchaseOrder.supplier_id, Supplier.supplier_name).order_by(func.sum(PurchaseOrder.order_amount).desc(), PurchaseOrder.supplier_id)).all()
+    overdue = dict(db.execute(select(Delivery.supplier_id, func.count(Delivery.id)).where(*delivery_conditions).group_by(Delivery.supplier_id)).all())
+    pending = [
+        {'task_type': 'PURCHASE_ORDER_APPROVAL', 'task_count': db.scalar(select(func.count(PurchaseOrder.id)).where(order_scope, PurchaseOrder.status == 'APPROVING')) or 0},
+        {'task_type': 'QUALITY_ACCEPTANCE', 'task_count': db.scalar(select(func.count(QualityAcceptance.id)).where(QualityAcceptance.delivery_id.in_(deliveries), QualityAcceptance.result.in_(('PENDING', 'REINSPECTION')))) or 0},
+        {'task_type': 'DELIVERY_CONFIRMATION', 'task_count': db.scalar(select(func.count(Delivery.id)).where(Delivery.id.in_(deliveries), Delivery.status == 'IN_TRANSIT')) or 0},
+        {'task_type': 'OPEN_EXCEPTION', 'task_count': db.scalar(select(func.count(OperationException.id)).where(exception_scope, OperationException.status.in_(('OPEN', 'PROCESSING')))) or 0},
+    ]
+    return {'date_from': date_from, 'date_to': date_to, 'inventory_available': False, 'order_trend': trend,
+            'order_statuses': [{'status': status, 'order_count': count, 'order_amount': Decimal(amount)} for status, count, amount in statuses],
+            'supplier_performance': [{'supplier_id': sid, 'supplier_name': name, 'order_count': count, 'order_amount': Decimal(amount), 'overdue_deliveries': overdue.get(sid, 0)} for sid, name, count, amount in suppliers],
+            'inventory_costs': [], 'pending_tasks': pending, 'inventory_alerts': []}

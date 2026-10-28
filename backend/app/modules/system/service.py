@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import hashlib
 
 from fastapi import HTTPException
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -15,7 +15,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.modules.system import crud
 from app.modules.suppliers.model import Supplier
 from app.modules.supplier_portal.model import SupplierPortalAccount
-from app.modules.system.model import Department, Permission, Role, RolePermission, User, UserRole
+from app.modules.system.model import Department, Permission, Role, RolePermission, User, UserRole, UserDepartmentScope, UserDepartmentGrant
 from app.modules.system.audit import add_audit_log
 from app.modules.system.schema import (
     DepartmentCreate,
@@ -43,6 +43,53 @@ def _require_user(db: Session, user_id: int) -> User:
     if user is None:
         raise ResourceNotFoundError(f"用户 {user_id} 不存在")
     return user
+
+
+def get_user_department_scope(db: Session, user_id: int) -> dict:
+    _require_user(db, user_id)
+    scope = db.get(UserDepartmentScope, user_id)
+    ids = list(db.scalars(select(UserDepartmentGrant.department_id).where(
+        UserDepartmentGrant.user_id == user_id
+    ).order_by(UserDepartmentGrant.department_id)).all()) if scope else []
+    return {"enabled": scope is not None, "department_ids": ids}
+
+
+def set_user_department_scope(db: Session, user_id: int, *, enabled: bool, department_ids: list[int], actor_id: int) -> dict:
+    require_authorization_admin(db, actor_id)
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None:
+        raise ResourceNotFoundError("用户不存在")
+    roles = set(crud.get_user_role_codes(db, user_id))
+    if enabled and "SYS_ADMIN" in roles:
+        raise BusinessValidationError("系统管理员不受部门范围限制")
+    if enabled and ("SUPPLIER_PORTAL" in roles or not roles.intersection({"PROCUREMENT_MANAGER", "FINANCE_VIEWER", "FINANCE_CLERK", "FINANCE_MANAGER"})):
+        raise BusinessValidationError("部门授权仅适用于内部采购经理或财务岗位账号")
+    if len(department_ids) != len(set(department_ids)) or any(value <= 0 for value in department_ids):
+        raise BusinessValidationError("部门授权包含重复或无效部门")
+    if not enabled and department_ids:
+        raise BusinessValidationError("未启用部门限制时不能指定部门")
+    ids = sorted(department_ids)
+    if ids:
+        actual = set(db.scalars(select(Department.id).where(Department.id.in_(ids), Department.status == "ACTIVE")).all())
+        if actual != set(ids):
+            raise BusinessValidationError("授权部门不存在或已停用")
+    previous = get_user_department_scope(db, user_id)
+    if previous == {"enabled": enabled, "department_ids": ids}:
+        return previous
+    db.execute(delete(UserDepartmentGrant).where(UserDepartmentGrant.user_id == user_id))
+    scope = db.get(UserDepartmentScope, user_id)
+    if enabled:
+        if scope is None:
+            db.add(UserDepartmentScope(user_id=user_id))
+            db.flush()
+        db.add_all(UserDepartmentGrant(user_id=user_id, department_id=value) for value in ids)
+    elif scope is not None:
+        db.delete(scope)
+    user.token_version += 1
+    add_audit_log(db, actor_id=actor_id, action_type="UPDATE_DEPARTMENT_SCOPE", resource_type="USER", resource_id=user.id,
+                  request_summary=f"部门授权 {previous} -> {{'enabled': {enabled}, 'department_ids': {ids}}}", result_status="SUCCESS")
+    db.commit()
+    return {"enabled": enabled, "department_ids": ids}
 
 
 def _require_roles(db: Session, role_ids: list[int]) -> None:
@@ -325,7 +372,7 @@ def update_user(
     return crud.update_entity(db, user, values)
 
 
-def delete_user(db: Session, user_id: int, *, actor_id: int | None = None) -> User:
+def delete_user(db: Session, user_id: int, *, actor_id: int | None = None, commit: bool = True) -> User:
     """软删除用户并保留历史操作记录。"""
 
     user = _require_user(db, user_id)
@@ -338,7 +385,11 @@ def delete_user(db: Session, user_id: int, *, actor_id: int | None = None) -> Us
     _require_role_assignment(db, actor_id, [], target_id=user_id)
     user.token_version += 1
     add_audit_log(db, actor_id=actor_id, action_type="DISABLE", resource_type="USER", resource_id=user.id, request_summary="停用用户", result_status="SUCCESS")
-    return crud.disable_entity(db, user)
+    user.status = "INACTIVE"
+    if commit:
+        db.commit()
+        db.refresh(user)
+    return user
 
 
 def list_departments(db: Session, keyword: str | None, status: str | None, page: int, page_size: int):
@@ -373,13 +424,17 @@ def update_department(db: Session, department_id: int, data: DepartmentUpdate) -
     return crud.update_entity(db, department, data.model_dump(exclude_unset=True))
 
 
-def delete_department(db: Session, department_id: int) -> Department:
+def delete_department(db: Session, department_id: int, *, commit: bool = True) -> Department:
     """软删除部门，将状态设置为 INACTIVE。"""
 
     department = crud.get_department(db, department_id)
     if department is None:
         raise ResourceNotFoundError(f"部门 {department_id} 不存在")
-    return crud.disable_entity(db, department)
+    department.status = "INACTIVE"
+    if commit:
+        db.commit()
+        db.refresh(department)
+    return department
 
 
 def list_roles(db: Session, keyword: str | None, status: str | None, page: int, page_size: int):
@@ -454,7 +509,7 @@ def _require_permissions(db: Session, permission_ids: list[int]) -> None:
         raise ResourceNotFoundError(f"权限不存在：{missing}")
 
 
-def delete_role(db: Session, role_id: int, *, actor_id: int | None = None) -> Role:
+def delete_role(db: Session, role_id: int, *, actor_id: int | None = None, commit: bool = True) -> Role:
     """软删除角色，将状态设置为 INACTIVE。"""
 
     require_authorization_admin(db, actor_id)
@@ -467,7 +522,11 @@ def delete_role(db: Session, role_id: int, *, actor_id: int | None = None) -> Ro
     if role.status != "INACTIVE":
         _invalidate_role_members(db, role_id)
     add_audit_log(db, actor_id=actor_id, action_type="DELETE", resource_type="ROLE", resource_id=role.id, request_summary="delete_role", result_status="SUCCESS")
-    return crud.disable_entity(db, role)
+    role.status = "INACTIVE"
+    if commit:
+        db.commit()
+        db.refresh(role)
+    return role
 
 
 def list_permissions(db: Session, keyword: str | None, permission_type: str | None, page: int, page_size: int):
@@ -504,7 +563,7 @@ def update_permission(db: Session, permission_id: int, data: PermissionUpdate, *
     return crud.update_entity(db, permission, data.model_dump(exclude_unset=True))
 
 
-def delete_permission(db: Session, permission_id: int, *, actor_id: int | None = None) -> Permission:
+def delete_permission(db: Session, permission_id: int, *, actor_id: int | None = None, commit: bool = True) -> Permission:
     """权限表没有状态字段，删除前必须确认没有角色引用。"""
 
     require_authorization_admin(db, actor_id)
@@ -516,7 +575,8 @@ def delete_permission(db: Session, permission_id: int, *, actor_id: int | None =
         raise BusinessValidationError("权限已绑定角色，不能直接删除")
     db.delete(permission)
     add_audit_log(db, actor_id=actor_id, action_type="DELETE", resource_type="PERMISSION", resource_id=permission.id, request_summary="delete_permission", result_status="SUCCESS")
-    db.commit()
+    if commit:
+        db.commit()
     return permission
 
 

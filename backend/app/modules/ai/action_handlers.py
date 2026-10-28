@@ -206,6 +206,7 @@ class PurchaseRequestUpdateHandler:
         if not isinstance(payload, dict) or (set(payload) not in ({"request_id", "changes"}, {"request_no", "changes"})):
             raise BusinessValidationError("修改申请提案必须包含申请编号和字段变更")
         request = _resolve_purchase_request(db, user, payload, {"changes"})
+        request = purchase_request_service.get_request_for_write(db, user, request.id)
         request_id = request.id
         if request.status not in {"DRAFT", "REJECTED"}:
             raise BusinessValidationError("只有草稿或已驳回的采购申请可以修改")
@@ -229,7 +230,7 @@ class PurchaseRequestUpdateHandler:
                 "warnings": [], "blockers": [], "risk_level": "LOW"}
 
     def validate_current(self, db, user, proposal, *, for_update=True):
-        request = purchase_request_service.get_request(db, user, int(proposal.resource_id), for_update=for_update)
+        request = purchase_request_service.get_request_for_write(db, user, int(proposal.resource_id), for_update=for_update)
         if request.status not in {"DRAFT", "REJECTED"} or _request_snapshot(request) != proposal.expected_resource_snapshot["request"]:
             raise BusinessValidationError("采购申请状态或内容已变化，请重新生成预览")
         updated = PurchaseRequestUpdate.model_validate(proposal.payload["changes"])
@@ -252,6 +253,7 @@ class PurchaseRequestSubmitHandler:
         if not isinstance(payload, dict) or set(payload) not in ({"request_id"}, {"request_no"}):
             raise BusinessValidationError("提交申请提案必须包含准确的申请编号")
         request = _resolve_purchase_request(db, user, payload, set())
+        request = purchase_request_service.get_request_for_write(db, user, request.id)
         request_id = request.id
         if request.status not in {"DRAFT", "REJECTED"}:
             raise BusinessValidationError("只有草稿或已驳回的采购申请可以提交")
@@ -265,7 +267,7 @@ class PurchaseRequestSubmitHandler:
                 "warnings": [], "blockers": [], "risk_level": "MEDIUM"}
 
     def validate_current(self, db, user, proposal, *, for_update=True):
-        request = purchase_request_service.get_request(db, user, int(proposal.resource_id), for_update=for_update)
+        request = purchase_request_service.get_request_for_write(db, user, int(proposal.resource_id), for_update=for_update)
         if request.status not in {"DRAFT", "REJECTED"} or _request_snapshot(request) != proposal.expected_resource_snapshot:
             raise BusinessValidationError("采购申请状态或内容已变化，请重新检查")
         if not request.items:

@@ -16,9 +16,7 @@ from app.modules.ai.formatting import format_amount
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
 from app.modules.inventory.model import InventoryBalance, InventoryBatch
 from app.modules.inventory_returns.model import InventoryReturnRequest
-from app.modules.purchase_orders.scope import ORDER_READ_ALL_ROLES
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
-from app.modules.purchase_requests.model import PurchaseRequest
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.rfqs.model import QuoteComparison, RFQ, SupplierQuote
 from app.modules.suppliers.model import Supplier
@@ -105,13 +103,8 @@ def format_stage_line(stage: dict[str, Any]) -> str:
 
 
 def _require_order_scope(db: Session, user: User, order: PurchaseOrder, roles: set[str]) -> None:
-    if ORDER_READ_ALL_ROLES.intersection(roles):
-        return
-    if user.department_id is not None:
-        if order.department_id != user.department_id:
-            raise ResourceNotFoundError(f"订单 {order.po_no} 不存在或无权查看")
-    elif order.buyer_id != user.id:
-        raise ResourceNotFoundError(f"订单 {order.po_no} 不存在或无权查看")
+    from app.modules.purchase_orders.service import read_order
+    read_order(db, user, order.id)
 
 
 def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
@@ -137,10 +130,11 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
     # 采购申请
     allowed = _can_read("采购申请", permissions, roles)
     if allowed and order.source_request_id:
-        request = db.get(PurchaseRequest, order.source_request_id)
-        if request and not roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
-            if (request.department_id != user.department_id if user.department_id is not None else request.applicant_id != user.id):
-                request = None
+        from app.modules.purchase_requests.service import get_request
+        try:
+            request = get_request(db, user, order.source_request_id)
+        except ResourceNotFoundError:
+            request = None
         records = [_record(request.request_no, request.status, request.updated_at)] if request else []
         if request:
             source_records.append({"dataset": "purchase_requests", "label": f"采购申请 {request.request_no}", "record_id": request.id, "filters": {"keywords": request.request_no}})
@@ -157,8 +151,12 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
             quote_id = comparison.selected_quote_id if comparison else None
         quote = db.get(SupplierQuote, quote_id) if quote_id else None
         rfq = db.get(RFQ, quote.rfq_id) if quote else None
-        if rfq and not roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"} and rfq.requester_id != user.id:
-            quote, rfq = None, None
+        if rfq:
+            from app.modules.rfqs.service import get_rfq
+            try:
+                get_rfq(db, user, rfq.id)
+            except (BusinessValidationError, ResourceNotFoundError):
+                quote, rfq = None, None
         quote_records = [_record(quote.quote_no, quote.status, quote.updated_at, rfq_no=rfq.rfq_no if rfq else None)] if quote else []
         stages.append(_stage("询价与报价", True, quote_records, summary=(f"关联询价单 {rfq.rfq_no}，报价 {quote.quote_no}（{quote.status}）" if quote and rfq else None)))
         if quote and rfq:
@@ -230,7 +228,11 @@ def trace_purchase_order(db: Session, user: User, po_no: str) -> dict[str, Any]:
 
     # 退货
     return_allowed = _can_read("退货", permissions, roles)
-    return_rows = list(db.scalars(select(InventoryReturnRequest).where((InventoryReturnRequest.po_id == order.id) | (InventoryReturnRequest.delivery_id.in_(delivery_ids) if delivery_ids else False)).order_by(InventoryReturnRequest.id).limit(51)).all()) if return_allowed else []
+    from app.modules.inventory_returns.service import return_read_condition
+    return_rows = list(db.scalars(select(InventoryReturnRequest).where(
+        (InventoryReturnRequest.po_id == order.id) | (InventoryReturnRequest.delivery_id.in_(delivery_ids) if delivery_ids else False),
+        return_read_condition(db, user, roles=roles),
+    ).order_by(InventoryReturnRequest.id).limit(51)).all()) if return_allowed else []
     returns_truncated = len(return_rows) > 50
     returns = return_rows[:50]
     stages.append(_stage("退货", return_allowed, [_record(item.return_no, item.status, item.updated_at, reason=item.reason) for item in returns], truncated=returns_truncated))

@@ -29,6 +29,7 @@ def notify_users(
     content: str,
     related_type: str | None = None,
     related_id: int | None = None,
+    exclude_scoped: bool = False,
 ) -> list[Notification]:
     """向指定用户和角色对应的启用用户写入通知，不单独提交事务。"""
 
@@ -47,6 +48,13 @@ def notify_users(
         active_ids = set(db.scalars(select(User.id).where(User.id.in_(user_ids), User.status == "ACTIVE")).all())
     else:
         active_ids = set()
+    if exclude_scoped and active_ids:
+        from app.modules.system.model import UserDepartmentScope
+        restricted = set(db.scalars(select(UserDepartmentScope.user_id).where(UserDepartmentScope.user_id.in_(active_ids))).all())
+        admin_ids = set(db.scalars(select(UserRole.user_id).join(Role, Role.id == UserRole.role_id).where(
+            UserRole.user_id.in_(restricted), Role.role_code == "SYS_ADMIN", Role.status == "ACTIVE"
+        )).all()) if restricted else set()
+        active_ids -= restricted - admin_ids
     notifications = [
         Notification(
             recipient_id=user_id,

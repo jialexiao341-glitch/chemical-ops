@@ -155,8 +155,8 @@ def find_rfq_items(db: Session, user: User, arguments: RFQSearchInput) -> RFQSea
         RFQItem.product_id, RFQItem.specification, RFQItem.technical_requirements,
     ).join(RFQ, RFQ.id == RFQItem.rfq_id).where(
         RFQItem.product_id == arguments.product_id, RFQ.status.in_(("SENT", "RESPONDING")))
-    if not set(get_user_role_codes(db, user.id)) & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
-        base = base.where(RFQ.requester_id == user.id)
+    from app.modules.rfqs.scope import rfq_read_condition
+    base = base.where(rfq_read_condition(user, get_user_role_codes(db, user.id)))
     if arguments.rfq_no is not None:
         base = base.where(RFQ.rfq_no == arguments.rfq_no)
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
@@ -368,8 +368,8 @@ def compare_quotes(db: Session, user: User, arguments: QuoteInput) -> QuoteResul
     ).join(RFQItem, RFQItem.rfq_id == RFQ.id).where(
         RFQItem.id == arguments.rfq_item_id, RFQItem.product_id == arguments.product_id
     )
-    if not roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"}:
-        statement = statement.where(RFQ.requester_id == user.id)
+    from app.modules.rfqs.scope import rfq_read_condition
+    statement = statement.where(rfq_read_condition(user, roles))
     context = db.execute(statement).first()
     if context is None:
         raise ResourceNotFoundError("询价明细不存在、产品不匹配或不可访问")

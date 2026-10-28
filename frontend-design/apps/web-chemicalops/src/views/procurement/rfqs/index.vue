@@ -117,7 +117,7 @@ function makeIdempotencyKey() {
 function openAiRfq(rawId: unknown) {
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) return;
-  detailApi.setData({ id } as RfqApi.Rfq).open();
+  detailApi.setData({ id, open_quotes: route.query.document_quotes === '1' } as RfqApi.Rfq & { open_quotes?: boolean }).open();
 }
 
 onMounted(() => openAiRfq(route.query.ai_record_id));

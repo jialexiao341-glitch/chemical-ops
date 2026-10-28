@@ -48,6 +48,7 @@ const loadingFiles = ref(false);
 const uploading = ref(false);
 const reviewing = ref(false);
 const fileInput = ref<HTMLInputElement>();
+let requestedFileId: number | undefined;
 
 const title = computed(() => `核对报告 · ${acceptance.value?.acceptance_no ?? ''}`);
 const selectedFile = computed(() => files.value.find((item) => item.id === selectedFileId.value));
@@ -87,7 +88,7 @@ async function loadFiles(id: number) {
   loadingFiles.value = true;
   try {
     files.value = await getAcceptanceReportFilesApi(id);
-    const preferred = acceptance.value?.report_file_id;
+    const preferred = requestedFileId ?? acceptance.value?.report_file_id;
     selectedFileId.value = files.value.find((item) => item.id === preferred)?.id ?? files.value[0]?.id;
   } finally {
     loadingFiles.value = false;
@@ -128,7 +129,7 @@ async function refreshSummary() {
   }
 }
 
-const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance>({
+const [Drawer, drawerApi] = useVbenDrawer<null | (QualityAcceptanceApi.Acceptance & { preferred_report_file_id?: number; preferred_review_id?: number })>({
   /** 打开抽屉时清除上次状态并加载当前验收单上下文。 */
   async onOpenChange(isOpen) {
     if (!isOpen) {
@@ -136,7 +137,9 @@ const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance
       return;
     }
     if (acceptance.value) clearPageCopilotContext('quality_acceptance', acceptance.value.id);
-    acceptance.value = drawerApi.getData() ?? null;
+    const data = drawerApi.getData();
+    requestedFileId = data?.preferred_report_file_id;
+    acceptance.value = data ?? null;
     if (acceptance.value) {
       setPageCopilotContext({
         objectType: 'quality_acceptance',
@@ -154,6 +157,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | QualityAcceptanceApi.Acceptance
     files.value = [];
     selectedFileId.value = undefined;
     if (acceptance.value) await Promise.all([loadFiles(acceptance.value.id), loadContext(acceptance.value.id)]);
+    if (data?.preferred_review_id && history.value.some((item) => item.id === data.preferred_review_id)) await openHistory(data.preferred_review_id);
   },
 });
 

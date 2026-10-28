@@ -37,7 +37,7 @@ def get_by_id(db: Session, rfq_id: int, *, for_update: bool = False) -> RFQ | No
 def list_page(
     db: Session,
     *,
-    requester_id: int | None,
+    scope_condition,
     keyword: str | None,
     status: str | None,
     page: int,
@@ -45,9 +45,7 @@ def list_page(
 ) -> tuple[list[RFQ], int]:
     """按用户范围和筛选条件返回询价分页数据。"""
 
-    conditions = []
-    if requester_id is not None:
-        conditions.append(RFQ.requester_id == requester_id)
+    conditions = [scope_condition]
     if keyword:
         conditions.append(RFQ.rfq_no.like(f"%{keyword}%"))
     if status:

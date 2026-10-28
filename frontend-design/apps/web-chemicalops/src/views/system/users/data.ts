@@ -226,6 +226,7 @@ export function useColumns(
         options: [
           { code: 'edit', auth: 'system.users.write', show: (row: SystemUserApi.SystemUser) => !['PENDING', 'REJECTED'].includes(row.status) },
           { code: 'review-registration', text: '审核注册', show: (row: SystemUserApi.SystemUser) => isAdmin && row.status === 'PENDING' },
+          { code: 'department-scope', text: '部门授权', show: (row: SystemUserApi.SystemUser) => isAdmin && !row.role_codes?.includes('SYS_ADMIN') && !['PENDING', 'REJECTED'].includes(row.status) },
           {
             code: 'bind-supplier',
             auth: 'system.users.write',

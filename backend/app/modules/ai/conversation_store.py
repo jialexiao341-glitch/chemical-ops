@@ -25,12 +25,17 @@ from app.modules.system.model import User
 LOGGER = logging.getLogger("chemicalops.ai")
 
 
-def get_owned_conversation(db: Session, user: User, conversation_id: int) -> AIConversation:
+def get_owned_conversation(db: Session, user: User, conversation_id: int, *, allow_stale: bool = False) -> AIConversation:
     """读取当前用户自己的会话，其他用户的会话按不存在处理。"""
 
     conversation = db.scalar(select(AIConversation).where(AIConversation.id == conversation_id, AIConversation.user_id == user.id))
     if conversation is None:
         raise BusinessValidationError("AI 会话不存在或无权访问")
+    if not allow_stale:
+        from app.modules.system.data_scope import department_scope_snapshot
+        scope = department_scope_snapshot(db, user)
+        if scope is not None and (conversation.permission_snapshot or {}).get("department_scope") != scope:
+            raise BusinessValidationError("会话创建后的部门授权已变化，请新建会话")
     return conversation
 
 
@@ -46,7 +51,9 @@ def conversation_state_enabled(db: Session) -> bool:
 
 
 def permission_snapshot(db: Session, user: User) -> dict[str, list[str]]:
-    return {"roles": get_user_role_codes(db, user.id), "permissions": get_user_permission_codes(db, user.id)}
+    from app.modules.system.data_scope import department_scope_snapshot
+    return {"roles": get_user_role_codes(db, user.id), "permissions": get_user_permission_codes(db, user.id),
+            "department_scope": department_scope_snapshot(db, user)}
 
 
 def load_conversation_state(db: Session, conversation: AIConversation) -> AIConversationState | None:
@@ -121,7 +128,7 @@ def save_query_state(
 
 def delete_conversation(db: Session, user: User, conversation_id: int) -> None:
     """删除当前用户自己的会话及其消息。"""
-    conversation = get_owned_conversation(db, user, conversation_id)
+    conversation = get_owned_conversation(db, user, conversation_id, allow_stale=True)
     # 取消任务并提升版本号，使持有旧租约的运行者无法覆盖删除状态。
     tasks = list(db.scalars(select(AIAgentTask).where(AIAgentTask.user_id == user.id,
         AIAgentTask.status.in_(("RUNNING", "WAITING_INPUT"))).with_for_update()).all())
@@ -171,6 +178,14 @@ def list_conversations(db: Session, user: User, *, limit: int = 50) -> tuple[lis
     """置顶优先，再按最近消息时间返回当前用户会话。"""
 
     condition = (AIConversation.user_id == user.id) & (AIConversation.business_scene != "FLOAT")
+    from app.modules.system.data_scope import department_scope_snapshot
+    scope = department_scope_snapshot(db, user)
+    if scope is not None:
+        conversations = db.scalars(select(AIConversation).where(condition).order_by(
+            AIConversation.pinned.desc(), AIConversation.last_message_at.desc(), AIConversation.id.desc()
+        ))
+        visible = [item for item in conversations if (item.permission_snapshot or {}).get("department_scope") == scope]
+        return visible[:limit], len(visible)
     total = db.scalar(select(func.count(AIConversation.id)).where(condition)) or 0
     items = list(db.scalars(select(AIConversation).where(condition).order_by(AIConversation.pinned.desc(), AIConversation.last_message_at.desc(), AIConversation.id.desc()).limit(limit)).all())
     return items, total

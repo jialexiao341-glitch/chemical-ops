@@ -120,7 +120,7 @@ def _purchase_request_trace(db: Session, user: User, request: object) -> tuple[l
     """追踪申请关联的询价与订单；每个模块均先校验权限和数据范围。"""
     permissions = set(get_user_permission_codes(db, user.id))
     roles = set(get_user_role_codes(db, user.id))
-    can_read_all_rfq = bool(roles & {"SYS_ADMIN", "PROCUREMENT_MANAGER"})
+    from app.modules.rfqs.scope import rfq_read_condition
     stages: list[dict] = []
     sources: list[dict] = []
 
@@ -154,8 +154,7 @@ def _purchase_request_trace(db: Session, user: User, request: object) -> tuple[l
             .order_by(RFQ.id)
             .limit(51)
         )
-        if not can_read_all_rfq:
-            rfq_query = rfq_query.where(RFQ.requester_id == user.id)
+        rfq_query = rfq_query.where(rfq_read_condition(user, roles))
         rfqs = list(db.scalars(rfq_query).all())
         rfq_records = []
         for rfq in rfqs[:50]:

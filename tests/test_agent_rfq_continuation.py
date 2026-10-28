@@ -19,7 +19,7 @@ def task_db(base_task_db):
 
 
 def waiting_rfq(db, actions, question='比较测试乙醇报价'):
-    db.execute(text("INSERT INTO rfqs VALUES (4, 'RFQ-OWN-B', 7, 'SENT')"))
+    db.execute(text("INSERT INTO rfqs (id, rfq_no, requester_id, status) VALUES (4, 'RFQ-OWN-B', 7, 'SENT')"))
     db.execute(text("INSERT INTO rfq_items (id, rfq_id, product_id, specification, technical_requirements, unit_id, quantity) VALUES (41, 4, 1, '工业级', NULL, 1, 20)"))
     db.commit()
     actions.extend([tool('catalog.search_products', keyword='测试乙醇'),

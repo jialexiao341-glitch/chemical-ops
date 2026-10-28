@@ -113,3 +113,15 @@ class RolePermission(Base):
     created_at: Mapped[datetime] = mapped_column(
         DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3)
     )
+
+
+class UserDepartmentScope(Base):
+    """存在记录表示该用户启用显式部门范围；无授权部门时范围为空。"""
+    __tablename__ = "sys_user_department_scopes"
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_users.id", ondelete="CASCADE"), primary_key=True)
+
+
+class UserDepartmentGrant(Base):
+    __tablename__ = "sys_user_department_grants"
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_user_department_scopes.user_id", ondelete="CASCADE"), primary_key=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("sys_departments.id"), primary_key=True)

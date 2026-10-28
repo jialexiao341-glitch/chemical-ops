@@ -44,12 +44,12 @@ def list_suppliers(
     )
 
 
-def create_supplier(db: Session, data: SupplierCreate) -> Supplier:
+def create_supplier(db: Session, data: SupplierCreate, *, commit: bool = True) -> Supplier:
     """校验供应商编码唯一后创建供应商。"""
 
     if crud.get_by_code(db, data.supplier_code):
         raise DuplicateResourceError(f"供应商编码 {data.supplier_code} 已存在")
-    return crud.create(db, data)
+    return crud.create(db, data, commit=commit)
 
 
 def update_supplier(db: Session, supplier_id: int, data: SupplierUpdate) -> Supplier:

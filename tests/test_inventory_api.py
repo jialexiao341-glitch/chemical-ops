@@ -35,16 +35,19 @@ def test_fifo_outbound_uses_warehouse_owner_scope(monkeypatch) -> None:
 
     from app.core.errors import ResourceNotFoundError
     from app.modules.inventory_cost import service as cost_service
+    from app.modules.inventory import service as inventory_service
 
-    monkeypatch.setattr(cost_service, "get_user_role_codes", lambda _db, _user_id: ["WAREHOUSE"])
+    warehouse = Warehouse(id=10, manager_id=99)
+    db = SimpleNamespace(get=lambda *_: warehouse)
+    monkeypatch.setattr(inventory_service, "get_user_role_codes", lambda _db, _user_id: ["WAREHOUSE"])
     with pytest.raises(ResourceNotFoundError):
         cost_service._require_warehouse_scope(
-            object(), SimpleNamespace(id=7), Warehouse(id=10, manager_id=99)
+            db, SimpleNamespace(id=7), warehouse
         )
 
-    monkeypatch.setattr(cost_service, "get_user_role_codes", lambda _db, _user_id: ["SYS_ADMIN"])
+    monkeypatch.setattr(inventory_service, "get_user_role_codes", lambda _db, _user_id: ["SYS_ADMIN"])
     cost_service._require_warehouse_scope(
-        object(), SimpleNamespace(id=7), Warehouse(id=10, manager_id=99)
+        db, SimpleNamespace(id=7), warehouse
     )
 
 

@@ -43,6 +43,12 @@ def create_acceptance(db: Session, user: User, data: QualityAcceptanceCreate) ->
     delivery = crud.get_delivery(db, data.delivery_id, for_update=True)
     if delivery is None:
         raise ResourceNotFoundError("到货单不存在")
+    from app.modules.system.data_scope import department_scope_condition
+    if db.scalar(select(PurchaseOrder.id).where(
+        PurchaseOrder.id == delivery.po_id,
+        department_scope_condition(user, get_user_role_codes(db, user.id), PurchaseOrder.department_id),
+    )) is None:
+        raise ResourceNotFoundError("到货单不存在")
     if delivery.status != "RECEIVED":
         raise BusinessValidationError("只有已确认收货的到货单可以发起质量验收")
     if crud.get_by_delivery(db, delivery.id) is not None:

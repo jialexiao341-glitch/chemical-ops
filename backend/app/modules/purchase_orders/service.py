@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
-from app.modules.purchase_orders.scope import ORDER_READ_ALL_ROLES, order_read_condition
+from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.purchase_orders import crud
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderApproval, PurchaseOrderEvent, PurchaseOrderItem
 from app.modules.purchase_orders.schema import (
@@ -187,10 +187,8 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate, *, commit: 
 def list_orders(db: Session, user: User, *, keyword: str | None, status: str | None, page: int, page_size: int):
     """按用户数据范围分页查询采购订单。"""
 
-    can_manage_all = bool(ORDER_READ_ALL_ROLES.intersection(get_user_role_codes(db, user.id)))
-    buyer_id = None if can_manage_all or user.department_id is not None else user.id
-    department_id = user.department_id if not can_manage_all else None
-    return crud.list_page(db, buyer_id=buyer_id, department_id=department_id, keyword=keyword, status=status, page=page, page_size=page_size)
+    scope = order_read_condition(user, get_user_role_codes(db, user.id))
+    return crud.list_page(db, scope_condition=scope, keyword=keyword, status=status, page=page, page_size=page_size)
 
 
 def read_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
@@ -202,10 +200,12 @@ def read_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
 
 
 def _assert_order_scope(db: Session, user: User, order: PurchaseOrder) -> None:
-    if not _can_manage_all(db, user) and not (
-        (user.department_id is not None and order.department_id == user.department_id)
-        or (user.department_id is None and order.buyer_id == user.id)
-    ):
+    if not _can_manage_all(db, user) and order.buyer_id != user.id:
+        raise ResourceNotFoundError(f"采购订单 {order.id} 不存在")
+    from app.modules.system.data_scope import department_scope_condition
+    from sqlalchemy import literal
+    roles = get_user_role_codes(db, user.id)
+    if not db.scalar(select(department_scope_condition(user, roles, literal(order.department_id)))):
         raise ResourceNotFoundError(f"采购订单 {order.id} 不存在")
 
 

@@ -27,8 +27,10 @@ def _proposal_notification_statuses(db: Session, user: User, items):
     return {row.id: "EXPIRED" if row.status == "PENDING" and row.expires_at <= now else row.status for row in rows}
 
 
-def _safe_notification(item, proposal_statuses=None):
+def _safe_notification(item, proposal_statuses=None, *, restricted=False):
     result = NotificationRead.model_validate(item)
+    if restricted:
+        return result.model_copy(update={"title": "业务通知", "content": "请前往相关业务页面查看当前可访问的记录。", "related_id": None})
     if item.notification_type == "OPERATION_TASK_ASSIGNED":
         return result.model_copy(update={"related_id": None})
     if item.notification_type == "OPERATION_SUGGESTION":
@@ -55,7 +57,9 @@ def list_notifications(
 
     items, total = service.list_notifications(db, user, unread_only=unread_only, page=page, page_size=page_size)
     statuses = _proposal_notification_statuses(db, user, items)
-    return NotificationPage(items=[_safe_notification(item, statuses) for item in items], total=total, page=page, page_size=page_size)
+    from app.modules.system.data_scope import is_department_restricted
+    restricted = is_department_restricted(db, user)
+    return NotificationPage(items=[_safe_notification(item, statuses, restricted=restricted) for item in items], total=total, page=page, page_size=page_size)
 
 
 @router.get("/unread-count", response_model=NotificationUnreadCount, summary="查询未读通知数量")
@@ -113,4 +117,5 @@ def mark_read(notification_id: int, db: Session = Depends(get_db), user: User = 
     """将指定通知标记为已读。"""
 
     item = service.mark_read(db, user, notification_id)
-    return _safe_notification(item, _proposal_notification_statuses(db, user, [item]))
+    from app.modules.system.data_scope import is_department_restricted
+    return _safe_notification(item, _proposal_notification_statuses(db, user, [item]), restricted=is_department_restricted(db, user))

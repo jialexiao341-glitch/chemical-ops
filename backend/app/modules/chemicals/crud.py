@@ -22,13 +22,16 @@ def get_by_cas_no(db: Session, cas_no: str) -> Chemical | None:
     return db.scalar(select(Chemical).where(Chemical.cas_no == cas_no))
 
 
-def create(db: Session, data: ChemicalCreate) -> Chemical:
+def create(db: Session, data: ChemicalCreate, *, commit: bool = True) -> Chemical:
     """新增化学品并提交事务。"""
 
     chemical = Chemical(**data.model_dump())
     db.add(chemical)
-    db.commit()
-    db.refresh(chemical)
+    if commit:
+        db.commit()
+        db.refresh(chemical)
+    else:
+        db.flush()
     return chemical
 
 
@@ -71,10 +74,11 @@ def update(db: Session, chemical: Chemical, data: ChemicalUpdate) -> Chemical:
     return chemical
 
 
-def disable(db: Session, chemical: Chemical) -> Chemical:
+def disable(db: Session, chemical: Chemical, *, commit: bool = True) -> Chemical:
     """通过将状态改为 INACTIVE 执行软删除。"""
 
     chemical.status = "INACTIVE"
-    db.commit()
-    db.refresh(chemical)
+    if commit:
+        db.commit()
+        db.refresh(chemical)
     return chemical

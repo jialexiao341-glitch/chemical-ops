@@ -20,12 +20,13 @@ class DashboardOverview(BaseModel):
     purchase_orders_total: int
     purchase_orders_in_progress: int
     deliveries_overdue: int
-    inventory_quantity: Decimal
+    inventory_quantity: Decimal | None
     inventory_units: list[DashboardInventoryUnit]
     open_exceptions: int
     confirmed_reconciliations: int
     paid_amount: Decimal
-    expiry_alerts: int
+    expiry_alerts: int | None
+    inventory_available: bool = True
 
 
 class DashboardStatusRow(BaseModel):
@@ -86,6 +87,7 @@ class DashboardReport(BaseModel):
     """按时间范围返回采购订单和供应商统计报表。"""
     date_from: date | None
     date_to: date | None
+    inventory_available: bool = True
     order_trend: list[DashboardTrendRow]
     order_statuses: list[DashboardStatusRow]
     supplier_performance: list[DashboardSupplierRow]

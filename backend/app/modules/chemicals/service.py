@@ -36,12 +36,12 @@ def list_chemicals(
     )
 
 
-def create_chemical(db: Session, data: ChemicalCreate) -> Chemical:
+def create_chemical(db: Session, data: ChemicalCreate, *, commit: bool = True) -> Chemical:
     """校验唯一 CAS 号后创建化学品。"""
 
     if data.cas_no and crud.get_by_cas_no(db, data.cas_no):
         raise DuplicateResourceError(f"CAS 号 {data.cas_no} 已存在")
-    return crud.create(db, data)
+    return crud.create(db, data, commit=commit)
 
 
 def update_chemical(db: Session, chemical_id: int, data: ChemicalUpdate) -> Chemical:

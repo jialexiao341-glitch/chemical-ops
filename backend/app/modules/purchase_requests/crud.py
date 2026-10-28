@@ -26,8 +26,7 @@ def get_by_id(db: Session, request_id: int, *, for_update: bool = False) -> Purc
 def list_page(
     db: Session,
     *,
-    applicant_id: int | None,
-    department_id: int | None = None,
+    scope_condition,
     keyword: str | None,
     status: str | None,
     page: int,
@@ -35,11 +34,7 @@ def list_page(
 ) -> tuple[list[PurchaseRequest], int]:
     """按用户范围和筛选条件返回采购申请分页数据。"""
 
-    conditions = []
-    if applicant_id is not None:
-        conditions.append(PurchaseRequest.applicant_id == applicant_id)
-    if department_id is not None:
-        conditions.append(PurchaseRequest.department_id == department_id)
+    conditions = [scope_condition]
     if keyword:
         conditions.append(
             PurchaseRequest.request_no.like(f"%{keyword}%")

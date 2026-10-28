@@ -38,6 +38,29 @@ def _now() -> datetime:
     return datetime.now()
 
 
+def _exception_department_scope(user: User, roles: set[str]):
+    """关联订单、到货和责任部门均不得超出用户部门授权。"""
+    from app.modules.system.data_scope import department_scope_condition
+    cap = department_scope_condition(user, roles, PurchaseOrder.department_id)
+    allowed_orders = select(PurchaseOrder.id).where(cap)
+    allowed_deliveries = select(Delivery.id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(cap)
+    allowed_items = select(DeliveryItem.id).join(Delivery, Delivery.id == DeliveryItem.delivery_id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(cap)
+    allowed_acceptances = select(QualityAcceptance.id).join(Delivery, Delivery.id == QualityAcceptance.delivery_id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(cap)
+    owner_department = select(User.department_id).where(User.id == OperationException.owner_id).scalar_subquery()
+    fallback = func.coalesce(OperationException.responsible_department_id, owner_department)
+    return and_(
+        or_(OperationException.source_type != 'PURCHASE_ORDER', OperationException.source_id.in_(allowed_orders)),
+        or_(OperationException.source_type != 'DELIVERY', OperationException.source_id.in_(allowed_deliveries)),
+        or_(OperationException.source_type != 'DELIVERY_ITEM', OperationException.source_id.in_(allowed_items)),
+        or_(OperationException.source_type != 'QUALITY_ACCEPTANCE', OperationException.source_id.in_(allowed_acceptances)),
+        or_(OperationException.po_id.is_(None), OperationException.po_id.in_(allowed_orders)),
+        or_(OperationException.delivery_id.is_(None), OperationException.delivery_id.in_(allowed_deliveries)),
+        or_(OperationException.delivery_item_id.is_(None), OperationException.delivery_item_id.in_(allowed_items)),
+        or_(OperationException.po_id.is_not(None), OperationException.delivery_id.is_not(None),
+            OperationException.delivery_item_id.is_not(None), department_scope_condition(user, roles, fallback)),
+    )
+
+
 def _exception_scope_condition(db: Session, user: User):
     """按来源对象读取范围或用户责任部门限制异常记录。"""
 
@@ -76,7 +99,8 @@ def _exception_scope_condition(db: Session, user: User):
         ))
 
     if "warehouse.inventory.read" in permissions:
-        warehouse_scope = True if roles & {"PROCUREMENT_MANAGER"} else or_(
+        from app.modules.inventory.service import _can_access_all_warehouses
+        warehouse_scope = True if _can_access_all_warehouses(db, user, roles) else or_(
             Warehouse.manager_id == user.id,
             Warehouse.manager_id.is_(None),
         )
@@ -92,7 +116,8 @@ def _exception_scope_condition(db: Session, user: User):
         ))
 
     if "procurement.rfqs.read" in permissions:
-        rfq_scope = True if "PROCUREMENT_MANAGER" in roles else RFQ.requester_id == user.id
+        from app.modules.rfqs.scope import rfq_read_condition
+        rfq_scope = rfq_read_condition(user, roles)
         visible_quotes = select(SupplierQuote.id).join(RFQ, RFQ.id == SupplierQuote.rfq_id).where(rfq_scope)
         scopes.append(and_(OperationException.source_type == "SUPPLIER_QUOTE", OperationException.source_id.in_(visible_quotes)))
 
@@ -108,16 +133,17 @@ def _exception_scope_condition(db: Session, user: User):
             OperationException.source_type == "PRODUCT",
             OperationException.source_id.in_(select(Product.id).where(Product.status == "ACTIVE")),
         ))
-    return or_(*scopes) if scopes else false()
+    return and_(or_(*scopes) if scopes else false(), _exception_department_scope(user, roles))
 
 
 def _exception_record_scope_condition(db: Session, user: User):
     """合并来源/部门、负责人和任务指派范围。"""
 
-    if "SYS_ADMIN" in set(get_user_role_codes(db, user.id)):
+    roles = set(get_user_role_codes(db, user.id))
+    if "SYS_ADMIN" in roles:
         return True
     scope = _exception_scope_condition(db, user)
-    return or_(
+    return and_(_exception_department_scope(user, roles), or_(
         and_(OperationException.source_type.in_(("SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH")), scope),
         and_(OperationException.source_type.not_in(("SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH")), or_(
             OperationException.owner_id == user.id,
@@ -125,7 +151,7 @@ def _exception_record_scope_condition(db: Session, user: User):
                 OperationTask.exception_id == OperationException.id,
                 OperationTask.assignee_id == user.id,
             ).correlate(OperationException)), scope)),
-    )
+    ))
 
 
 def _has_exception_scope(db: Session, user: User, exception: OperationException) -> bool:
@@ -164,7 +190,8 @@ def _has_source_scope(db: Session, user: User, data: OperationExceptionCreate) -
         acceptance_scope = acceptance_read_condition(user, roles)
         return db.scalar(select(QualityAcceptance.id).where(QualityAcceptance.id == data.source_id, acceptance_scope)) is not None
     if data.source_type == "INVENTORY_BATCH" and "warehouse.inventory.read" in permissions:
-        warehouse_scope = True if roles & {"PROCUREMENT_MANAGER"} else or_(Warehouse.manager_id == user.id, Warehouse.manager_id.is_(None))
+        from app.modules.inventory.service import _can_access_all_warehouses
+        warehouse_scope = True if _can_access_all_warehouses(db, user, roles) else or_(Warehouse.manager_id == user.id, Warehouse.manager_id.is_(None))
         return db.scalar(select(InventoryBalance.id).join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(InventoryBalance.batch_id == data.source_id, warehouse_scope).limit(1)) is not None
     if data.source_type == "PRODUCT" and "master.products.read" in permissions:
         return db.scalar(select(Product.id).where(Product.id == data.source_id, Product.status == "ACTIVE")) is not None
@@ -333,6 +360,11 @@ def get_exception(db: Session, user: User, exception_id: int, *, for_update: boo
 def _require_task_creation_scope(db: Session, user: User, exception: OperationException) -> OperationException:
     """新增处理任务要求本人负责或来源记录处于可读范围。"""
 
+    roles = set(get_user_role_codes(db, user.id))
+    if db.scalar(select(OperationException.id).where(
+        OperationException.id == exception.id, _exception_department_scope(user, roles)
+    )) is None:
+        raise ResourceNotFoundError(f"异常 {exception.id} 不存在")
     if (exception.source_type in {"SUPPLIER_QUOTE", "FINANCE_INVOICE_MATCH"} or exception.owner_id != user.id) and not _has_source_exception_scope(db, user, exception):
         raise ResourceNotFoundError(f"异常 {exception.id} 不存在")
     return exception
@@ -429,7 +461,13 @@ def _can_access_task(db: Session, user: User, task: OperationTask) -> bool:
     """判断用户是否可以访问异常任务。"""
 
     exception = _require_exception(db, task.exception_id)
-    return _has_source_exception_scope(db, user, exception) or exception.owner_id == user.id or task.assignee_id == user.id
+    department_visible = db.scalar(select(OperationException.id).where(
+        OperationException.id == exception.id,
+        _exception_department_scope(user, set(get_user_role_codes(db, user.id))),
+    )) is not None
+    return department_visible and (
+        _has_source_exception_scope(db, user, exception) or exception.owner_id == user.id or task.assignee_id == user.id
+    )
 
 
 def _require_task(db: Session, task_id: int, *, for_update: bool = False) -> OperationTask:
@@ -470,6 +508,11 @@ def list_tasks(db: Session, user: User, exception_id: int, *, status: str | None
     """按异常查询处理任务，并校验用户数据范围。"""
 
     exception = _require_exception(db, exception_id)
+    if db.scalar(select(OperationException.id).where(
+        OperationException.id == exception.id,
+        _exception_department_scope(user, set(get_user_role_codes(db, user.id))),
+    )) is None:
+        raise ResourceNotFoundError(f"异常 {exception_id} 不存在")
     has_full_exception_scope = _has_source_exception_scope(db, user, exception) or exception.owner_id == user.id
     if not has_full_exception_scope:
         assigned = db.scalar(

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai.text2sql import QueryPlan, build_statement, validate_sql
+from app.modules.ai.text2sql import QueryPlan, build_statement, _validate_scoped_statement
 from app.modules.ai.catalog import CATALOG
 from app.modules.deliveries.model import Delivery
 from app.modules.doc_kb.retrieve import resolve_doc_targets
@@ -130,7 +130,7 @@ def test_financial_scope_matches_lists_details_queries_and_does_not_grant_order_
     for dataset in ["purchase_orders", "finance_reconciliations", "finance_invoices", "finance_payments"]:
         plan = QueryPlan(dataset=dataset, metric="count", time_field=None)
         statement = build_statement(plan, db_session, viewer)
-        validate_sql(str(statement), CATALOG[dataset].tables)
+        _validate_scoped_statement(statement, db_session, CATALOG[dataset].tables, literal_binds=False)
         # Restricted aggregates exclude all rows of the otherwise visible financial order.
         if dataset.startswith("finance"):
             model = {"finance_reconciliations":FinanceReconciliation,"finance_invoices":FinanceInvoice,"finance_payments":FinancePayment}[dataset]
@@ -207,7 +207,7 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
     model = type(record)
     plan = QueryPlan(dataset=dataset, metric="count", time_field=None)
     statement = build_statement(plan, db_session, actor).where(model.id == record.id)
-    validate_sql(str(statement), CATALOG[dataset].tables)
+    _validate_scoped_statement(statement, db_session, CATALOG[dataset].tables, literal_binds=False)
     assert db_session.execute(statement).scalar() == 0
     resource_type = {"deliveries": "DELIVERY", "quality_acceptances": "QUALITY_ACCEPTANCE", "exceptions": "OPERATION_EXCEPTION"}.get(dataset)
     if resource_type:
@@ -218,7 +218,7 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
             quality.get_acceptance(db_session, actor, record.id)
     authorize(); db_session.flush()
     statement = build_statement(plan, db_session, actor).where(model.id == record.id)
-    validate_sql(str(statement), CATALOG[dataset].tables)
+    _validate_scoped_statement(statement, db_session, CATALOG[dataset].tables, literal_binds=False)
     assert db_session.execute(statement).scalar() == 1
     if resource_type:
         assert _can_access_resource_instance(db_session, actor, resource_type, record)
@@ -249,7 +249,7 @@ def test_quality_readonly_scope_matches_detail_total_sql_and_attachment(db_sessi
             order.buyer_id = actor.id
             db_session.flush()
         condition = build_statement(plan, db_session, actor).where(QualityAcceptance.id == acceptance.id)
-        validate_sql(str(condition), CATALOG[plan.dataset].tables)
+        _validate_scoped_statement(condition, db_session, CATALOG[plan.dataset].tables, literal_binds=False)
         assert db_session.execute(condition).scalar() == int(visible)
         rows, total = quality.list_acceptances(db_session, actor, result=None, page=1, page_size=100)
         assert total == db_session.execute(build_statement(plan, db_session, actor)).scalar()

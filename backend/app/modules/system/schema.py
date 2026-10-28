@@ -51,6 +51,17 @@ class UserUpdate(BaseModel):
     role_ids: list[int] | None = None
 
 
+class UserDepartmentScopeUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+    department_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+class UserDepartmentScopeRead(BaseModel):
+    enabled: bool
+    department_ids: list[int]
+
+
 class UserRead(BaseModel):
     """用户响应，不返回密码哈希。"""
 

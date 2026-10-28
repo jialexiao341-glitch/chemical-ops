@@ -89,7 +89,7 @@ const [Quote, quoteApi] = useVbenModal({
   destroyOnClose: true,
 });
 
-const [Drawer, drawerApi] = useVbenDrawer<null | RfqApi.Rfq>({
+const [Drawer, drawerApi] = useVbenDrawer<null | (RfqApi.Rfq & { open_quotes?: boolean })>({
   footer: false,
   async onOpenChange(isOpen) {
     if (!isOpen) {
@@ -98,7 +98,7 @@ const [Drawer, drawerApi] = useVbenDrawer<null | RfqApi.Rfq>({
     const data = drawerApi.getData();
     detail.value = undefined;
     comparison.value = undefined;
-    activeTab.value = 'items';
+    activeTab.value = data?.open_quotes ? 'quotes' : 'items';
     if (!data?.id) {
       return;
     }
