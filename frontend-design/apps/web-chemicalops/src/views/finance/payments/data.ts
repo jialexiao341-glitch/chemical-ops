@@ -82,7 +82,7 @@ export function useColumns(
           { code: 'detail', text: '详情', auth: 'finance.payments.read' },
           { code: 'approve', text: '审批通过', auth: 'finance.payments.approve', show: (row: FinanceApi.Payment) => row.status === 'REQUESTED' && String(row.requested_by) !== String(currentUserId) },
           { code: 'reject', text: '驳回', auth: 'finance.payments.approve', danger: true, show: (row: FinanceApi.Payment) => row.status === 'REQUESTED' && String(row.requested_by) !== String(currentUserId) },
-          { code: 'paid', text: '登记付款', auth: 'finance.payments.write', show: (row: FinanceApi.Payment) => row.status === 'APPROVED' },
+          { code: 'paid', text: '登记付款', auth: 'finance.payments.pay', show: (row: FinanceApi.Payment) => row.status === 'APPROVED' },
         ],
         props: { menuCodes: ['approve', 'reject', 'paid'], menuText: '更多', renderMode: 'menu' },
       },

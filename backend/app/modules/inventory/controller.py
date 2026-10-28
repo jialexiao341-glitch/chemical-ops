@@ -261,7 +261,7 @@ def cancel_transfer_request(transfer_id: int, db: Session = Depends(get_db), use
 
 
 @router.post("/transfer-requests/{transfer_id}/execute", response_model=InventoryTransferRequestRead, summary="执行库存调拨")
-def execute_transfer_request(transfer_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.transfer.write"))) -> InventoryTransferRequestRead:
+def execute_transfer_request(transfer_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.transfer.execute"))) -> InventoryTransferRequestRead:
     """以一个事务完成源库位扣减和目标库位增加。"""
 
     return service.execute_transfer_request(db, user, transfer_id)

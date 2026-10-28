@@ -140,7 +140,7 @@ function openPaid(row: FinanceApi.Payment) {
 }
 
 async function onPaidConfirm() {
-  if (!hasAccessByCodes(['finance.payments.write'])) return;
+  if (!hasAccessByCodes(['finance.payments.pay'])) return;
   if (!paidRef.value.trim()) {
     message.warning('请填写外部流水号');
     return;
@@ -227,7 +227,7 @@ watch(
     <!-- 登记付款弹窗（流水号必填） -->
     <Modal
       v-model:open="paidVisible"
-      :ok-button-props="{ disabled: !hasAccessByCodes(['finance.payments.write']) }"
+      :ok-button-props="{ disabled: !hasAccessByCodes(['finance.payments.pay']) }"
       cancel-text="取消"
       ok-text="确认登记"
       title="登记人工核对的付款结果"

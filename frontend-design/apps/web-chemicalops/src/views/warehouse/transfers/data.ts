@@ -80,7 +80,7 @@ export function useColumns(
             show: (row: TransferRequestApi.TransferRequest) => row.status === 'SUBMITTED' && String(row.applicant_id) !== String(currentUserId),
           },
           {
-            code: 'execute', text: '执行调拨', auth: 'warehouse.inventory.transfer.write',
+            code: 'execute', text: '执行调拨', auth: 'warehouse.inventory.transfer.execute',
             show: (row: TransferRequestApi.TransferRequest) => row.status === 'APPROVED',
           },
           {

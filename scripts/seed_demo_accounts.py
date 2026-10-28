@@ -51,6 +51,7 @@ PERMISSIONS = (
     ("warehouse.inventory.issue.execute", "执行库存出库", "API", "warehouse.inventory.issue", "execute"),
     ("warehouse.inventory.transfer.read", "查看库存调拨", "API", "warehouse.inventory.transfer", "read"),
     ("warehouse.inventory.transfer.write", "管理库存调拨", "API", "warehouse.inventory.transfer", "write"),
+    ("warehouse.inventory.transfer.execute", "执行库存调拨", "API", "warehouse.inventory.transfer", "execute"),
     ("warehouse.inventory.transfer.approve", "审批库存调拨", "API", "warehouse.inventory.transfer", "approve"),
     ("warehouse.inventory.stocktake.read", "查看库存盘点", "API", "warehouse.inventory.stocktake", "read"),
     ("warehouse.inventory.stocktake.write", "管理库存盘点", "API", "warehouse.inventory.stocktake", "write"),
@@ -67,6 +68,7 @@ PERMISSIONS = (
     ("finance.invoices.verify", "核验供应商发票", "API", "finance.invoices", "verify"),
     ("finance.payments.read", "查看付款记录", "API", "finance.payments", "read"),
     ("finance.payments.write", "管理付款记录", "API", "finance.payments", "write"),
+    ("finance.payments.pay", "登记付款结果", "API", "finance.payments", "pay"),
     ("finance.payments.approve", "审批付款申请", "API", "finance.payments", "approve"),
     ("finance.settlements.read", "查看采购结算", "API", "finance.settlements", "read"),
     ("finance.settlements.write", "管理采购结算", "API", "finance.settlements", "write"),
@@ -217,6 +219,10 @@ ROLE_SCOPES = {
         "supplier.portal.reconciliation.message", "dashboard.read",
     },
 }
+
+ROLE_SCOPES["WAREHOUSE"].add("warehouse.inventory.transfer.execute")
+for _role_code in ("FINANCE_CLERK", "FINANCE_MANAGER"):
+    ROLE_SCOPES[_role_code].add("finance.payments.pay")
 
 # 运营看板对所有演示角色开放；AI 工作台仅对内部演示角色开放。
 for _role_code, _scope in ROLE_SCOPES.items():

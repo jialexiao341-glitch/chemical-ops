@@ -205,7 +205,7 @@ def reject_payment(payment_id: int, data: PaymentReject, db: Session = Depends(g
 
 
 @router.post("/payments/{payment_id}/paid", response_model=PaymentRead, summary="登记人工核对的付款结果")
-def mark_payment_paid(payment_id: int, data: PaymentPaid, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.payments.write"))) -> PaymentRead:
+def mark_payment_paid(payment_id: int, data: PaymentPaid, db: Session = Depends(get_db), user: User = Depends(require_permission("finance.payments.pay"))) -> PaymentRead:
     """记录人工核对的外部流水；此接口不会向银行查询或发送支付指令。"""
 
     return service.mark_payment_paid(db, user, payment_id, data.transaction_ref, data.note)
