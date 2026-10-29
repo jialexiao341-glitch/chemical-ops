@@ -31,6 +31,9 @@ export namespace InventoryApi {
   /** 库存余额 */
   export interface InventoryBalance {
     batch_id?: number;
+    batch_status: null | string;
+    quality_hold: boolean;
+    available_quantity: string;
     created_at?: string;
     id: number;
     location_id: number;

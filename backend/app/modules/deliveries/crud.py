@@ -1,6 +1,6 @@
 """到货模块的数据访问操作。"""
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.deliveries.model import Delivery, DeliveryItem
@@ -19,7 +19,7 @@ def get_by_id(db: Session, delivery_id: int, *, for_update: bool = False) -> Del
 def list_page(
     db: Session,
     *,
-    po_ids: set[int] | None,
+    po_ids: Select,
     keyword: str | None,
     status: str | None,
     page: int,
@@ -27,11 +27,7 @@ def list_page(
 ) -> tuple[list[Delivery], int]:
     """按订单范围和筛选条件分页查询到货单。"""
 
-    conditions = []
-    if po_ids is not None:
-        if not po_ids:
-            return [], 0
-        conditions.append(Delivery.po_id.in_(po_ids))
+    conditions = [Delivery.po_id.in_(po_ids)]
     if keyword:
         conditions.append(Delivery.delivery_no.like(f"%{keyword}%"))
     if status:

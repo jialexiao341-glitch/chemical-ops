@@ -74,7 +74,7 @@ def create_inbound(data: InboundCreate, db: Session = Depends(get_db), user: Use
     """将已通过质量验收的到货单写入库存余额和库存流水。"""
 
     transactions, balances = service.create_inbound(db, user, data)
-    return InboundRead(delivery_id=data.delivery_id, transaction_count=len(transactions), transactions=transactions, balances=balances)
+    return InboundRead(delivery_id=data.delivery_id, transaction_count=len(transactions), transactions=transactions, balances=service.balance_read_models(db, balances))
 
 
 @router.get("/balances", response_model=InventoryBalancePage, summary="查询库存余额")
@@ -85,21 +85,23 @@ def list_balances(product_id: int | None = Query(default=None, gt=0), warehouse_
     if warehouse_id is not None and warehouse_ids is not None and warehouse_id not in warehouse_ids:
         raise service.ResourceNotFoundError(f"仓库 {warehouse_id} 不存在")
     items, total = crud.list_balances(db, product_id=product_id, warehouse_id=warehouse_id, batch_id=batch_id, warehouse_ids=warehouse_ids, page=page, page_size=page_size)
-    return InventoryBalancePage(items=items, total=total, page=page, page_size=page_size)
+    return InventoryBalancePage(items=service.balance_read_models(db, items), total=total, page=page, page_size=page_size)
 
 
 @router.post("/balances/{balance_id}/freeze", response_model=InventoryBalanceRead, summary="冻结库存余额")
 def freeze_balance(balance_id: int, data: InventoryBalanceStatusChange, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.freeze.write"))) -> InventoryBalanceRead:
     """冻结库存余额，不改变库存数量。"""
 
-    return service.freeze_balance(db, user, balance_id, data)
+    balance = service.freeze_balance(db, user, balance_id, data)
+    return service.balance_read_models(db, [balance])[0]
 
 
 @router.post("/balances/{balance_id}/unfreeze", response_model=InventoryBalanceRead, summary="解冻库存余额")
 def unfreeze_balance(balance_id: int, data: InventoryBalanceStatusChange, db: Session = Depends(get_db), user: User = Depends(require_permission("warehouse.inventory.freeze.write"))) -> InventoryBalanceRead:
     """解冻库存余额，恢复为可用状态。"""
 
-    return service.unfreeze_balance(db, user, balance_id, data)
+    balance = service.unfreeze_balance(db, user, balance_id, data)
+    return service.balance_read_models(db, [balance])[0]
 
 
 @router.get("/balances/{balance_id}/status-logs", response_model=InventoryBalanceStatusLogPage, summary="查询库存状态变更记录")

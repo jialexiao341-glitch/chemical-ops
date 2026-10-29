@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery
 from app.modules.inventory import crud
+from app.modules.inventory.quality_hold import lock_available_batches
 from app.modules.inventory.model import (
     InventoryBalance,
     InventoryBalanceStatusLog,
@@ -38,7 +39,7 @@ from app.modules.inventory.schema import (
 from app.modules.inventory_cost.model import InventoryCostLayer
 from app.modules.inventory_cost.service import allocate_outbound_cost, adjust_stocktake_cost
 from app.modules.products.model import Product
-from app.modules.purchase_orders.model import PurchaseOrderItem
+from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
 from app.modules.purchase_requests.model import Unit
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_role_codes
@@ -98,6 +99,33 @@ def accessible_warehouse_ids(db: Session, user: User) -> set[int] | None:
         return set()
     from app.modules.system.model import UserWarehouseGrant
     return set(db.scalars(select(Warehouse.id).join(UserWarehouseGrant, UserWarehouseGrant.warehouse_id == Warehouse.id).where(UserWarehouseGrant.user_id == user.id, Warehouse.status == "ACTIVE")).all())
+
+
+def balance_read_models(db: Session, balances: list[InventoryBalance]):
+    """批量合并人工状态与批次质量状态，返回真实可用数量。"""
+    from app.modules.inventory.schema import InventoryBalanceRead
+    from app.modules.quality_acceptances.model import QualityAcceptance
+    batch_ids = {balance.batch_id for balance in balances}
+    if not batch_ids:
+        return []
+    quality_hold = select(QualityAcceptance.id).where(
+        QualityAcceptance.delivery_id == InventoryBatch.source_delivery_id,
+        QualityAcceptance.result.in_(("REINSPECTION", "FAILED", "PARTIAL")),
+    ).exists()
+    states = {batch_id: (status, held) for batch_id, status, held in db.execute(
+        select(InventoryBatch.id, InventoryBatch.status, quality_hold).where(InventoryBatch.id.in_(batch_ids))
+    )}
+    result = []
+    for balance in balances:
+        batch_status, historical_hold = states.get(balance.batch_id, (None, False))
+        held = batch_status == "QUALITY_HOLD" or bool(historical_hold)
+        available = max(Decimal("0"), balance.quantity - balance.locked_quantity) if (
+            balance.status == "AVAILABLE" and batch_status == "ACTIVE" and not held
+        ) else Decimal("0")
+        result.append(InventoryBalanceRead.model_validate(balance).model_copy(update={
+            "batch_status": batch_status, "quality_hold": held, "available_quantity": available,
+        }))
+    return result
 
 def create_warehouse(db: Session, user: User, data: WarehouseCreate) -> Warehouse:
     """创建仓库主数据。"""
@@ -274,7 +302,8 @@ def create_inbound(db: Session, user: User, data: InboundCreate):
         po_item = db.get(PurchaseOrderItem, delivery_item.po_item_id)
         tax_rate = po_item.tax_rate if po_item is not None and po_item.tax_rate is not None else Decimal("0")
         unit_cost = po_item.unit_price * (Decimal("1") + tax_rate / Decimal("100")) if po_item is not None else Decimal("0")
-        db.add(InventoryCostLayer(source_transaction_id=transaction.id, warehouse_id=warehouse.id, location_id=location.id, product_id=delivery_item.product_id, batch_id=batch.id, unit_id=delivery_item.unit_id, unit_cost=unit_cost, currency_code="CNY", original_quantity=delivery_item.actual_quantity, remaining_quantity=delivery_item.actual_quantity))
+        order = db.get(PurchaseOrder, delivery.po_id)
+        db.add(InventoryCostLayer(source_transaction_id=transaction.id, warehouse_id=warehouse.id, location_id=location.id, product_id=delivery_item.product_id, batch_id=batch.id, unit_id=delivery_item.unit_id, unit_cost=unit_cost, currency_code=order.currency_code, original_quantity=delivery_item.actual_quantity, remaining_quantity=delivery_item.actual_quantity))
         transactions.append(transaction)
         balances.append(balance)
     if not transactions:
@@ -539,6 +568,7 @@ def execute_issue_request(db: Session, user: User, issue_id: int) -> InventoryIs
             raise BusinessValidationError("只有已审批的领用申请可以执行出库")
         if not issue.items:
             raise BusinessValidationError("库存领用申请没有可出库明细")
+        lock_available_batches(db, [item.batch_id for item in issue.items])
         for item in sorted(issue.items, key=lambda value: (value.warehouse_id, value.location_id, value.product_id, value.batch_id, value.unit_id)):
             balance = db.scalar(
                 select(InventoryBalance)
@@ -812,6 +842,7 @@ def execute_transfer_request(db: Session, user: User, transfer_id: int) -> Inven
             raise BusinessValidationError("只有已审批的调拨申请可以执行")
         if not transfer.items:
             raise BusinessValidationError("库存调拨申请没有可执行明细")
+        lock_available_batches(db, [item.batch_id for item in transfer.items])
         for item in sorted(transfer.items, key=lambda value: (value.target_warehouse_id, value.target_location_id, value.product_id, value.batch_id, value.unit_id)):
             _ensure_transfer_target_balance(db, item)
         db.flush()
@@ -887,7 +918,7 @@ def execute_transfer_request(db: Session, user: User, transfer_id: int) -> Inven
             db.flush()
             outbound.transaction_no = f"IT{date.today():%Y%m%d}{outbound.id:06d}"
             inbound.transaction_no = f"IT{date.today():%Y%m%d}{inbound.id:06d}"
-            transfer_cost = allocate_outbound_cost(db, outbound, item.requested_quantity)
+            transfer_cost, transfer_currency = allocate_outbound_cost(db, outbound, item.requested_quantity)
             db.add(InventoryCostLayer(
                 source_transaction_id=inbound.id,
                 warehouse_id=item.target_warehouse_id,
@@ -896,7 +927,7 @@ def execute_transfer_request(db: Session, user: User, transfer_id: int) -> Inven
                 batch_id=item.batch_id,
                 unit_id=item.unit_id,
                 unit_cost=transfer_cost / item.requested_quantity,
-                currency_code="CNY",
+                currency_code=transfer_currency,
                 original_quantity=item.requested_quantity,
                 remaining_quantity=item.requested_quantity,
             ))
@@ -1146,6 +1177,7 @@ def execute_stocktake_request(db: Session, user: User, stocktake_id: int) -> Inv
             raise BusinessValidationError("只有已审批的盘点申请可以执行")
         if not stocktake.items:
             raise BusinessValidationError("库存盘点申请没有可执行明细")
+        lock_available_batches(db, [item.batch_id for item in stocktake.items])
         for item in sorted(stocktake.items, key=lambda value: (value.location_id, value.product_id, value.batch_id, value.unit_id)):
             if item.counted_quantity > 0:
                 _ensure_stocktake_balance(db, item, stocktake.warehouse_id)

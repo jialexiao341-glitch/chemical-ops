@@ -49,6 +49,11 @@ def create_acceptance(db: Session, user: User, data: QualityAcceptanceCreate) ->
         department_scope_condition(user, get_user_role_codes(db, user.id), PurchaseOrder.department_id),
     )) is None:
         raise ResourceNotFoundError("到货单不存在")
+    if db.scalar(select(PurchaseOrder.id).where(
+        PurchaseOrder.id == delivery.po_id,
+        department_scope_condition(inspector, get_user_role_codes(db, inspector.id), PurchaseOrder.department_id),
+    )) is None:
+        raise BusinessValidationError("所选检验员无权访问该到货单所属部门")
     if delivery.status != "RECEIVED":
         raise BusinessValidationError("只有已确认收货的到货单可以发起质量验收")
     if crud.get_by_delivery(db, delivery.id) is not None:
@@ -76,9 +81,13 @@ def _is_inspector(db: Session, user: User) -> bool:
             <= set(get_user_permission_codes(db, user.id)))
 
 
-def assignment_options(db: Session) -> dict:
+def assignment_options(db: Session, user: User) -> dict:
     """只向获准指派者提供待送检单号和有效检验员，不开放系统用户目录。"""
-    deliveries = db.scalars(select(Delivery).where(Delivery.status == "RECEIVED").order_by(Delivery.id.desc())).all()
+    from app.modules.system.data_scope import department_scope_condition
+    deliveries = db.scalars(select(Delivery).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(
+        Delivery.status == "RECEIVED",
+        department_scope_condition(user, get_user_role_codes(db, user.id), PurchaseOrder.department_id),
+    ).order_by(Delivery.id.desc())).all()
     inspectors = [user for user in db.scalars(select(User).where(User.status == "ACTIVE").order_by(User.id))
                   if _is_inspector(db, user)]
     return {"deliveries": deliveries, "inspectors": inspectors}
@@ -134,6 +143,15 @@ def submit_result(db: Session, user: User, acceptance_id: int, data: QualityAcce
         if len(delivery_item_ids) > 1 and data.result != "REINSPECTION":
             raise BusinessValidationError("多明细验收单必须按到货明细分别填写检测结果")
         test_result = data.test_result
+    from app.modules.inventory.model import InventoryBatch
+    if data.result in {"REINSPECTION", "FAILED", "PARTIAL", "PASSED"}:
+        batches = db.scalars(select(InventoryBatch).where(InventoryBatch.source_delivery_id == delivery.id)
+            .order_by(InventoryBatch.id).with_for_update().execution_options(populate_existing=True)).all()
+        for batch in batches:
+            if data.result in {"REINSPECTION", "FAILED", "PARTIAL"} and batch.status == "ACTIVE":
+                batch.status = "QUALITY_HOLD"
+            elif data.result == "PASSED" and batch.status == "QUALITY_HOLD":
+                batch.status = "ACTIVE"
     acceptance.result = data.result
     acceptance.test_result = test_result
     acceptance.certificate_complete = 1 if data.certificate_complete else 0

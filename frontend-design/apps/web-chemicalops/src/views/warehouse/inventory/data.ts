@@ -52,7 +52,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
 /**
  * 列表列定义。
  *
- * 可用量 = 库存数量 - 锁定量，让仓库人员直接看到可出库的数量。
+ * 可用量由后端合并人工冻结、批次状态和质量隔离计算。
  */
 export function useColumns(
   onActionClick: OnActionClickFn<InventoryApi.InventoryBalance>,
@@ -96,9 +96,7 @@ export function useColumns(
       align: 'right',
       field: 'available',
       formatter: ({ row }: { row: InventoryApi.InventoryBalance }) => {
-        const total = Number(row.quantity ?? 0);
-        const locked = Number(row.locked_quantity ?? 0);
-        return formatQuantity(total - locked);
+        return formatQuantity(row.available_quantity);
       },
       title: '可用量',
       width: 120,
@@ -112,11 +110,24 @@ export function useColumns(
     {
       cellRender: {
         name: 'CellTag',
-        options: INVENTORY_BALANCE_STATUS_DICT.items,
+        options: INVENTORY_BALANCE_STATUS_DICT.items.map((item) => ({
+          ...item,
+          label: item.value === 'AVAILABLE' ? '未冻结' : '已冻结',
+        })),
       },
       field: 'status',
-      title: '状态',
+      title: '人工状态',
       width: 90,
+    },
+    {
+      field: 'batch_status',
+      formatter: ({ row }: { row: InventoryApi.InventoryBalance }) => {
+        if (row.quality_hold) return '质量隔离';
+        const labels: Record<string, string> = { ACTIVE: '正常', BLOCKED: '禁用', EXPIRED: '已过期' };
+        return row.batch_status ? (labels[row.batch_status] ?? row.batch_status) : '未知';
+      },
+      title: '批次状态',
+      width: 100,
     },
     {
       align: 'center',

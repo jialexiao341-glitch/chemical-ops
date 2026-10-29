@@ -123,7 +123,7 @@ def list_deliveries(db: Session, user: User, *, keyword: str | None, status: str
     """按用户数据范围分页查询到货单。"""
 
     roles = set(get_user_role_codes(db, user.id))
-    po_ids = {order.id for order in db.scalars(select(PurchaseOrder).where(order_read_condition(user, roles))).all()}
+    po_ids = select(PurchaseOrder.id).where(order_read_condition(user, roles))
     return crud.list_page(db, po_ids=po_ids, keyword=keyword, status=status, page=page, page_size=page_size)
 
 
@@ -161,8 +161,8 @@ def receive_delivery(db: Session, user: User, delivery_id: int, data: DeliveryRe
     for item in data.items:
         delivery_item = delivery_items[item.delivery_item_id]
         po_item = po_items[delivery_item.po_item_id]
-        if item.actual_quantity + item.short_quantity > delivery_item.planned_quantity:
-            raise BusinessValidationError(f"到货明细 {delivery_item.line_no} 的实收和短交数量不能超过计划数量")
+        if item.actual_quantity + item.short_quantity != delivery_item.planned_quantity:
+            raise BusinessValidationError(f"到货明细 {delivery_item.line_no} 的实收和短交数量之和必须等于计划数量")
         if po_item.received_quantity + item.actual_quantity > po_item.order_quantity:
             raise BusinessValidationError(f"订单明细 {po_item.line_no} 的累计收货数量不能超过订购数量")
     for item in data.items:

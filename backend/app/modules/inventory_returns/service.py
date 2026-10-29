@@ -12,6 +12,7 @@ from app.modules.inventory.model import InventoryBalance, InventoryBatch, Invent
 from app.modules.inventory_returns.model import InventoryReturnItem, InventoryReturnRequest
 from app.modules.inventory_returns.schema import ReturnCreate, ReturnSourceRead
 from app.modules.inventory import service as inventory_service
+from app.modules.inventory.quality_hold import lock_available_batches
 from app.modules.inventory_cost.service import allocate_outbound_cost
 from app.modules.products.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
@@ -360,6 +361,7 @@ def execute_return(db: Session, user: User, return_id: int) -> InventoryReturnRe
         payload = ReturnCreate(supplier_id=value.supplier_id, po_id=value.po_id, delivery_id=value.delivery_id, reason=value.reason, items=[{key: getattr(item, key) for key in ("product_id", "warehouse_id", "location_id", "batch_id", "unit_id", "requested_quantity", "source_delivery_item_id", "source_po_item_id")} for item in value.items])
         _validate_items(db, payload)
         _validate_sources(db, user, payload, executing_id=value.id)
+        lock_available_batches(db, [item.batch_id for item in value.items])
         for item in sorted(value.items, key=lambda x: (x.warehouse_id, x.location_id, x.product_id, x.batch_id, x.unit_id)):
             balance = db.scalar(select(InventoryBalance).where(InventoryBalance.warehouse_id == item.warehouse_id, InventoryBalance.location_id == item.location_id, InventoryBalance.product_id == item.product_id, InventoryBalance.batch_id == item.batch_id, InventoryBalance.unit_id == item.unit_id).with_for_update())
             if balance is None:

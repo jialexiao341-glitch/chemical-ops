@@ -80,6 +80,9 @@ class InventoryBalanceRead(BaseModel):
     quantity: Decimal
     locked_quantity: Decimal
     status: str
+    batch_status: str | None = None
+    quality_hold: bool = False
+    available_quantity: Decimal = Decimal("0")
     created_at: datetime
     updated_at: datetime
 

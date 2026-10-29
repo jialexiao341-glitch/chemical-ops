@@ -19,6 +19,21 @@ def test_fifo_outbound_request_is_idempotent(client: TestClient, db_session, dem
 
     balance = db_session.scalar(select(InventoryBalance).where(InventoryBalance.quantity > 0).order_by(InventoryBalance.id).limit(1))
     assert balance is not None
+    # 本用例验证请求幂等性，不把历史质量隔离样本当作可出库库存。
+    from app.modules.inventory.model import InventoryBatch
+    from app.modules.inventory_cost.model import InventoryCostLayer
+    from app.modules.quality_acceptances.model import QualityAcceptance
+    source_ids = select(InventoryBatch.source_delivery_id).join(
+        InventoryCostLayer, InventoryCostLayer.batch_id == InventoryBatch.id,
+    ).where(InventoryCostLayer.product_id == balance.product_id,
+            InventoryCostLayer.warehouse_id == balance.warehouse_id,
+            InventoryCostLayer.location_id == balance.location_id,
+            InventoryCostLayer.unit_id == balance.unit_id,
+            InventoryCostLayer.remaining_quantity > 0)
+    for acceptance in db_session.scalars(select(QualityAcceptance).where(
+            QualityAcceptance.delivery_id.in_(source_ids))):
+        acceptance.result = 'PASSED'
+    db_session.flush()
     warehouse_user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
     assert warehouse_user is not None
     warehouse_user.password_hash = hash_password(demo_password)

@@ -49,7 +49,7 @@ const [Modal, modalApi] = useVbenModal<null | FreezePayload>({
       } else {
         await unfreezeBalanceApi(data.balance.id, reason.value.trim());
       }
-      message.success(isFreeze.value ? '库存已冻结' : '库存已解冻');
+      message.success(isFreeze.value ? '已人工冻结库存' : '已解除人工冻结');
       emit('success');
       modalApi.close();
     } catch {
@@ -68,7 +68,7 @@ const [Modal, modalApi] = useVbenModal<null | FreezePayload>({
   },
 });
 
-const title = computed(() => (isFreeze.value ? '冻结库存' : '解冻库存'));
+const title = computed(() => (isFreeze.value ? '人工冻结库存' : '解除人工冻结'));
 </script>
 
 <template>
@@ -77,8 +77,12 @@ const title = computed(() => (isFreeze.value ? '冻结库存' : '解冻库存'))
       <Alert
         :message="
           isFreeze
-            ? '冻结不会改变库存数量，但会阻止领用、调拨和盘点差异调整。'
-            : '解冻后该批次库存恢复为可用状态。'
+            ? '人工冻结不会改变库存数量，但会阻止领用、调拨和盘点差异调整。'
+            : payload?.balance.quality_hold
+              ? '解除人工冻结后，质量隔离仍然生效，库存不可用。'
+              : payload?.balance.batch_status !== 'ACTIVE'
+                ? '解除人工冻结后，批次状态仍可能限制库存使用。'
+                : '解除人工冻结后，可用量仍受锁定数量限制。'
         "
         :type="isFreeze ? 'warning' : 'info'"
         show-icon

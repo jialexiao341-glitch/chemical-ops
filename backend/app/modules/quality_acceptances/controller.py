@@ -25,7 +25,7 @@ def assignment_options(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("quality.acceptances.assign")),
 ) -> QualityAssignmentOptions:
-    return service.assignment_options(db)
+    return service.assignment_options(db, user)
 
 
 @router.get("/{acceptance_id}/report-files", response_model=list[QualityReportFile], summary="查询验收报告")

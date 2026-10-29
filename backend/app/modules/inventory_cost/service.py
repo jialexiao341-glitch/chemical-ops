@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
+from app.modules.inventory.quality_hold import lock_available_batches
 from app.modules.inventory_cost.model import InventoryCostAllocation, InventoryCostLayer, InventoryFifoOutboundAllocation, InventoryFifoOutboundRequest
 from app.modules.inventory_cost.schema import FifoOutboundCreate
 from app.modules.products.model import Product
@@ -33,7 +34,21 @@ def _require_warehouse_scope(db: Session, user: User, warehouse: Warehouse) -> N
     require_inventory_scope(db, user, warehouse.id)
 
 
-def allocate_outbound_cost(db: Session, transaction: InventoryTransaction, quantity: Decimal) -> Decimal:
+def _allocation_currency(layers, quantity: Decimal) -> str:
+    """只检查本次实际消耗的成本层，禁止无汇率依据的跨币种汇总。"""
+    remaining = quantity
+    currencies = set()
+    for layer in layers:
+        if remaining <= 0:
+            break
+        currencies.add(layer.currency_code)
+        remaining -= min(remaining, layer.remaining_quantity)
+    if len(currencies) != 1:
+        raise BusinessValidationError("出库成本涉及不同币种，无法直接汇总")
+    return currencies.pop()
+
+
+def allocate_outbound_cost(db: Session, transaction: InventoryTransaction, quantity: Decimal) -> tuple[Decimal, str]:
     """按 FIFO 扣减普通出库的成本层，并记录统一成本分摊。"""
     layers = list(db.scalars(
         select(InventoryCostLayer)
@@ -50,6 +65,7 @@ def allocate_outbound_cost(db: Session, transaction: InventoryTransaction, quant
     ).all())
     if sum((layer.remaining_quantity for layer in layers), Decimal("0")) < quantity:
         raise BusinessValidationError("库存成本层不足，请先执行历史库存成本回填")
+    currency = _allocation_currency(layers, quantity)
     remaining = quantity
     total_cost = Decimal("0")
     for layer in layers:
@@ -61,7 +77,7 @@ def allocate_outbound_cost(db: Session, transaction: InventoryTransaction, quant
         db.add(InventoryCostAllocation(transaction_id=transaction.id, cost_layer_id=layer.id, quantity=allocated, unit_cost=layer.unit_cost, total_cost=allocation_cost))
         remaining -= allocated
         total_cost += allocation_cost
-    return total_cost
+    return total_cost, currency
 
 
 def adjust_stocktake_cost(db: Session, transaction: InventoryTransaction, difference: Decimal, *, book_quantity: Decimal | None = None) -> None:
@@ -135,8 +151,9 @@ def create_fifo_outbound(db: Session, user: User, data: FifoOutboundCreate) -> I
     if unit is None or unit.status != "ACTIVE":
         raise BusinessValidationError("计量单位不存在或已停用")
     try:
-        # 所有履约路径先锁库存余额，再锁成本层，避免 FIFO 与普通出库形成反向锁顺序。
+        # 统一按批次、库存余额、成本层的顺序加锁，避免与复检及其他履约路径反向加锁。
         candidate_layers = list(db.scalars(select(InventoryCostLayer).where(InventoryCostLayer.product_id == data.product_id, InventoryCostLayer.warehouse_id == data.warehouse_id, InventoryCostLayer.location_id == data.location_id, InventoryCostLayer.unit_id == data.unit_id, InventoryCostLayer.remaining_quantity > 0).order_by(InventoryCostLayer.created_at, InventoryCostLayer.id)).all())
+        lock_available_batches(db, [layer.batch_id for layer in candidate_layers])
         balance_by_batch = {}
         for batch_id in sorted({layer.batch_id for layer in candidate_layers}):
             balance = db.scalar(select(InventoryBalance).where(InventoryBalance.warehouse_id == data.warehouse_id, InventoryBalance.location_id == data.location_id, InventoryBalance.product_id == data.product_id, InventoryBalance.batch_id == batch_id, InventoryBalance.unit_id == data.unit_id).with_for_update())
@@ -144,10 +161,13 @@ def create_fifo_outbound(db: Session, user: User, data: FifoOutboundCreate) -> I
                 raise BusinessValidationError(f"批次 {batch_id} 没有对应库存余额")
             balance_by_batch[batch_id] = balance
         layers = list(db.scalars(select(InventoryCostLayer).where(InventoryCostLayer.product_id == data.product_id, InventoryCostLayer.warehouse_id == data.warehouse_id, InventoryCostLayer.location_id == data.location_id, InventoryCostLayer.unit_id == data.unit_id, InventoryCostLayer.remaining_quantity > 0).order_by(InventoryCostLayer.created_at, InventoryCostLayer.id).with_for_update()).all())
+        if any(layer.batch_id not in balance_by_batch for layer in layers):
+            raise BusinessValidationError("库存批次已变化，请重试")
         remaining = data.quantity
         if sum((layer.remaining_quantity for layer in layers), Decimal("0")) < remaining:
             raise BusinessValidationError("FIFO 成本层可用库存不足，请先建立成本层或使用普通批次出库")
-        request = InventoryFifoOutboundRequest(request_no=data.request_no, product_id=data.product_id, warehouse_id=data.warehouse_id, location_id=data.location_id, unit_id=data.unit_id, requested_quantity=data.quantity, issued_quantity=Decimal("0"), total_cost=Decimal("0"), currency_code="CNY", status="COMPLETED", operator_id=user.id, note=data.note)
+        currency = _allocation_currency(layers, remaining)
+        request = InventoryFifoOutboundRequest(request_no=data.request_no, product_id=data.product_id, warehouse_id=data.warehouse_id, location_id=data.location_id, unit_id=data.unit_id, requested_quantity=data.quantity, issued_quantity=Decimal("0"), total_cost=Decimal("0"), currency_code=currency, status="COMPLETED", operator_id=user.id, note=data.note)
         db.add(request)
         db.flush()
         total_cost = Decimal("0")
