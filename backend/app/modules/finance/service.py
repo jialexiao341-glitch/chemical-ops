@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -105,8 +105,12 @@ def _sum_payments(db: Session, reconciliation_id: int, *, paid_only: bool = Fals
     """统计付款申请或实际付款金额。"""
 
     statuses = ["PAID"] if paid_only else ["REQUESTED", "APPROVED", "PAID"]
-    value = db.scalar(select(func.coalesce(func.sum(FinancePayment.amount), 0)).where(FinancePayment.reconciliation_id == reconciliation_id, FinancePayment.status.in_(statuses)))
-    return Decimal(value or 0)
+    # 与对账单主锁配合使用当前读，避免等待主锁后继续统计旧快照。
+    values = db.scalars(select(FinancePayment.amount).where(
+        FinancePayment.reconciliation_id == reconciliation_id,
+        FinancePayment.status.in_(statuses),
+    ).order_by(FinancePayment.id).with_for_update()).all()
+    return sum(values, Decimal(0))
 
 
 def create_reconciliation(db: Session, user: User, po_id: int, note: str | None) -> FinanceReconciliation:

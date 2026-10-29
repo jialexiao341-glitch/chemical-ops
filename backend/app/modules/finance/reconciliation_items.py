@@ -35,7 +35,7 @@ def collect_basis(db: Session, order: PurchaseOrder, *, for_update: bool = False
     ).order_by(InventoryReturnItem.id))).all()
     return {
         "order": {"id":order.id, "po_no":order.po_no, "supplier_id":order.supplier_id, "status":order.status, "currency_code":order.currency_code, "order_amount":str(order.order_amount)},
-        "lines": [{"id":line.id, "line_no":line.line_no, "product_id":line.product_id, "product_name":line.product_name_snapshot, "unit_id":line.unit_id, "unit_name":(db.get(Unit, line.unit_id).unit_name if db.get(Unit, line.unit_id) else "未记录"), "ordered_quantity":str(line.order_quantity), "recorded_received_quantity":str(line.received_quantity), "unit_price":str(line.unit_price), "tax_rate":str(line.tax_rate or 0)} for line in lines],
+        "lines": [{"id":line.id, "line_no":line.line_no, "product_id":line.product_id, "product_name":line.product_name_snapshot, "unit_id":line.unit_id, "unit_name":(db.get(Unit, line.unit_id).unit_name if db.get(Unit, line.unit_id) else "未记录"), "ordered_quantity":str(line.order_quantity), "recorded_received_quantity":str(line.received_quantity), "unit_price":str(line.unit_price), "tax_rate":str(line.tax_rate or 0), **({"tax_included": line.tax_included} if line.tax_included is not None else {})} for line in lines],
         "deliveries": [{"id":row.id,"delivery_no":row.delivery_no,"status":row.status} for row in deliveries],
         "receipts": [{"id":row.id,"delivery_id":row.delivery_id,"delivery_no":delivery_by_id[row.delivery_id].delivery_no,"status":delivery_by_id[row.delivery_id].status,"line_no":row.line_no,"po_item_id":row.po_item_id,"product_id":row.product_id,"unit_id":row.unit_id,"batch_no":row.batch_no,"quantity":str(row.actual_quantity),"short_quantity":str(row.short_quantity)} for row in items],
         "returns": [{"id":row.id,"return_no":request.return_no,"status":request.status,"source_delivery_item_id":row.source_delivery_item_id,"source_po_item_id":row.source_po_item_id,"product_id":row.product_id,"unit_id":row.unit_id,"requested_quantity":str(row.requested_quantity),"returned_quantity":str(row.returned_quantity)} for row,request in returns],
@@ -108,9 +108,15 @@ def append_basis(db: Session, user: User, reconciliation: FinanceReconciliation,
         if treatment == "PENDING":
             warnings.append("退货金额处理口径待财务确认，当前金额仅为草稿核查值")
         quantity = max(Decimal(0), accepted - returned) if treatment == "DEDUCT" else accepted
-        raw_excl = quantity * Decimal(line["unit_price"])
-        amount_excl = raw_excl.quantize(quantum, rounding=ROUND_HALF_UP)
-        tax = (raw_excl * Decimal(line["tax_rate"]) / 100).quantize(quantum, rounding=ROUND_HALF_UP)
+        raw_price = quantity * Decimal(line["unit_price"])
+        rate = Decimal(line["tax_rate"])
+        if line.get("tax_included") is True:
+            amount = raw_price.quantize(quantum, rounding=ROUND_HALF_UP)
+            amount_excl = (raw_price / (Decimal(1) + rate / 100)).quantize(quantum, rounding=ROUND_HALF_UP)
+            tax = amount - amount_excl
+        else:
+            amount_excl = raw_price.quantize(quantum, rounding=ROUND_HALF_UP)
+            tax = (raw_price * rate / 100).quantize(quantum, rounding=ROUND_HALF_UP)
         amount = amount_excl + tax
         total += amount
         db.add(FinanceReconciliationItem(
@@ -142,7 +148,9 @@ def append_basis(db: Session, user: User, reconciliation: FinanceReconciliation,
                 "returns": returns,
                 "global_warnings": _global_warnings(basis),
                 "amount_precision": payload.amount_precision,
-                "rounding": "逐行不含税金额和税额分别按原始数量乘单价计算，以 ROUND_HALF_UP 舍入后相加",
+                "rounding": ("逐行含税金额和不含税金额分别按 ROUND_HALF_UP 舍入，税额为两者差额"
+                             if line.get("tax_included") is True else
+                             "逐行不含税金额和税额分别按原始数量乘单价计算，以 ROUND_HALF_UP 舍入后相加"),
             },
         ))
     reconciliation.items_version = version

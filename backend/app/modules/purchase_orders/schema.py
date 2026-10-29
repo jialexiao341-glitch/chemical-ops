@@ -57,6 +57,7 @@ class PurchaseOrderItemRead(BaseModel):
     unit_id: int
     unit_price: Decimal
     tax_rate: Decimal | None
+    tax_included: bool | None = None
     payment_terms_snapshot: str | None
     planned_arrival_date: date | None
     received_quantity: Decimal

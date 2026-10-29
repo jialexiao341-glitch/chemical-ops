@@ -208,6 +208,10 @@ def create_quote_for_supplier(
 ) -> RFQ:
     """为已邀请的供应商创建一版报价；调用方负责授权询价范围。"""
 
+    # 定标与所有报价入口使用同一主单锁，刷新会话中的旧状态。
+    rfq = db.scalar(select(RFQ).where(RFQ.id == rfq.id).with_for_update().execution_options(populate_existing=True))
+    if rfq is None:
+        raise ResourceNotFoundError("询价单不存在")
     if rfq.status not in {"SENT", "RESPONDING"}:
         raise BusinessValidationError("当前询价单不接受供应商报价")
     if data.source_file_id is not None:
@@ -239,6 +243,7 @@ def create_quote_for_supplier(
         select(SupplierQuote.quote_version)
         .where(SupplierQuote.rfq_id == rfq.id, SupplierQuote.supplier_id == supplier_id)
         .order_by(SupplierQuote.quote_version.desc())
+        .limit(1).with_for_update()
     )
     quote = SupplierQuote(
         quote_no=f"TEMP-Q-{rfq.id}-{supplier_id}-{int(_now().timestamp())}",

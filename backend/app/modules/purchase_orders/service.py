@@ -145,8 +145,11 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate, *, commit: 
     for line_no, rfq_item_id in enumerate(sorted(quote_items, key=lambda value: rfq_items[value].line_no), start=1):
         rfq_item = rfq_items[rfq_item_id]
         quote_item = quote_items[rfq_item_id]
-        tax_rate = quote_item.tax_rate or Decimal("0")
-        total += quote_item.unit_price * quote_item.quoted_quantity * (Decimal("1") + tax_rate / Decimal("100"))
+        if quote_item.tax_rate is None or quote_item.tax_included is None:
+            raise BusinessValidationError("报价税务口径不完整，请先明确税率和单价是否含税")
+        tax_rate = quote_item.tax_rate
+        amount = quote_item.unit_price * quote_item.quoted_quantity
+        total += amount if quote_item.tax_included else amount * (Decimal("1") + tax_rate / Decimal("100"))
         order.items.append(
             PurchaseOrderItem(
                 line_no=line_no,
@@ -159,6 +162,7 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate, *, commit: 
                 unit_id=quote_item.unit_id,
                 unit_price=quote_item.unit_price,
                 tax_rate=quote_item.tax_rate,
+                tax_included=quote_item.tax_included,
                 payment_terms_snapshot=quote_item.payment_terms,
                 planned_arrival_date=data.expected_arrival_date or rfq_item.required_delivery_date,
             )
@@ -303,19 +307,31 @@ def place_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
     order = get_order(db, user, order_id, for_update=True)
     if order.status != "APPROVED":
         raise BusinessValidationError("只有已审批的采购订单可以下单")
+    quantities: dict[int, Decimal] = {}
+    for item in order.items:
+        source = db.scalar(select(SupplierQuoteItem).where(SupplierQuoteItem.id == item.source_quote_item_id)) if item.source_quote_item_id else None
+        rfq_item = db.get(RFQItem, source.rfq_item_id) if source is not None else None
+        if rfq_item is not None and rfq_item.source_request_item_id is not None:
+            item_id = rfq_item.source_request_item_id
+            quantities[item_id] = quantities.get(item_id, Decimal("0")) + item.order_quantity
+    request_items = []
+    if quantities:
+        # 以申请明细为跨订单串行化点，使用当前读并按主键锁定。
+        request_items = list(db.scalars(select(PurchaseRequestItem).where(
+            PurchaseRequestItem.id.in_(quantities),
+            PurchaseRequestItem.request_id == order.source_request_id,
+        ).order_by(PurchaseRequestItem.id).with_for_update().execution_options(populate_existing=True)).all())
+        if len(request_items) != len(quantities):
+            raise BusinessValidationError("采购订单来源申请明细不存在或不属于来源申请")
+        for request_item in request_items:
+            if request_item.fulfilled_quantity + quantities[request_item.id] > request_item.quantity:
+                raise BusinessValidationError(f"采购申请明细 {request_item.id} 剩余可采购数量不足")
     previous = order.status
     order.status = "ORDERED"
     order.order_date = date.today()
-    for item in order.items:
-        source = db.scalar(select(SupplierQuoteItem).where(SupplierQuoteItem.id == item.source_quote_item_id)) if item.source_quote_item_id else None
-        if source is None:
-            continue
-        rfq_item = db.get(RFQItem, source.rfq_item_id)
-        if rfq_item and rfq_item.source_request_item_id:
-            request_item = db.get(PurchaseRequestItem, rfq_item.source_request_item_id)
-            if request_item:
-                request_item.fulfilled_quantity += item.order_quantity
-                request_item.status = "FULFILLED" if request_item.fulfilled_quantity >= request_item.quantity else "PARTIAL"
+    for request_item in request_items:
+        request_item.fulfilled_quantity += quantities[request_item.id]
+        request_item.status = "FULFILLED" if request_item.fulfilled_quantity >= request_item.quantity else "PARTIAL"
     _add_event(db, order, user.id, "ORDERED", previous, "ORDERED", "采购订单正式下单")
     add_audit_log(db, actor_id=user.id, action_type="PLACE", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary="采购订单正式下单", result_status="SUCCESS")
     db.commit()

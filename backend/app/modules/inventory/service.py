@@ -226,6 +226,16 @@ def list_balance_status_logs(db: Session, user: User, balance_id: int, *, page: 
     return crud.list_balance_status_logs(db, balance_id, page=page, page_size=page_size)
 
 
+def inbound_unit_cost(po_item: PurchaseOrderItem | None) -> Decimal:
+    """新订单使用含税快照，历史未知订单沿用原有计算口径。"""
+    if po_item is None:
+        return Decimal("0")
+    if po_item.tax_included:
+        return po_item.unit_price
+    tax_rate = po_item.tax_rate if po_item.tax_rate is not None else Decimal("0")
+    return po_item.unit_price * (Decimal("1") + tax_rate / Decimal("100"))
+
+
 def create_inbound(db: Session, user: User, data: InboundCreate):
     """将已通过质量验收的到货单执行入库。"""
 
@@ -300,8 +310,7 @@ def create_inbound(db: Session, user: User, data: InboundCreate):
         db.flush()
         transaction.transaction_no = f"IT{date.today():%Y%m%d}{transaction.id:06d}"
         po_item = db.get(PurchaseOrderItem, delivery_item.po_item_id)
-        tax_rate = po_item.tax_rate if po_item is not None and po_item.tax_rate is not None else Decimal("0")
-        unit_cost = po_item.unit_price * (Decimal("1") + tax_rate / Decimal("100")) if po_item is not None else Decimal("0")
+        unit_cost = inbound_unit_cost(po_item)
         order = db.get(PurchaseOrder, delivery.po_id)
         db.add(InventoryCostLayer(source_transaction_id=transaction.id, warehouse_id=warehouse.id, location_id=location.id, product_id=delivery_item.product_id, batch_id=batch.id, unit_id=delivery_item.unit_id, unit_cost=unit_cost, currency_code=order.currency_code, original_quantity=delivery_item.actual_quantity, remaining_quantity=delivery_item.actual_quantity))
         transactions.append(transaction)
@@ -476,7 +485,7 @@ def get_issue_request(db: Session, user: User, issue_id: int) -> InventoryIssueR
 def update_issue_request(db: Session, user: User, issue_id: int, data: InventoryIssueRequestUpdate) -> InventoryIssueRequest:
     """修改草稿或已驳回的库存领用申请。"""
 
-    issue = _get_issue_for_user(db, user, issue_id)
+    issue = _get_issue_for_user(db, user, issue_id, for_update=True)
     if issue.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的领用申请可以修改")
     values = data.model_dump(exclude_unset=True)
@@ -501,7 +510,7 @@ def update_issue_request(db: Session, user: User, issue_id: int, data: Inventory
 def submit_issue_request(db: Session, user: User, issue_id: int) -> InventoryIssueRequest:
     """提交库存领用申请审批。"""
 
-    issue = _get_issue_for_user(db, user, issue_id)
+    issue = _get_issue_for_user(db, user, issue_id, for_update=True)
     if issue.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的领用申请可以提交")
     if not issue.items:
@@ -549,7 +558,7 @@ def reject_issue_request(db: Session, user: User, issue_id: int, reason: str) ->
 def cancel_issue_request(db: Session, user: User, issue_id: int) -> InventoryIssueRequest:
     """取消草稿或已驳回的库存领用申请。"""
 
-    issue = _get_issue_for_user(db, user, issue_id)
+    issue = _get_issue_for_user(db, user, issue_id, for_update=True)
     if issue.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的领用申请可以取消")
     issue.status = "CANCELLED"
@@ -738,7 +747,7 @@ def get_transfer_request(db: Session, user: User, transfer_id: int) -> Inventory
 def update_transfer_request(db: Session, user: User, transfer_id: int, data: InventoryTransferRequestUpdate) -> InventoryTransferRequest:
     """修改草稿或已驳回的库存调拨申请。"""
 
-    transfer = _get_transfer_for_user(db, user, transfer_id)
+    transfer = _get_transfer_for_user(db, user, transfer_id, for_update=True)
     if transfer.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的调拨申请可以修改")
     values = data.model_dump(exclude_unset=True)
@@ -758,7 +767,7 @@ def update_transfer_request(db: Session, user: User, transfer_id: int, data: Inv
 def submit_transfer_request(db: Session, user: User, transfer_id: int) -> InventoryTransferRequest:
     """提交库存调拨申请审批。"""
 
-    transfer = _get_transfer_for_user(db, user, transfer_id)
+    transfer = _get_transfer_for_user(db, user, transfer_id, for_update=True)
     if transfer.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的调拨申请可以提交")
     if not transfer.items:
@@ -806,7 +815,7 @@ def reject_transfer_request(db: Session, user: User, transfer_id: int, reason: s
 def cancel_transfer_request(db: Session, user: User, transfer_id: int) -> InventoryTransferRequest:
     """取消草稿或已驳回的库存调拨申请。"""
 
-    transfer = _get_transfer_for_user(db, user, transfer_id)
+    transfer = _get_transfer_for_user(db, user, transfer_id, for_update=True)
     if transfer.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的调拨申请可以取消")
     transfer.status = "CANCELLED"
@@ -1072,7 +1081,7 @@ def get_stocktake_request(db: Session, user: User, stocktake_id: int) -> Invento
 def update_stocktake_request(db: Session, user: User, stocktake_id: int, data: InventoryStocktakeRequestUpdate) -> InventoryStocktakeRequest:
     """修改草稿或已驳回的库存盘点申请。"""
 
-    stocktake = _get_stocktake_for_user(db, user, stocktake_id)
+    stocktake = _get_stocktake_for_user(db, user, stocktake_id, for_update=True)
     if stocktake.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的盘点申请可以修改")
     values = data.model_dump(exclude_unset=True)
@@ -1093,7 +1102,7 @@ def update_stocktake_request(db: Session, user: User, stocktake_id: int, data: I
 def submit_stocktake_request(db: Session, user: User, stocktake_id: int) -> InventoryStocktakeRequest:
     """提交库存盘点申请审批。"""
 
-    stocktake = _get_stocktake_for_user(db, user, stocktake_id)
+    stocktake = _get_stocktake_for_user(db, user, stocktake_id, for_update=True)
     if stocktake.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的盘点申请可以提交")
     if not stocktake.items:
@@ -1141,7 +1150,7 @@ def reject_stocktake_request(db: Session, user: User, stocktake_id: int, reason:
 def cancel_stocktake_request(db: Session, user: User, stocktake_id: int) -> InventoryStocktakeRequest:
     """取消草稿或已驳回的库存盘点申请。"""
 
-    stocktake = _get_stocktake_for_user(db, user, stocktake_id)
+    stocktake = _get_stocktake_for_user(db, user, stocktake_id, for_update=True)
     if stocktake.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的盘点申请可以取消")
     stocktake.status = "CANCELLED"

@@ -2,6 +2,7 @@
 
 from sqlalchemy import and_, exists, func, insert, or_, select
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.modules.inventory.model import (
     InventoryBalance,
@@ -13,6 +14,7 @@ from app.modules.inventory.model import (
     InventoryTransferRequest,
     InventoryTransferItem,
     InventoryStocktakeRequest,
+    InventoryStocktakeItem,
     Warehouse,
     WarehouseLocation,
 )
@@ -191,12 +193,24 @@ def list_transactions(db: Session, *, product_id: int | None, transaction_type: 
     return items, total
 
 
+def _locked_request(db: Session, request_model, item_model, foreign_key, request_id: int):
+    """主单及明细均使用当前读，避免等待主锁后读取旧事务快照。"""
+    value = db.scalar(select(request_model).where(request_model.id == request_id)
+        .with_for_update().execution_options(populate_existing=True))
+    if value is None:
+        return None
+    items = list(db.scalars(select(item_model).where(foreign_key == request_id)
+        .order_by(item_model.line_no, item_model.id).with_for_update().execution_options(populate_existing=True)).all())
+    set_committed_value(value, "items", items)
+    return value
+
+
 def get_issue_request(db: Session, issue_id: int, *, for_update: bool = False) -> InventoryIssueRequest | None:
     """查询库存领用申请，可选锁定主单。"""
 
-    statement = select(InventoryIssueRequest).options(selectinload(InventoryIssueRequest.items)).where(InventoryIssueRequest.id == issue_id)
     if for_update:
-        statement = statement.with_for_update()
+        return _locked_request(db, InventoryIssueRequest, InventoryIssueItem, InventoryIssueItem.issue_request_id, issue_id)
+    statement = select(InventoryIssueRequest).options(selectinload(InventoryIssueRequest.items)).where(InventoryIssueRequest.id == issue_id)
     return db.scalar(statement)
 
 
@@ -239,9 +253,9 @@ def list_issue_requests(db: Session, *, applicant_id: int | None, warehouse_ids:
 def get_transfer_request(db: Session, transfer_id: int, *, for_update: bool = False) -> InventoryTransferRequest | None:
     """查询库存调拨申请，可选锁定主单。"""
 
-    statement = select(InventoryTransferRequest).options(selectinload(InventoryTransferRequest.items)).where(InventoryTransferRequest.id == transfer_id)
     if for_update:
-        statement = statement.with_for_update()
+        return _locked_request(db, InventoryTransferRequest, InventoryTransferItem, InventoryTransferItem.transfer_request_id, transfer_id)
+    statement = select(InventoryTransferRequest).options(selectinload(InventoryTransferRequest.items)).where(InventoryTransferRequest.id == transfer_id)
     return db.scalar(statement)
 
 
@@ -288,9 +302,9 @@ def list_transfer_requests(db: Session, *, applicant_id: int | None, warehouse_i
 def get_stocktake_request(db: Session, stocktake_id: int, *, for_update: bool = False) -> InventoryStocktakeRequest | None:
     """查询库存盘点申请，可选锁定主单。"""
 
-    statement = select(InventoryStocktakeRequest).options(selectinload(InventoryStocktakeRequest.items)).where(InventoryStocktakeRequest.id == stocktake_id)
     if for_update:
-        statement = statement.with_for_update()
+        return _locked_request(db, InventoryStocktakeRequest, InventoryStocktakeItem, InventoryStocktakeItem.stocktake_request_id, stocktake_id)
+    statement = select(InventoryStocktakeRequest).options(selectinload(InventoryStocktakeRequest.items)).where(InventoryStocktakeRequest.id == stocktake_id)
     return db.scalar(statement)
 
 

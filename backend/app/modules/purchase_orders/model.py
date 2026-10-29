@@ -74,6 +74,7 @@ class PurchaseOrderItem(Base):
     unit_id: Mapped[int] = mapped_column(ForeignKey("md_units.id"), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    tax_included: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     payment_terms_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
     planned_arrival_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     received_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=0)

@@ -61,7 +61,7 @@ def _supplier_id(db: Session, user: User) -> int:
     return account.supplier_id
 
 
-def _invited_rfq(db: Session, supplier_id: int, rfq_id: int) -> tuple[RFQ, RFQSupplier]:
+def _invited_rfq(db: Session, supplier_id: int, rfq_id: int, *, for_update: bool = False) -> tuple[RFQ, RFQSupplier]:
     """只按当前绑定供应商的邀请关系查询询价。"""
     row = db.execute(
         select(RFQ, RFQSupplier)
@@ -75,7 +75,12 @@ def _invited_rfq(db: Session, supplier_id: int, rfq_id: int) -> tuple[RFQ, RFQSu
     ).first()
     if row is None:
         raise ResourceNotFoundError(f"询价单 {rfq_id} 不存在")
-    return row[0], row[1]
+    rfq = row[0]
+    if for_update:
+        rfq = db.scalar(select(RFQ).where(RFQ.id == rfq_id).with_for_update().execution_options(populate_existing=True))
+        if rfq is None or rfq.status == "DRAFT":
+            raise ResourceNotFoundError(f"询价单 {rfq_id} 不存在")
+    return rfq, row[1]
 
 
 def _rfq_list_item(rfq: RFQ, invitation: RFQSupplier) -> SupplierRFQListItem:
@@ -176,7 +181,7 @@ def submit_rfq_quote(
 ) -> SupplierRFQDetail:
     """提交或修订供应商自己的报价版本。"""
     supplier_id = _supplier_id(db, user)
-    rfq, _ = _invited_rfq(db, supplier_id, rfq_id)
+    rfq, _ = _invited_rfq(db, supplier_id, rfq_id, for_update=True)
     if rfq.status not in {"SENT", "RESPONDING"}:
         raise BusinessValidationError("当前询价单已关闭，不接受报价")
     if rfq.quote_deadline is not None and rfq.quote_deadline < datetime.now():

@@ -65,7 +65,7 @@ def _require(db: Session, replenishment_id: int, *, for_update: bool = False) ->
     """查询补货申请及明细。"""
     statement = select(ReplenishmentRequest).options(selectinload(ReplenishmentRequest.items)).where(ReplenishmentRequest.id == replenishment_id)
     if for_update:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     value = db.scalar(statement)
     if value is None:
         raise ResourceNotFoundError(f"补货申请 {replenishment_id} 不存在")
@@ -121,9 +121,9 @@ def list_replenishments(db: Session, user: User, *, status: str | None, page: in
     return items, total
 
 
-def get_replenishment(db: Session, user: User, replenishment_id: int) -> ReplenishmentRequest:
+def get_replenishment(db: Session, user: User, replenishment_id: int, *, for_update: bool = False) -> ReplenishmentRequest:
     """查询补货详情。"""
-    value = _require(db, replenishment_id)
+    value = _require(db, replenishment_id, for_update=for_update)
     if not _can_manage_all(db, user) and value.applicant_id != user.id:
         raise ResourceNotFoundError(f"补货申请 {replenishment_id} 不存在")
     if db.scalar(select(ReplenishmentRequest.id).where(ReplenishmentRequest.id == replenishment_id, _department_scope(user, get_user_role_codes(db, user.id)))) is None:
@@ -133,7 +133,7 @@ def get_replenishment(db: Session, user: User, replenishment_id: int) -> Repleni
 
 def submit_replenishment(db: Session, user: User, replenishment_id: int) -> ReplenishmentRequest:
     """提交补货审批。"""
-    value = get_replenishment(db, user, replenishment_id)
+    value = get_replenishment(db, user, replenishment_id, for_update=True)
     if value.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的补货申请可以提交")
     value.status = "SUBMITTED"
@@ -174,7 +174,7 @@ def reject_replenishment(db: Session, user: User, replenishment_id: int, reason:
 
 def cancel_replenishment(db: Session, user: User, replenishment_id: int) -> ReplenishmentRequest:
     """取消草稿或驳回补货申请。"""
-    value = get_replenishment(db, user, replenishment_id)
+    value = get_replenishment(db, user, replenishment_id, for_update=True)
     if value.status not in {"DRAFT", "REJECTED"}:
         raise BusinessValidationError("只有草稿或已驳回的补货申请可以取消")
     value.status = "CANCELLED"
