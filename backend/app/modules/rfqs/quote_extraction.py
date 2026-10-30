@@ -123,7 +123,7 @@ async def parse_quote_file(
     max_upload_bytes = get_settings().document_max_size_mb * 1024 * 1024
     if len(content) > max_upload_bytes:
         raise BusinessValidationError(f"文件大小不能超过 {get_settings().document_max_size_mb} MB")
-    scan_result = file_service.scan_content(content)
+    scan_result = await asyncio.to_thread(file_service.scan_content, content)
     if scan_result.status == "INFECTED":
         raise BusinessValidationError("文件未通过安全扫描，已拒绝解析")
     if scan_result.status not in {"SKIPPED", "CLEAN"}:
@@ -227,10 +227,23 @@ async def parse_quote_file(
     if not candidates:
         raise BusinessValidationError("未找到带可核对原文引用的报价明细，请人工录入")
 
+    # 外部解析和模型调用后重新核对当前权限和询价单状态。
+    db.expire_all()
+    from app.core.errors import AuthorizationError
+    from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
+    if user.status != "ACTIVE" or (
+        "SYS_ADMIN" not in get_user_role_codes(db, user.id)
+        and "procurement.rfqs.quote" not in set(get_user_permission_codes(db, user.id))
+    ):
+        raise AuthorizationError("当前账号已无报价录入权限")
+    rfq = rfq_service.get_rfq(db, user, rfq_id)
+    if rfq.status not in {"SENT", "RESPONDING"}:
+        raise BusinessValidationError("当前询价单状态已变化，不再接受报价文件")
+
     # 文件通过已有上传校验和安全扫描后保存为业务来源；报价记录仍须用户随后手动确认提交。
     source_file = file_service.upload_file(
         db, user, file_name=file_name, mime_type=mime_type, content=content,
-        file_category="SUPPLIER_QUOTE", access_level="INTERNAL",
+        file_category="SUPPLIER_QUOTE", access_level="INTERNAL", scan_result=scan_result,
     )
     warnings = ["解析结果仅为候选值，请逐项核对后再录入报价。"]
     if dropped_fields:

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
 from app.core.time import business_today, utc_now
@@ -13,10 +14,11 @@ from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance import reconciliation_items
 from app.modules.finance.model import FinanceReconciliation
 from app.modules.files import service as file_service
-from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderEvent
+from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderEvent, PurchaseOrderItem
 from app.modules.rfqs.model import RFQ, RFQItem, RFQSupplier, SupplierQuote
 from app.modules.rfqs.schema import SupplierQuoteCreate, SupplierQuoteItemCreate
 from app.modules.rfqs.service import create_quote_for_supplier
+from app.modules.suppliers.model import Supplier
 from app.modules.supplier_portal.model import (
     SupplierDeliveryUpdate,
     SupplierPortalAccount,
@@ -52,10 +54,18 @@ from app.modules.system import crud as system_crud
 
 
 def _supplier_id(db: Session, user: User) -> int:
-    """读取当前登录用户绑定的供应商。"""
+    """读取当前登录用户绑定的供应商，并校验供应商处于启用状态。"""
     if set(system_crud.get_user_role_codes(db, user.id)) != {"SUPPLIER_PORTAL"}:
         raise AuthorizationError("仅供应商门户角色账号可访问供应商业务")
-    account = db.scalar(select(SupplierPortalAccount).where(SupplierPortalAccount.user_id == user.id, SupplierPortalAccount.status == "ACTIVE"))
+    account = db.scalar(
+        select(SupplierPortalAccount)
+        .join(Supplier, Supplier.id == SupplierPortalAccount.supplier_id)
+        .where(
+            SupplierPortalAccount.user_id == user.id,
+            SupplierPortalAccount.status == "ACTIVE",
+            Supplier.status == "ACTIVE",
+        )
+    )
     if account is None:
         raise AuthorizationError("当前用户未绑定有效的供应商门户账号")
     return account.supplier_id
@@ -186,7 +196,7 @@ def submit_rfq_quote(
         raise BusinessValidationError("当前询价单已关闭，不接受报价")
     if rfq.quote_deadline is not None and rfq.quote_deadline < datetime.now():
         raise BusinessValidationError("已超过询价报价截止时间")
-    if data.valid_until is not None and data.valid_until < date.today():
+    if data.valid_until is not None and data.valid_until < business_today():
         raise BusinessValidationError("报价有效期不能早于今天")
 
     quote_data = SupplierQuoteCreate(
@@ -205,14 +215,39 @@ def submit_rfq_quote(
 
 
 def _require_order(db: Session, user: User, order_id: int, *, for_update: bool = False) -> PurchaseOrder:
-    """查询供应商自己的采购订单。"""
+    """查询供应商自己的采购订单，锁定模式下同时锁定订单子表明细与事件。"""
     supplier_id = _supplier_id(db, user)
-    statement = select(PurchaseOrder).options(selectinload(PurchaseOrder.items), selectinload(PurchaseOrder.approvals), selectinload(PurchaseOrder.events)).where(PurchaseOrder.id == order_id, PurchaseOrder.supplier_id == supplier_id)
+    statement = (
+        select(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.items), selectinload(PurchaseOrder.approvals), selectinload(PurchaseOrder.events))
+        .where(PurchaseOrder.id == order_id, PurchaseOrder.supplier_id == supplier_id)
+    )
     if for_update:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     order = db.scalar(statement)
     if order is None:
         raise ResourceNotFoundError(f"采购订单 {order_id} 不存在")
+    if for_update:
+        items = list(
+            db.scalars(
+                select(PurchaseOrderItem)
+                .where(PurchaseOrderItem.po_id == order.id)
+                .order_by(PurchaseOrderItem.line_no, PurchaseOrderItem.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).all()
+        )
+        set_committed_value(order, "items", items)
+        events = list(
+            db.scalars(
+                select(PurchaseOrderEvent)
+                .where(PurchaseOrderEvent.po_id == order.id)
+                .order_by(PurchaseOrderEvent.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).all()
+        )
+        set_committed_value(order, "events", events)
     return order
 
 
@@ -243,6 +278,8 @@ def confirm_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
         raise BusinessValidationError("只有已正式下单的采购订单可以由供应商确认")
     if order.supplier_confirmed_at is not None:
         raise BusinessValidationError("该采购订单已经完成供应商确认")
+    if any(event.event_type == "SUPPLIER_REJECTED" for event in order.events):
+        raise BusinessValidationError("该采购订单已由供应商拒绝，请联系采购处理")
     order.supplier_confirmed_at = datetime.now(timezone.utc)
     order.events.append(PurchaseOrderEvent(operator_id=user.id, event_type="SUPPLIER_CONFIRMED", from_status=order.status, to_status=order.status, event_note="供应商确认采购订单"))
     add_audit_log(db, actor_id=user.id, action_type="CONFIRM", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary="供应商确认采购订单", result_status="SUCCESS")
@@ -253,10 +290,14 @@ def confirm_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
 def reject_order(db: Session, user: User, order_id: int, reason: str) -> PurchaseOrder:
     """供应商拒绝采购订单并保留订单事件。"""
     order = _require_order(db, user, order_id, for_update=True)
-    if order.status not in {"ORDERED", "PARTIAL", "COMPLETED"}:
-        raise BusinessValidationError("只有已正式下单的采购订单可以由供应商拒绝")
+    if order.status != "ORDERED":
+        raise BusinessValidationError("只有已下单且尚未收货的采购订单可以由供应商拒绝")
     if order.supplier_confirmed_at is not None:
         raise BusinessValidationError("已确认的采购订单不能再拒绝")
+    if any(event.event_type == "SUPPLIER_REJECTED" for event in order.events):
+        raise BusinessValidationError("该采购订单已经提交过拒绝记录")
+    if db.scalar(select(Delivery.id).where(Delivery.po_id == order.id).limit(1)) is not None:
+        raise BusinessValidationError("已存在发货或到货记录的采购订单不能直接拒绝")
     order.events.append(PurchaseOrderEvent(operator_id=user.id, event_type="SUPPLIER_REJECTED", from_status=order.status, to_status=order.status, event_note=reason))
     add_audit_log(db, actor_id=user.id, action_type="REJECT", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary=f"供应商拒绝采购订单：{reason}", result_status="SUCCESS")
     db.commit()
@@ -317,18 +358,25 @@ def create_shipment_notice(db: Session, user: User, data: SupplierShipmentCreate
     order = _require_order(db, user, data.po_id, for_update=True)
     if order.status not in {"ORDERED", "PARTIAL"}:
         raise BusinessValidationError("只有已下单或部分到货的订单可以提交发货通知")
+    if any(event.event_type == "SUPPLIER_REJECTED" for event in order.events):
+        raise BusinessValidationError("已拒绝的采购订单不能提交发货通知")
     po_items = {item.id: item for item in order.items}
     item_ids = [item.po_item_id for item in data.items]
     if len(item_ids) != len(set(item_ids)) or not set(item_ids).issubset(po_items):
         raise BusinessValidationError("发货明细必须来自当前订单且不能重复")
     outstanding = {item_id: Decimal(0) for item_id in item_ids}
-    existing_rows = db.execute(
-        select(DeliveryItem.po_item_id, func.sum(DeliveryItem.planned_quantity))
-        .join(Delivery, Delivery.id == DeliveryItem.delivery_id)
-        .where(Delivery.po_id == order.id, Delivery.status == "IN_TRANSIT", DeliveryItem.po_item_id.in_(item_ids))
-        .group_by(DeliveryItem.po_item_id)
-    ).all()
-    outstanding.update({item_id: Decimal(str(quantity or 0)) for item_id, quantity in existing_rows})
+    existing_items = list(
+        db.scalars(
+            select(DeliveryItem)
+            .join(Delivery, Delivery.id == DeliveryItem.delivery_id)
+            .where(Delivery.po_id == order.id, Delivery.status == "IN_TRANSIT", DeliveryItem.po_item_id.in_(item_ids))
+            .order_by(DeliveryItem.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+    )
+    for existing in existing_items:
+        outstanding[existing.po_item_id] += Decimal(str(existing.planned_quantity or 0))
     for item in data.items:
         po_item = po_items[item.po_item_id]
         remaining = po_item.order_quantity - po_item.received_quantity - outstanding[item.po_item_id]
@@ -337,7 +385,7 @@ def create_shipment_notice(db: Session, user: User, data: SupplierShipmentCreate
         if item.production_date and item.expiry_date and item.production_date > item.expiry_date:
             raise BusinessValidationError("生产日期不能晚于有效期")
     delivery = Delivery(
-        delivery_no=f"TEMP-D-{user.id}-{int(datetime.now().timestamp())}-{uuid4().hex[:6]}",
+        delivery_no=f"TEMP-D-{uuid4().hex[:12]}",
         po_id=order.id,
         supplier_id=order.supplier_id,
         shipment_date=data.shipment_date,
@@ -406,14 +454,14 @@ def list_shipment_notices(db: Session, user: User, *, keyword: str | None, statu
     return SupplierShipmentPage(items=[_shipment_row(delivery, po_no) for delivery, po_no in rows], total=total, page=page, page_size=page_size)
 
 
-def create_quality_document(db: Session, user: User, *, po_id: int, po_item_id: int | None, document_type: str, note: str | None, file_name: str, mime_type: str, content: bytes):
+def create_quality_document(db: Session, user: User, *, po_id: int, po_item_id: int | None, document_type: str, note: str | None, file_name: str, mime_type: str, content: bytes, scan_result=None):
     """校验供应商订单后上传并提交质量文件。"""
     order = _require_order(db, user, po_id)
     if po_item_id is not None and po_item_id not in {item.id for item in order.items}:
         raise ResourceNotFoundError("质量资料关联的订单明细不存在")
     if document_type not in {"COA", "SDS", "INSPECTION_REPORT", "OTHER"}:
         raise BusinessValidationError("质量资料类型不正确")
-    file_value = file_service.upload_file(db, user, file_name=file_name, mime_type=mime_type, content=content, file_category="QUALITY_REPORT", access_level="INTERNAL")
+    file_value = file_service.upload_file(db, user, file_name=file_name, mime_type=mime_type, content=content, file_category="QUALITY_REPORT", access_level="INTERNAL", scan_result=scan_result)
     record = SupplierQualityDocument(
         document_no=f"TEMP-SQD-{uuid4().hex[:12]}", supplier_id=order.supplier_id, po_id=order.id,
         po_item_id=po_item_id, file_id=file_value.id, document_type=document_type, status="SUBMITTED",
@@ -423,6 +471,7 @@ def create_quality_document(db: Session, user: User, *, po_id: int, po_item_id: 
     db.flush()
     record.document_no = f"SQD{date.today():%Y%m%d}{record.id:06d}"
     db.add(SysFileAttachment(file_id=file_value.id, resource_type="SUPPLIER_QUALITY_DOCUMENT", resource_id=record.id, created_by=user.id))
+    db.add(SysFileAttachment(file_id=file_value.id, resource_type="PURCHASE_ORDER", resource_id=order.id, created_by=user.id))
     add_audit_log(db, actor_id=user.id, action_type="SUBMIT_QUALITY_DOC", resource_type="SUPPLIER_QUALITY_DOCUMENT", resource_id=record.id, request_summary=f"供应商提交质量资料 {file_value.file_name}", result_status="SUCCESS")
     db.commit()
     return _quality_document_read(db, record.id)

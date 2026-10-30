@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -76,14 +77,27 @@ def create_delivery(db: Session, user: User, data: DeliveryCreate) -> Delivery:
         raise BusinessValidationError("到货明细不能重复引用采购订单明细")
     if not set(input_ids).issubset(po_items):
         raise BusinessValidationError("到货明细必须引用当前采购订单明细")
+    outstanding = {item_id: Decimal(0) for item_id in input_ids}
+    existing_items = list(
+        db.scalars(
+            select(DeliveryItem)
+            .join(Delivery, Delivery.id == DeliveryItem.delivery_id)
+            .where(Delivery.po_id == order.id, Delivery.status == "IN_TRANSIT", DeliveryItem.po_item_id.in_(input_ids))
+            .order_by(DeliveryItem.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+    )
+    for existing in existing_items:
+        outstanding[existing.po_item_id] += Decimal(str(existing.planned_quantity or 0))
     for item in data.items:
         po_item = po_items[item.po_item_id]
-        remaining = po_item.order_quantity - po_item.received_quantity
+        remaining = po_item.order_quantity - po_item.received_quantity - outstanding[item.po_item_id]
         if item.planned_quantity > remaining:
             raise BusinessValidationError(f"订单明细 {po_item.line_no} 剩余未收数量不足")
         _check_dates(item.production_date, item.expiry_date)
     delivery = Delivery(
-        delivery_no=f"TEMP-D-{user.id}-{int(_now().timestamp())}",
+        delivery_no=f"TEMP-D-{uuid4().hex[:12]}",
         po_id=order.id,
         supplier_id=order.supplier_id,
         shipment_date=data.shipment_date,
@@ -153,6 +167,8 @@ def receive_delivery(db: Session, user: User, delivery_id: int, data: DeliveryRe
     order = _require_order(db, user, delivery.po_id, for_update=True)
     if delivery.status != "IN_TRANSIT":
         raise BusinessValidationError("只有运输中的到货单可以确认收货")
+    if order.status not in {"ORDERED", "PARTIAL"}:
+        raise BusinessValidationError("只有已下单或部分到货的采购订单可以确认收货")
     delivery_items = {item.id: item for item in delivery.items}
     input_ids = [item.delivery_item_id for item in data.items]
     if set(input_ids) != set(delivery_items) or len(input_ids) != len(set(input_ids)):

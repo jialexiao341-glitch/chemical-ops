@@ -116,8 +116,17 @@ def list_replenishments(db: Session, user: User, *, status: str | None, page: in
         conditions.append(ReplenishmentRequest.status == status)
     total = db.scalar(select(func.count(ReplenishmentRequest.id)).where(*conditions)) or 0
     items = list(db.scalars(select(ReplenishmentRequest).options(selectinload(ReplenishmentRequest.items)).where(*conditions).order_by(ReplenishmentRequest.id.desc()).offset((page - 1) * page_size).limit(page_size)).all())
-    for item in items:
-        _enrich_header(db, item)
+    if items:
+        supplier_ids = {item.supplier_id for item in items if item.supplier_id is not None}
+        applicant_ids = {item.applicant_id for item in items if item.applicant_id is not None}
+        suppliers = {s.id: s for s in db.scalars(select(Supplier).where(Supplier.id.in_(supplier_ids))).all()} if supplier_ids else {}
+        applicants = {u.id: u for u in db.scalars(select(User).where(User.id.in_(applicant_ids))).all()} if applicant_ids else {}
+        for item in items:
+            supplier = suppliers.get(item.supplier_id)
+            item.supplier_code = supplier.supplier_code if supplier else None
+            item.supplier_name = supplier.supplier_name if supplier else None
+            applicant = applicants.get(item.applicant_id)
+            item.applicant_name = (applicant.display_name or applicant.username) if applicant else None
     return items, total
 
 

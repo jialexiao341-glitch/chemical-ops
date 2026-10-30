@@ -3,6 +3,7 @@
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -27,7 +28,7 @@ from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.quality_acceptances.scope import acceptance_read_condition
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
-from app.modules.system.file_model import SysFile
+from app.modules.system.file_model import SysFile, SysFileAttachment
 from app.modules.system.model import User
 
 
@@ -111,7 +112,7 @@ def create_rfq(db: Session, user: User, data: RFQCreate, *, commit: bool = True)
     _validate_item_refs(db, data.items, data.source_request_id)
     _validate_suppliers(db, data.supplier_ids)
     rfq = RFQ(
-        rfq_no=f"TEMP-{user.id}-{int(_now().timestamp())}",
+        rfq_no=f"TEMP-RFQ-{uuid4().hex[:12]}",
         source_request_id=data.source_request_id,
         requester_id=user.id,
         quote_deadline=data.quote_deadline,
@@ -246,7 +247,7 @@ def create_quote_for_supplier(
         .limit(1).with_for_update()
     )
     quote = SupplierQuote(
-        quote_no=f"TEMP-Q-{rfq.id}-{supplier_id}-{int(_now().timestamp())}",
+        quote_no=f"TEMP-Q-{uuid4().hex[:12]}",
         rfq_id=rfq.id,
         supplier_id=supplier_id,
         quote_version=(existing_version or 0) + 1,
@@ -262,6 +263,25 @@ def create_quote_for_supplier(
     db.add(quote)
     db.flush()
     quote.quote_no = f"Q{date.today():%Y%m%d}{quote.id:06d}"
+    if data.source_file_id is not None:
+        if (
+            db.scalar(
+                select(SysFileAttachment.id).where(
+                    SysFileAttachment.file_id == data.source_file_id,
+                    SysFileAttachment.resource_type == "RFQ",
+                    SysFileAttachment.resource_id == rfq.id,
+                )
+            )
+            is None
+        ):
+            db.add(
+                SysFileAttachment(
+                    file_id=data.source_file_id,
+                    resource_type="RFQ",
+                    resource_id=rfq.id,
+                    created_by=user.id,
+                )
+            )
     invitation.response_status = "RESPONDED"
     invitation.response_at = _now()
     rfq.status = "RESPONDING"
@@ -276,11 +296,18 @@ def build_comparison(db: Session, user: User, rfq_id: int) -> QuoteComparison:
     """按统一币种、单位和税务口径生成可解释的报价比价快照。"""
 
     rfq = get_rfq(db, user, rfq_id, for_write=True)
-    quotes = [quote for quote in rfq.quotes if quote.status == "SUBMITTED"]
+    latest_by_supplier: dict[int, SupplierQuote] = {}
+    for quote in rfq.quotes:
+        if quote.status != "SUBMITTED":
+            continue
+        current = latest_by_supplier.get(quote.supplier_id)
+        if current is None or (quote.quote_version or 0, quote.id or 0) > (current.quote_version or 0, current.id or 0):
+            latest_by_supplier[quote.supplier_id] = quote
+    quotes = list(latest_by_supplier.values())
     if not quotes:
         raise BusinessValidationError("当前询价单还没有可比较的报价")
     comparison = QuoteComparison(
-        comparison_no=f"TEMP-C-{rfq.id}-{int(_now().timestamp())}",
+        comparison_no=f"TEMP-C-{uuid4().hex[:12]}",
         rfq_id=rfq.id,
         created_by=user.id,
         conclusion="仅在币种、计量单位、税率及含税口径一致的报价组内按单价排序；不做汇率或单位换算。总成本按询价量/同单位 MOQ、商品税与已登记运费拆分；缺项不生成完整总额。MOQ、交期、账期和当前用户可见的历史验收结果作为独立事实展示，不合成评分；最终中选仍需人工确认。",

@@ -1,5 +1,6 @@
 """供应商门户订单 HTTP 接口。"""
 
+import asyncio
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
@@ -142,7 +143,8 @@ def list_quality_documents(keyword: str | None = None, document_status: str | No
 async def submit_quality_document(po_id: int = Form(..., gt=0), document_type: str = Form(...), po_item_id: int | None = Form(default=None, gt=0), note: str | None = Form(default=None, max_length=1000), file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(require_permission("supplier.portal.quality.submit"))):
     settings = file_service.get_settings()
     content = await file.read(settings.document_max_size_mb * 1024 * 1024 + 1)
-    return service.create_quality_document(db, user, po_id=po_id, po_item_id=po_item_id, document_type=document_type, note=note, file_name=file.filename or "", mime_type=file.content_type or "application/octet-stream", content=content)
+    scan_result = await asyncio.to_thread(file_service.scan_content, content)
+    return service.create_quality_document(db, user, po_id=po_id, po_item_id=po_item_id, document_type=document_type, note=note, file_name=file.filename or "", mime_type=file.content_type or "application/octet-stream", content=content, scan_result=scan_result)
 
 
 @collaboration_router.get("/quality-documents/{document_id}/download", summary="下载供应商已提交的质量资料")

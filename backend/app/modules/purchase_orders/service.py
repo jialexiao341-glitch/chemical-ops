@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -124,11 +125,18 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate, *, commit: 
     """根据已确认的中选报价生成采购订单草稿。"""
 
     comparison, quote, source_request, rfq_items, quote_items = _validate_source(db, user, data)
-    existing_order = db.scalar(select(PurchaseOrder.id).where(PurchaseOrder.source_comparison_id == comparison.id).with_for_update())
+    existing_order = db.scalar(
+        select(PurchaseOrder.id)
+        .where(
+            PurchaseOrder.source_comparison_id == comparison.id,
+            PurchaseOrder.status != "CANCELLED",
+        )
+        .with_for_update()
+    )
     if existing_order is not None:
         raise DuplicateResourceError("该比价结果已经生成采购订单，不能重复下单")
     order = PurchaseOrder(
-        po_no=f"TEMP-PO-{user.id}-{int(_now().timestamp())}",
+        po_no=f"TEMP-PO-{uuid4().hex[:12]}",
         supplier_id=quote.supplier_id,
         source_comparison_id=comparison.id,
         source_quote_id=quote.id,
@@ -197,7 +205,11 @@ def list_orders(db: Session, user: User, *, keyword: str | None, status: str | N
 
 def read_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
     """读取订单来源；写操作继续使用 get_order 的采购范围。"""
-    order = db.scalar(select(PurchaseOrder).where(PurchaseOrder.id == order_id, order_read_condition(user, get_user_role_codes(db, user.id))))
+    order = db.scalar(
+        select(PurchaseOrder)
+        .options(*crud.detail_options())
+        .where(PurchaseOrder.id == order_id, order_read_condition(user, get_user_role_codes(db, user.id)))
+    )
     if order is None:
         raise ResourceNotFoundError(f"采购订单 {order_id} 不存在")
     return order
@@ -346,6 +358,7 @@ def cancel_order(db: Session, user: User, order_id: int, data: PurchaseOrderCanc
         raise BusinessValidationError("当前订单状态不允许取消")
     previous = order.status
     order.status = "CANCELLED"
+    order.source_comparison_id = None
     order.cancelled_at = _now()
     order.cancel_reason = data.reason
     _add_event(db, order, user.id, "CANCELLED", previous, "CANCELLED", data.reason)

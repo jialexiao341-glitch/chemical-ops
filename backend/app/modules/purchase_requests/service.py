@@ -1,6 +1,7 @@
 """采购申请的业务校验、状态流转和事务处理。"""
 
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -106,7 +107,7 @@ def create_request(db: Session, user: User, data: PurchaseRequestCreate, *, comm
     _validate_department(db, department_id)
     _validate_items(db, data.items)
     request = PurchaseRequest(
-        request_no="TEMP",
+        request_no=f"TEMP-PR-{uuid4().hex[:12]}",
         applicant_id=user.id,
         department_id=department_id,
         purpose=data.purpose,

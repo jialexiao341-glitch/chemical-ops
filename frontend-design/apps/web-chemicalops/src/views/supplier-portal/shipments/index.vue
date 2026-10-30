@@ -67,6 +67,7 @@ async function onOrderChange(id?: number) {
   lines.value = [];
   if (!id) return;
   const result = await getSupplierOrderApi(id);
+  if (selectedOrder.value !== id) return;
   lines.value = (result.items ?? []).map((item) => ({
     id: item.id,
     name: item.product_name_snapshot,

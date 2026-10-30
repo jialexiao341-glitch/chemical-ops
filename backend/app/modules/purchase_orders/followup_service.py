@@ -128,7 +128,7 @@ def list_followups(db: Session, user, order_id: int, *, supplier=False, page=1, 
         can_reply = 'supplier.portal.delivery.update' in get_user_permission_codes(db,user.id)
     else:
         _authorize(db,user,'procurement.orders.read')
-        order = order_service.get_order(db,user,order_id)
+        order = order_service.read_order(db,user,order_id)
         can_reply = False
     conditions = (DeliveryFollowup.order_id == order.id,DeliveryFollowup.supplier_id == order.supplier_id)
     total = db.scalar(select(func.count(DeliveryFollowup.id)).where(*conditions)) or 0
