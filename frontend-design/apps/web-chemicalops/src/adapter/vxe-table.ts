@@ -279,13 +279,11 @@ setupVbenVxeTable({
           return h(
             Popconfirm,
             {
-              /**
-               * 固定列中的 Popconfirm 容器选择较麻烦：以 body 作为容器时
-               * 弹窗无法跟随表格滚动。折中方案是弹窗打开时禁止表格滚动。
-               */
+              // 菜单中的确认框放在菜单弹层内，避免被菜单自身的层级遮挡。
+              // 行内按钮仍挂载到 body，并保留表格交互限制。
               getPopupContainer(el) {
                 viewportWrapper = el.closest('.vxe-table--viewport-wrapper');
-                return document.body;
+                return el.closest<HTMLElement>('.ant-dropdown') ?? document.body;
               },
               placement: 'topLeft',
               title: $t('ui.actionTitle.delete', [attrs?.nameTitle || '']),
