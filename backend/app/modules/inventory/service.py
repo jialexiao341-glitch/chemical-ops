@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
@@ -9,7 +10,11 @@ from sqlalchemy.orm import Session
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery
 from app.modules.inventory import crud
-from app.modules.inventory.quality_hold import lock_available_batches
+from app.modules.inventory.quality_hold import (
+    batch_quality_hold_exists_clause,
+    is_batch_quality_held,
+    lock_available_batches,
+)
 from app.modules.inventory.model import (
     InventoryBalance,
     InventoryBalanceStatusLog,
@@ -372,8 +377,8 @@ def _validate_issue_items(db: Session, items: list) -> None:
         if location is None or location.status != "ACTIVE" or location.warehouse_id != warehouse.id:
             raise BusinessValidationError(f"库位 {item.location_id} 不存在、已停用或不属于指定仓库")
         batch = db.get(InventoryBatch, item.batch_id)
-        if batch is None or batch.status != "ACTIVE":
-            raise BusinessValidationError(f"库存批次 {item.batch_id} 不存在或不可用")
+        if batch is None or is_batch_quality_held(db, batch):
+            raise BusinessValidationError(f"库存批次 {item.batch_id} 不存在或处于质量隔离不可用状态")
         if batch.product_id != item.product_id:
             raise BusinessValidationError(f"库存批次 {item.batch_id} 不属于产品 {item.product_id}")
         unit = db.get(Unit, item.unit_id)
@@ -405,7 +410,7 @@ def create_issue_request(db: Session, user: User, data: InventoryIssueRequestCre
     _validate_issue_warehouse_scope(db, user, data.items)
     _validate_issue_items(db, data.items)
     issue = InventoryIssueRequest(
-        issue_no="TEMP",
+        issue_no=f"TEMP-IR-{uuid4().hex[:12]}",
         applicant_id=user.id,
         department_id=department_id,
         purpose=data.purpose,
@@ -467,6 +472,7 @@ def list_issue_request_options(db: Session, user: User, *, keyword: str | None =
             Warehouse.status == "ACTIVE",
             WarehouseLocation.status == "ACTIVE",
             InventoryBatch.status == "ACTIVE",
+            ~batch_quality_hold_exists_clause(),
               ((Product.product_name.like(f"%{keyword.strip()}%")) |
                (InventoryBatch.batch_no.like(f"%{keyword.strip()}%"))) if keyword else True,
         )
@@ -687,8 +693,8 @@ def _validate_transfer_items(db: Session, items: list) -> None:
         if item.source_warehouse_id == item.target_warehouse_id and item.source_location_id == item.target_location_id:
             raise BusinessValidationError("源库位和目标库位不能相同")
         batch = db.get(InventoryBatch, item.batch_id)
-        if batch is None or batch.status != "ACTIVE":
-            raise BusinessValidationError(f"库存批次 {item.batch_id} 不存在或不可用")
+        if batch is None or is_batch_quality_held(db, batch):
+            raise BusinessValidationError(f"库存批次 {item.batch_id} 不存在或处于质量隔离不可用状态")
         if batch.product_id != item.product_id:
             raise BusinessValidationError(f"库存批次 {item.batch_id} 不属于产品 {item.product_id}")
         unit = db.get(Unit, item.unit_id)
@@ -714,7 +720,7 @@ def create_transfer_request(db: Session, user: User, data: InventoryTransferRequ
 
     _validate_transfer_warehouse_scope(db, user, data.items)
     _validate_transfer_items(db, data.items)
-    transfer = InventoryTransferRequest(transfer_no="TEMP", applicant_id=user.id, purpose=data.purpose, status="DRAFT")
+    transfer = InventoryTransferRequest(transfer_no=f"TEMP-TR-{uuid4().hex[:12]}", applicant_id=user.id, purpose=data.purpose, status="DRAFT")
     db.add(transfer)
     db.flush()
     transfer.transfer_no = f"TR{date.today():%Y%m%d}{transfer.id:06d}"
@@ -998,8 +1004,8 @@ def _validate_stocktake_items(db: Session, warehouse_id: int, location_id: int |
         if location_id is not None and item.location_id != location_id:
             raise BusinessValidationError(f"盘点明细库位 {item.location_id} 与盘点单指定库位不一致")
         batch = db.get(InventoryBatch, item.batch_id)
-        if batch is None or batch.status != "ACTIVE":
-            raise BusinessValidationError(f"库存批次 {item.batch_id} 不存在或不可用")
+        if batch is None or is_batch_quality_held(db, batch):
+            raise BusinessValidationError(f"库存批次 {item.batch_id} 不存在或处于质量隔离不可用状态")
         if batch.product_id != item.product_id:
             raise BusinessValidationError(f"库存批次 {item.batch_id} 不属于产品 {item.product_id}")
         unit = db.get(Unit, item.unit_id)
@@ -1047,7 +1053,7 @@ def create_stocktake_request(db: Session, user: User, data: InventoryStocktakeRe
         _require_warehouse_scope(db, user, data.warehouse_id)
     _validate_stocktake_items(db, data.warehouse_id, data.location_id, data.items)
     stocktake = InventoryStocktakeRequest(
-        stocktake_no="TEMP", applicant_id=user.id, warehouse_id=data.warehouse_id, location_id=data.location_id, purpose=data.purpose, status="DRAFT"
+        stocktake_no=f"TEMP-ST-{uuid4().hex[:12]}", applicant_id=user.id, warehouse_id=data.warehouse_id, location_id=data.location_id, purpose=data.purpose, status="DRAFT"
     )
     db.add(stocktake)
     db.flush()

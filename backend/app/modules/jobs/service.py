@@ -16,6 +16,7 @@ from app.modules.jobs.model import SchedulerJobRun
 
 from app.modules.deliveries.model import Delivery
 from app.modules.inventory.model import InventoryBalance, InventoryBatch
+from app.modules.inventory.quality_hold import batch_quality_hold_exists_clause
 from app.modules.notifications.service import notify_users
 from app.modules.operation_exceptions.model import OperationException
 from app.modules.operation_exceptions.service import close_recovered_low_stock_alert, create_automatic_exception
@@ -237,7 +238,12 @@ def scan_low_inventory(db: Session, actor: User) -> dict[str, int]:
         func.sum(
             case(
                 (
-                    and_(InventoryBalance.unit_id == Product.unit_id, InventoryBalance.status == "AVAILABLE"),
+                    and_(
+                        InventoryBalance.unit_id == Product.unit_id,
+                        InventoryBalance.status == "AVAILABLE",
+                        InventoryBatch.status == "ACTIVE",
+                        ~batch_quality_hold_exists_clause(),
+                    ),
                     case(
                         (
                             InventoryBalance.quantity > InventoryBalance.locked_quantity,
@@ -260,6 +266,7 @@ def scan_low_inventory(db: Session, actor: User) -> dict[str, int]:
             select(Product, Unit.unit_name, available_expression, mismatched_unit_count)
             .join(Unit, Unit.id == Product.unit_id)
             .outerjoin(InventoryBalance, InventoryBalance.product_id == Product.id)
+            .outerjoin(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id)
             .where(
                 Product.status == "ACTIVE",
                 Product.safety_stock_quantity.is_not(None),

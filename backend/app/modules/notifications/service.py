@@ -63,6 +63,13 @@ def notify_users(
             UserRole.user_id.in_(restricted), Role.role_code == "SYS_ADMIN", Role.status == "ACTIVE"
         )).all()) if restricted else set()
         active_ids -= restricted - admin_ids
+    if related_type == "OPERATION_EXCEPTION" and related_id is not None and active_ids:
+        from app.modules.operation_exceptions.model import OperationException
+        from app.modules.operation_exceptions.service import _has_exception_scope
+        exception = db.get(OperationException, related_id)
+        if exception is not None:
+            candidate_users = list(db.scalars(select(User).where(User.id.in_(active_ids), User.status == "ACTIVE")).all())
+            active_ids = {candidate.id for candidate in candidate_users if _has_exception_scope(db, candidate, exception)}
     notifications = [
         Notification(
             recipient_id=user_id,

@@ -1,6 +1,7 @@
 """异常登记、指派、处理和关闭的业务逻辑。"""
 
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import and_, exists, false, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery, DeliveryItem
+from app.modules.files import service as file_service
 from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.insights.model import ExceptionActionDecision
 from app.modules.operation_exceptions import crud
@@ -26,7 +28,7 @@ from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.quality_acceptances.scope import acceptance_read_condition
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
-from app.modules.system.file_model import SysFile
+from app.modules.system.file_model import SysFile, SysFileAttachment
 from app.modules.system.model import Department, User
 from app.modules.rfqs.model import RFQ, SupplierQuote
 from app.modules.finance.model import FinanceInvoice, FinanceInvoiceMatch
@@ -267,7 +269,7 @@ def create_exception(db: Session, user: User, data: OperationExceptionCreate) ->
     if duplicate is not None:
         raise DuplicateResourceError("同一来源的未关闭异常已存在")
     exception = OperationException(
-        exception_no=f"TEMP-EX-{user.id}-{int(_now().timestamp())}",
+        exception_no=f"TEMP-EX-{uuid4().hex[:12]}",
         **data.model_dump(),
         status="OPEN",
     )
@@ -313,7 +315,7 @@ def create_automatic_exception(
     if existing is not None:
         return None
     exception = OperationException(
-        exception_no=f"TMP{source_type[:4]}{source_id}{int(_now().timestamp() * 1000)}",
+        exception_no=f"TMP-{uuid4().hex[:12]}",
         exception_type=exception_type,
         source_type=source_type,
         source_id=source_id,
@@ -457,17 +459,29 @@ def close_recovered_low_stock_alert(db: Session, user: User, exception_id: int) 
     has_tasks = db.scalar(select(OperationTask.id).where(OperationTask.exception_id == exception.id).limit(1))
     if has_tasks is not None:
         return False
-    update_exception(db, user, exception.id, OperationExceptionUpdate(status="PROCESSING"))
-    update_exception(db, user, exception.id, OperationExceptionUpdate(status="RESOLVED"))
-    update_exception(
-        db,
-        user,
-        exception.id,
-        OperationExceptionUpdate(
-            status="CLOSED",
-            closing_note="系统自动关闭：可用库存已恢复到安全库存阈值。",
-        ),
+    decision = db.scalar(
+        select(ExceptionActionDecision).where(
+            ExceptionActionDecision.exception_id == exception.id,
+            ExceptionActionDecision.decision == "ADOPTED",
+        )
     )
+    if decision is not None:
+        return False
+    closing_note = "系统自动关闭：可用库存已恢复到安全库存阈值。"
+    exception.status = "CLOSED"
+    exception.closed_by = user.id
+    exception.closed_at = _now()
+    exception.closing_note = closing_note
+    add_audit_log(
+        db,
+        actor_id=user.id,
+        action_type="UPDATE",
+        resource_type="OPERATION_EXCEPTION",
+        resource_id=exception.id,
+        request_summary="更新异常状态 CLOSED",
+        result_status="SUCCESS",
+    )
+    db.flush()
     return True
 
 
@@ -664,8 +678,29 @@ def create_comment(db: Session, user: User, task_id: int, data: OperationTaskCom
     task = get_task(db, user, task_id)
     if task.status == "CANCELLED":
         raise BusinessValidationError("已取消的任务不能追加处理记录")
-    if data.attachment_file_id is not None and db.get(SysFile, data.attachment_file_id) is None:
-        raise BusinessValidationError("附件文件不存在")
+    if data.attachment_file_id is not None:
+        attachment_file = db.get(SysFile, data.attachment_file_id)
+        if attachment_file is None:
+            raise BusinessValidationError("附件文件不存在")
+        file_service._check_file_access(db, user, attachment_file)
+        if (
+            db.scalar(
+                select(SysFileAttachment.id).where(
+                    SysFileAttachment.file_id == attachment_file.id,
+                    SysFileAttachment.resource_type == "OPERATION_EXCEPTION",
+                    SysFileAttachment.resource_id == task.exception_id,
+                )
+            )
+            is None
+        ):
+            db.add(
+                SysFileAttachment(
+                    file_id=attachment_file.id,
+                    resource_type="OPERATION_EXCEPTION",
+                    resource_id=task.exception_id,
+                    created_by=user.id,
+                )
+            )
     comment = OperationTaskComment(task_id=task.id, commenter_id=user.id, **data.model_dump())
     db.add(comment)
     db.flush()

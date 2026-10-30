@@ -118,6 +118,8 @@ def run_documents(execution_id, token):
         else:
             parsed = list(db.scalars(select(AiDocument).where(AiDocument.cas_no == cas,
                                                            AiDocument.doc_type.in_(doc_types))).all())
+            if not parsed:
+                raise PermanentTaskError("DOCUMENT_PARSE_REJECTED")
             run.result_json = {**run.result_json, "documents": [
                 {"doc_type": doc.doc_type, "parse_status": doc.parse_status, "section_count": doc.section_count,
                  "char_count": doc.char_count, "reject_reason": doc.reject_reason} for doc in parsed]}

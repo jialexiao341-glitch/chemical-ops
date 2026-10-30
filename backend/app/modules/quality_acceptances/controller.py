@@ -1,8 +1,10 @@
 """质量验收的 HTTP 接口。"""
 
+import asyncio
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from fastapi.responses import Response
-from urllib.parse import quote
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
@@ -126,7 +128,8 @@ async def upload_report_file(
     file_service._check_resource_write_access(db, user, "QUALITY_ACCEPTANCE", acceptance)
     settings = file_service.get_settings()
     content = await file.read(settings.document_max_size_mb * 1024 * 1024 + 1)
-    value = file_service.upload_file(db, user, file_name=file.filename or "", mime_type=file.content_type or "application/octet-stream", content=content, file_category="QUALITY_REPORT", access_level="INTERNAL")
+    scan_result = await asyncio.to_thread(file_service.scan_content, content)
+    value = file_service.upload_file(db, user, file_name=file.filename or "", mime_type=file.content_type or "application/octet-stream", content=content, file_category="QUALITY_REPORT", access_level="INTERNAL", scan_result=scan_result)
     file_service.attach_file(db, user, value.id, FileAttachmentCreate(resource_type="QUALITY_ACCEPTANCE", resource_id=acceptance_id))
     return QualityReportFile(id=value.id, file_name=value.file_name, uploaded_at=value.uploaded_at)
 

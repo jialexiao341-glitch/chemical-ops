@@ -1,7 +1,9 @@
 """文件上传、下载和附件关联 HTTP 接口。"""
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+import asyncio
 from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 
 from fastapi.responses import Response, StreamingResponse
 from starlette.background import BackgroundTask
@@ -22,7 +24,8 @@ async def upload_file(file: UploadFile = File(...), file_category: str = Form(de
     """校验文件类型和大小后写入开发环境本地对象存储。"""
     settings = service.get_settings()
     content = await file.read(settings.document_max_size_mb * 1024 * 1024 + 1)
-    return service.upload_file(db, user, file_name=file.filename or "", mime_type=file.content_type or "application/octet-stream", content=content, file_category=file_category, access_level=access_level)
+    scan_result = await asyncio.to_thread(service.scan_content, content)
+    return service.upload_file(db, user, file_name=file.filename or "", mime_type=file.content_type or "application/octet-stream", content=content, file_category=file_category, access_level=access_level, scan_result=scan_result)
 
 
 @router.get("/{file_id}", response_model=FileRead, summary="查询文件元数据")

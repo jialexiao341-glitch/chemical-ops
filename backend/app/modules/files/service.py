@@ -20,7 +20,9 @@ from app.modules.operation_exceptions.model import OperationException
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.replenishments.model import ReplenishmentRequest
+from app.modules.rfqs.model import RFQ
 from app.modules.supplier_portal.model import SupplierPortalAccount, SupplierQualityDocument
+from app.modules.suppliers.model import Supplier
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.file_model import SysFile, SysFileAttachment
@@ -36,6 +38,7 @@ RESOURCE_MODELS = {
     "INVENTORY_RETURN": InventoryReturnRequest,
     "REPLENISHMENT": ReplenishmentRequest,
     "SUPPLIER_QUALITY_DOCUMENT": SupplierQualityDocument,
+    "RFQ": RFQ,
 }
 
 RESOURCE_READ_PERMISSIONS = {
@@ -47,6 +50,7 @@ RESOURCE_READ_PERMISSIONS = {
     "INVENTORY_RETURN": "warehouse.inventory.return.read",
     "REPLENISHMENT": "procurement.replenishment.read",
     "SUPPLIER_QUALITY_DOCUMENT": "supplier.portal.quality.read",
+    "RFQ": "procurement.rfqs.read",
 }
 
 RESOURCE_ATTACHMENT_PERMISSIONS = {
@@ -58,6 +62,7 @@ RESOURCE_ATTACHMENT_PERMISSIONS = {
     "INVENTORY_RETURN": "warehouse.inventory.return.write",
     "REPLENISHMENT": "procurement.replenishment.write",
     "SUPPLIER_QUALITY_DOCUMENT": "supplier.portal.quality.submit",
+    "RFQ": "procurement.rfqs.write",
 }
 
 # 附件是业务记录的一部分；仅允许仍可编辑或办理的阶段追加。
@@ -69,6 +74,7 @@ ATTACHMENT_ALLOWED_STATUSES = {
     "FINANCE_INVOICE": frozenset({"DRAFT", "REJECTED"}),
     "OPERATION_EXCEPTION": frozenset({"OPEN", "PROCESSING", "RESOLVED"}),
     "SUPPLIER_QUALITY_DOCUMENT": frozenset({"SUBMITTED"}),
+    "RFQ": frozenset({"DRAFT", "SENT", "RESPONDING"}),
 }
 
 _GENERIC_MIME_TYPES = {"", "application/octet-stream", "binary/octet-stream"}
@@ -207,8 +213,19 @@ def _can_read_resource(db: Session, user: User, resource_type: str) -> bool:
 
     if _is_system_admin(db, user):
         return True
+    permissions = set(get_user_permission_codes(db, user.id))
+    if resource_type == "SUPPLIER_QUALITY_DOCUMENT":
+        return bool(
+            {
+                "supplier.portal.quality.read",
+                "procurement.orders.read",
+                "warehouse.deliveries.read",
+                "quality.acceptances.read",
+            }
+            & permissions
+        )
     required_permission = RESOURCE_READ_PERMISSIONS.get(resource_type)
-    return required_permission is not None and required_permission in get_user_permission_codes(db, user.id)
+    return required_permission is not None and required_permission in permissions
 
 
 def _can_access_resource_instance(db: Session, user: User, resource_type: str, resource) -> bool:
@@ -223,6 +240,7 @@ def _can_access_resource_instance(db: Session, user: User, resource_type: str, r
     from app.modules.inventory_returns.service import get_return
     from app.modules.replenishments.service import get_replenishment
     from app.modules.finance.service import get_invoice
+    from app.modules.rfqs.service import get_rfq
 
     getter = {
         "PURCHASE_ORDER": read_order,
@@ -232,6 +250,7 @@ def _can_access_resource_instance(db: Session, user: User, resource_type: str, r
         "INVENTORY_RETURN": get_return,
         "REPLENISHMENT": get_replenishment,
         "FINANCE_INVOICE": get_invoice,
+        "RFQ": get_rfq,
     }.get(resource_type)
     if getter is not None:
         try:
@@ -240,11 +259,24 @@ def _can_access_resource_instance(db: Session, user: User, resource_type: str, r
             return False
         return True
     if resource_type == "SUPPLIER_QUALITY_DOCUMENT":
-        account = db.scalar(select(SupplierPortalAccount).where(
-            SupplierPortalAccount.user_id == user.id,
-            SupplierPortalAccount.status == "ACTIVE",
-        ))
-        return account is not None and account.supplier_id == resource.supplier_id
+        account = db.scalar(
+            select(SupplierPortalAccount)
+            .join(Supplier, Supplier.id == SupplierPortalAccount.supplier_id)
+            .where(
+                SupplierPortalAccount.user_id == user.id,
+                SupplierPortalAccount.status == "ACTIVE",
+                Supplier.status == "ACTIVE",
+            )
+        )
+        if account is not None and account.supplier_id == resource.supplier_id:
+            return True
+        if {"procurement.orders.read", "warehouse.deliveries.read", "quality.acceptances.read"} & set(get_user_permission_codes(db, user.id)):
+            try:
+                read_order(db, user, resource.po_id)
+            except ResourceNotFoundError:
+                return False
+            return True
+        return False
     return False
 
 
@@ -331,7 +363,7 @@ def recover_stale_parses(db: Session, *, stale_after_seconds: int) -> int:
     return len(values)
 
 
-def upload_file(db: Session, user: User, *, file_name: str, mime_type: str, content: bytes, file_category: str, access_level: str) -> SysFile:
+def upload_file(db: Session, user: User, *, file_name: str, mime_type: str, content: bytes, file_category: str, access_level: str, scan_result=None) -> SysFile:
     """校验文件并写入本地对象存储，再保存文件元数据。"""
     safe_name = Path(file_name or "").name
     if not safe_name or safe_name in {".", ".."}:
@@ -350,7 +382,8 @@ def upload_file(db: Session, user: User, *, file_name: str, mime_type: str, cont
         raise BusinessValidationError(f"文件大小不能超过 {get_settings().document_max_size_mb} MB")
     if access_level not in {"PRIVATE", "INTERNAL", "PUBLIC"}:
         raise BusinessValidationError("文件访问级别不正确")
-    scan_result = scan_content(content)
+    if scan_result is None:
+        scan_result = scan_content(content)
     if scan_result.status == "INFECTED":
         raise BusinessValidationError("文件未通过安全扫描，已拒绝上传")
     if scan_result.status not in {"SKIPPED", "CLEAN"}:

@@ -1,10 +1,46 @@
 """批次质量隔离及库存履约共用的锁顺序。"""
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError
 from app.modules.inventory.model import InventoryBatch
+
+
+def batch_quality_hold_exists_clause():
+    """Return an EXISTS clause matching batches whose source delivery is under quality hold."""
+
+    from app.modules.quality_acceptances.model import QualityAcceptance
+
+    return exists(
+        select(QualityAcceptance.id).where(
+            InventoryBatch.source_delivery_id.is_not(None),
+            QualityAcceptance.delivery_id == InventoryBatch.source_delivery_id,
+            QualityAcceptance.result.in_(("REINSPECTION", "FAILED", "PARTIAL")),
+        )
+    )
+
+
+def is_batch_quality_held(db: Session, batch: InventoryBatch) -> bool:
+    """Check whether a single batch is under quality hold."""
+
+    if batch.status != "ACTIVE":
+        return True
+    if batch.source_delivery_id is None:
+        return False
+    from app.modules.quality_acceptances.model import QualityAcceptance
+
+    return (
+        db.scalar(
+            select(QualityAcceptance.id)
+            .where(
+                QualityAcceptance.delivery_id == batch.source_delivery_id,
+                QualityAcceptance.result.in_(("REINSPECTION", "FAILED", "PARTIAL")),
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def lock_available_batches(db: Session, batch_ids) -> None:

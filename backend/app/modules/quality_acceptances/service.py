@@ -1,12 +1,14 @@
 """质量验收创建、检测结果录入和到货状态更新的业务逻辑。"""
 
 from datetime import date, datetime
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.deliveries.model import Delivery, DeliveryItem
+from app.modules.files import service as file_service
 from app.modules.quality_acceptances import crud
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.quality_acceptances.scope import acceptance_read_condition
@@ -16,6 +18,7 @@ from app.modules.operation_exceptions.service import create_automatic_exception
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.system.audit import add_audit_log
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
+from app.modules.system.file_model import SysFile, SysFileAttachment
 from app.modules.system.model import User
 
 
@@ -59,7 +62,7 @@ def create_acceptance(db: Session, user: User, data: QualityAcceptanceCreate) ->
     if crud.get_by_delivery(db, delivery.id) is not None:
         raise BusinessValidationError("该到货单已经存在质量验收记录")
     acceptance = QualityAcceptance(
-        acceptance_no=f"TEMP-QA-{user.id}-{int(_now().timestamp())}",
+        acceptance_no=f"TEMP-QA-{uuid4().hex[:12]}",
         delivery_id=delivery.id,
         inspector_id=inspector.id,
         result="PENDING",
@@ -152,6 +155,29 @@ def submit_result(db: Session, user: User, acceptance_id: int, data: QualityAcce
                 batch.status = "QUALITY_HOLD"
             elif data.result == "PASSED" and batch.status == "QUALITY_HOLD":
                 batch.status = "ACTIVE"
+    if data.report_file_id is not None:
+        report_file = db.get(SysFile, data.report_file_id)
+        if report_file is None:
+            raise BusinessValidationError("验收报告文件不存在")
+        file_service._check_file_access(db, user, report_file)
+        if (
+            db.scalar(
+                select(SysFileAttachment.id).where(
+                    SysFileAttachment.file_id == report_file.id,
+                    SysFileAttachment.resource_type == "QUALITY_ACCEPTANCE",
+                    SysFileAttachment.resource_id == acceptance.id,
+                )
+            )
+            is None
+        ):
+            db.add(
+                SysFileAttachment(
+                    file_id=report_file.id,
+                    resource_type="QUALITY_ACCEPTANCE",
+                    resource_id=acceptance.id,
+                    created_by=user.id,
+                )
+            )
     acceptance.result = data.result
     acceptance.test_result = test_result
     acceptance.certificate_complete = 1 if data.certificate_complete else 0
