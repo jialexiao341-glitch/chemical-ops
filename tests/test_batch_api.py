@@ -8,6 +8,12 @@ from tests.conftest import login
 from app.modules.batch.controller import EXPORT_COLUMNS, RESOURCES
 
 
+def sample_cas() -> str:
+    digits = str(100000000 + int(uuid4().hex[:8], 16) % 800000000)
+    check = sum(int(d) * i for i, d in enumerate(reversed(digits), 1)) % 10
+    return f'{digits[:-2]}-{digits[-2:]}-{check}'
+
+
 def test_batch_export_columns_are_explicit_and_never_include_auth_secrets() -> None:
     assert set(EXPORT_COLUMNS) == set(RESOURCES)
     forbidden = {"password_hash", "token_version", "avatar", "avatar_base64"}
@@ -30,7 +36,7 @@ def test_chemical_batch_disable_and_export(client: TestClient, demo_password: st
         response = client.post(
             "/api/v1/chemicals",
             headers=headers,
-            json={"chemical_name": f"批量测试-{suffix}-{number}"},
+            json={"chemical_name": f"批量测试-{suffix}-{number}", "cas_no": sample_cas()},
         )
         assert response.status_code == 201, response.text
         ids.append(response.json()["id"])
@@ -57,7 +63,7 @@ def test_batch_import_is_atomic_on_invalid_row(client: TestClient, demo_password
     headers = login(client, "system_admin", demo_password)
     suffix = uuid4().hex[:12]
     name = f"导入测试-{suffix}"
-    csv_content = f'chemical_name\n{name}\n""\n'.encode("utf-8")
+    csv_content = f'chemical_name,cas_no\n{name},{sample_cas()}\n"",{sample_cas()}\n'.encode("utf-8")
 
     response = client.post(
         "/api/v1/batch/master.chemicals/import",
@@ -109,10 +115,10 @@ def test_batch_import_uses_single_create_validation_and_rolls_back(client: TestC
     headers = login(client, 'system_admin', demo_password)
     suffix = uuid4().hex[:10]
     name = f'批量原子校验-{suffix}'
-    cas_no = f'{int(suffix[:6], 16)}-11-1'
+    cas_no = sample_cas()
     created = client.post('/api/v1/chemicals', headers=headers, json={'chemical_name': f'已有-{suffix}', 'cas_no': cas_no})
     assert created.status_code == 201, created.text
-    content = f'chemical_name,cas_no\n{name},\n重复-{suffix},{cas_no}\n'.encode('utf-8')
+    content = f'chemical_name,cas_no\n{name},{sample_cas()}\n重复-{suffix},{cas_no}\n'.encode('utf-8')
     response = client.post('/api/v1/batch/master.chemicals/import', headers=headers, files={'file': ('data.csv', content, 'text/csv')})
     assert response.status_code == 409, response.text
     listing = client.get('/api/v1/chemicals', headers=headers, params={'keyword': name})
@@ -123,7 +129,7 @@ def test_batch_import_duplicate_within_file_rolls_back(client: TestClient, demo_
     headers = login(client, 'system_admin', demo_password)
     suffix = uuid4().hex[:10]
     name = f'批内重复-{suffix}'
-    cas_no = f'{int(suffix[:6], 16)}-12-2'
+    cas_no = sample_cas()
     content = f'chemical_name,cas_no\n{name},{cas_no}\n另一个-{suffix},{cas_no}\n'.encode('utf-8')
     response = client.post('/api/v1/batch/master.chemicals/import', headers=headers, files={'file': ('data.csv', content, 'text/csv')})
     assert response.status_code == 409, response.text
@@ -138,7 +144,7 @@ def test_batch_import_records_audit(client: TestClient, db_session, demo_passwor
     suffix = uuid4().hex[:10]
     name = f'批量审计-{suffix}'
     headers = login(client, 'system_admin', demo_password)
-    content = f'chemical_name\n{name}\n'.encode('utf-8')
+    content = f'chemical_name,cas_no\n{name},{sample_cas()}\n'.encode('utf-8')
     response = client.post('/api/v1/batch/master.chemicals/import', headers=headers, files={'file': ('data.csv', content, 'text/csv')})
     assert response.status_code == 200, response.text
     chemical = db_session.scalar(select(Chemical).where(Chemical.chemical_name == name))

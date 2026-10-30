@@ -2,7 +2,9 @@
 
 from sqlalchemy.orm import Session
 
-from app.core.errors import DuplicateResourceError, ResourceNotFoundError
+from pydantic import ValidationError
+
+from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.chemicals import crud
 from app.modules.chemicals.model import Chemical
 from app.modules.chemicals.schema import ChemicalCreate, ChemicalUpdate
@@ -48,6 +50,11 @@ def update_chemical(db: Session, chemical_id: int, data: ChemicalUpdate) -> Chem
     """校验更新后的 CAS 号并执行部分更新。"""
 
     chemical = get_chemical(db, chemical_id)
+    if 'cas_no' not in data.model_fields_set:
+        try:
+            ChemicalUpdate.model_validate({'cas_no': chemical.cas_no})
+        except ValidationError:
+            raise BusinessValidationError('请先补充有效的 CAS 号') from None
     if "cas_no" in data.model_fields_set and data.cas_no:
         duplicate = crud.get_by_cas_no(db, data.cas_no)
         if duplicate and duplicate.id != chemical_id:
