@@ -899,8 +899,30 @@ class ExceptionTaskCreateHandler:
             raise BusinessValidationError("异常状态、负责人或内容已变化，请重新核对")
 
     def execute(self, db, user, proposal, *, commit=False):
+        from app.modules.ai.model import AIOperationSuggestion
+
         data = OperationTaskCreate.model_validate(self._task_values(proposal.payload))
         task = exception_service.create_task(db, user, int(proposal.resource_id), data, commit=commit)
+        open_suggestions = list(
+            db.scalars(
+                select(AIOperationSuggestion)
+                .where(
+                    AIOperationSuggestion.exception_id == int(proposal.resource_id),
+                    AIOperationSuggestion.status == "OPEN",
+                )
+                .with_for_update()
+            ).all()
+        )
+        now = datetime.now()
+        for suggestion in open_suggestions:
+            suggestion.task_id = task.id
+            suggestion.status = "HANDED_OFF"
+            suggestion.handled_by = user.id
+            suggestion.handled_at = now
+        if open_suggestions:
+            db.flush()
+            if commit:
+                db.commit()
         return OperationTaskRead.model_validate(task).model_dump(mode="json")
 
 

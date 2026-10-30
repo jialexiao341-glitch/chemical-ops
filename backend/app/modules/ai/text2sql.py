@@ -38,6 +38,7 @@ from app.modules.ai.schema import (
 from app.modules.deliveries.model import Delivery, DeliveryItem
 from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
 from app.modules.inventory.model import InventoryBalance, InventoryBalanceStatusLog, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
+from app.modules.inventory.quality_hold import batch_quality_hold_exists_clause
 from app.modules.chemicals.model import Chemical
 from app.modules.operation_exceptions.model import OperationException
 from app.modules.products.model import Product
@@ -177,7 +178,12 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
         due_date = func.coalesce(PurchaseOrderItem.planned_arrival_date, PurchaseOrder.expected_arrival_date)
         stock_available = case(
             (
-                and_(InventoryBalance.unit_id == Product.unit_id, InventoryBalance.status == "AVAILABLE"),
+                and_(
+                    InventoryBalance.unit_id == Product.unit_id,
+                    InventoryBalance.status == "AVAILABLE",
+                    InventoryBatch.status == "ACTIVE",
+                    ~batch_quality_hold_exists_clause(),
+                ),
                 case(
                     (InventoryBalance.quantity > InventoryBalance.locked_quantity,
                      InventoryBalance.quantity - InventoryBalance.locked_quantity),
@@ -200,6 +206,7 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             .select_from(InventoryBalance)
             .join(Product, Product.id == InventoryBalance.product_id)
             .join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id)
+            .outerjoin(InventoryBatch, InventoryBatch.id == InventoryBalance.batch_id)
             .where(Warehouse.status == "ACTIVE")
         )
         if warehouse_ids is not None:
@@ -312,7 +319,14 @@ def build_statement(plan: QueryPlan, db: Session | None = None, user: User | Non
             [],
         )
         available_quantity = case(
-            (InventoryBalance.status == "AVAILABLE", InventoryBalance.quantity - InventoryBalance.locked_quantity),
+            (
+                and_(
+                    InventoryBalance.status == "AVAILABLE",
+                    InventoryBatch.status == "ACTIVE",
+                    ~batch_quality_hold_exists_clause(),
+                ),
+                InventoryBalance.quantity - InventoryBalance.locked_quantity,
+            ),
             else_=0,
         )
         statement = (

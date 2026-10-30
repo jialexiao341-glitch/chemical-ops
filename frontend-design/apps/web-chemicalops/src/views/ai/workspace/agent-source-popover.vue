@@ -9,14 +9,42 @@ import type { AnswerSource } from './answer-sources';
 const props = defineProps<{ result?: AgentApi.Result; entries?: AnswerSource[]; sourceLabel?: string }>();
 const emit = defineEmits<{ openRecord: [record: NonNullable<AnswerSource['record']>]; openDataset: [dataset: string] }>();
 const { hasAccessByCodes } = useAccess();
-const canOpenSource = computed(() => !props.result || hasAccessByCodes([props.result.tool === 'inventory.query_available' ? 'warehouse.inventory.read' : props.result.tool === 'catalog.search_products' ? 'master.products.read' : 'procurement.rfqs.read']));
+const TOOL_PERMISSION_MAP: Record<string, string> = {
+  'catalog.search_products': 'master.products.read',
+  'inventory.query_available': 'warehouse.inventory.read',
+  'inventory.replenishment_plan': 'warehouse.inventory.read',
+  'supplier_quotes.find_rfq_items': 'procurement.rfqs.read',
+  'supplier_quotes.compare': 'procurement.rfqs.read',
+  'purchase_requests.get_by_no': 'procurement.requests.read',
+  'purchase_orders.trace_by_no': 'procurement.orders.read',
+  'quality_acceptances.get_by_no': 'quality.acceptances.read',
+  'deliveries.get_by_no': 'warehouse.deliveries.read',
+  'finance_reconciliations.get_by_no': 'finance.reconciliations.read',
+  'suppliers.get_by_code': 'master.suppliers.read',
+  'suppliers.profile': 'master.suppliers.read',
+};
+const TOOL_SOURCE_PILL_LABELS: Record<string, string> = {
+  'catalog.search_products': '产品资料',
+  'inventory.query_available': '库存记录',
+  'inventory.replenishment_plan': '补货评估',
+  'supplier_quotes.find_rfq_items': '询价记录',
+  'supplier_quotes.compare': '供应商报价',
+  'purchase_requests.get_by_no': '采购申请',
+  'purchase_orders.trace_by_no': '采购订单',
+  'quality_acceptances.get_by_no': '质量验收',
+  'deliveries.get_by_no': '到货记录',
+  'finance_reconciliations.get_by_no': '财务对账',
+  'suppliers.get_by_code': '供应商资料',
+  'suppliers.profile': '供应商画像',
+};
+const canOpenSource = computed(() => !props.result || hasAccessByCodes([TOOL_PERMISSION_MAP[props.result.tool] || 'procurement.rfqs.read']));
 const open = ref(false);
 const index = ref(0);
 const entries = computed<AnswerSource[]>(() => props.entries ?? (props.result?.sources ?? []).map((source) => ({
   ...agentSourcePreview(props.result!, source), key: `${source.resource}:${source.record_id}`, label: '', observedAt: props.result && 'observed_at' in props.result ? props.result.observed_at : undefined,
 })));
 const preview = computed(() => entries.value[index.value]);
-const label = computed(() => props.sourceLabel || (props.result ? props.result.tool === 'inventory.query_available' ? '库存记录' : props.result.tool === 'supplier_quotes.compare' ? '供应商报价' : props.result.tool === 'catalog.search_products' ? '产品资料' : '询价记录' : '回答依据'));
+const label = computed(() => props.sourceLabel || (props.result ? TOOL_SOURCE_PILL_LABELS[props.result.tool] || '业务记录' : '回答依据'));
 watch(() => [props.result, props.entries], () => { index.value = 0; open.value = false; });
 </script>
 <template>

@@ -2,7 +2,7 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { AgentApi, AiApi } from '#/api';
 
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 
@@ -26,6 +26,7 @@ import {
   resolveProposalNotificationApi,
 } from '#/api';
 import AgentChatTask from '../workspace/agent-chat-task.vue';
+import { createAgentPoller } from '../workspace/agent-polling';
 import { acceptTask } from '../workspace/task-view';
 import { retryQuestion, taskActionFeedback, taskActions } from './task-actions';
 import ActionProposalDetail from './ActionProposalDetail.vue';
@@ -96,11 +97,17 @@ const proposalStatusLabels: Record<AiApi.ActionProposalRead['status'], string> =
   CANCELLED: '已取消', EXECUTED: '已执行', EXPIRED: '已过期', INVALIDATED: '资源已变化', PENDING: '待确认',
 };
 const proposalActionLabels: Record<string, string> = {
+  'purchase_request.create_draft': '新建采购申请草稿',
   'purchase_request.update_draft': '修改采购申请',
   'purchase_request.submit': '提交采购申请',
   'rfq.create_draft': '询价草稿',
   'rfq.send': '发送询价',
   'rfq.select_quote': '确认中选报价',
+  'purchase_order.create_draft': '生成采购订单草稿',
+  'purchase_order.submit': '提交采购订单审批',
+  'exceptions.create_task': '创建异常处理任务',
+  'inventory.create_replenishment': '创建补货申请',
+  'deliveries.followup_draft': '保存交期催办草稿',
 };
 const proposalColumns = [
   { field: 'confirmation_id', title: '提案编号', minWidth: 190 },
@@ -204,6 +211,37 @@ async function refreshSelectedTask() {
   await refreshTask(task.id);
   selectedLoading.value = false;
 }
+
+const taskPoller = createAgentPoller({
+  hidden: () => typeof document !== 'undefined' && document.hidden,
+  pending: () => Boolean(detailOpen.value && selectedTask.value?.status === 'RUNNING'),
+  refresh: async () => {
+    const task = selectedTask.value;
+    if (!task) return;
+    await refreshTask(task.id);
+    if (selectedTask.value?.status !== 'RUNNING') {
+      void gridApi.query();
+    }
+  },
+  timeout: () => {
+    message.warning('任务仍在后台执行，请点击刷新状态核对最新进展');
+  },
+});
+
+watch(
+  () => [detailOpen.value, selectedTask.value?.id, selectedTask.value?.status],
+  () => {
+    if (detailOpen.value && selectedTask.value?.status === 'RUNNING') {
+      taskPoller.schedule();
+    } else {
+      taskPoller.reset();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  taskPoller.stop();
+});
 
 async function withTaskBusy(task: AgentApi.Task, operation: () => Promise<AgentApi.Task>, action: 'continue' | 'cancel') {
   if (busyTaskId.value) return;

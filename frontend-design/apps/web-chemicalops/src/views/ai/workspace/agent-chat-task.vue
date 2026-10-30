@@ -161,7 +161,7 @@ function quoteRecommendationLines(result?: AgentApi.Result) {
         <p v-if="entry.result.truncated" class="agent-muted">报价已截断，当前结果不代表完整比较。</p>
         <RouterLink v-if="hasAccessByCodes(['procurement.rfqs.read'])" class="agent-source-link" :to="{ path: '/procurement/rfqs', query: { ai_record_id: entry.result.rfq_id } }">查看询价原记录 ↗</RouterLink>
       </template>
-      <p v-else-if="entry.result?.total_rows === 0" class="agent-empty">{{ entry.result.tool === 'catalog.search_products' ? '当前授权范围未找到匹配产品。' : '当前授权范围未找到可用询价明细。' }}</p>
+      <p v-else-if="entry.result?.total_rows === 0" class="agent-empty">{{ entry.result.tool === 'catalog.search_products' ? '当前授权范围未找到匹配产品。' : entry.result.tool === 'supplier_quotes.find_rfq_items' ? '当前授权范围未找到可用询价明细。' : '当前授权范围未找到匹配的业务记录。' }}</p>
       <template v-if="entry.result">
         <div v-if="entry.result.tool !== 'inventory.query_available' && visibleWarnings(entry.result).length" class="agent-notice"><span aria-hidden="true">ⓘ</span><div><p v-for="warning in visibleWarnings(entry.result)" :key="warning">{{ warning }}</p></div></div>
         <p v-if="'observed_at' in entry.result && !(compactDetails && entry.result.tool === 'inventory.query_available')" class="agent-snapshot">{{ formatDateTime(entry.result.observed_at) }}（本地时间）查询快照</p>

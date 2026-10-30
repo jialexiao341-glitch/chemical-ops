@@ -203,6 +203,7 @@ def stream_page_context(data: AIContextAskRequest, db: Session = Depends(get_db)
     # 完整上下文始终由服务端重新授权；问题不影响可读取范围。
     full = data.model_copy(update={"question": "请展示当前业务对象的完整情况。"})
     result = context_service.ask_context(db, user, full).model_dump(mode="json")
+    db.commit()
     return StreamingResponse(context_stream.stream_answer(user, data.question, result, data.previous_questions), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -212,6 +213,7 @@ def stream_order_list_context(data: AIListContextAskRequest, db: Session = Depen
                               user: User = Depends(require_permission("procurement.orders.read"))):
     from app.modules.ai import context_stream
     result = context_service.ask_order_list(db, user, data)
+    db.commit()
     return StreamingResponse(context_stream.stream_answer(user, data.question, result, data.previous_questions), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -234,10 +236,13 @@ async def route_request(data: RouteRequest, db: Session = Depends(get_db),
                if data.conversation_id is not None else None)
     if pending is not None:
         context = routing.with_pending_clarification(db, user, data.conversation_id, context, pending)
+    user_id = user.id
+    pending_state_id = pending.state_id if pending else None
+    db.commit()
     decision = await routing.understand(data.question, context, manifest=manifest)
     return {"route": decision.route, "understanding": decision.model_dump(mode="json"),
-            "route_token": routing.issue_ticket(decision, user.id, data.question, data.conversation_id,
-                                                pending_state_id=pending.state_id if pending else None)}
+            "route_token": routing.issue_ticket(decision, user_id, data.question, data.conversation_id,
+                                                pending_state_id=pending_state_id)}
 
 
 @router.post("/agent/tools/execute", response_model=InventoryResult | QuoteResult | ProductSearchResult | RFQSearchResult,

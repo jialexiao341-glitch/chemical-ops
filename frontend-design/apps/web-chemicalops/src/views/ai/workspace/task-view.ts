@@ -69,9 +69,27 @@ export const TOOL_LABELS: Record<string, string> = {
   'inventory.query_available': '查询库存',
   'supplier_quotes.find_rfq_items': '定位询价',
   'supplier_quotes.compare': '比较报价',
+  'purchase_requests.get_by_no': '查询采购申请',
+  'purchase_orders.trace_by_no': '追踪采购订单',
+  'quality_acceptances.get_by_no': '查询质量验收',
+  'deliveries.get_by_no': '查询到货单',
+  'finance_reconciliations.get_by_no': '查询财务对账',
+  'suppliers.get_by_code': '查询供应商',
+  'suppliers.profile': '查询供应商画像',
+  'inventory.replenishment_plan': '评估补货计划',
 };
 export const SOURCE_LABELS: Record<string, string> = {
-  md_products: '产品规格', rfq_items: '询价明细', inventory_balances: '库存余额', supplier_quote_items: '报价明细',
+  md_products: '产品规格',
+  rfq_items: '询价明细',
+  inventory_balances: '库存余额',
+  supplier_quote_items: '报价明细',
+  purchase_requests: '采购申请',
+  purchase_orders: '采购订单',
+  quality_acceptances: '质量验收',
+  deliveries: '到货单',
+  finance_reconciliations: '财务对账',
+  md_suppliers: '供应商',
+  suppliers: '供应商',
 };
 
 /** 仅最新强制等待步骤可提供候选，避免从上一轮历史选择失效对象。 */

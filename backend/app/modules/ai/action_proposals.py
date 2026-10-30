@@ -332,9 +332,12 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
     )
     base["requires_user_confirmation"] = can_confirm
     revision_values = {}
-    if proposal.action_type == "purchase_request.update_draft":
+    if proposal.action_type == "purchase_request.create_draft":
+        revision_values = {key: proposal.payload.get(key) for key in
+                           ("purpose", "priority", "budget_amount", "currency_code", "expected_date")}
+    elif proposal.action_type == "purchase_request.update_draft":
         revision_values = {key: value for key, value in proposal.payload.get("changes", {}).items()
-                          if key in {"purpose", "priority", "budget_amount", "currency_code", "expected_date"}}
+                           if key in {"purpose", "priority", "budget_amount", "currency_code", "expected_date"}}
     elif proposal.action_type == "rfq.create_draft":
         revision_values = {key: proposal.payload.get(key) for key in
                            ("quote_deadline", "requested_delivery_date", "delivery_requirements")}
@@ -343,13 +346,23 @@ def _proposal_read(db: Session, user: User, proposal: AIAgentActionProposal) -> 
     elif proposal.action_type == "purchase_order.create_draft":
         revision_values = {key: proposal.payload.get(key) for key in
                            ("delivery_address", "expected_arrival_date", "note")}
+    elif proposal.action_type == "exceptions.create_task":
+        revision_values = {key: proposal.payload.get(key) for key in ("title", "priority", "due_at")}
+    elif proposal.action_type == "inventory.create_replenishment":
+        revision_values = {key: proposal.payload.get(key) for key in
+                           ("quantity", "expected_date", "reason", "note")}
     elif proposal.action_type == "deliveries.followup_draft" and proposal.status == "PENDING":
         revision_values = {"followup_note": proposal.payload.get("followup_note", "")}
     if not resource_visible:
         revision_values = {}
+    created_at = (
+        proposal.created_at.replace(tzinfo=timezone.utc)
+        if proposal.created_at is not None and proposal.created_at.tzinfo is None
+        else proposal.created_at
+    )
     result = AIActionProposalRead(
         **base,
-        created_at=proposal.created_at,
+        created_at=created_at,
         business_reference=readable_reference,
         source_route=source_route,
         availability=availability,
@@ -417,6 +430,18 @@ def revise_action(db: Session, user: User, confirmation_id: str, preview_version
         payload = {**proposal.payload, **payload}
     elif proposal.action_type == "purchase_order.create_draft" and set(payload) <= {
         "delivery_address", "expected_arrival_date", "note"
+    }:
+        payload = {**proposal.payload, **payload}
+    elif proposal.action_type == "purchase_request.create_draft" and set(payload) <= {
+        "purpose", "priority", "budget_amount", "currency_code", "expected_date"
+    }:
+        payload = {**proposal.payload, **payload}
+    elif proposal.action_type == "exceptions.create_task" and set(payload) <= {
+        "title", "priority", "due_at"
+    }:
+        payload = {**proposal.payload, **payload}
+    elif proposal.action_type == "inventory.create_replenishment" and set(payload) <= {
+        "quantity", "expected_date", "reason", "note"
     }:
         payload = {**proposal.payload, **payload}
     elif proposal.action_type == "deliveries.followup_draft":

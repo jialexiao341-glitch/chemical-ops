@@ -22,6 +22,7 @@ const canEdit = computed(() => props.proposal.requires_user_confirmation &&
   props.proposal.availability === 'AVAILABLE' && Object.keys(props.proposal.revision_values).length > 0);
 
 const actionLabels: Record<string, string> = {
+  'purchase_request.create_draft': '新建采购申请草稿',
   'purchase_request.update_draft': '修改采购申请',
   'purchase_request.submit': '提交采购申请',
   'rfq.create_draft': '创建询价草稿',
@@ -71,7 +72,7 @@ const fieldLabels: Record<string, string> = {
   followup_message: '催办草稿正文',
   followup_note: '补充说明',
 };
-const dateFields = new Set(['expected_date', 'requested_delivery_date', 'quote_deadline', 'expected_arrival_date']);
+const dateFields = new Set(['expected_date', 'requested_delivery_date', 'quote_deadline', 'expected_arrival_date', 'due_at']);
 const statusColor: Record<AiApi.ActionProposalRead['status'], string> = {
   CANCELLED: 'default', EXECUTED: 'success', EXPIRED: 'warning', INVALIDATED: 'error', PENDING: 'processing',
 };
@@ -90,7 +91,7 @@ function dateValue(value: unknown): Dayjs | undefined {
 function updateDate(field: string, value?: Dayjs | Dayjs[] | null) {
   const date = Array.isArray(value) ? value[0] : value;
   revisionValues[field] = date?.isValid()
-    ? (field === 'quote_deadline' ? date.format('YYYY-MM-DDTHH:mm:ss') : date.format('YYYY-MM-DD'))
+    ? (field === 'quote_deadline' || field === 'due_at' ? date.format('YYYY-MM-DDTHH:mm:ss') : date.format('YYYY-MM-DD'))
     : null;
 }
 
@@ -239,9 +240,9 @@ function orderTermsLines(evidence: Record<string, unknown>) {
       <div v-for="(value, field) in revisionValues" :key="field" class="space-y-1">
         <div class="text-sm text-muted-foreground">{{ fieldLabels[field] || field }}</div>
         <Select v-if="field === 'priority'" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :options="PRIORITY_DICT.options()" class="w-full" />
-        <DatePicker v-else-if="dateFields.has(field)" :aria-label="fieldLabels[field]" :show-time="field === 'quote_deadline'" :value="dateValue(value)" class="w-full" @change="updateDate(field, $event)" />
-        <InputNumber v-else-if="field === 'budget_amount'" :aria-label="fieldLabels[field]" :value="typeof value === 'number' || typeof value === 'string' ? Number(value) : null" :min="0" class="w-full" @change="updateNumber(field, $event)" />
-        <Input.TextArea v-else-if="['purpose', 'delivery_requirements', 'selection_reason', 'delivery_address', 'note', 'followup_note'].includes(field)" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :rows="2" :maxlength="field === 'selection_reason' ? 2000 : field === 'delivery_address' ? 500 : 1000" />
+        <DatePicker v-else-if="dateFields.has(field)" :aria-label="fieldLabels[field]" :show-time="field === 'quote_deadline' || field === 'due_at'" :value="dateValue(value)" class="w-full" @change="updateDate(field, $event)" />
+        <InputNumber v-else-if="field === 'budget_amount' || field === 'quantity'" :aria-label="fieldLabels[field]" :value="typeof value === 'number' || typeof value === 'string' ? Number(value) : null" :min="0" class="w-full" @change="updateNumber(field, $event)" />
+        <Input.TextArea v-else-if="['purpose', 'delivery_requirements', 'selection_reason', 'delivery_address', 'note', 'followup_note', 'reason'].includes(field)" v-model:value="revisionValues[field]" :aria-label="fieldLabels[field]" :rows="2" :maxlength="field === 'selection_reason' ? 2000 : field === 'delivery_address' ? 500 : 1000" />
         <Input v-else v-model:value="revisionValues[field]" :aria-label="fieldLabels[field] || field" />
       </div>
     </section>

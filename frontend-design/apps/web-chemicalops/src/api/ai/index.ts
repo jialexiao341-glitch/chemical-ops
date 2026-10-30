@@ -329,10 +329,10 @@ export async function updateConversationApi(
 }
 
 /** 当前是否在流式提问中（用于禁用发送按钮） */
-let streaming = false;
+let activeStreamSignal: AbortSignal | null = null;
 
 export function isAiStreaming() {
-  return streaming;
+  return activeStreamSignal !== null && !activeStreamSignal.aborted;
 }
 
 /**
@@ -348,10 +348,11 @@ export async function streamChatApi(
   routeToken?: string,
   options: { independent?: boolean; retryFailed?: boolean; signal?: AbortSignal } = {},
 ): Promise<void> {
-  if (!options.independent && streaming) {
+  if (!options.independent && isAiStreaming()) {
     throw new Error('上一条消息尚未回复完成');
   }
-  if (!options.independent) streaming = true;
+  const currentSignal = options.signal ?? new AbortController().signal;
+  if (!options.independent) activeStreamSignal = currentSignal;
   const token = useAccessStore().accessToken;
   const base = import.meta.env.VITE_GLOB_API_URL || '/api/v1';
   try {
@@ -418,7 +419,9 @@ export async function streamChatApi(
         : String(error?.message ?? error),
     );
   } finally {
-    if (!options.independent) streaming = false;
+    if (!options.independent && activeStreamSignal === currentSignal) {
+      activeStreamSignal = null;
+    }
   }
 }
 
@@ -478,7 +481,20 @@ export async function streamPageContextApi(
     body: JSON.stringify(isList ? { question, previous_questions: previousQuestions, filters: target.filters } : { question, previous_questions: previousQuestions, context: { object_type: target.objectType, object_id: target.objectId } }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]),
   });
-  if (!response.ok || !response.body) throw new Error(`上下文读取失败（HTTP ${response.status}）`);
+  if (response.status === 401) {
+    const { useAuthStore } = await import('#/store');
+    await useAuthStore().logout(false, false);
+  }
+  if (!response.ok || !response.body) {
+    let message = `上下文读取失败（HTTP ${response.status}）`;
+    try {
+      const body = await response.json();
+      message = body.detail ?? body.message ?? message;
+    } catch {
+      // 非 JSON 错误体，保留默认文案
+    }
+    throw new Error(String(message));
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let terminal = false;

@@ -6,8 +6,9 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
+import { IconifyIcon } from '@vben/icons';
 
-import { Button, Input, InputNumber, message, Modal, Select, Spin, Tag } from 'antdv-next';
+import { Button, Dropdown, Input, InputNumber, message, Modal, Select, Spin, Tag } from 'antdv-next';
 
 import {
   cancelAgentTaskApi,
@@ -118,6 +119,7 @@ interface UiMessage {
 const { conversations, conversationsLoading, conversationSearch, visibleConversations, loadConversations } = useConversation<AiApi.Conversation>(() => getConversationListApi(100));
 const sidebarExpanded = ref(false);
 const sidebarCollapsed = ref(false);
+const moreMenuOpen = ref(false);
 const menuConversationId = ref<number>();
 const editingConversationId = ref<number>();
 const editingTitle = ref('');
@@ -1676,8 +1678,15 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
             <div>
               <span class="ai-toolbar-title">化运 AI 助手</span>
             </div>
-            <Button size="large" type="primary" @click="router.push('/ai/tasks')">Agent Inbox</Button>
-            <Button size="large" @click="router.push('/ai/documents')">业务文档</Button>
+            <Dropdown :open="moreMenuOpen" :trigger="['click']" placement="bottomRight" @open-change="moreMenuOpen = $event">
+              <Button class="inline-flex items-center gap-2">更多 <IconifyIcon class="size-4 text-slate-500" icon="lucide:chevron-down" /></Button>
+              <template #popupRender>
+                <div class="supplier-record-menu">
+                  <button type="button" @click="moreMenuOpen = false; router.push('/ai/tasks')">Agent Inbox</button>
+                  <button type="button" @click="moreMenuOpen = false; router.push('/ai/documents')">业务文档</button>
+                </div>
+              </template>
+            </Dropdown>
           </div>
           <div v-if="filterPanelOpen" class="mt-3 rounded-md border border-border p-3 text-sm font-normal">
             <div class="mb-2 flex items-center justify-between">
@@ -2024,6 +2033,9 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
 .ai-toolbar { padding: 16px 24px 12px; border-bottom: 1px solid #f0f1f4; }
 .ai-toolbar-title { font-size: 14px; font-weight: 650; }
 .ai-toolbar :deep(.ant-btn) { border-radius: 9px; }
+.supplier-record-menu { min-width: 154px; padding: 5px; border: 1px solid hsl(var(--border)); border-radius: 9px; background: hsl(var(--background)); box-shadow: 0 10px 28px #0f27401f; }
+.supplier-record-menu > button { display: block; width: 100%; padding: 8px 11px; border: 0; border-radius: 5px; background: transparent; color: hsl(var(--foreground)); text-align: left; font-size: 14px; line-height: 20px; cursor: pointer; }
+.supplier-record-menu > button:hover { background: hsl(var(--muted)); }
 .ai-messages { padding: 24px clamp(20px, 5vw, 88px); }
 .ai-main.is-empty .ai-messages { flex: 0 0 auto; margin-top: auto; overflow: visible; padding-bottom: 0; }
 .ai-welcome { display: flex; align-items: center; justify-content: center; gap: 14px; }
