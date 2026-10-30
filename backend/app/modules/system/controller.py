@@ -155,7 +155,7 @@ def logout(db: Session = Depends(get_db), user: User = Depends(get_current_user)
 def create_user(data: UserCreate, db: Session = Depends(get_db), user: User = Depends(require_permission("system.users.write"))) -> UserRead:
     """新增用户，并按请求中的角色 ID 建立用户角色关联。"""
 
-    return service.create_user(db, data, actor_id=user.id)
+    return service.user_read(db, service.create_user(db, data, actor_id=user.id))
 
 
 @router.get("/system/users", response_model=UserPage, summary="分页查询用户")

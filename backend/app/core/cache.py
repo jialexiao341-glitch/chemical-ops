@@ -19,6 +19,8 @@ LOGGER = logging.getLogger("chemicalops.cache")
 _PENDING = "redis_cache_invalidations"
 _TABLE_SPACES = {
     "md_products": "product_catalog", "md_chemicals": "product_catalog", "md_units": "product_catalog",
+    "products": "product_catalog", "chemicals": "product_catalog", "units": "product_catalog",
+    "md_suppliers": "supplier_directory", "suppliers": "supplier_directory",
     "ai_messages": "ai_history", "ai_conversations": "ai_history",
 }
 

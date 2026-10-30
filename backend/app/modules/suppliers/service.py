@@ -1,7 +1,9 @@
 """供应商模块的业务服务。"""
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.cache import invalidate as bump_namespace
 from app.core.errors import DuplicateResourceError, ResourceNotFoundError
 from app.modules.suppliers import crud
 from app.modules.suppliers.model import Supplier
@@ -47,18 +49,38 @@ def list_suppliers(
 def create_supplier(db: Session, data: SupplierCreate, *, commit: bool = True) -> Supplier:
     """校验供应商编码唯一后创建供应商。"""
 
+    if data.unified_credit_code is not None and not data.unified_credit_code.strip():
+        data.unified_credit_code = None
     if crud.get_by_code(db, data.supplier_code):
         raise DuplicateResourceError(f"供应商编码 {data.supplier_code} 已存在")
-    return crud.create(db, data, commit=commit)
+    try:
+        supplier = crud.create(db, data, commit=commit)
+    except IntegrityError:
+        if commit:
+            db.rollback()
+        raise DuplicateResourceError("供应商编码或统一社会信用代码已存在") from None
+    if commit:
+        bump_namespace("supplier_directory")
+    return supplier
 
 
 def update_supplier(db: Session, supplier_id: int, data: SupplierUpdate) -> Supplier:
     """执行供应商部分更新；供应商编码作为不可变业务标识。"""
 
-    return crud.update(db, get_supplier(db, supplier_id), data)
+    if data.unified_credit_code is not None and not data.unified_credit_code.strip():
+        data.unified_credit_code = None
+    try:
+        updated = crud.update(db, get_supplier(db, supplier_id), data)
+    except IntegrityError:
+        db.rollback()
+        raise DuplicateResourceError("统一社会信用代码已被其他供应商使用") from None
+    bump_namespace("supplier_directory")
+    return updated
 
 
 def delete_supplier(db: Session, supplier_id: int) -> Supplier:
     """以软删除方式停用供应商，保留采购历史数据。"""
 
-    return crud.disable(db, get_supplier(db, supplier_id))
+    disabled = crud.disable(db, get_supplier(db, supplier_id))
+    bump_namespace("supplier_directory")
+    return disabled

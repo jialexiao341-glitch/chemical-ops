@@ -1,8 +1,10 @@
 """产品模块的业务服务。"""
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.errors import DuplicateResourceError, ResourceNotFoundError
+from app.core.cache import invalidate as bump_namespace
+from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.products import crud
 from app.modules.products.model import Product
 from app.modules.products.schema import ProductCreate, ProductUpdate
@@ -43,17 +45,35 @@ def create_product(db: Session, data: ProductCreate, *, commit: bool = True) -> 
 
     if crud.get_by_code(db, data.product_code):
         raise DuplicateResourceError(f"产品编码 {data.product_code} 已存在")
-    return crud.create(db, data, commit=commit)
+    try:
+        product = crud.create(db, data, commit=commit)
+    except IntegrityError as exc:
+        if commit:
+            db.rollback()
+        if "product_code" in str(exc.orig):
+            raise DuplicateResourceError(f"产品编码 {data.product_code} 已存在") from None
+        raise BusinessValidationError("关联的化学品、产品分类或计量单位不存在") from None
+    if commit:
+        bump_namespace("product_catalog")
+    return product
 
 
 def update_product(db: Session, product_id: int, data: ProductUpdate) -> Product:
     """校验产品编码不被修改为重复值，并执行产品部分更新。"""
 
     product = get_product(db, product_id)
-    return crud.update(db, product, data)
+    try:
+        updated = crud.update(db, product, data)
+    except IntegrityError:
+        db.rollback()
+        raise BusinessValidationError("关联的化学品、产品分类或计量单位不存在") from None
+    bump_namespace("product_catalog")
+    return updated
 
 
 def delete_product(db: Session, product_id: int) -> Product:
     """以软删除方式停用产品，并保留产品版本变化记录。"""
 
-    return crud.disable(db, get_product(db, product_id))
+    disabled = crud.disable(db, get_product(db, product_id))
+    bump_namespace("product_catalog")
+    return disabled

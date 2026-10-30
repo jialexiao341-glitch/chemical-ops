@@ -89,7 +89,10 @@ function onActionClick({
 }
 
 /** 停用选定产品，并在操作完成后刷新列表。 */
+const deletingIds = new Set<number>();
 function onDelete(row: ProductApi.Product) {
+  if (deletingIds.has(row.id)) return Promise.resolve();
+  deletingIds.add(row.id);
   const hideLoading = message.loading({
     content: `正在停用 ${row.product_name}`,
     duration: 0,
@@ -106,6 +109,9 @@ function onDelete(row: ProductApi.Product) {
     .catch((error) => {
       hideLoading();
       throw error;
+    })
+    .finally(() => {
+      deletingIds.delete(row.id);
     });
 }
 

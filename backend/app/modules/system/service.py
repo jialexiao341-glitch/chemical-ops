@@ -346,8 +346,11 @@ def _require_role_assignment(db: Session, actor_id: int | None, role_ids: list[i
 def create_user(db: Session, data: UserCreate, *, actor_id: int | None = None) -> User:
     """校验用户名、部门和角色后创建用户。"""
 
+    email = data.email.strip() if data.email and data.email.strip() else None
     if crud.get_user_by_username(db, data.username):
         raise DuplicateResourceError(f"用户名 {data.username} 已存在")
+    if email and db.scalar(select(User.id).where(User.email == email).limit(1)):
+        raise DuplicateResourceError(f"邮箱 {email} 已被其他用户使用")
     _require_department(db, data.department_id)
     _require_roles(db, data.role_ids)
     _require_role_assignment(db, actor_id, data.role_ids)
@@ -356,14 +359,18 @@ def create_user(db: Session, data: UserCreate, *, actor_id: int | None = None) -
         password_hash=hash_password(data.password),
         display_name=data.display_name,
         department_id=data.department_id,
-        email=data.email,
+        email=email,
         phone=data.phone,
     )
-    db.add(user)
-    db.flush()
-    crud.replace_user_roles(db, user.id, data.role_ids)
-    add_audit_log(db, actor_id=actor_id, action_type="CREATE", resource_type="USER", resource_id=user.id, request_summary=f"创建用户，角色 ID={sorted(data.role_ids)}", result_status="SUCCESS")
-    db.commit()
+    try:
+        db.add(user)
+        db.flush()
+        crud.replace_user_roles(db, user.id, data.role_ids)
+        add_audit_log(db, actor_id=actor_id, action_type="CREATE", resource_type="USER", resource_id=user.id, request_summary=f"创建用户，角色 ID={sorted(data.role_ids)}", result_status="SUCCESS")
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise DuplicateResourceError("用户名或邮箱已被占用") from None
     db.refresh(user)
     return user
 
@@ -375,6 +382,10 @@ def update_user(
 
     user = _require_user(db, user_id)
     values = data.model_dump(exclude_unset=True, exclude={"password", "role_ids"})
+    if "email" in values:
+        values["email"] = values["email"].strip() if values["email"] and values["email"].strip() else None
+        if values["email"] and db.scalar(select(User.id).where(User.email == values["email"], User.id != user_id).limit(1)):
+            raise DuplicateResourceError(f"邮箱 {values['email']} 已被其他用户使用")
     if user.status in {"PENDING", "REJECTED"}:
         raise BusinessValidationError("注册申请只能通过专用审批操作处理")
     current_role_codes = set(crud.get_user_role_codes(db, user_id))
@@ -413,7 +424,11 @@ def update_user(
             if account is not None:
                 account.status = "INACTIVE"
     add_audit_log(db, actor_id=actor_id, action_type="UPDATE", resource_type="USER", resource_id=user.id, request_summary=f"更新用户字段={sorted(values.keys())}，角色 ID={sorted(data.role_ids) if data.role_ids is not None else '未变更'}", result_status="SUCCESS")
-    return crud.update_entity(db, user, values)
+    try:
+        return crud.update_entity(db, user, values)
+    except IntegrityError:
+        db.rollback()
+        raise DuplicateResourceError("邮箱已被其他用户使用") from None
 
 
 def delete_user(db: Session, user_id: int, *, actor_id: int | None = None, commit: bool = True) -> User:
@@ -792,6 +807,10 @@ def update_profile(db: Session, user: User, data: ProfileUpdate) -> User:
     """个人中心更新自己的昵称/邮箱/手机/头像。"""
 
     values = data.model_dump(exclude_unset=True)
+    if "email" in values:
+        values["email"] = values["email"].strip() if values["email"] and values["email"].strip() else None
+        if values["email"] and db.scalar(select(User.id).where(User.email == values["email"], User.id != user.id).limit(1)):
+            raise DuplicateResourceError(f"邮箱 {values['email']} 已被其他用户使用")
     has_avatar = "avatar_base64" in values
     avatar_value = values.pop("avatar_base64", None)
     if not values and not has_avatar:
@@ -810,7 +829,11 @@ def update_profile(db: Session, user: User, data: ProfileUpdate) -> User:
         request_summary=summary,
         result_status="SUCCESS",
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise DuplicateResourceError("邮箱已被其他用户使用") from None
     db.refresh(user)
     return user
 

@@ -141,7 +141,6 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       const method = String(config.method ?? 'get').toUpperCase();
       if (
         ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
-        !(config.data instanceof FormData) &&
         !config.headers['Idempotency-Key']
       ) {
         config.headers['Idempotency-Key'] = createIdempotencyKey();
