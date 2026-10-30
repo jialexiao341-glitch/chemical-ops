@@ -213,12 +213,29 @@ def create_invoice(db: Session, user: User, data: InvoiceCreate) -> FinanceInvoi
         raise BusinessValidationError("价税合计必须等于不含税金额加税额")
     if _sum_invoices(db, reconciliation.id) + data.amount_incl_tax > reconciliation.total_amount:
         raise BusinessValidationError("发票累计金额不能超过对账应付总额")
-    if db.scalar(select(FinanceInvoice.id).where(FinanceInvoice.supplier_id == reconciliation.supplier_id,
-                                                  FinanceInvoice.invoice_number == data.invoice_number).limit(1)):
+    if db.scalar(
+        select(FinanceInvoice.id).where(
+            FinanceInvoice.supplier_id == reconciliation.supplier_id,
+            FinanceInvoice.invoice_number == data.invoice_number,
+            FinanceInvoice.status != "VOIDED",
+        ).limit(1)
+    ):
         raise DuplicateResourceError("该供应商已登记相同发票号码")
     if data.source_file_id is not None:
         source = db.scalar(select(SysFile).where(SysFile.id == data.source_file_id).with_for_update())
-        attached = db.scalar(select(SysFileAttachment.id).where(SysFileAttachment.file_id == data.source_file_id).limit(1))
+        attached = db.scalar(
+            select(SysFileAttachment.id)
+            .outerjoin(
+                FinanceInvoice,
+                (SysFileAttachment.resource_type == "FINANCE_INVOICE")
+                & (FinanceInvoice.id == SysFileAttachment.resource_id),
+            )
+            .where(
+                SysFileAttachment.file_id == data.source_file_id,
+                (SysFileAttachment.resource_type != "FINANCE_INVOICE") | (FinanceInvoice.status != "VOIDED"),
+            )
+            .limit(1)
+        )
         if source is None or source.uploader_id != user.id or source.file_category != "FINANCE_INVOICE" or attached:
             raise BusinessValidationError("发票来源文件无效或不可使用")
     invoice = FinanceInvoice(
@@ -339,9 +356,10 @@ def create_payment(db: Session, user: User, data: PaymentCreate) -> FinancePayme
     _require_finance_scope(db, user, reconciliation.po_id)
     if reconciliation.status != "CONFIRMED":
         raise BusinessValidationError("只有已确认的对账单可以发起付款")
-    if _sum_payments(db, reconciliation.id) + data.amount > reconciliation.total_amount:
+    total_requested = _sum_payments(db, reconciliation.id) + data.amount
+    if total_requested > reconciliation.total_amount:
         raise BusinessValidationError("付款累计金额不能超过对账应付总额")
-    if _sum_invoices(db, reconciliation.id, verified_only=True) < data.amount:
+    if _sum_invoices(db, reconciliation.id, verified_only=True) < total_requested:
         raise BusinessValidationError("人工复核通过的发票金额不足，不能发起本次付款")
     payment = FinancePayment(
         payment_no=f"TEMP-FP-{uuid4().hex[:12]}",
@@ -384,7 +402,10 @@ def approve_payment(db: Session, user: User, payment_id: int) -> FinancePayment:
         raise BusinessValidationError("不能审批本人经办的付款申请")
     if reconciliation.status != "CONFIRMED":
         raise BusinessValidationError("对账单未确认，不能审批付款")
-    if _sum_invoices(db, reconciliation.id, verified_only=True) < payment.amount:
+    total_payments = _sum_payments(db, reconciliation.id)
+    if total_payments > reconciliation.total_amount:
+        raise BusinessValidationError("付款累计金额不能超过对账应付总额")
+    if _sum_invoices(db, reconciliation.id, verified_only=True) < total_payments:
         raise BusinessValidationError("人工复核通过的发票金额不足，不能审批付款")
     payment.status = "APPROVED"
     payment.approved_by = user.id

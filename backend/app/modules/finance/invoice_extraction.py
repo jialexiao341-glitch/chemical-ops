@@ -92,7 +92,7 @@ async def parse_invoice_file(db: Session, user: User, reconciliation_id: int, *,
     if expected and mime not in file_service._GENERIC_MIME_TYPES and mime not in expected:
         raise BusinessValidationError('文件扩展名与 MIME 类型不匹配')
     file_service._validate_file_signature(extension, content)
-    scan = file_service.scan_content(content)
+    scan = await asyncio.to_thread(file_service.scan_content, content)
     if scan.status not in {'CLEAN', 'SKIPPED'}:
         raise BusinessValidationError('文件未通过安全扫描或扫描服务不可用')
     try:
@@ -135,8 +135,9 @@ async def parse_invoice_file(db: Session, user: User, reconciliation_id: int, *,
         warnings.append('以下字段缺少一致的原文依据，未带入：' + '、'.join(dropped))
     if values['invoice_number'] and db.scalar(select(FinanceInvoice.id).where(
         FinanceInvoice.supplier_id == reconciliation.supplier_id,
-        FinanceInvoice.invoice_number == values['invoice_number']).limit(1)):
+        FinanceInvoice.invoice_number == values['invoice_number'],
+        FinanceInvoice.status != 'VOIDED').limit(1)):
         warnings.append('该供应商已登记相同发票号码，请核对后处理。')
     source = file_service.upload_file(db, user, file_name=file_name, mime_type=mime_type,
-        content=content, file_category='FINANCE_INVOICE', access_level='INTERNAL')
+        content=content, file_category='FINANCE_INVOICE', access_level='INTERNAL', scan_result=scan)
     return InvoiceParseCandidate(file_id=source.id, file_name=source.file_name, **values, evidence=evidence, warnings=warnings)

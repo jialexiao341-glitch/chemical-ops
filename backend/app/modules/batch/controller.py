@@ -233,6 +233,19 @@ def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db),
                            "master.suppliers": supplier_crud.disable}[name]
                 disable(db, row, commit=False)
             else:
+                if name == "finance.reconciliations":
+                    from app.modules.finance.model import FinanceReconciliationItem
+                    from sqlalchemy import delete as sql_delete
+                    db.execute(sql_delete(FinanceReconciliationItem).where(FinanceReconciliationItem.reconciliation_id == row.id))
+                elif name == "finance.invoices":
+                    from app.modules.files.model import SysFileAttachment
+                    from app.modules.finance.model import FinanceInvoiceMatch
+                    from sqlalchemy import delete as sql_delete
+                    db.execute(sql_delete(FinanceInvoiceMatch).where(FinanceInvoiceMatch.invoice_id == row.id))
+                    db.execute(sql_delete(SysFileAttachment).where(
+                        SysFileAttachment.resource_type == "FINANCE_INVOICE",
+                        SysFileAttachment.resource_id == row.id,
+                    ))
                 db.delete(row)
             add_audit_log(db, actor_id=user.id,
                           action_type="DISABLE" if spec.delete_mode == "master" else "DELETE",
@@ -240,6 +253,12 @@ def batch_delete(name: str, selection: Selection, db: Session = Depends(get_db),
                           request_summary=f"批量{'停用' if spec.delete_mode == 'master' else '删除'} {name}",
                           result_status="SUCCESS")
         db.commit()
+        if name == "master.products":
+            from app.core.cache import invalidate
+            invalidate("product_catalog")
+        elif name == "master.suppliers":
+            from app.core.cache import invalidate
+            invalidate("supplier_directory")
     except IntegrityError:
         db.rollback()
         raise BusinessValidationError("所选记录存在业务引用，无法批量删除") from None
@@ -360,6 +379,12 @@ async def batch_import(name: str, file: UploadFile = File(...), db: Session = De
                 add_audit_log(db, actor_id=user.id, action_type="CREATE", resource_type=name,
                               resource_id=row.id, request_summary=f"批量导入 {name}", result_status="SUCCESS")
         db.commit()
+        if name == "master.products":
+            from app.core.cache import invalidate
+            invalidate("product_catalog")
+        elif name == "master.suppliers":
+            from app.core.cache import invalidate
+            invalidate("supplier_directory")
     except UnicodeDecodeError:
         raise BusinessValidationError("CSV 请使用 UTF-8 编码") from None
     except IntegrityError:
