@@ -13,7 +13,7 @@ def test_agent_statistics_respect_department_grants(db_session):
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGrant
 
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     department = db_session.scalar(select(PurchaseOrder.department_id).where(
         PurchaseOrder.department_id.is_not(None)).limit(1))
     assert user is not None and department is not None
@@ -36,7 +36,7 @@ def test_agent_dataset_guards_accept_server_department_filters(db_session, datas
     from app.modules.ai.catalog import CATALOG
     from app.modules.system.model import User
 
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     plan = text2sql.QueryPlan(dataset=dataset, metric='count')
     statement = text2sql.build_statement(plan, db_session, user)
     text2sql._validate_scoped_statement(statement, db_session, CATALOG[dataset].tables, literal_binds=False)
@@ -49,7 +49,7 @@ def test_agent_association_guards_accept_server_department_filters(db_session, d
     from app.modules.ai.catalog import CATALOG
     from app.modules.system.model import User
 
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     plan = text2sql.QueryPlan(dataset=dataset, metric='records')
     statement = text2sql.build_statement(plan, db_session, user)
     text2sql._validate_scoped_statement(statement, db_session, CATALOG[dataset].tables, literal_binds=False)
@@ -61,7 +61,7 @@ def test_explicit_department_scope_is_an_upper_bound_and_admin_bypasses(db_sessi
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import User
 
-    user = db_session.scalar(select(User).where(User.username == 'buyer'))
+    user = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
     assert user is not None
     department_ids = list(db_session.scalars(select(PurchaseOrder.department_id).where(PurchaseOrder.department_id.is_not(None)).distinct().limit(2)))
     assert len(department_ids) == 2
@@ -84,7 +84,7 @@ def test_department_cap_applies_to_manager_orders_and_finance(db_session):
     from app.modules.finance.model import FinanceInvoice
     import pytest
 
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     assert manager is not None
     departments = list(db_session.scalars(select(PurchaseOrder.department_id).where(PurchaseOrder.department_id.is_not(None)).distinct().limit(2)))
     assert len(departments) == 2
@@ -108,7 +108,7 @@ def test_replenishment_cap_blocks_other_department_for_manager(db_session):
     from app.modules.replenishments import service
     from app.modules.replenishments.model import ReplenishmentRequest
     from app.modules.purchase_orders.model import PurchaseOrder
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     row = db_session.scalar(select(ReplenishmentRequest).where(ReplenishmentRequest.source_po_id.is_not(None)).limit(1))
     if manager is None or row is None:
         import pytest
@@ -135,7 +135,7 @@ def test_return_cap_blocks_other_department_for_manager(db_session):
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.core.errors import ResourceNotFoundError
     import pytest
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     row = db_session.scalar(select(InventoryReturnRequest).where(InventoryReturnRequest.po_id.is_not(None)).limit(1))
     if manager is None or row is None:
         pytest.skip('缺少关联订单的退货样本')
@@ -158,7 +158,7 @@ def test_exception_owner_cannot_bypass_department_cap(db_session):
     from app.modules.operation_exceptions import service
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGrant
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     row = db_session.scalar(select(OperationException).where(OperationException.po_id.is_not(None)).limit(1))
     if manager is None or row is None:
         pytest.skip('缺少订单异常样本')
@@ -185,7 +185,7 @@ def test_exception_source_cannot_bypass_department_cap_without_link_columns(db_s
     from app.modules.quality_acceptances.model import QualityAcceptance
     from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGrant
 
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     source = db_session.scalar(select(QualityAcceptance).join(Delivery).join(PurchaseOrder).where(
         PurchaseOrder.department_id.is_not(None)).limit(1))
     if manager is None or source is None:
@@ -211,9 +211,9 @@ def test_scoped_user_gets_department_dashboard_without_global_inventory(client, 
     from sqlalchemy import func
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGrant
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     assert user is not None
-    headers = login(client, 'procurement_manager', demo_password)
+    headers = login(client, 'ProcManager', demo_password)
     db_session.add(UserDepartmentScope(user_id=user.id))
     db_session.flush()
     department_id = db_session.scalar(select(PurchaseOrder.department_id).where(PurchaseOrder.department_id.is_not(None)).limit(1))
@@ -236,7 +236,7 @@ def test_scoped_user_gets_department_dashboard_without_global_inventory(client, 
 def test_global_briefing_notification_excludes_scoped_recipients(db_session):
     from app.modules.notifications.service import notify_users
     from app.modules.system.model import User, UserDepartmentScope
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     assert manager is not None
     db_session.add(UserDepartmentScope(user_id=manager.id))
     db_session.flush()
@@ -252,7 +252,7 @@ def test_exception_task_creation_cannot_bypass_department_cap(db_session):
     from app.modules.operation_exceptions import service
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGrant
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     row = db_session.scalar(select(OperationException).where(OperationException.po_id.is_not(None)).limit(1))
     if manager is None or row is None:
         pytest.skip('缺少订单异常样本')
@@ -273,8 +273,8 @@ def test_department_scope_redacts_old_notification_content(client, db_session, d
     from tests.conftest import login
     from app.modules.notifications.model import Notification
     from app.modules.system.model import User, UserDepartmentScope
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
-    headers = login(client, 'procurement_manager', demo_password)
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
+    headers = login(client, 'ProcManager', demo_password)
     notice = Notification(recipient_id=manager.id, notification_type='AI_BRIEFING', title='跨部门敏感标题', content='跨部门敏感金额', is_read=0)
     db_session.add(notice)
     db_session.add(UserDepartmentScope(user_id=manager.id))
@@ -296,7 +296,7 @@ def test_exception_task_details_cannot_bypass_department_cap(db_session):
     from app.modules.operation_exceptions import service
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGrant
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     row = db_session.scalar(select(OperationException).where(OperationException.po_id.is_not(None)).limit(1))
     if manager is None or row is None:
         pytest.skip('缺少订单异常样本')
@@ -321,8 +321,8 @@ def test_scope_change_hides_previously_created_ai_conversation(client, db_sessio
     from tests.conftest import login
     from app.modules.ai.model import AIConversation, AIMessage
     from app.modules.system.model import User, UserDepartmentScope
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
-    headers = login(client, 'procurement_manager', demo_password)
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
+    headers = login(client, 'ProcManager', demo_password)
     conversation = AIConversation(user_id=manager.id, title='旧范围敏感标题', business_scene='GENERAL', permission_snapshot={}, status='ACTIVE')
     db_session.add(conversation)
     db_session.flush()
@@ -343,7 +343,7 @@ def test_new_scoped_conversation_invalidated_when_departments_change(db_session)
     from app.modules.ai.model import AIConversation
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGrant
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     departments = list(db_session.scalars(select(PurchaseOrder.department_id).where(PurchaseOrder.department_id.is_not(None)).distinct().limit(2)))
     assert user is not None and len(departments) == 2
     db_session.add(UserDepartmentScope(user_id=user.id))
@@ -367,7 +367,7 @@ def test_scoped_user_cannot_read_or_export_old_agent_task(db_session):
     from app.modules.ai import agent_runtime
     from app.modules.ai.model import AIAgentTask
     from app.modules.system.model import User, UserDepartmentScope
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     task = AIAgentTask(id='scope-history-test-001', user_id=user.id, status='SUCCEEDED', revision=0,
         payload={'messages': ['旧敏感信息'], 'trace': []}, reply='旧敏感结果', created_at=datetime.now(), updated_at=datetime.now())
     db_session.add(task)
@@ -386,7 +386,7 @@ def test_scoped_briefing_snapshot_uses_department_data(db_session):
     from app.modules.ai import briefing
     from app.modules.dashboard.service import get_department_overview
     from app.modules.system.model import User, UserDepartmentScope
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     db_session.add(UserDepartmentScope(user_id=user.id))
     db_session.flush()
     snapshot = briefing.build_snapshot(db_session, user=user)
@@ -399,7 +399,7 @@ def test_old_action_proposal_is_unavailable_after_department_scope_change(db_ses
     from app.core.errors import ResourceNotFoundError
     from app.modules.ai import action_proposals
     from app.modules.system.model import User, UserDepartmentScope
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     db_session.add(UserDepartmentScope(user_id=user.id))
     db_session.flush()
     with pytest.raises(ResourceNotFoundError):
@@ -409,11 +409,11 @@ def test_old_action_proposal_is_unavailable_after_department_scope_change(db_ses
 def test_admin_can_set_department_scope_and_user_cannot_modify(client, db_session, demo_password):
     from tests.conftest import login
     from app.modules.system.model import User, Department
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     department = db_session.scalar(select(Department).where(Department.status == 'ACTIVE').limit(1))
     assert user and department
-    admin = login(client, 'system_admin', demo_password)
-    manager = login(client, 'procurement_manager', demo_password)
+    admin = login(client, 'SystemAdmin', demo_password)
+    manager = login(client, 'ProcManager', demo_password)
     url = f'/api/v1/system/users/{user.id}/department-scope'
     denied = client.put(url, headers=manager, json={'enabled': True, 'department_ids': [department.id]})
     assert denied.status_code == 403, denied.text
@@ -436,7 +436,7 @@ def test_finance_multirole_department_cap_is_not_widened(db_session):
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import Role, User, UserRole, UserDepartmentScope, UserDepartmentGrant
     import pytest
-    user = db_session.scalar(select(User).where(User.username == 'finance_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'FinanceManager'))
     buyer = db_session.scalar(select(Role).where(Role.role_code == 'BUYER'))
     departments = list(db_session.scalars(select(PurchaseOrder.department_id).where(PurchaseOrder.department_id.is_not(None)).distinct().limit(2)))
     assert user and buyer and len(departments) == 2
@@ -459,8 +459,8 @@ def test_scoped_manager_does_not_bypass_other_warehouse_owner(db_session):
     from app.modules.inventory import service
     from app.modules.inventory.model import Warehouse
     from app.modules.system.model import User, UserDepartmentScope
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
-    other = db_session.scalar(select(User).where(User.username == 'buyer'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
+    other = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(1))
     assert manager and other and warehouse
     warehouse.manager_id = other.id
@@ -474,7 +474,7 @@ def test_configured_manager_http_cannot_read_or_export_other_department(client, 
     from tests.conftest import login
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system.model import User, Role, Permission, RolePermission
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     departments = list(db_session.scalars(select(PurchaseOrder.department_id).where(PurchaseOrder.department_id.is_not(None)).distinct().limit(2)))
     assert manager and len(departments) == 2
     role = db_session.scalar(select(Role).where(Role.role_code == 'PROCUREMENT_MANAGER'))
@@ -484,10 +484,10 @@ def test_configured_manager_http_cannot_read_or_export_other_department(client, 
         db_session.add(RolePermission(role_id=role.id, permission_id=permission.id))
         db_session.flush()
     hidden = db_session.scalar(select(PurchaseOrder).where(PurchaseOrder.department_id == departments[1]).limit(1))
-    admin = login(client, 'system_admin', demo_password)
+    admin = login(client, 'SystemAdmin', demo_password)
     configured = client.put(f'/api/v1/system/users/{manager.id}/department-scope', headers=admin, json={'enabled': True, 'department_ids': [departments[0]]})
     assert configured.status_code == 200, configured.text
-    manager_headers = login(client, 'procurement_manager', demo_password)
+    manager_headers = login(client, 'ProcManager', demo_password)
     assert client.get(f'/api/v1/purchase-orders/{hidden.id}', headers=manager_headers).status_code == 404
     denied_export = client.post('/api/v1/batch/procurement.orders/export', headers=manager_headers, json={'ids': [hidden.id]})
     assert denied_export.status_code == 404, denied_export.text
@@ -497,9 +497,9 @@ def test_configured_manager_http_cannot_read_or_export_other_department(client, 
 def test_scope_rejects_admin_and_supplier_accounts(client, db_session, demo_password):
     from tests.conftest import login
     from app.modules.system.model import User
-    headers = login(client, 'system_admin', demo_password)
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
-    supplier = db_session.scalar(select(User).where(User.username == 'supplier_portal'))
+    headers = login(client, 'SystemAdmin', demo_password)
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
+    supplier = db_session.scalar(select(User).where(User.username == 'SupplierUser'))
     assert admin is not None
     result = client.put(f'/api/v1/system/users/{admin.id}/department-scope', headers=headers, json={'enabled': True, 'department_ids': []})
     assert result.status_code == 400, result.text

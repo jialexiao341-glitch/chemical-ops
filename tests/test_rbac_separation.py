@@ -459,8 +459,8 @@ def test_notifications_keep_recipient_scope_and_read_only_permission(client: Tes
     """通知列表/总数/未读统计和批量已读均限制接收人，只读角色不能标记。"""
     from app.modules.notifications.model import Notification
 
-    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
-    quality_manager = db_session.scalar(select(User).where(User.username == "quality_manager"))
+    buyer = db_session.scalar(select(User).where(User.username == "BuyerUser"))
+    quality_manager = db_session.scalar(select(User).where(User.username == "QualityManager"))
     assert buyer is not None and quality_manager is not None
     own = Notification(recipient_id=buyer.id, notification_type="RBAC", title="本人通知", content="本人", is_read=0)
     foreign = Notification(recipient_id=quality_manager.id, notification_type="RBAC", title="他人通知", content="他人", is_read=0)
@@ -539,7 +539,7 @@ def test_replenishment_links_cannot_bypass_order_scope(client: TestClient, db_se
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.replenishments.model import ReplenishmentRequest
 
-    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
+    buyer = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     template = db_session.scalar(select(PurchaseOrder).where(PurchaseOrder.status == "COMPLETED"))
     assert buyer is not None and template is not None and template.items
     other_buyer = db_session.scalar(select(User).where(User.id != buyer.id).order_by(User.id))
@@ -585,7 +585,7 @@ def test_replenishment_links_cannot_bypass_order_scope(client: TestClient, db_se
 @pytest.mark.parametrize("resource", ["issue-requests", "transfer-requests", "stocktakes"])
 @pytest.mark.parametrize("action", ["approve", "reject"])
 def test_admin_cannot_review_own_warehouse_request(client: TestClient, db_session, resource, action) -> None:
-    admin = db_session.scalar(select(User).where(User.username == "system_admin"))
+    admin = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     warehouse = db_session.scalar(select(Warehouse))
     assert admin is not None and warehouse is not None
     models = {
@@ -663,8 +663,8 @@ def test_builtin_buyer_replenishment_flow_and_foreign_request_scope(client: Test
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.replenishments.model import ReplenishmentRequest
 
-    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
-    manager = db_session.scalar(select(User).where(User.username == "procurement_manager"))
+    buyer = db_session.scalar(select(User).where(User.username == "BuyerUser"))
+    manager = db_session.scalar(select(User).where(User.username == "ProcManager"))
     template = db_session.scalar(select(PurchaseOrder).where(PurchaseOrder.status == "COMPLETED"))
     assert buyer is not None and manager is not None and template is not None and template.items
     own_order = PurchaseOrder(
@@ -714,7 +714,7 @@ def test_builtin_buyer_replenishment_flow_and_foreign_request_scope(client: Test
 def test_buyer_request_list_count_and_detail_share_department_scope(
     client: TestClient, db_session
 ) -> None:
-    buyer = db_session.scalar(select(User).where(User.username == "buyer", User.status == "ACTIVE"))
+    buyer = db_session.scalar(select(User).where(User.username == "BuyerUser", User.status == "ACTIVE"))
     assert buyer is not None
     suffix = uuid4().hex[:10]
     own_department = Department(
@@ -769,7 +769,7 @@ def test_buyer_request_list_count_and_detail_share_department_scope(
 def test_buyer_cannot_move_or_create_requests_outside_department_or_link_them_to_rfq(
     client: TestClient, db_session
 ) -> None:
-    buyer = db_session.scalar(select(User).where(User.username == "buyer", User.status == "ACTIVE"))
+    buyer = db_session.scalar(select(User).where(User.username == "BuyerUser", User.status == "ACTIVE"))
     assert buyer is not None
     suffix = uuid4().hex[:10]
     own_department = Department(
@@ -861,7 +861,7 @@ def test_quality_inspector_lists_and_reads_only_assigned_acceptances(
     client: TestClient, db_session
 ) -> None:
     inspector = db_session.scalar(
-        select(User).where(User.username == "quality_inspector", User.status == "ACTIVE")
+        select(User).where(User.username == "QualityInspector", User.status == "ACTIVE")
     )
     role = db_session.scalar(select(Role).where(Role.role_code == "QUALITY"))
     acceptance = db_session.scalar(select(QualityAcceptance).order_by(QualityAcceptance.id))
@@ -896,8 +896,8 @@ def test_quality_manager_assigns_acceptance_and_inspector_cannot_self_assign(cli
     from app.modules.deliveries.model import Delivery
     from app.modules.purchase_orders.model import PurchaseOrder
 
-    inspector = db_session.scalar(select(User).where(User.username == "quality_inspector"))
-    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
+    inspector = db_session.scalar(select(User).where(User.username == "QualityInspector"))
+    buyer = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     template = db_session.scalar(select(PurchaseOrder))
     assert inspector is not None and buyer is not None and template is not None
     delivery = Delivery(delivery_no=f"RBAC-QA-{uuid4().hex[:12]}", po_id=template.id,
@@ -1107,7 +1107,7 @@ def test_supplier_insight_omits_quality_evidence_without_quality_permission(
 ) -> None:
     from app.modules.system import crud as system_crud
 
-    buyer = db_session.scalar(select(User).where(User.username == "buyer", User.status == "ACTIVE"))
+    buyer = db_session.scalar(select(User).where(User.username == "BuyerUser", User.status == "ACTIVE"))
     supplier = db_session.scalar(select(Supplier).order_by(Supplier.id))
     assert buyer is not None and supplier is not None
     grants = system_crud.get_user_permission_codes(db_session, buyer.id)
@@ -1236,11 +1236,11 @@ def test_warehouse_can_execute_fifo_without_receiving_cost_fields(
 def test_role_revocation_and_account_disable_apply_to_existing_token(
     client: TestClient, db_session, demo_password: str
 ) -> None:
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     assert user is not None
     user.password_hash = hash_password(demo_password)
     db_session.flush()
-    token_headers = login(client, "buyer", demo_password)
+    token_headers = login(client, "BuyerUser", demo_password)
     assert client.get("/api/v1/products", headers=token_headers).status_code == 200
 
     binding = db_session.scalar(
@@ -1268,7 +1268,7 @@ def test_role_revocation_and_account_disable_apply_to_existing_token(
 
 
 def test_user_role_membership_change_increments_token_version(db_session: Session) -> None:
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     supplier_role = db_session.scalar(select(Role).where(Role.role_code == "SUPPLIER_PORTAL"))
     assert user is not None and supplier_role is not None
     previous_version = user.token_version

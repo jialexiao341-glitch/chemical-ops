@@ -30,7 +30,7 @@ def test_tool_is_registered_and_requires_supplier_code():
 
 def test_profile_aggregates_visible_sections(db_session):
     code = _supplier_code(db_session)
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     result = agent_tools.execute_tool(db_session, user, ToolCall(
         tool="suppliers.profile", arguments={"supplier_code": code}))
     stages = [section["stage"] for section in result.sections]
@@ -43,7 +43,7 @@ def test_profile_aggregates_visible_sections(db_session):
 def test_profile_hides_sections_without_permission(db_session, monkeypatch):
     monkeypatch.setattr(profile_module, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(profile_module, "get_user_permission_codes", lambda *_args: ["master.suppliers.read"])
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     result = profile_module.build_supplier_profile(db_session, user, _supplier_code(db_session))
     assert all(section["status"] == "NO_PERMISSION" for section in result.sections)
     assert result.answer.endswith(
@@ -52,7 +52,7 @@ def test_profile_hides_sections_without_permission(db_session, monkeypatch):
 
 
 def test_profile_unknown_code_returns_no_business_data(db_session):
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     result = profile_module.build_supplier_profile(db_session, user, "SUP-NOT-EXIST")
     assert result.sections == []
     assert "没有找到供应商编码" in result.answer

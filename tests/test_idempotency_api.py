@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 
 def test_idempotency_key_replays_first_response(client: TestClient, demo_password: str) -> None:
     """同一用户和幂等键重复提交时回放首次响应。"""
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     headers["Idempotency-Key"] = "TEST-IDEMPOTENCY-READ-ALL"
     first = client.post("/api/v1/notifications/read-all", headers=headers)
     assert first.status_code == 200, first.text
@@ -49,11 +49,11 @@ def test_role_revocation_prevents_replaying_completed_idempotency_response(
             return None
 
     monkeypatch.setattr("app.core.idempotency.SessionLocal", lambda: SharedSession(db_session))
-    user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    user = db_session.scalar(select(User).where(User.username == "WarehouseUser"))
     supplier_role = db_session.scalar(select(Role).where(Role.role_code == "SUPPLIER_PORTAL"))
     assert user is not None and supplier_role is not None
 
-    headers = login(client, "warehouse_receiver", demo_password)
+    headers = login(client, "WarehouseUser", demo_password)
     headers["Idempotency-Key"] = f"TEST-IDEMPOTENCY-REVOKED-{uuid4().hex}"
     first = client.post("/api/v1/notifications/read-all", headers=headers)
     assert first.status_code == 200, first.text
@@ -67,7 +67,7 @@ def test_role_revocation_prevents_replaying_completed_idempotency_response(
 def test_idempotency_key_cannot_be_reused_for_a_different_request(client: TestClient, demo_password: str) -> None:
     """同一幂等键用于不同请求体时必须返回冲突。"""
 
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     headers["Idempotency-Key"] = "TEST-IDEMPOTENCY-DIFFERENT-BODY"
     first = client.post("/api/v1/notifications/read-all", headers=headers)
     assert first.status_code == 200, first.text
@@ -81,7 +81,7 @@ def test_idempotency_can_be_enabled_as_a_required_policy(client: TestClient, dem
 
     from types import SimpleNamespace
 
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     monkeypatch.setattr("app.core.idempotency.get_settings", lambda: SimpleNamespace(idempotency_required=True))
     response = client.post("/api/v1/notifications/read-all", headers=headers)
     assert response.status_code == 428
@@ -90,7 +90,7 @@ def test_idempotency_can_be_enabled_as_a_required_policy(client: TestClient, dem
 def test_expired_idempotency_record_can_be_reused(client: TestClient, demo_password: str) -> None:
     """过期幂等记录会被清理，同一键可以建立新的请求。"""
 
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     key = f"TEST-IDEMPOTENCY-EXPIRED-{uuid4().hex}"
     headers["Idempotency-Key"] = key
     actor_key = sha256(headers["Authorization"].encode("utf-8")).hexdigest()

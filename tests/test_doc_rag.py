@@ -530,7 +530,7 @@ def test_chat_doc_path_injects_context_and_citations(client, demo_password, monk
 
     response = client.post(
         "/api/v1/ai/chat",
-        headers={"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'username': 'system_admin', 'password': demo_password}).json()['access_token']}"},
+        headers={"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'username': 'SystemAdmin', 'password': demo_password}).json()['access_token']}"},
         json={"messages": [{"role": "user", "content": "乙醇的闪点是多少"}]},
     )
 
@@ -544,7 +544,7 @@ def test_chat_doc_path_injects_context_and_citations(client, demo_password, monk
     # 历史消息持久化了 citations
     history = client.get(
         f"/api/v1/ai/conversations/{body['conversation_id']}/messages",
-        headers={"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'username': 'system_admin', 'password': demo_password}).json()['access_token']}"},
+        headers={"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'username': 'SystemAdmin', 'password': demo_password}).json()['access_token']}"},
     )
     assert history.json()["items"][-1]["citations"][0]["type"] == "doc_kb"
 
@@ -565,7 +565,7 @@ def test_chat_doc_path_empty_hits_gives_guidance(client, demo_password, monkeypa
     monkeypatch.setattr(ai_service, "chat", fake_chat)
 
     token = client.post(
-        "/api/v1/auth/login", json={"username": "system_admin", "password": demo_password}
+        "/api/v1/auth/login", json={"username": "SystemAdmin", "password": demo_password}
     ).json()["access_token"]
     response = client.post(
         "/api/v1/ai/chat",
@@ -596,7 +596,7 @@ def test_stream_doc_path_emits_deltas_and_citations(client, demo_password, monke
     monkeypatch.setattr(ai_service, "chat", fake_chat)
 
     token = client.post(
-        "/api/v1/auth/login", json={"username": "system_admin", "password": demo_password}
+        "/api/v1/auth/login", json={"username": "SystemAdmin", "password": demo_password}
     ).json()["access_token"]
     response = client.post(
         "/api/v1/ai/chat/stream",

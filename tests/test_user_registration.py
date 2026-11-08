@@ -36,7 +36,7 @@ def test_registration_requires_approval_then_can_login(client, db_session, demo_
     assert before.status_code == 401 and '待管理员审批' in before.json()['detail']
     forged = {"Authorization": f"Bearer {create_access_token(user.id, user.token_version)}"}
     assert client.get('/api/v1/auth/me', headers=forged).status_code == 401
-    admin = login(client, 'system_admin', demo_password)
+    admin = login(client, 'SystemAdmin', demo_password)
     listing = client.get('/api/v1/system/users', headers=admin, params={'status':'PENDING', 'keyword':data['username']})
     assert listing.status_code == 200
     assert listing.json()['items'][0]['role_codes'] == ['BUYER']
@@ -62,10 +62,10 @@ def test_registration_reject_and_no_review_bypass(client, db_session, demo_passw
     assert client.post('/api/v1/auth/register', json=data).status_code == 201
     user = db_session.scalar(select(User).where(User.username==data['username']))
     path = f'/api/v1/system/users/{user.id}'
-    buyer = login(client, 'buyer', demo_password)
+    buyer = login(client, 'BuyerUser', demo_password)
     assert client.post(path+'/registration-review', headers=buyer, json={'decision':'approve'}).status_code == 403
     assert client.post(path+'/registration-review', json={'decision':'approve'}).status_code == 401
-    admin = login(client, 'system_admin', demo_password)
+    admin = login(client, 'SystemAdmin', demo_password)
     assert client.post(path+'/registration-review', headers=admin, json={'decision':'reject','reason':'信息不完整'}).json()['status'] == 'REJECTED'
     assert client.patch(path, headers=admin, json={'status':'ACTIVE'}).status_code == 400
     assert client.delete(path, headers=admin).status_code == 400
@@ -100,7 +100,7 @@ def test_role_expiry_prevents_registration_approval(client, db_session, demo_pas
     user = db_session.scalar(select(User).where(User.username==data['username']))
     role.status='INACTIVE'
     db_session.flush()
-    admin = login(client, 'system_admin', demo_password)
+    admin = login(client, 'SystemAdmin', demo_password)
     assert client.post(f'/api/v1/system/users/{user.id}/registration-review',headers=admin,json={'decision':'approve'}).status_code==400
 
 

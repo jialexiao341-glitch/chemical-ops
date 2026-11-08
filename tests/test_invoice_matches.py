@@ -18,7 +18,7 @@ def matched_scenario(client, scenario, demo_password):
     path = f"/api/v1/finance/reconciliations/{rec_id}"
     assert client.post(path + "/confirm", headers=s["headers"], json={}).status_code == 200
     basis = client.get(path + "/items", headers=s["headers"]).json()
-    return {**s, "rec_id": rec_id, "basis": basis, "clerk": login(client, "finance_clerk", demo_password), "manager": login(client, "finance_manager", demo_password)}
+    return {**s, "rec_id": rec_id, "basis": basis, "clerk": login(client, "FinanceClerk", demo_password), "manager": login(client, "FinanceManager", demo_password)}
 
 
 def invoice(client, s, excl, tax):
@@ -109,7 +109,7 @@ def test_source_changes_and_self_review_blocked(client, matched_scenario):
 def test_readonly_user_cannot_match_or_void(client, matched_scenario, demo_password):
     s = matched_scenario
     path = invoice(client, s, '200', '0')
-    viewer = login(client, 'finance_viewer', demo_password)
+    viewer = login(client, 'FinanceViewer', demo_password)
     assert client.get(path + '/matches', headers=viewer).status_code in {403, 404}
     assert client.post(path + '/matches', headers=viewer, json={'reconciliation_version': 1, 'allocations': [allocation(s, 1, '200', '0')]}).status_code in {403, 404}
     assert client.post(path + '/void', headers=viewer, json={'reason': '越权'}).status_code in {403, 404}

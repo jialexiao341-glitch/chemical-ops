@@ -59,7 +59,7 @@ def test_alert_management_api_requires_permissions(client, monkeypatch):
 def test_manual_scan_persists_latest_run(db_session, monkeypatch):
     from sqlalchemy import select
     from app.modules.system.model import User
-    user = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     monkeypatch.setattr(service, 'scan_active_alerts', lambda *_: {'quote_expiry_created_count': 2})
     service.run_manual_alert_scan(db_session, user)
     run = service.latest_alert_run(db_session)

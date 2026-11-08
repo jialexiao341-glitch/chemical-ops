@@ -45,8 +45,8 @@ def test_two_issue_requests_cannot_overdraw_same_balance(db_engine) -> None:
     try:
         product = setup.scalar(select(Product).where(Product.status == "ACTIVE").order_by(Product.id).limit(1))
         warehouse = setup.scalar(select(Warehouse).where(Warehouse.status == "ACTIVE").order_by(Warehouse.id).limit(1))
-        applicant = setup.scalar(select(User).where(User.username == "warehouse_receiver"))
-        approver = setup.scalar(select(User).where(User.username == "procurement_manager"))
+        applicant = setup.scalar(select(User).where(User.username == "WarehouseUser"))
+        approver = setup.scalar(select(User).where(User.username == "ProcManager"))
         unit = setup.get(Unit, product.unit_id) if product is not None else None
         location = (
             setup.scalar(
@@ -144,7 +144,7 @@ def test_two_issue_requests_cannot_overdraw_same_balance(db_engine) -> None:
     def execute(issue_id: int) -> str:
         db = SessionLocal()
         try:
-            user = db.scalar(select(User).where(User.username == "warehouse_receiver"))
+            user = db.scalar(select(User).where(User.username == "WarehouseUser"))
             barrier.wait(timeout=10)
             service.execute_issue_request(db, user, issue_id)
             return "success"

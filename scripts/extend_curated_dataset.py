@@ -144,8 +144,8 @@ def main_seed(db, cases=CASES, *, add_master=True):
     supplier_products = {}
     for sp in db.scalars(select(SupplierProduct).where(SupplierProduct.status == "ACTIVE")).all():
         supplier_products.setdefault(sp.product_id, []).append(sp)
-    buyer, receiver, inspector = (users[k] for k in ("buyer", "warehouse_receiver", "quality_inspector"))
-    finance, manager = users["finance_clerk"], users["finance_manager"]
+    buyer, receiver, inspector = (users[k] for k in ("BuyerUser", "WarehouseUser", "QualityInspector"))
+    finance, manager = users["FinanceClerk"], users["FinanceManager"]
 
     old_submitted = db.scalar(select(PurchaseRequest).where(PurchaseRequest.request_no == "PR-26003"))
     if old_submitted and not db.scalar(select(PurchaseRequestApproval.id).where(PurchaseRequestApproval.request_id == old_submitted.id)):

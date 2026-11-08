@@ -80,7 +80,13 @@ def main() -> None:
         for permission_id in set(permission_ids) - current_permission_ids:
             db.add(RolePermission(role_id=role.id, permission_id=permission_id))
 
-        user = db.scalar(select(User).where(User.username == settings.admin_username))
+        user = db.scalar(select(User).where(User.username.collate("utf8mb4_bin") == settings.admin_username))
+        if user is None and settings.admin_username == "SystemAdmin" and db.scalar(
+            select(User.id).where(User.username.collate("utf8mb4_bin") == "system_admin")
+        ) is not None:
+            raise RuntimeError("发现历史管理员 system_admin，请核对 ADMIN_USERNAME，避免创建重复管理员")
+        if user is None and db.scalar(select(User.id).where(User.username == settings.admin_username)) is not None:
+            raise RuntimeError("管理员登录名存在排序规则等价的其他账号，请人工核对")
         if user is None:
             user = User(
                 username=settings.admin_username,

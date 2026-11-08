@@ -12,7 +12,7 @@ pytestmark = pytest.mark.integration
 def test_dashboard_overview_returns_core_metrics(client: TestClient, demo_password: str) -> None:
     """管理层账号可以查询规范的 Dashboard 指标。"""
 
-    headers = login(client, "management_viewer", demo_password)
+    headers = login(client, "ManagementViewer", demo_password)
     response = client.get("/api/v1/dashboard/overview", headers=headers)
     assert response.status_code == 200, response.text
     body = response.json()
@@ -22,7 +22,7 @@ def test_dashboard_overview_returns_core_metrics(client: TestClient, demo_passwo
 
 
 def test_supplier_keeps_global_dashboard(client: TestClient, demo_password: str) -> None:
-    headers = login(client, "supplier_portal", demo_password)
+    headers = login(client, "SupplierUser", demo_password)
     response = client.get("/api/v1/dashboard/overview", headers=headers)
     assert response.status_code == 200, response.text
     assert response.json()["inventory_available"] is True
@@ -31,7 +31,7 @@ def test_supplier_keeps_global_dashboard(client: TestClient, demo_password: str)
 def test_buyer_cannot_trigger_overdue_scan(client: TestClient, demo_password: str) -> None:
     """普通采购员不能触发后台逾期扫描任务。"""
 
-    headers = login(client, "buyer", demo_password)
+    headers = login(client, "BuyerUser", demo_password)
     response = client.post("/api/v1/jobs/overdue-scan", headers=headers)
     assert response.status_code == 403
     assert response.json()["message"] == "无权访问"
@@ -40,7 +40,7 @@ def test_buyer_cannot_trigger_overdue_scan(client: TestClient, demo_password: st
 def test_dashboard_report_returns_sql_aggregates(client: TestClient, demo_password: str) -> None:
     """统计报表返回订单状态和供应商聚合结果。"""
 
-    headers = login(client, "management_viewer", demo_password)
+    headers = login(client, "ManagementViewer", demo_password)
     response = client.get("/api/v1/dashboard/report?date_from=2020-01-01&date_to=2030-12-31", headers=headers)
     assert response.status_code == 200, response.text
     body = response.json()
@@ -59,7 +59,7 @@ def test_dashboard_report_returns_sql_aggregates(client: TestClient, demo_passwo
 def test_dashboard_report_rejects_invalid_date_range(client: TestClient, demo_password: str) -> None:
     """统计开始日期晚于结束日期时返回中文业务错误。"""
 
-    headers = login(client, "management_viewer", demo_password)
+    headers = login(client, "ManagementViewer", demo_password)
     response = client.get("/api/v1/dashboard/report?date_from=2030-01-02&date_to=2030-01-01", headers=headers)
     assert response.status_code == 400
     assert "开始日期不能晚于结束日期" in response.json()["detail"]

@@ -73,7 +73,7 @@ def test_multi_item_result_requires_each_delivery_item(db_session) -> None:
     if acceptance is None:
         pytest.skip("测试数据库缺少验收单")
     first = db_session.scalar(select(DeliveryItem).where(DeliveryItem.delivery_id == acceptance.delivery_id))
-    admin = db_session.scalar(select(User).where(User.username == "system_admin"))
+    admin = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     if first is None or admin is None:
         pytest.skip("测试数据库缺少到货明细或管理员")
     second = DeliveryItem(
@@ -125,8 +125,8 @@ def test_standard_api_follows_permissions(client, db_session, demo_password) -> 
     product = db_session.scalar(select(Product).where(Product.status == "ACTIVE").order_by(Product.id))
     if product is None:
         pytest.skip("测试数据库缺少启用的产品")
-    admin = login(client, "system_admin", demo_password)
-    quality = login(client, "quality_inspector", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
+    quality = login(client, "QualityInspector", demo_password)
     payload = {
         "source_reference": "测试用经审核协议 V1",
         "criteria": [{"name": "纯度", "aliases": ["含量"], "kind": "NUMERIC", "unit": "%", "minimum": "99.5"}],
@@ -154,7 +154,7 @@ def test_review_decision_is_saved_without_changing_acceptance(client, db_session
     if item is None or attachment is None:
         pytest.skip("测试数据库缺少验收明细或报告附件")
     file = db_session.get(SysFile, attachment.file_id)
-    admin_user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    admin_user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     assert file is not None and admin_user is not None
     acceptance.inspector_id = admin_user.id
     snapshot = QualityReportReview(
@@ -169,14 +169,14 @@ def test_review_decision_is_saved_without_changing_acceptance(client, db_session
     db_session.add(record)
     db_session.flush()
     before = acceptance.result
-    manager = login(client, "quality_manager", demo_password)
-    inspector = login(client, "quality_inspector", demo_password)
+    manager = login(client, "QualityManager", demo_password)
+    inspector = login(client, "QualityInspector", demo_password)
     denied = client.post(
         f"/api/v1/quality-acceptances/{acceptance.id}/report-reviews/{record.id}/decision",
         headers=inspector, json={"status": "CONFIRMED", "reviewer_note": "自我复核"},
     )
     assert denied.status_code == 403
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     self_review = client.post(
         f"/api/v1/quality-acceptances/{acceptance.id}/report-reviews/{record.id}/decision",
         headers=admin, json={"status": "CONFIRMED", "reviewer_note": "管理员自我复核"},
@@ -212,7 +212,7 @@ def test_report_conflicts_and_item_correction_history(client, db_session, demo_p
     ).limit(2)).all()
     if item is None or not attachments:
         pytest.skip("测试数据库缺少到货明细或报告")
-    admin_user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    admin_user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     assert admin_user is not None
     if len(attachments) == 1:
         original = db_session.get(SysFile, attachments[0].file_id)
@@ -245,7 +245,7 @@ def test_report_conflicts_and_item_correction_history(client, db_session, demo_p
         db_session.add(record)
         db_session.flush()
         records.append(record)
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     root = f"/api/v1/quality-acceptances/{acceptance.id}"
     summary = client.get(f"{root}/report-summary/{item.id}", headers=admin)
     assert summary.status_code == 200, summary.text

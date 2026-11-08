@@ -84,8 +84,8 @@ def test_confirmed_actions_connect_request_rfq_review_award_order_and_submit(
     client, db_session, demo_password, chain_catalog, monkeypatch, chain_storage,
 ):
     unit, supplier, products = chain_catalog
-    buyer = login(client, 'buyer', demo_password)
-    manager = login(client, 'procurement_manager', demo_password)
+    buyer = login(client, 'BuyerUser', demo_password)
+    manager = login(client, 'ProcManager', demo_password)
     # 每个 HTTP 请求使用独立 identity map，贴近生产 get_db；commit 仅释放
     # SAVEPOINT，所有请求仍属于 conftest 管理的可回滚外部事务。
     connection = db_session.connection()
@@ -234,7 +234,7 @@ def test_quote_response_refreshes_loaded_collection_for_each_version(
 ):
     """expire_on_commit=False 下首份和修订报价都必须立即出现在响应中。"""
     unit, supplier, products = chain_catalog
-    buyer = login(client, 'buyer', demo_password)
+    buyer = login(client, 'BuyerUser', demo_password)
     rfq = _ok(client.post('/api/v1/rfqs', headers=buyer, json={
         'supplier_ids': [supplier.id],
         'items': [{'product_id': products[0].id, 'requested_name': products[0].product_name,

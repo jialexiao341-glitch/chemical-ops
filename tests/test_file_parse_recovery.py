@@ -11,7 +11,7 @@ from app.modules.system.model import User
 
 
 def test_recover_stale_processing_files(db_session) -> None:
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     assert user is not None
     stale = SysFile(
         file_name="stale.pdf",

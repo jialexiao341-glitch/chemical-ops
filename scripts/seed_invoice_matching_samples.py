@@ -40,8 +40,8 @@ def main():
         print(json.dumps(CASES, ensure_ascii=False))
         return
     with SessionLocal() as db:
-        clerk = db.scalar(select(User).where(User.username == 'finance_clerk'))
-        manager = db.scalar(select(User).where(User.username == 'finance_manager'))
+        clerk = db.scalar(select(User).where(User.username == 'FinanceClerk'))
+        manager = db.scalar(select(User).where(User.username == 'FinanceManager'))
         supplier = db.scalar(select(Supplier).where(Supplier.status == 'ACTIVE').order_by(Supplier.id))
         products = list(db.scalars(select(Product).where(Product.status == 'ACTIVE').order_by(Product.id).limit(2)))
         if not clerk or not manager or not supplier or len(products) < 2:

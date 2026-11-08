@@ -63,7 +63,7 @@ def test_actual_report_lookup_and_revoked_file_is_filtered(db_session, monkeypat
     from app.modules.files import service as file_service
     from app.modules.ai.schema import QualityAcceptanceInput
     db = db_session
-    user = db.scalar(select(User).where(User.username == 'system_admin'))
+    user = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     record = db.scalar(select(QualityReportReviewRecord).order_by(QualityReportReviewRecord.id.desc()))
     assert record is not None
     acceptance = db.get(QualityAcceptance, record.acceptance_id)

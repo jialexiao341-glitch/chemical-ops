@@ -35,7 +35,7 @@ page.on('console', (m) => {
 await page.goto('http://localhost:3000/', { waitUntil: 'networkidle' });
 await page.waitForTimeout(2500);
 const li = page.locator('input:visible');
-await li.nth(0).fill('system_admin');
+await li.nth(0).fill('SystemAdmin');
 await li.nth(1).fill('ChemicalOps@2026');
 await page.keyboard.press('Enter');
 await page.waitForTimeout(5000);

@@ -14,8 +14,8 @@ from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGr
 def test_assignment_options_and_inspector_respect_department_scope(db_session, client):
     from app.core.auth import get_current_user
     from app.main import app
-    manager = db_session.scalar(select(User).where(User.username == 'quality_manager'))
-    inspector = db_session.scalar(select(User).where(User.username == 'quality_inspector'))
+    manager = db_session.scalar(select(User).where(User.username == 'QualityManager'))
+    inspector = db_session.scalar(select(User).where(User.username == 'QualityInspector'))
     departments = list(db_session.scalars(select(PurchaseOrder.department_id).where(
         PurchaseOrder.department_id.is_not(None)).distinct().limit(2)))
     assert manager is not None and inspector is not None and len(departments) == 2

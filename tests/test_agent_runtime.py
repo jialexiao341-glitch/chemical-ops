@@ -1149,7 +1149,7 @@ def test_task_api_against_mysql_with_authenticated_user(client, db_session, demo
     """MySQL 事务回滚测试验证认证、迁移表、JSON 轨迹与 API；模型仍为替身。"""
     product = db_session.execute(select(Product.id, Product.product_code).where(Product.status == 'ACTIVE').limit(1)).first()
     assert product is not None
-    headers = login(client, 'system_admin', demo_password)
+    headers = login(client, 'SystemAdmin', demo_password)
     actions, _ = model_script
     actions.extend([tool('catalog.search_products', keyword=product.product_code),
         tool('inventory.query_available', product_id=product.id), {'action': 'finish', 'evidence_steps': [2]}])

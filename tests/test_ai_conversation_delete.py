@@ -10,13 +10,13 @@ from app.modules.system.crud import get_user_by_username
 
 
 def _login(client: TestClient, password: str) -> dict[str, str]:
-    response = client.post("/api/v1/auth/login", json={"username": "system_admin", "password": password})
+    response = client.post("/api/v1/auth/login", json={"username": "SystemAdmin", "password": password})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def test_delete_own_ai_conversation_removes_messages(client: TestClient, db_session, demo_password: str) -> None:
-    user = get_user_by_username(db_session, "system_admin")
+    user = get_user_by_username(db_session, "SystemAdmin")
     assert user is not None
     conversation = AIConversation(user_id=user.id, title="待删除会话", business_scene="GENERAL", permission_snapshot={}, status="ACTIVE")
     db_session.add(conversation)
@@ -33,7 +33,7 @@ def test_delete_own_ai_conversation_removes_messages(client: TestClient, db_sess
 
 
 def test_manage_own_ai_conversation(client: TestClient, db_session, demo_password: str) -> None:
-    user = get_user_by_username(db_session, "system_admin")
+    user = get_user_by_username(db_session, "SystemAdmin")
     assert user is not None
     conversation = AIConversation(user_id=user.id, title="原会话", business_scene="GENERAL", permission_snapshot={}, status="ACTIVE")
     db_session.add(conversation)
@@ -62,7 +62,7 @@ def test_delete_conversation_cancels_owned_running_tasks_and_draft(db_session):
     from app.modules.purchase_requests.model import PurchaseRequest
 
     from app.modules.system.model import User
-    user = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     conversation = AIConversation(user_id=user.id, title='生命周期回归', business_scene='GENERAL', permission_snapshot={}, status='ACTIVE')
     db_session.add(conversation); db_session.flush()
     task_id = uuid4().hex

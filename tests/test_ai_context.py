@@ -476,7 +476,7 @@ def test_context_ask_returns_trace_for_existing_order(client: TestClient, db_ses
     if order_id is None:
         pytest.skip("当前测试库没有采购订单样本")
 
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     response = client.post(
         "/api/v1/ai/context/ask",
         headers=headers,
@@ -498,7 +498,7 @@ def test_context_ask_traces_downstream_records_for_existing_request(client: Test
     if request_id is None:
         pytest.skip("当前测试库没有采购申请样本")
 
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     response = client.post(
         "/api/v1/ai/context/ask",
         headers=headers,
@@ -515,7 +515,7 @@ def test_context_ask_traces_downstream_records_for_existing_request(client: Test
 
 
 def test_context_ask_maps_missing_order_to_404(client: TestClient, db_session, demo_password) -> None:
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     missing_id = (db_session.scalar(select(PurchaseOrder.id).order_by(PurchaseOrder.id.desc())) or 0) + 1
     response = client.post(
         "/api/v1/ai/context/ask",
@@ -528,7 +528,7 @@ def test_context_ask_maps_missing_order_to_404(client: TestClient, db_session, d
 
 
 def test_context_ask_maps_unsupported_object_to_400(client: TestClient, demo_password) -> None:
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     response = client.post(
         "/api/v1/ai/context/ask",
         headers=headers,

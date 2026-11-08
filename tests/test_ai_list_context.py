@@ -47,9 +47,9 @@ def test_http_order_list_scope_filters_and_permission_revocation(client, db_sess
     from app.modules.suppliers.model import Supplier
     from app.modules.purchase_orders.model import PurchaseOrder
     from tests.conftest import login
-    actor = login(client, 'buyer', demo_password)
-    buyer = db_session.scalar(select(User).where(User.username == 'buyer'))
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    actor = login(client, 'BuyerUser', demo_password)
+    buyer = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     tag = uuid4().hex[:10]
     department = Department(department_code='CTX'+tag, department_name='隔离部门')
     supplier = Supplier(supplier_code='CTX'+tag, supplier_name='上下文测试供应商')

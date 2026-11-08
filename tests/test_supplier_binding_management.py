@@ -43,7 +43,7 @@ def test_binding_options_include_all_active_suppliers(client, db_session, demo_p
         for i in range(101)
     ])
     db_session.flush()
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     response = client.get("/api/v1/system/supplier-binding-options", headers=headers)
     assert response.status_code == 200, response.text
     options = response.json()
@@ -55,12 +55,12 @@ def test_binding_options_include_all_active_suppliers(client, db_session, demo_p
 
 def test_binding_create_repeat_replace_reactivate_and_scope(client, db_session, demo_password, binding_case):
     user, suppliers = binding_case
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     portal_headers = login(client, user.username, demo_password)
     path = f"/api/v1/system/users/{user.id}/supplier-binding"
     assert client.get(path, headers=headers).json() is None
     assert client.get("/api/v1/supplier-portal/orders", headers=portal_headers).status_code == 403
-    buyer_id = db_session.scalar(select(User.id).where(User.username == "buyer"))
+    buyer_id = db_session.scalar(select(User.id).where(User.username == "BuyerUser"))
     orders = [PurchaseOrder(po_no=f"BIND-PO-{uuid4().hex[:12]}", supplier_id=s.id,
                             buyer_id=buyer_id, order_amount=0, currency_code="CNY", status="ORDERED")
               for s in suppliers[:2]]
@@ -96,10 +96,10 @@ def test_binding_create_repeat_replace_reactivate_and_scope(client, db_session, 
     assert db_session.scalar(select(func.count()).select_from(SupplierPortalAccount).where(
         SupplierPortalAccount.user_id == user.id)) == 1
     log = db_session.scalar(select(AuditLog).where(AuditLog.action_type == "BIND_SUPPLIER", AuditLog.resource_id == user.id).order_by(AuditLog.id.desc()))
-    assert log.actor_id == db_session.scalar(select(User.id).where(User.username == "system_admin"))
+    assert log.actor_id == db_session.scalar(select(User.id).where(User.username == "SystemAdmin"))
 
 
-@pytest.mark.parametrize("username", ["buyer", "supplier_portal"])
+@pytest.mark.parametrize("username", ["BuyerUser", "SupplierUser"])
 def test_binding_management_requires_user_write(client, demo_password, binding_case, username):
     user, suppliers = binding_case
     headers = login(client, username, demo_password)
@@ -111,7 +111,7 @@ def test_binding_management_requires_user_write(client, demo_password, binding_c
 
 def test_binding_rejects_invalid_targets_without_changing_existing(client, db_session, demo_password, binding_case):
     user, suppliers = binding_case
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     path = f"/api/v1/system/users/{user.id}/supplier-binding"
     assert client.put(path, headers=headers, json={"supplier_id": suppliers[0].id}).status_code == 200
     for supplier_id, expected in [(suppliers[2].id, 400), (2147483647, 404), (0, 422), (None, 422)]:
@@ -126,10 +126,10 @@ def test_binding_rejects_invalid_targets_without_changing_existing(client, db_se
     assert client.get(path, headers=headers).json()["supplier_id"] == suppliers[0].id
 
 
-@pytest.mark.parametrize("username", ["system_admin", "buyer", "quality_manager"])
+@pytest.mark.parametrize("username", ["SystemAdmin", "BuyerUser", "QualityManager"])
 def test_binding_rejects_internal_roles(client, db_session, demo_password, binding_case, username):
     _, suppliers = binding_case
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     user_id = db_session.scalar(select(User.id).where(User.username == username))
     response = client.put(f"/api/v1/system/users/{user_id}/supplier-binding", headers=admin,
                           json={"supplier_id": suppliers[0].id})
@@ -139,7 +139,7 @@ def test_binding_rejects_internal_roles(client, db_session, demo_password, bindi
 
 def test_changing_portal_role_disables_binding(client, db_session, demo_password, binding_case):
     user, suppliers = binding_case
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     path = f"/api/v1/system/users/{user.id}"
     assert client.put(path + '/supplier-binding', headers=admin, json={"supplier_id": suppliers[0].id}).status_code == 200
     buyer = db_session.scalar(select(Role.id).where(Role.role_code == "BUYER"))

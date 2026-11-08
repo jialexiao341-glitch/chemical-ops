@@ -59,7 +59,7 @@ def test_fifo_outbound_preserves_currency_or_rejects_mixed(db_session, currencie
 
     batch = db_session.scalar(select(InventoryBatch).limit(1))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(1))
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     assert batch is not None and warehouse is not None and admin is not None
     product_id = batch.product_id
     from app.modules.products.model import Product
@@ -106,7 +106,7 @@ def test_inbound_cost_layer_uses_order_currency(db_session):
     order_item = db_session.scalar(select(PurchaseOrderItem).limit(1))
     order = db_session.get(PurchaseOrder, order_item.po_id)
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(1))
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     assert order is not None and warehouse is not None and admin is not None
     order.currency_code = 'USD'
     location = WarehouseLocation(warehouse_id=warehouse.id, location_code=f'T-{uuid4().hex[:12]}', location_name='测试', status='ACTIVE')

@@ -14,9 +14,9 @@ pytestmark = pytest.mark.integration
 
 
 def test_exception_suggestion_decision_is_idempotent_and_blocks_early_close(client, db_session, demo_password):
-    manager = login(client, "procurement_manager", demo_password)
-    viewer = login(client, "finance_viewer", demo_password)
-    manager_user = db_session.scalar(select(User).where(User.username == "procurement_manager"))
+    manager = login(client, "ProcManager", demo_password)
+    viewer = login(client, "FinanceViewer", demo_password)
+    manager_user = db_session.scalar(select(User).where(User.username == "ProcManager"))
     created = client.post("/api/v1/operation-exceptions", headers=manager, json={
         "exception_type": "OTHER", "source_type": "OTHER", "source_id": 987654332,
         "owner_id": manager_user.id, "severity": "HIGH", "description": "核查来源与影响",

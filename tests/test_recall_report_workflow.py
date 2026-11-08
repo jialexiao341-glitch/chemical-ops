@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def drill(client, db_session, demo_password):
-    receiver = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    receiver = db_session.scalar(select(User).where(User.username == "WarehouseUser"))
     sample = next(row for row in db_session.scalars(select(InventoryBalance).order_by(InventoryBalance.id)).all() if inventory_service._can_access_warehouse(db_session, receiver, row.warehouse_id))
     batch = InventoryBatch(product_id=sample.product_id, batch_no="TEST-REPORT-WORKFLOW")
     db_session.add(batch)
@@ -25,8 +25,8 @@ def drill(client, db_session, demo_password):
     balance = InventoryBalance(warehouse_id=sample.warehouse_id, location_id=sample.location_id, product_id=sample.product_id, batch_id=batch.id, unit_id=sample.unit_id, quantity=Decimal(0), locked_quantity=Decimal(0))
     db_session.add(balance)
     db_session.flush()
-    admin = login(client, "system_admin", demo_password)
-    warehouse = login(client, "warehouse_receiver", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
+    warehouse = login(client, "WarehouseUser", demo_password)
     base = f"/api/v1/insights/batch-impact/{balance.id}"
     snapshot = client.post(f"{base}/snapshots", headers=admin)
     assert snapshot.status_code == 200, snapshot.text
@@ -102,9 +102,9 @@ def test_report_cannot_bypass_permissions_or_reopened_checks(client, db_session,
     base, _, admin, warehouse, _, check_id = drill
     report = ready_report(client, drill)
     url = f"{base}/recall-reports/{report['id']}/workflow"
-    viewer = db_session.scalar(select(User).where(User.username == "finance_viewer"))
+    viewer = db_session.scalar(select(User).where(User.username == "FinanceViewer"))
     assert client.post(url, headers=admin, json={"action": "ASSIGN", "owner_id": viewer.id}).status_code == 400
-    viewer_headers = login(client, "finance_viewer", demo_password)
+    viewer_headers = login(client, "FinanceViewer", demo_password)
     assert client.post(url, headers=viewer_headers, json={"action": "SUBMIT", "conclusion": "完成"}).status_code == 403
     submitted = client.post(url, headers=admin, json={"action": "SUBMIT", "conclusion": "所有核查已完成"})
     assert submitted.status_code == 200, submitted.text

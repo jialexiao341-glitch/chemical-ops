@@ -136,7 +136,7 @@ def test_cross_user_cannot_load_conversation_or_routing_context(db_session):
 
 
 def test_revoked_history_is_not_sent_to_understanding_model(db_session, monkeypatch):
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     conversation = AIConversation(user_id=user.id, title="权限撤销", business_scene="GENERAL", status="ACTIVE",
                                   permission_snapshot=conversation_store.permission_snapshot(db_session, user))
     db_session.add(conversation)

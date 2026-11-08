@@ -10,8 +10,8 @@ from tests.test_agent_procurement_chain import chain_catalog
 
 def test_proposal_notification_once_owner_only_and_expiry(client, db_session, demo_password, chain_catalog, monkeypatch):
     unit, supplier, products = chain_catalog
-    buyer = login(client, 'buyer', demo_password)
-    manager = login(client, 'procurement_manager', demo_password)
+    buyer = login(client, 'BuyerUser', demo_password)
+    manager = login(client, 'ProcManager', demo_password)
     key = uuid4().hex
     payload = {'action_type': 'purchase_request.create_draft', 'idempotency_key': key,
                'payload': {'purpose': '通知验收', 'items': [{'product_id': products[0].id,
@@ -48,7 +48,7 @@ def test_proposal_notification_once_owner_only_and_expiry(client, db_session, de
 
 def test_cancelled_proposal_notification_shows_current_status(client, db_session, demo_password, chain_catalog):
     unit, _, products = chain_catalog
-    buyer = login(client, 'buyer', demo_password)
+    buyer = login(client, 'BuyerUser', demo_password)
     body = {'action_type': 'purchase_request.create_draft', 'idempotency_key': uuid4().hex,
             'payload': {'purpose': '取消验收', 'items': [{'product_id': products[0].id,
                 'requested_name': products[0].product_name, 'quantity': '4', 'unit_id': unit.id}]}}

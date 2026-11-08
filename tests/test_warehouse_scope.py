@@ -10,7 +10,7 @@ def test_configured_warehouse_scope_limits_access_and_admin_bypasses(db_session)
     from app.modules.inventory import service
     from app.modules.system.model import User, UserWarehouseScope, UserWarehouseGrant
 
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     warehouses = list(db_session.scalars(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(2)))
     assert user is not None and len(warehouses) == 2
     if db_session.get(UserWarehouseScope, user.id) is None:
@@ -28,7 +28,7 @@ def test_configured_warehouse_scope_limits_access_and_admin_bypasses(db_session)
     db_session.delete(db_session.get(UserWarehouseGrant, (user.id, warehouses[0].id)))
     db_session.flush()
     assert service.accessible_warehouse_ids(db_session, user) == set()
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     assert service.accessible_warehouse_ids(db_session, admin) is None
 
 
@@ -37,9 +37,9 @@ def test_only_admin_can_configure_warehouse_scope(client, db_session, demo_passw
     from app.modules.inventory.model import Warehouse
     from app.modules.system.model import User
 
-    admin = login(client, 'system_admin', demo_password)
-    manager = login(client, 'procurement_manager', demo_password)
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    admin = login(client, 'SystemAdmin', demo_password)
+    manager = login(client, 'ProcManager', demo_password)
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE'))
     assert user and warehouse
     url = f'/api/v1/system/users/{user.id}/warehouse-scope'
@@ -71,7 +71,7 @@ def test_disabled_warehouse_is_removed_from_scope_snapshot(db_session):
     from app.modules.system.data_scope import warehouse_scope_snapshot
     from app.modules.system.model import User, UserWarehouseScope, UserWarehouseGrant
 
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(1))
     assert user and warehouse
     if db_session.get(UserWarehouseScope, user.id) is None:
@@ -124,7 +124,7 @@ def test_exception_owner_cannot_bypass_empty_warehouse_scope(db_session):
     from app.modules.operation_exceptions import service
     from app.modules.system.model import User, UserWarehouseScope
 
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     balance = db_session.scalar(select(InventoryBalance).limit(1))
     assert user is not None and balance is not None
     if db_session.get(UserWarehouseScope, user.id) is None:
@@ -142,7 +142,7 @@ def test_agent_association_sql_accepts_warehouse_scoped_exception_filter(db_sess
     from app.modules.ai.catalog import CATALOG
     from app.modules.system.model import User, UserWarehouseScope
 
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     if db_session.get(UserWarehouseScope, user.id) is None:
         db_session.add(UserWarehouseScope(user_id=user.id))
     db_session.flush()
@@ -205,7 +205,7 @@ def test_stocktake_execute_requires_independent_permission(client, db_session, d
     from tests.conftest import login
     from app.modules.system import crud
 
-    headers = login(client, 'warehouse_receiver', demo_password)
+    headers = login(client, 'WarehouseUser', demo_password)
     permissions = ['warehouse.inventory.stocktake.write']
     monkeypatch.setattr(crud, 'get_user_permission_codes', lambda *_: permissions)
     url = '/api/v1/inventory/stocktakes/999999999/execute'
@@ -221,8 +221,8 @@ def test_manager_approves_other_issue_only_with_permission_and_scope(client, db_
     from app.modules.system.model import User, UserWarehouseGrant
     from tests.conftest import login, grant_test_warehouse
 
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
-    applicant = db_session.scalar(select(User).where(User.username == 'buyer'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
+    applicant = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
     balance = db_session.scalar(select(InventoryBalance).where(InventoryBalance.quantity > 0).limit(1))
     assert manager and applicant and balance
     grant = db_session.get(UserWarehouseGrant, (manager.id, balance.warehouse_id))
@@ -235,7 +235,7 @@ def test_manager_approves_other_issue_only_with_permission_and_scope(client, db_
         location_id=balance.location_id, batch_id=balance.batch_id, unit_id=balance.unit_id, requested_quantity=1)]
     db_session.add(issue)
     db_session.flush()
-    headers = login(client, 'procurement_manager', demo_password)
+    headers = login(client, 'ProcManager', demo_password)
     permissions = []
     monkeypatch.setattr(crud, 'get_user_permission_codes', lambda *_: permissions)
     url = f'/api/v1/inventory/issue-requests/{issue.id}/approve'
@@ -262,9 +262,9 @@ def test_admin_can_configure_mixed_supplier_internal_account(client, db_session,
     from app.modules.system.model import Role, User, UserRole
     from tests.conftest import login
 
-    headers = login(client, 'system_admin', demo_password)
-    user = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
-    supplier = db_session.scalar(select(User).where(User.username == 'supplier_portal'))
+    headers = login(client, 'SystemAdmin', demo_password)
+    user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
+    supplier = db_session.scalar(select(User).where(User.username == 'SupplierUser'))
     portal_role = db_session.scalar(select(Role).where(Role.role_code == 'SUPPLIER_PORTAL'))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE'))
     assert user and supplier and portal_role and warehouse
@@ -289,7 +289,7 @@ def test_pure_supplier_cannot_reuse_old_internal_warehouse_grant(db_session):
     from app.modules.system.model import User
     from tests.conftest import grant_test_warehouse
 
-    supplier = db_session.scalar(select(User).where(User.username == 'supplier_portal'))
+    supplier = db_session.scalar(select(User).where(User.username == 'SupplierUser'))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE'))
     assert supplier and warehouse
     grant_test_warehouse(db_session, supplier.id, warehouse.id)
@@ -301,9 +301,9 @@ def test_global_notification_excludes_mixed_supplier_internal_user(db_session):
     from app.modules.notifications.service import notify_users
     from app.modules.system.model import Role, User, UserRole
 
-    manager = db_session.scalar(select(User).where(User.username == 'procurement_manager'))
-    supplier = db_session.scalar(select(User).where(User.username == 'supplier_portal'))
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
+    supplier = db_session.scalar(select(User).where(User.username == 'SupplierUser'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     role = db_session.scalar(select(Role).where(Role.role_code == 'SUPPLIER_PORTAL'))
     assert manager and supplier and admin and role
     if db_session.get(UserRole, (manager.id, role.id)) is None:

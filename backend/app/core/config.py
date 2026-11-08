@@ -144,7 +144,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
-    admin_username: str = "system_admin"
+    admin_username: str = "SystemAdmin"
     admin_password: str = ""
     admin_display_name: str = "系统管理员"
     demo_default_password: str = ""

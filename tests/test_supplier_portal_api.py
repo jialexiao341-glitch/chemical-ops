@@ -26,7 +26,7 @@ def test_supplier_portal_isolated_and_confirmation_is_idempotent(client: TestCli
     """供应商账号只能访问自己的订单，订单确认重复执行会被拒绝。"""
 
     supplier_id = db_session.scalar(select(Supplier.id).where(Supplier.status == "ACTIVE").limit(1))
-    buyer_id = db_session.scalar(select(User.id).where(User.username == "buyer"))
+    buyer_id = db_session.scalar(select(User.id).where(User.username == "BuyerUser"))
     role_id = db_session.scalar(select(Role.id).where(Role.role_code == "SUPPLIER_PORTAL"))
     assert supplier_id is not None and buyer_id is not None and role_id is not None
     suffix = uuid4().hex[:10]
@@ -101,10 +101,10 @@ def test_internal_admin_without_supplier_binding_cannot_use_supplier_portal(clie
     """系统管理员没有供应商门户绑定时也不能冒充供应商访问门户。"""
 
     # 显式构造未绑定状态，避免依赖开发库管理员的实际演示绑定。
-    admin_id = db_session.scalar(select(User.id).where(User.username == "system_admin"))
+    admin_id = db_session.scalar(select(User.id).where(User.username == "SystemAdmin"))
     db_session.query(SupplierPortalAccount).filter_by(user_id=admin_id).update({"status": "INACTIVE"})
     db_session.flush()
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     response = client.get("/api/v1/supplier-portal/orders", headers=admin)
     assert response.status_code == 403
     assert response.json()["message"] == "无权访问"
@@ -114,7 +114,7 @@ def test_supplier_eta_and_shipment_notice_are_scoped_and_quantity_checked(client
     """供应商可维护本方交期并提交发货通知，服务端校验未到货余量。"""
 
     supplier_id = db_session.scalar(select(Supplier.id).where(Supplier.status == "ACTIVE").limit(1))
-    buyer_id = db_session.scalar(select(User.id).where(User.username == "buyer"))
+    buyer_id = db_session.scalar(select(User.id).where(User.username == "BuyerUser"))
     role_id = db_session.scalar(select(Role.id).where(Role.role_code == "SUPPLIER_PORTAL"))
     unit = db_session.scalar(select(Unit).where(Unit.status == "ACTIVE").limit(1))
     product = db_session.scalar(select(Product).where(Product.status == "ACTIVE").limit(1))
@@ -187,7 +187,7 @@ def test_supplier_quality_document_upload_and_download_are_binding_scoped(client
         monkeypatch.setattr(file_service, "_storage_backend", lambda: "local")
         monkeypatch.setattr(file_service, "storage_root", lambda: tmp_path)
     supplier_id = db_session.scalar(select(Supplier.id).where(Supplier.status == "ACTIVE").limit(1))
-    buyer_id = db_session.scalar(select(User.id).where(User.username == "buyer"))
+    buyer_id = db_session.scalar(select(User.id).where(User.username == "BuyerUser"))
     role_id = db_session.scalar(select(Role.id).where(Role.role_code == "SUPPLIER_PORTAL"))
     assert supplier_id is not None and buyer_id is not None and role_id is not None
     suffix = uuid4().hex[:10]
@@ -224,9 +224,9 @@ def test_supplier_quality_document_upload_and_download_are_binding_scoped(client
     assert downloaded.status_code == 200, downloaded.text
     assert downloaded.content == b"COA: batch verified"
 
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     # 未绑定账号不得读取；该状态仅在测试事务内设置，结束后回滚。
-    admin_id = db_session.scalar(select(User.id).where(User.username == "system_admin"))
+    admin_id = db_session.scalar(select(User.id).where(User.username == "SystemAdmin"))
     db_session.query(SupplierPortalAccount).filter_by(user_id=admin_id).update({"status": "INACTIVE"})
     db_session.flush()
     forbidden = client.get(f"/api/v1/supplier-portal/quality-documents/{document_id}/download", headers=admin)
@@ -237,7 +237,7 @@ def test_supplier_portal_rfq_scope_quote_submission_and_revision(client: TestCli
     """供应商仅能读取受邀询价，提交的报价绑定登录账号供应商并可留版本。"""
 
     supplier_id = db_session.scalar(select(Supplier.id).where(Supplier.status == "ACTIVE").limit(1))
-    buyer_id = db_session.scalar(select(User.id).where(User.username == "buyer"))
+    buyer_id = db_session.scalar(select(User.id).where(User.username == "BuyerUser"))
     role_id = db_session.scalar(select(Role.id).where(Role.role_code == "SUPPLIER_PORTAL"))
     unit_id = db_session.scalar(select(Unit.id).where(Unit.status == "ACTIVE").limit(1))
     assert supplier_id is not None and buyer_id is not None and role_id is not None and unit_id is not None

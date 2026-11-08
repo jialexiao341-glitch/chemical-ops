@@ -36,7 +36,7 @@ def test_task_list_is_owner_scoped_and_paged(db_session, monkeypatch):
 
 
 def test_export_rechecks_scope_and_escapes_formulas(db_session, monkeypatch):
-    user = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     task = AIAgentTask(id=uuid4().hex, user_id=user.id, status='SUCCEEDED', revision=1,
         payload={'messages': [], 'trace': [{'step': 1, 'action': 'call_tool', 'tool': 'catalog.search_products',
             'status': 'FAILED', 'arguments': {'keyword': '试剂'}, 'result': '=HYPERLINK("https://example.invalid")'}]},
@@ -50,11 +50,11 @@ def test_export_rechecks_scope_and_escapes_formulas(db_session, monkeypatch):
     with pytest.raises(AuthorizationError):
         agent_runtime.export_task_csv(db_session, user, task.id)
     with pytest.raises(ResourceNotFoundError):
-        agent_runtime.export_task_csv(db_session, db_session.scalar(select(User).where(User.username == 'buyer')), task.id)
+        agent_runtime.export_task_csv(db_session, db_session.scalar(select(User).where(User.username == 'BuyerUser')), task.id)
 
 
 def test_patch_draft_refreshes_hash_and_requires_new_confirmation(db_session):
-    user = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     unit = db_session.scalar(select(Unit).where(Unit.status == 'ACTIVE'))
     payload = {'department_id': user.department_id, 'purpose': '旧用途', 'priority': 'NORMAL',
         'currency_code': 'CNY', 'items': [{'requested_name': '试剂', 'quantity': '2', 'unit_id': unit.id}]}
@@ -80,7 +80,7 @@ def test_patch_draft_refreshes_hash_and_requires_new_confirmation(db_session):
 
 def test_retention_marks_expired_previews_and_purges_only_old_terminal_tasks(db_session):
     now = datetime(2026, 10, 21)
-    user = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     old_id, live_id = uuid4().hex, uuid4().hex
     old_task = AIAgentTask(id=old_id, user_id=user.id, status='SUCCEEDED', revision=2,
         payload={'trace': [{'private': 'expired'}]}, reply='expired', created_at=now-timedelta(days=40),

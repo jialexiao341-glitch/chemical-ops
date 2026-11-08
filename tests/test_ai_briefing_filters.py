@@ -31,7 +31,7 @@ def _fake_chat_response(content: str) -> AIChatResponse:
 def _login(client: TestClient, password: str) -> dict[str, str]:
     response = client.post(
         "/api/v1/auth/login",
-        json={"username": "system_admin", "password": password},
+        json={"username": "SystemAdmin", "password": password},
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}

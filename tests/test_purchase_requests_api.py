@@ -12,7 +12,7 @@ pytestmark = pytest.mark.integration
 def test_legacy_submitted_request_can_be_approved(client: TestClient, demo_password: str) -> None:
     """兼容数据库中 SUBMITTED 状态的历史采购申请审批。"""
 
-    manager = login(client, "procurement_manager", demo_password)
+    manager = login(client, "ProcManager", demo_password)
     listed = client.get(
         "/api/v1/purchase-requests?status=SUBMITTED&page=1&page_size=100",
         headers=manager,

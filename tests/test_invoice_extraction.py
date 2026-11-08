@@ -47,7 +47,7 @@ def test_parse_preview_and_confirmed_invoice_link_use_real_services(client, db_s
     from app.core.errors import BusinessValidationError, DuplicateResourceError
     import pytest
     db = db_session
-    actor = db.scalar(select(User).where(User.username == 'system_admin'))
+    actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     total = select(func.coalesce(func.sum(FinanceInvoice.amount_incl_tax), 0)).where(
         FinanceInvoice.reconciliation_id == FinanceReconciliation.id,
         FinanceInvoice.status.in_(['DRAFT', 'SUBMITTED', 'VERIFIED'])).scalar_subquery()
@@ -87,9 +87,9 @@ def test_parse_preview_and_confirmed_invoice_link_use_real_services(client, db_s
         attachment = db.scalar(select(SysFileAttachment).where(SysFileAttachment.file_id == candidate['file_id']))
         assert attachment.resource_type == 'FINANCE_INVOICE' and attachment.resource_id == invoice.id
         assert db.get(SysFile, candidate['file_id']).uploader_id == actor.id
-        manager = db.scalar(select(User).where(User.username == 'finance_manager'))
+        manager = db.scalar(select(User).where(User.username == 'FinanceManager'))
         assert files.get_file(db, manager, candidate['file_id']).id == candidate['file_id']
-        buyer = db.scalar(select(User).where(User.username == 'buyer'))
+        buyer = db.scalar(select(User).where(User.username == 'BuyerUser'))
         from app.core.errors import ResourceNotFoundError
         with pytest.raises(ResourceNotFoundError):
             files.get_file(db, buyer, candidate['file_id'])
@@ -121,8 +121,8 @@ def test_invalid_file_and_revoked_permission_never_upload(client, db_session, mo
     from app.modules.system.model import User
     from unittest.mock import Mock
     db = db_session
-    actor = db.scalar(select(User).where(User.username == 'system_admin'))
-    buyer = db.scalar(select(User).where(User.username == 'buyer'))
+    actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
+    buyer = db.scalar(select(User).where(User.username == 'BuyerUser'))
     rec = db.scalar(select(FinanceReconciliation).where(FinanceReconciliation.status == 'CONFIRMED').limit(1))
     upload = Mock()
     monkeypatch.setattr(files, 'upload_file', upload)
@@ -151,7 +151,7 @@ def test_write_permission_rechecked_after_model_call(client, db_session, monkeyp
     from app.modules.files import service as files
     from app.modules.finance.model import FinanceReconciliation
     from app.modules.system.model import User
-    actor = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    actor = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     rec = db_session.scalar(select(FinanceReconciliation).where(FinanceReconciliation.status == 'CONFIRMED').limit(1))
     async def fake_chat(*args, **kwargs):
         return SimpleNamespace(answer=json.dumps({'invoice_number':'1234', 'evidence':{'invoice_number':'发票号码：1234'}}, ensure_ascii=False), message=SimpleNamespace(content=''))
@@ -183,8 +183,8 @@ def test_other_users_upload_cannot_be_used_as_invoice_source(db_session):
     from app.modules.system.model import User
     import pytest
     db = db_session
-    actor = db.scalar(select(User).where(User.username == 'system_admin'))
-    other = db.scalar(select(User).where(User.username == 'buyer'))
+    actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
+    other = db.scalar(select(User).where(User.username == 'BuyerUser'))
     total = select(func.coalesce(func.sum(FinanceInvoice.amount_incl_tax), 0)).where(
         FinanceInvoice.reconciliation_id == FinanceReconciliation.id,
         FinanceInvoice.status.in_(['DRAFT', 'SUBMITTED', 'VERIFIED'])).scalar_subquery()

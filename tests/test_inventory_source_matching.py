@@ -27,7 +27,7 @@ pytestmark = pytest.mark.integration
 def executed_line(db_session, request):
     kind = request.param
     balance = db_session.scalar(select(InventoryBalance).order_by(InventoryBalance.id))
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     assert balance is not None and user is not None
     fields = dict(product_id=balance.product_id, batch_id=balance.batch_id, unit_id=balance.unit_id)
     slot = dict(warehouse_id=balance.warehouse_id, location_id=balance.location_id)
@@ -134,7 +134,7 @@ def test_report_and_checklist_include_both_transfer_sides(client, db_session, de
     db_session.add(inbound)
     db_session.flush()
     balance = db_session.scalar(select(InventoryBalance).where(InventoryBalance.batch_id == item.batch_id, InventoryBalance.warehouse_id == item.source_warehouse_id, InventoryBalance.location_id == item.source_location_id))
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     base = f"/api/v1/insights/batch-impact/{balance.id}"
     snapshot = client.post(f"{base}/snapshots", headers=admin)
     assert snapshot.status_code == 200, snapshot.text

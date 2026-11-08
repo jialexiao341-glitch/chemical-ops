@@ -33,7 +33,7 @@ def test_upload_download_and_attach_file(
     """验证文件元数据、下载和业务附件去重。"""
 
     _use_local_storage(monkeypatch, tmp_path, request)
-    manager = login(client, "procurement_manager", demo_password)
+    manager = login(client, "ProcManager", demo_password)
     order = db_session.scalar(select(PurchaseOrder).order_by(PurchaseOrder.id))
     assert order is not None
     order.status = "DRAFT"
@@ -60,7 +60,7 @@ def test_upload_download_and_attach_file(
     assert duplicate.status_code == 409
     order.status = "COMPLETED"
     db_session.flush()
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     locked = client.post(f"/api/v1/files/{file_id}/attachments", headers=admin, json={"resource_type": "PURCHASE_ORDER", "resource_id": order_id})
     assert locked.status_code == 400
     listed = client.get(f"/api/v1/files/attachments/PURCHASE_ORDER/{order_id}", headers=manager)
@@ -74,7 +74,7 @@ def test_upload_download_and_attach_file(
         files={"file": ("private.txt", b"private", "text/plain")},
     )
     assert private_upload.status_code == 201, private_upload.text
-    finance_manager = login(client, "finance_manager", demo_password)
+    finance_manager = login(client, "FinanceManager", demo_password)
     private_download = client.get(f"/api/v1/files/{private_upload.json()['id']}/download", headers=finance_manager)
     assert private_download.status_code == 404
     private_attach = client.post(f"/api/v1/files/{private_upload.json()['id']}/attachments", headers=finance_manager, json={"resource_type": "PURCHASE_ORDER", "resource_id": order_id})
@@ -91,7 +91,7 @@ def test_linked_file_requires_business_resource_permission(
     """具备通用文件权限但没有采购订单权限的用户不能通过文件 ID 绕过资源权限。"""
 
     _use_local_storage(monkeypatch, tmp_path, request)
-    procurement_manager = login(client, "procurement_manager", demo_password)
+    procurement_manager = login(client, "ProcManager", demo_password)
     order = db_session.scalar(select(PurchaseOrder).order_by(PurchaseOrder.id))
     assert order is not None
     order.status = "DRAFT"
@@ -112,7 +112,7 @@ def test_linked_file_requires_business_resource_permission(
     )
     assert attached.status_code == 201, attached.text
 
-    warehouse_receiver = login(client, "warehouse_receiver", demo_password)
+    warehouse_receiver = login(client, "WarehouseUser", demo_password)
     assert client.get(f"/api/v1/files/{file_id}", headers=warehouse_receiver).status_code == 404
     assert client.get(f"/api/v1/files/{file_id}/download", headers=warehouse_receiver).status_code == 404
     assert client.get(f"/api/v1/files/attachments/PURCHASE_ORDER/{order_id}", headers=warehouse_receiver).status_code == 404
@@ -157,7 +157,7 @@ def test_minio_storage_adapter_round_trip(db_session) -> None:
     fake_values = settings.model_dump()
     fake_values.update(file_storage_backend="minio", minio_access_key="access", minio_secret_key="secret", minio_bucket="bucket")
     fake_settings = SimpleNamespace(**fake_values)
-    original_user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    original_user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     assert original_user is not None
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(service, "get_settings", lambda: fake_settings)
@@ -174,7 +174,7 @@ def test_minio_storage_adapter_round_trip(db_session) -> None:
 def test_upload_rejects_unsupported_or_mismatched_files(client: TestClient, demo_password: str) -> None:
     """上传入口拒绝未知扩展名、错误 MIME 和不匹配的二进制文件内容。"""
 
-    manager = login(client, "procurement_manager", demo_password)
+    manager = login(client, "ProcManager", demo_password)
     unsupported = client.post(
         "/api/v1/files",
         headers=manager,

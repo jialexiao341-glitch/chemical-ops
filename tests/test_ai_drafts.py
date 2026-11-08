@@ -35,7 +35,7 @@ def test_preview_endpoint_is_available_to_authorized_user_without_creating_a_req
     monkeypatch.setattr(controller.drafts_service, "propose_purchase_request_draft", fake_proposal)
     token_response = client.post(
         "/api/v1/auth/login",
-        json={"username": "system_admin", "password": demo_password},
+        json={"username": "SystemAdmin", "password": demo_password},
     )
     assert token_response.status_code == 200, token_response.text
     response = client.post(

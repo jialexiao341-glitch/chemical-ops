@@ -45,8 +45,8 @@ def test_stream_endpoint_authorizes_and_returns_incremental_evidence(client, db_
     from app.modules.suppliers.model import Supplier
     from app.modules.purchase_orders.model import PurchaseOrder
     from tests.conftest import login
-    buyer = db_session.scalar(select(User).where(User.username == 'buyer'))
-    headers = login(client, 'buyer', demo_password)
+    buyer = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
+    headers = login(client, 'BuyerUser', demo_password)
     tag = uuid4().hex[:10]
     supplier = Supplier(supplier_code='SSE'+tag, supplier_name='流式测试供应商')
     db_session.add(supplier); db_session.flush()
@@ -80,8 +80,8 @@ def test_floating_conversation_is_separate_from_workspace(db_session, demo_passw
     from app.modules.system.model import User
     from tests.conftest import login
     import pytest
-    login(client, 'buyer', demo_password)
-    user = db_session.scalar(select(User).where(User.username == 'buyer'))
+    login(client, 'BuyerUser', demo_password)
+    user = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
     data = AIChatRequest(messages=[AIChatMessage(role='user', content='浮窗隔离验收')], conversation_scene='FLOAT')
     conversation = conversation_store.ensure_conversation(db_session, user, data)
     db_session.flush()

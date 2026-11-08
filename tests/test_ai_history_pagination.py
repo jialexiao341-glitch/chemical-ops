@@ -25,7 +25,7 @@ def test_history_page_api_is_owned_and_preserves_messages(client, db_session):
     from app.modules.system.model import User
     from types import SimpleNamespace
     db = db_session
-    owner = db.scalar(select(User).where(User.username == 'system_admin'))
+    owner = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     conversation = AIConversation(user_id=owner.id, title='分页测试', business_scene='GENERAL', permission_snapshot={}, status='ACTIVE')
     db.add(conversation); db.flush()
     for i in range(5):

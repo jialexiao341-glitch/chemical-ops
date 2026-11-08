@@ -14,7 +14,7 @@ def test_balance_api_reports_manual_and_quality_holds_independently(client, db_s
         .where(InventoryBalance.quantity > 0).limit(1)).first()
     assert row is not None
     balance, batch, acceptance = row
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     balance.status = 'AVAILABLE'
     balance.locked_quantity = 0
     batch.status = 'ACTIVE'  # 修复前的历史复检数据

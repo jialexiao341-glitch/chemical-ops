@@ -78,7 +78,7 @@ async def main(output: Path | None = None) -> int:
         raise SystemExit("只在已配置模型的开发环境运行")
     db = SessionLocal()
     try:
-        user = db.scalar(select(User).where(User.username == "system_admin"))
+        user = db.scalar(select(User).where(User.username == "SystemAdmin"))
         if user is None:
             raise SystemExit("缺少用于只读评估的管理员账号")
         results = []

@@ -31,7 +31,7 @@ def user(db, name):
 
 
 def test_supplier_counts_all_records_including_older_than_other_suppliers(db_session):
-    admin = user(db_session, "system_admin")
+    admin = user(db_session, "SystemAdmin")
     suffix = uuid4().hex[:10]
     target = Supplier(supplier_code=f"REG-{suffix}", supplier_name="完整样本供应商")
     other = Supplier(supplier_code=f"OTHER-{suffix}", supplier_name="其他供应商")
@@ -54,7 +54,7 @@ def test_supplier_counts_all_records_including_older_than_other_suppliers(db_ses
 
 
 def test_consumption_excludes_transfers_returns_and_uses_same_inventory_scope(db_session):
-    admin = user(db_session, "system_admin")
+    admin = user(db_session, "SystemAdmin")
     balance = db_session.scalar(select(InventoryBalance))
     assert balance is not None
     before = {x.label: x.value for x in _replenishment(db_session, admin, balance.id).evidence}
@@ -77,9 +77,9 @@ def test_consumption_excludes_transfers_returns_and_uses_same_inventory_scope(db
 
 
 def test_financial_scope_matches_lists_details_queries_and_does_not_grant_order_writes(client, db_session, demo_password):
-    clerk = user(db_session, "finance_clerk")
-    viewer = user(db_session, "finance_viewer")
-    buyer = user(db_session, "system_admin")
+    clerk = user(db_session, "FinanceClerk")
+    viewer = user(db_session, "FinanceViewer")
+    buyer = user(db_session, "SystemAdmin")
     supplier = db_session.scalar(select(Supplier))
     suffix = uuid4().hex[:10]
     # No department and a different buyer makes the order invisible to an ordinary viewer.
@@ -96,8 +96,8 @@ def test_financial_scope_matches_lists_details_queries_and_does_not_grant_order_
     assert orders.read_order(db_session, clerk, order.id).id == order.id
     with pytest.raises(ResourceNotFoundError):
         orders.get_order(db_session, clerk, order.id)
-    headers = login(client, "finance_clerk", demo_password)
-    restricted = login(client, "finance_viewer", demo_password)
+    headers = login(client, "FinanceClerk", demo_password)
+    restricted = login(client, "FinanceViewer", demo_password)
     for name, value in [("reconciliations", rec), *zip(["invoices", "payments", "settlements"], documents)]:
         assert client.get(f"/api/v1/finance/{name}/{value.id}", headers=headers).status_code == 200
         denied = client.get(f"/api/v1/finance/{name}/{value.id}", headers=restricted)
@@ -174,8 +174,8 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
     from app.modules.inventory.model import Warehouse, WarehouseLocation
     from app.modules.operation_exceptions.model import OperationException
 
-    actor = user(db_session, "quality_inspector" if dataset == "quality_acceptances" else "warehouse_receiver" if dataset == "inventory" else "buyer")
-    other = user(db_session, "system_admin")
+    actor = user(db_session, "QualityInspector" if dataset == "quality_acceptances" else "WarehouseUser" if dataset == "inventory" else "BuyerUser")
+    other = user(db_session, "SystemAdmin")
     actor.department_id = None
     suffix = uuid4().hex[:12]
     template_order = db_session.scalar(select(PurchaseOrder))
@@ -230,14 +230,14 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
         assert quality.get_acceptance(db_session, actor, record.id).id == record.id
 
 
-@pytest.mark.parametrize("username", ["warehouse_receiver", "buyer", "finance_viewer"])
+@pytest.mark.parametrize("username", ["WarehouseUser", "BuyerUser", "FinanceViewer"])
 def test_quality_readonly_scope_matches_detail_total_sql_and_attachment(db_session, username):
     from app.modules.quality_acceptances.model import QualityAcceptance
     from app.modules.quality_acceptances import service as quality
     from app.modules.files.service import _can_access_resource_instance
 
     actor = user(db_session, username)
-    other = user(db_session, "system_admin")
+    other = user(db_session, "SystemAdmin")
     actor.department_id = None
     template = db_session.scalar(select(PurchaseOrder))
     suffix = uuid4().hex[:12]

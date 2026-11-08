@@ -1,6 +1,16 @@
 """内置角色授权基线的纯静态回归。"""
 
-from scripts.seed_demo_accounts import PERMISSIONS, ROLE_SCOPES
+from scripts.seed_demo_accounts import LEGACY_USERNAMES, PERMISSIONS, ROLE_SCOPES, USERS
+
+
+def test_demo_usernames_are_unique_and_cover_legacy_names() -> None:
+    usernames = [username for username, *_ in USERS]
+    assert len(usernames) == len(set(usernames)) == 12
+    assert set(usernames) == set(LEGACY_USERNAMES)
+    aliases = [alias for names in LEGACY_USERNAMES.values() for alias in names]
+    assert len(aliases) == len(set(aliases)) == 15
+    assert LEGACY_USERNAMES["QualityInspector"] == ("quality_inspector", "quality")
+    assert LEGACY_USERNAMES["WarehouseUser"] == ("warehouse_receiver", "warehouse")
 
 
 def test_dashboard_and_ai_baseline_for_all_roles() -> None:

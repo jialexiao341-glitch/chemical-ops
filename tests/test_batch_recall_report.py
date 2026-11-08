@@ -17,8 +17,8 @@ pytestmark = pytest.mark.integration
 def test_recall_report_is_scoped_saved_and_keeps_its_original_state(client, db_session, demo_password):
     balance = db_session.scalar(select(InventoryBalance).order_by(InventoryBalance.id))
     assert balance is not None
-    admin = login(client, "system_admin", demo_password)
-    viewer = login(client, "finance_viewer", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
+    viewer = login(client, "FinanceViewer", demo_password)
     base = f"/api/v1/insights/batch-impact/{balance.id}"
 
     assert client.post(f"{base}/recall-reports", headers=viewer).status_code in {403, 404}
@@ -46,7 +46,7 @@ def test_recall_report_is_scoped_saved_and_keeps_its_original_state(client, db_s
 
 def test_recall_report_marks_unresolved_source_and_unknown_adjustment(client, db_session, demo_password):
     balance = db_session.scalar(select(InventoryBalance).order_by(InventoryBalance.id))
-    admin_user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    admin_user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     assert balance is not None and admin_user is not None
     for number, tx_type in enumerate(("OUTBOUND", "ADJUSTMENT"), start=1):
         db_session.add(InventoryTransaction(
@@ -57,7 +57,7 @@ def test_recall_report_marks_unresolved_source_and_unknown_adjustment(client, db
             operator_id=admin_user.id,
         ))
     db_session.flush()
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     response = client.post(f"/api/v1/insights/batch-impact/{balance.id}/recall-reports", headers=admin)
     assert response.status_code == 200, response.text
     report = response.json()["result_json"]

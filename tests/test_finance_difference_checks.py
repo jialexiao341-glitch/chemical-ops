@@ -23,8 +23,8 @@ pytestmark = pytest.mark.integration
 
 
 def test_receipt_line_and_document_review_are_separate(client, db_session, demo_password):
-    clerk_user = db_session.scalar(select(User).where(User.username == "finance_clerk"))
-    manager_user = db_session.scalar(select(User).where(User.username == "finance_manager"))
+    clerk_user = db_session.scalar(select(User).where(User.username == "FinanceClerk"))
+    manager_user = db_session.scalar(select(User).where(User.username == "FinanceManager"))
     supplier = db_session.scalar(select(Supplier).where(Supplier.status == "ACTIVE"))
     product = db_session.scalar(select(Product).where(Product.status == "ACTIVE"))
     assert clerk_user and manager_user and supplier and product
@@ -50,9 +50,9 @@ def test_receipt_line_and_document_review_are_separate(client, db_session, demo_
     ])
     db_session.flush()
 
-    clerk = login(client, "finance_clerk", demo_password)
-    manager = login(client, "finance_manager", demo_password)
-    viewer = login(client, "finance_viewer", demo_password)
+    clerk = login(client, "FinanceClerk", demo_password)
+    manager = login(client, "FinanceManager", demo_password)
+    viewer = login(client, "FinanceViewer", demo_password)
     base = f"/api/v1/insights/finance-difference/{order.id}"
     analysis = client.get(base, headers=clerk)
     assert analysis.status_code == 200, analysis.text

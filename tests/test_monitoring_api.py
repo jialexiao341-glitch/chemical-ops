@@ -51,7 +51,7 @@ def test_monitoring_overview_rejects_non_admin(monkeypatch):
         controller._require_admin(object(), _admin())
 
 
-@pytest.mark.parametrize("username,expected", [("system_admin", 200), ("buyer", 403), ("warehouse_receiver", 403)])
+@pytest.mark.parametrize("username,expected", [("SystemAdmin", 200), ("BuyerUser", 403), ("WarehouseUser", 403)])
 def test_monitoring_authenticated_http_boundary(client, demo_password, monkeypatch, username, expected):
     """真实登录和数据库 RBAC，仅 Prometheus 网络响应使用替身。"""
     from tests.conftest import login

@@ -57,7 +57,7 @@ def test_api_and_csv_enforce_cas_and_rollback(client, db_session, demo_password)
     from tests.conftest import login
     from tests.test_batch_api import sample_cas
 
-    admin = db_session.scalar(select(User).where(User.username.in_(['SystemAdmin', 'system_admin'])))
+    admin = db_session.scalar(select(User).where(User.username.in_(['SystemAdmin', 'SystemAdmin'])))
     if admin is None:
         pytest.skip('缺少管理员演示账号')
     headers = login(client, admin.username, demo_password)

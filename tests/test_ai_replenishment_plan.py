@@ -21,7 +21,7 @@ def test_tool_is_registered_and_task_requires_product_keyword():
 
 
 def test_plan_computes_gap_and_formats_decimal(db_session):
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     product = db_session.scalar(select(Product).where(Product.status == "ACTIVE").limit(1))
     product.safety_stock_quantity = Decimal("900000")
     db_session.flush()
@@ -39,7 +39,7 @@ def test_plan_computes_gap_and_formats_decimal(db_session):
 
 
 def test_plan_without_safety_stock_is_read_only_no_threshold(db_session):
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     product = db_session.scalar(select(Product).where(Product.status == "ACTIVE").limit(1))
     product.safety_stock_quantity = None
     db_session.flush()
@@ -53,7 +53,7 @@ def test_plan_without_safety_stock_is_read_only_no_threshold(db_session):
 
 
 def test_plan_without_incoming_permissions_adds_warnings(db_session, monkeypatch):
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     product = db_session.scalar(select(Product).where(Product.status == "ACTIVE").limit(1))
     product.safety_stock_quantity = Decimal("1")
     db_session.flush()

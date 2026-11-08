@@ -15,13 +15,13 @@ pytestmark = pytest.mark.integration
 
 
 def test_batch_snapshot_and_checklist_are_scoped_and_idempotent(client, db_session, demo_password):
-    receiver = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    receiver = db_session.scalar(select(User).where(User.username == "WarehouseUser"))
     balance = next((row for row in db_session.scalars(select(InventoryBalance).order_by(InventoryBalance.id)).all() if receiver is not None and inventory_service._can_access_warehouse(db_session, receiver, row.warehouse_id)), None)
     if balance is None:
         pytest.skip("测试数据库缺少库存余额")
-    admin = login(client, "system_admin", demo_password)
-    warehouse = login(client, "warehouse_receiver", demo_password)
-    viewer = login(client, "finance_viewer", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
+    warehouse = login(client, "WarehouseUser", demo_password)
+    viewer = login(client, "FinanceViewer", demo_password)
     base = f"/api/v1/insights/batch-impact/{balance.id}"
 
     snapshot_response = client.post(f"{base}/snapshots", headers=admin)

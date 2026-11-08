@@ -13,7 +13,7 @@ from app.modules.system.model import User
 
 def test_expired_latest_quotes_generate_one_actionable_suggestion(db_session):
     db = db_session
-    actor = db.scalar(select(User).where(User.username == 'system_admin'))
+    actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     supplier = db.scalar(select(Supplier).limit(1))
     token = uuid4().hex[:12]
     active = RFQ(rfq_no=f'T-{token}', requester_id=actor.id, status='SENT')
@@ -46,7 +46,7 @@ def test_expired_latest_quotes_generate_one_actionable_suggestion(db_session):
 
 def test_scan_ignores_superseded_current_and_missing_expiry(db_session):
     db = db_session
-    actor = db.scalar(select(User).where(User.username == 'system_admin'))
+    actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     supplier = db.scalar(select(Supplier).limit(1))
     token = uuid4().hex[:10]
     rfqs = [RFQ(rfq_no=f'Q{i}-{token}', requester_id=actor.id, status='RESPONDING') for i in range(3)]
@@ -70,7 +70,7 @@ def test_scan_ignores_superseded_current_and_missing_expiry(db_session):
 def test_quote_exception_requires_current_rfq_scope(db_session, monkeypatch):
     from app.modules.operation_exceptions import service as exception_service
     db = db_session
-    actor = db.scalar(select(User).where(User.username == 'system_admin'))
+    actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     supplier = db.scalar(select(Supplier).limit(1))
     token = uuid4().hex[:10]
     rfq = RFQ(rfq_no=f'P-{token}', requester_id=actor.id, status='SENT')

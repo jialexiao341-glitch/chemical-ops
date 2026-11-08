@@ -41,12 +41,12 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
 ) -> None:
     """验证询价、比价定标、采购审批、收货和质量验收的完整转换。"""
 
-    manager = login(client, "procurement_manager", demo_password)
-    warehouse = login(client, "warehouse_receiver", demo_password)
-    quality = login(client, "quality_inspector", demo_password)
-    admin = login(client, "system_admin", demo_password)
-    manager_user = db_session.scalar(select(User).where(User.username == "procurement_manager"))
-    warehouse_user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    manager = login(client, "ProcManager", demo_password)
+    warehouse = login(client, "WarehouseUser", demo_password)
+    quality = login(client, "QualityInspector", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
+    manager_user = db_session.scalar(select(User).where(User.username == "ProcManager"))
+    warehouse_user = db_session.scalar(select(User).where(User.username == "WarehouseUser"))
     department = db_session.scalar(select(Department).where(Department.status == "ACTIVE"))
     assert manager_user is not None and warehouse_user is not None and department is not None
     manager_user.department_id = department.id
@@ -159,11 +159,11 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     assert selected.status_code == 200, selected.text
     assert selected.json()["status"] == "CLOSED"
 
-    buyer_user = db_session.scalar(select(User).where(User.username == "buyer", User.status == "ACTIVE"))
+    buyer_user = db_session.scalar(select(User).where(User.username == "BuyerUser", User.status == "ACTIVE"))
     assert buyer_user is not None
     buyer_user.department_id = None
     db_session.flush()
-    buyer = login(client, "buyer", demo_password)
+    buyer = login(client, "BuyerUser", demo_password)
     denied_foreign_order = client.post(
         "/api/v1/purchase-orders",
         headers=buyer,
@@ -242,13 +242,13 @@ def test_rfq_to_purchase_order_to_quality_acceptance(
     ).status_code == 400
 
     acceptance_response = client.post(
-        "/api/v1/quality-acceptances", headers=admin, json={"delivery_id": delivery["id"], "inspector_id": db_session.scalar(select(User.id).where(User.username == "quality_inspector"))}
+        "/api/v1/quality-acceptances", headers=admin, json={"delivery_id": delivery["id"], "inspector_id": db_session.scalar(select(User.id).where(User.username == "QualityInspector"))}
     )
     assert acceptance_response.status_code == 201, acceptance_response.text
     acceptance = acceptance_response.json()
     assert acceptance["result"] == "PENDING"
     assert client.post(
-        "/api/v1/quality-acceptances", headers=admin, json={"delivery_id": delivery["id"], "inspector_id": db_session.scalar(select(User.id).where(User.username == "quality_inspector"))}
+        "/api/v1/quality-acceptances", headers=admin, json={"delivery_id": delivery["id"], "inspector_id": db_session.scalar(select(User.id).where(User.username == "QualityInspector"))}
     ).status_code == 400
     passed = client.post(
         f"/api/v1/quality-acceptances/{acceptance['id']}/result",
@@ -272,15 +272,15 @@ def test_operation_exception_task_and_close_state_machine(
 ) -> None:
     """验证异常、处理任务、处理记录和关闭说明的状态约束。"""
 
-    admin_user = db_session.scalar(select(User).where(User.username == "system_admin"))
-    manager_user = db_session.scalar(select(User).where(User.username == "procurement_manager"))
+    admin_user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
+    manager_user = db_session.scalar(select(User).where(User.username == "ProcManager"))
     assert admin_user is not None and manager_user is not None
     # 仅在当前回滚事务中设置测试口令，不修改本地演示账号。
     admin_user.password_hash = hash_password(demo_password)
     manager_user.password_hash = hash_password(demo_password)
     db_session.flush()
-    manager = login(client, "procurement_manager", demo_password)
-    admin = login(client, "system_admin", demo_password)
+    manager = login(client, "ProcManager", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     created = client.post(
         "/api/v1/operation-exceptions",
         headers=manager,
@@ -381,18 +381,18 @@ def test_role_permissions_separate_procurement_warehouse_quality_and_admin(
     """确认只读财务角色不能写业务，仓库和质量角色权限边界明确。"""
 
     for username in (
-        "finance_viewer", "warehouse_receiver", "quality_inspector",
-        "procurement_manager", "system_admin",
+        "FinanceViewer", "WarehouseUser", "QualityInspector",
+        "ProcManager", "SystemAdmin",
     ):
         user = db_session.scalar(select(User).where(User.username == username))
         assert user is not None
         user.password_hash = hash_password(demo_password)
     db_session.flush()
 
-    viewer = login(client, "finance_viewer", demo_password)
-    warehouse = login(client, "warehouse_receiver", demo_password)
-    quality = login(client, "quality_inspector", demo_password)
-    manager = login(client, "procurement_manager", demo_password)
+    viewer = login(client, "FinanceViewer", demo_password)
+    warehouse = login(client, "WarehouseUser", demo_password)
+    quality = login(client, "QualityInspector", demo_password)
+    manager = login(client, "ProcManager", demo_password)
 
     assert client.get("/api/v1/rfqs", headers=viewer).status_code == 403
     assert client.post(
@@ -413,7 +413,7 @@ def test_role_permissions_separate_procurement_warehouse_quality_and_admin(
         "/api/v1/deliveries", headers=quality, json={"po_id": 987654321, "items": [{"po_item_id": 1, "planned_quantity": "1"}]}
     ).status_code == 403
     assert client.get("/api/v1/system/users", headers=manager).status_code == 403
-    assert client.get("/api/v1/system/users", headers=login(client, "system_admin", demo_password)).status_code == 200
+    assert client.get("/api/v1/system/users", headers=login(client, "SystemAdmin", demo_password)).status_code == 200
 
 
 def test_buyer_can_read_but_cannot_update_product_master_data(
@@ -422,13 +422,13 @@ def test_buyer_can_read_but_cannot_update_product_master_data(
     """采购员保留采购所需的产品读取权限，但不能修改产品主数据。"""
 
     product = db_session.scalar(select(Product).where(Product.status == "ACTIVE").order_by(Product.id))
-    buyer_user = db_session.scalar(select(User).where(User.username == "buyer"))
+    buyer_user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     if product is None or buyer_user is None:
         pytest.skip("测试数据库需要采购员账号和至少一个启用的产品")
     # 登录只使用当前测试事务中的临时口令；测试结束后事务回滚，不改动演示账号口令。
     buyer_user.password_hash = hash_password(demo_password)
     db_session.flush()
-    buyer = login(client, "buyer", demo_password)
+    buyer = login(client, "BuyerUser", demo_password)
 
     assert client.get("/api/v1/products", headers=buyer).status_code == 200
     assert client.get("/api/v1/suppliers", headers=buyer).status_code == 200

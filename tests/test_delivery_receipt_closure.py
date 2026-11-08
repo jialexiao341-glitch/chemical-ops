@@ -29,7 +29,7 @@ def test_delivery_listing_does_not_materialize_visible_orders(db_session):
     from sqlalchemy import event, select
     from app.modules.system.model import User
 
-    user = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     assert user is not None
     statements = []
     connection = db_session.connection()

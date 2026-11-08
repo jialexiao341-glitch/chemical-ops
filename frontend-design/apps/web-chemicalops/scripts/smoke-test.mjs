@@ -8,7 +8,7 @@
  *
  * 用法：
  *   node frontend-design/scripts/smoke-test.mjs
- *   SMOKE_USER=system_admin SMOKE_PASSWORD=xxx node frontend-design/scripts/smoke-test.mjs
+ *   SMOKE_USER=SystemAdmin SMOKE_PASSWORD=xxx node frontend-design/scripts/smoke-test.mjs
  *
  * 说明：使用系统已安装的 Chrome（channel: 'chrome'），无需额外下载浏览器。
  */
@@ -17,7 +17,7 @@ import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE = process.env.SMOKE_BASE ?? 'http://localhost:3000';
-const USER = process.env.SMOKE_USER ?? 'system_admin';
+const USER = process.env.SMOKE_USER ?? 'SystemAdmin';
 const PASSWORD = process.env.SMOKE_PASSWORD ?? 'ChemicalOps@2026';
 const OUT = process.env.SMOKE_OUT ?? 'C:/self_project/ChemicalOps/.cache/shots';
 

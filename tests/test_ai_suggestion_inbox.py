@@ -118,7 +118,7 @@ def test_mysql_api_suggestion_lifecycle(client, db_session, demo_password):
     from app.modules.ai.model import AIOperationSuggestion
     from app.modules.operation_exceptions.model import OperationException, OperationTask
     from tests.conftest import login
-    actor = login(client, 'system_admin', demo_password)
+    actor = login(client, 'SystemAdmin', demo_password)
     token = uuid4().hex[:12]
     exceptions = [OperationException(exception_no=f'TEST-{token}-{i}', exception_type='LOW_STOCK',
                     source_type='PRODUCT', source_id=900000 + i, severity='HIGH',

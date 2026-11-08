@@ -9,7 +9,7 @@ from app.modules.system.model import User
 
 def test_submitted_invoice_with_stale_match_generates_deduplicated_suggestion(db_session):
     db = db_session
-    actor = db.scalar(select(User).where(User.username == 'system_admin'))
+    actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     row = db.execute(select(FinanceInvoice, FinanceInvoiceMatch, FinanceReconciliation)
         .join(FinanceReconciliation, FinanceReconciliation.id == FinanceInvoice.reconciliation_id)
         .join(FinanceInvoiceMatch, FinanceInvoiceMatch.invoice_id == FinanceInvoice.id)
@@ -46,7 +46,7 @@ def test_invoice_exception_requires_current_finance_read_scope(db_session, monke
 
 def test_draft_invoice_is_not_reported_while_matching_is_in_progress(db_session):
     db = db_session
-    actor = db.scalar(select(User).where(User.username == 'system_admin'))
+    actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     row = db.execute(select(FinanceInvoice, FinanceInvoiceMatch)
         .join(FinanceInvoiceMatch, FinanceInvoiceMatch.invoice_id == FinanceInvoice.id)
         .where(FinanceInvoice.status == 'SUBMITTED')

@@ -23,7 +23,7 @@ from app.modules.files import service as file_service
 
 def stock_fixture(db):
     source = db.scalar(select(InventoryBalance).where(InventoryBalance.quantity > 0).limit(1))
-    actor = db.scalar(select(User).where(User.username == "system_admin"))
+    actor = db.scalar(select(User).where(User.username == "SystemAdmin"))
     assert source is not None and actor is not None
     batch = InventoryBatch(product_id=source.product_id, batch_no=f"REMED-{uuid4().hex[:12]}")
     db.add(batch)
@@ -119,9 +119,9 @@ def test_historical_return_cost_repair_is_audited_and_idempotent(db_session):
     assert db_session.scalar(select(AuditLog.id).where(AuditLog.action_type == "REPAIR_COST_ALLOCATION", AuditLog.resource_id == tx.id)) is not None
 
 
-@pytest.mark.parametrize("target", ["buyer", "warehouse_receiver"])
+@pytest.mark.parametrize("target", ["BuyerUser", "WarehouseUser"])
 def test_delegated_user_manager_cannot_grant_admin(db_session, target):
-    actor = db_session.scalar(select(User).where(User.username == "buyer"))
+    actor = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     user = db_session.scalar(select(User).where(User.username == target))
     admin = db_session.scalar(select(Role).where(Role.role_code == "SYS_ADMIN"))
     with pytest.raises(AuthorizationError):
@@ -133,8 +133,8 @@ def test_delegated_user_manager_cannot_grant_admin(db_session, target):
 
 
 def test_user_update_audits_without_password(db_session):
-    actor = db_session.scalar(select(User).where(User.username == "system_admin"))
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    actor = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     system_service.update_user(db_session, user.id, UserUpdate(display_name="审计回归"), actor_id=actor.id)
     log = db_session.scalar(select(AuditLog).where(AuditLog.resource_type == "USER", AuditLog.resource_id == user.id).order_by(AuditLog.id.desc()))
     assert log.actor_id == actor.id and "display_name" in log.request_summary

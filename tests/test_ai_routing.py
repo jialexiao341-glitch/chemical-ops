@@ -293,8 +293,8 @@ def test_route_endpoint_permissions_and_foreign_context(client, db_session, monk
     from sqlalchemy import select
     from tests.test_rbac_separation import as_demo_role
 
-    buyer = db_session.scalar(select(User).where(User.username == "buyer"))
-    owner = db_session.scalar(select(User).where(User.username == "system_admin"))
+    buyer = db_session.scalar(select(User).where(User.username == "BuyerUser"))
+    owner = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     conversation = AIConversation(user_id=owner.id, title="foreign", business_scene="GENERAL", status="ACTIVE")
     db_session.add(conversation); db_session.flush()
     calls = []

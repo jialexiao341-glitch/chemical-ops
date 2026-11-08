@@ -34,11 +34,11 @@ def test_fifo_outbound_request_is_idempotent(client: TestClient, db_session, dem
             QualityAcceptance.delivery_id.in_(source_ids))):
         acceptance.result = 'PASSED'
     db_session.flush()
-    warehouse_user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    warehouse_user = db_session.scalar(select(User).where(User.username == "WarehouseUser"))
     assert warehouse_user is not None
     warehouse_user.password_hash = hash_password(demo_password)
     db_session.flush()
-    headers = login(client, "warehouse_receiver", demo_password)
+    headers = login(client, "WarehouseUser", demo_password)
     body = {"request_no": "TEST-FIFO-001", "product_id": balance.product_id, "warehouse_id": balance.warehouse_id, "location_id": balance.location_id, "unit_id": balance.unit_id, "quantity": "0.000001", "note": "FIFO 测试"}
     first = client.post("/api/v1/inventory/fifo-outbounds", headers=headers, json=body)
     assert first.status_code == 201, first.text
@@ -53,11 +53,11 @@ def test_fifo_outbound_request_is_idempotent(client: TestClient, db_session, dem
 def test_expiry_alert_endpoint_validates_window(client: TestClient, db_session, demo_password: str) -> None:
     """有效期预警接口接受合法天数并返回规范列表。"""
 
-    warehouse_user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    warehouse_user = db_session.scalar(select(User).where(User.username == "WarehouseUser"))
     assert warehouse_user is not None
     warehouse_user.password_hash = hash_password(demo_password)
     db_session.flush()
-    headers = login(client, "warehouse_receiver", demo_password)
+    headers = login(client, "WarehouseUser", demo_password)
     response = client.get("/api/v1/inventory/expiry-alerts?days=30", headers=headers)
     assert response.status_code == 200, response.text
     assert isinstance(response.json(), list)

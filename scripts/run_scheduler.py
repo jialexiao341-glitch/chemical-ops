@@ -71,9 +71,9 @@ def run_once() -> dict[str, int]:
     """执行一轮逾期到货扫描，并在任务结束后关闭数据库会话。"""
     db = SessionLocal()
     try:
-        actor = db.scalar(select(User).where(User.username == "system_admin", User.status == "ACTIVE"))
+        actor = db.scalar(select(User).where(User.username == "SystemAdmin", User.status == "ACTIVE"))
         if actor is None:
-            raise RuntimeError("system_admin 不存在或已停用")
+            raise RuntimeError("SystemAdmin 不存在或已停用")
         result = scan_overdue_deliveries(db, actor)
         result["recovered_file_parse_count"] = recover_stale_parses(
             db,

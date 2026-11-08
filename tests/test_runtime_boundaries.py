@@ -55,7 +55,7 @@ def test_rbac_cache_is_request_scoped_and_invalidates_on_role_change(db_session)
     from app.modules.system import crud
     from app.modules.system.model import User
 
-    user = db_session.scalar(select(User).where(User.username == 'buyer'))
+    user = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
     statements = []
     def capture(*args):
         statements.append(args[2])

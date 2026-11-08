@@ -54,7 +54,7 @@ def test_fifo_outbound_uses_warehouse_owner_scope(monkeypatch) -> None:
 def test_error_response_contains_chinese_message(client: TestClient, demo_password: str) -> None:
     """不存在资源时返回统一错误结构和中文提示。"""
 
-    headers = login(client, "procurement_manager", demo_password)
+    headers = login(client, "ProcManager", demo_password)
     response = client.get("/api/v1/products/999999", headers=headers)
     assert response.status_code == 404
     assert response.json()["code"] == 404
@@ -65,7 +65,7 @@ def test_error_response_contains_chinese_message(client: TestClient, demo_passwo
 def test_buyer_cannot_freeze_inventory(client: TestClient, demo_password: str) -> None:
     """没有冻结权限的采购员不能改变库存状态。"""
 
-    headers = login(client, "buyer", demo_password)
+    headers = login(client, "BuyerUser", demo_password)
     response = client.post("/api/v1/inventory/balances/1/freeze", headers=headers, json={"reason": "无权限测试"})
     assert response.status_code == 403
     assert response.json()["message"] == "无权访问"
@@ -77,7 +77,7 @@ def test_warehouse_cannot_inbound_foreign_department_delivery(
     """入库同时校验授权仓库和到货单来源订单范围。"""
 
     warehouse_user = db_session.scalar(
-        select(User).where(User.username == "warehouse_receiver", User.status == "ACTIVE")
+        select(User).where(User.username == "WarehouseUser", User.status == "ACTIVE")
     )
     if warehouse_user is None:
         pytest.skip("测试数据库需要仓库账号")
@@ -93,7 +93,7 @@ def test_warehouse_cannot_inbound_foreign_department_delivery(
     # 无部门仓库用户只能读取本人采购订单，确保该来源单越界。
     warehouse_user.department_id = None
     db_session.flush()
-    headers = login(client, "warehouse_receiver", demo_password)
+    headers = login(client, "WarehouseUser", demo_password)
     response = client.post(
         "/api/v1/inventory/inbounds",
         headers=headers,
@@ -108,7 +108,7 @@ def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session
 
     balance = get_available_balance(db_session)
     from app.modules.system.model import User, UserWarehouseGrant, UserWarehouseScope
-    for username in ('technical_engineer', 'warehouse_receiver'):
+    for username in ('TechEngineer', 'WarehouseUser'):
         actor = db_session.scalar(select(User).where(User.username == username))
         if db_session.get(UserWarehouseScope, actor.id) is None:
             db_session.add(UserWarehouseScope(user_id=actor.id))
@@ -117,10 +117,10 @@ def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session
             db_session.add(UserWarehouseGrant(user_id=actor.id, warehouse_id=balance.warehouse_id))
     db_session.flush()
     quantity = min(Decimal("0.000001"), balance.quantity)
-    technical = login(client, "technical_engineer", demo_password)
-    manager = login(client, "procurement_manager", demo_password)
-    approver = login(client, "system_admin", demo_password)
-    warehouse = login(client, "warehouse_receiver", demo_password)
+    technical = login(client, "TechEngineer", demo_password)
+    manager = login(client, "ProcManager", demo_password)
+    approver = login(client, "SystemAdmin", demo_password)
+    warehouse = login(client, "WarehouseUser", demo_password)
     options = client.get("/api/v1/inventory/issue-request-options", headers=technical)
     assert options.status_code == 200
     assert all("available_quantity" in item and "product_name" in item for item in options.json())
@@ -158,7 +158,7 @@ def test_transfer_rejects_same_source_and_target(client: TestClient, db_session,
     """调拨源库位和目标库位相同时必须被拒绝。"""
 
     balance = get_available_balance(db_session)
-    headers = login(client, "warehouse_receiver", demo_password)
+    headers = login(client, "WarehouseUser", demo_password)
     body = {
         "purpose": "自动化测试非法调拨",
         "items": [{
@@ -181,9 +181,9 @@ def test_stocktake_requires_unchanged_book_quantity(client: TestClient, db_sessi
     """盘点执行前账面数量发生变化时不能覆盖库存。"""
 
     balance = get_available_balance(db_session)
-    warehouse = login(client, "warehouse_receiver", demo_password)
-    manager = login(client, "procurement_manager", demo_password)
-    approver = login(client, "system_admin", demo_password)
+    warehouse = login(client, "WarehouseUser", demo_password)
+    manager = login(client, "ProcManager", demo_password)
+    approver = login(client, "SystemAdmin", demo_password)
     body = {
         "warehouse_id": balance.warehouse_id,
         "location_id": balance.location_id,

@@ -77,7 +77,7 @@ def preflight(backup: Path) -> list[str]:
     with engine.connect() as connection:
         if connection.scalar(text("SELECT COUNT(*) FROM md_chemicals WHERE source_text LIKE 'PubChem PUG REST%'")) < 8:
             raise SystemExit("Expected verified PubChem chemical identities are missing")
-        for username in ("system_admin", "buyer", "warehouse_receiver", "quality_inspector", "finance_clerk"):
+        for username in ("SystemAdmin", "BuyerUser", "WarehouseUser", "QualityInspector", "FinanceClerk"):
             if connection.scalar(text("SELECT COUNT(*) FROM sys_users WHERE username=:username"), {"username": username}) != 1:
                 raise SystemExit(f"Core development account missing: {username}")
     return inspect(engine).get_table_names()
@@ -116,14 +116,14 @@ def seed_core(db) -> Counter[str]:
     chemical_map = {item.cas_no: item for item in db.scalars(select(Chemical).where(Chemical.status == "ACTIVE")).all() if item.cas_no}
     departments = {item.department_code: item for item in db.scalars(select(Department)).all()}
     accounts = {item.username: item for item in db.scalars(select(User)).all()}
-    users = {"buyer": accounts["buyer"], "quality": accounts["quality_inspector"], "warehouse": accounts["warehouse_receiver"]}
+    users = {"BuyerUser": accounts["BuyerUser"], "QualityInspector": accounts["QualityInspector"], "WarehouseUser": accounts["WarehouseUser"]}
     units = load_units(db, counts)
     products, suppliers, supplier_products, warehouse, location = load_master_data(db, chemical_map, units, counts)
     # The stock actually received in the linked chain is solvent stock. Give it
     # an appropriate dedicated storage area instead of the former demo general warehouse.
     warehouse.warehouse_name = "甲类易燃液体仓"
     warehouse.region = "华东园区"
-    warehouse.manager_id = users["warehouse"].id
+    warehouse.manager_id = users["WarehouseUser"].id
     warehouse.note = "有机溶剂专用区域；按库内作业规程管理"
     location.location_name = "易燃液体区 A 排 01 位"
     load_procurement_chain(db, products, suppliers, supplier_products, units, departments, users, warehouse, location, counts)
@@ -140,7 +140,7 @@ def seed_core(db) -> Counter[str]:
 def seed_linked_workflows(db) -> Counter[str]:
     counts: Counter[str] = Counter()
     users = {u.username: u for u in db.scalars(select(User)).all()}
-    buyer, warehouse_user, finance_user = users["buyer"], users["warehouse_receiver"], users["finance_clerk"]
+    buyer, warehouse_user, finance_user = users["BuyerUser"], users["WarehouseUser"], users["FinanceClerk"]
     rd = db.scalar(select(Department).where(Department.department_code == "R_AND_D"))
     warehouse = db.scalar(select(Warehouse).where(Warehouse.warehouse_code == "WH-26001"))
     location = db.scalar(select(WarehouseLocation).where(WarehouseLocation.warehouse_id == warehouse.id))
@@ -189,7 +189,7 @@ def seed_linked_workflows(db) -> Counter[str]:
     partial = db.scalar(select(PurchaseOrder).where(PurchaseOrder.po_no == "PO-26002"))
     delivery = db.scalar(select(Delivery).where(Delivery.po_id == partial.id))
     short_item = db.scalar(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == partial.id))
-    replenish = add(db, ReplenishmentRequest, replenishment_no="REP-SHORT-26001", supplier_id=partial.supplier_id, source_po_id=partial.id, source_delivery_id=delivery.id, applicant_id=buyer.id, reason="到货短交 8 L，要求供应商按原单补足", status="APPROVED", approved_by=users["procurement_manager"].id, approved_at=NOW)
+    replenish = add(db, ReplenishmentRequest, replenishment_no="REP-SHORT-26001", supplier_id=partial.supplier_id, source_po_id=partial.id, source_delivery_id=delivery.id, applicant_id=buyer.id, reason="到货短交 8 L，要求供应商按原单补足", status="APPROVED", approved_by=users["ProcManager"].id, approved_at=NOW)
     add(db, ReplenishmentItem, replenishment_request_id=replenish.id, line_no=1, product_id=short_item.product_id, unit_id=short_item.unit_id, requested_quantity=q(8), expected_date=TODAY + timedelta(days=5), status="OPEN")
     counts.update({"replenishment_requests": 1, "replenishment_items": 1})
     return_request = add(db, InventoryReturnRequest, return_no="RET-QUALITY-26001", supplier_id=partial.supplier_id, po_id=partial.id, delivery_id=delivery.id, applicant_id=warehouse_user.id, reason="待质量复核批次暂缓使用，申请退货评估", status="DRAFT")
@@ -199,12 +199,12 @@ def seed_linked_workflows(db) -> Counter[str]:
 
     complete = db.scalar(select(PurchaseOrder).where(PurchaseOrder.po_no == "PO-26001"))
     amount = complete.order_amount
-    reconciliation = add(db, FinanceReconciliation, reconciliation_no="REC-26001", po_id=complete.id, supplier_id=complete.supplier_id, currency_code="CNY", total_amount=amount, status="CLOSED", created_by=finance_user.id, confirmed_by=users["finance_manager"].id, confirmed_at=NOW - timedelta(days=2), closed_at=NOW, note="与已收货订单及发票金额核对一致")
+    reconciliation = add(db, FinanceReconciliation, reconciliation_no="REC-26001", po_id=complete.id, supplier_id=complete.supplier_id, currency_code="CNY", total_amount=amount, status="CLOSED", created_by=finance_user.id, confirmed_by=users["FinanceManager"].id, confirmed_at=NOW - timedelta(days=2), closed_at=NOW, note="与已收货订单及发票金额核对一致")
     net = (amount / q("1.13")).quantize(q("0.01"))
     tax = amount - net
-    add(db, FinanceInvoice, invoice_no="INV-26001", reconciliation_id=reconciliation.id, po_id=complete.id, supplier_id=complete.supplier_id, invoice_number="FP202609900001", invoice_date=TODAY - timedelta(days=2), amount_excl_tax=net, tax_amount=tax, amount_incl_tax=amount, currency_code="CNY", status="VERIFIED", submitted_by=finance_user.id, verified_by=users["finance_manager"].id, verified_at=NOW - timedelta(days=1), note="票面金额与订单及对账金额核对一致，附件待归档")
-    add(db, FinancePayment, payment_no="PAY-26001", reconciliation_id=reconciliation.id, po_id=complete.id, supplier_id=complete.supplier_id, amount=amount, currency_code="CNY", payment_method="BANK_TRANSFER", status="PAID", requested_by=finance_user.id, approved_by=users["finance_manager"].id, paid_by=finance_user.id, approved_at=NOW - timedelta(days=1), paid_at=NOW, transaction_ref="FIN202609900001", note="付款登记金额与对账金额一致，银行回单待归档")
-    add(db, FinanceSettlement, settlement_no="SET-26001", reconciliation_id=reconciliation.id, po_id=complete.id, supplier_id=complete.supplier_id, settlement_amount=amount, currency_code="CNY", status="CONFIRMED", created_by=finance_user.id, confirmed_by=users["finance_manager"].id, confirmed_at=NOW, note="结算金额已与订单、发票及付款登记核对一致")
+    add(db, FinanceInvoice, invoice_no="INV-26001", reconciliation_id=reconciliation.id, po_id=complete.id, supplier_id=complete.supplier_id, invoice_number="FP202609900001", invoice_date=TODAY - timedelta(days=2), amount_excl_tax=net, tax_amount=tax, amount_incl_tax=amount, currency_code="CNY", status="VERIFIED", submitted_by=finance_user.id, verified_by=users["FinanceManager"].id, verified_at=NOW - timedelta(days=1), note="票面金额与订单及对账金额核对一致，附件待归档")
+    add(db, FinancePayment, payment_no="PAY-26001", reconciliation_id=reconciliation.id, po_id=complete.id, supplier_id=complete.supplier_id, amount=amount, currency_code="CNY", payment_method="BANK_TRANSFER", status="PAID", requested_by=finance_user.id, approved_by=users["FinanceManager"].id, paid_by=finance_user.id, approved_at=NOW - timedelta(days=1), paid_at=NOW, transaction_ref="FIN202609900001", note="付款登记金额与对账金额一致，银行回单待归档")
+    add(db, FinanceSettlement, settlement_no="SET-26001", reconciliation_id=reconciliation.id, po_id=complete.id, supplier_id=complete.supplier_id, settlement_amount=amount, currency_code="CNY", status="CONFIRMED", created_by=finance_user.id, confirmed_by=users["FinanceManager"].id, confirmed_at=NOW, note="结算金额已与订单、发票及付款登记核对一致")
     counts.update({"finance_reconciliations": 1, "finance_invoices": 1, "finance_payments": 1, "finance_settlements": 1})
     return counts
 

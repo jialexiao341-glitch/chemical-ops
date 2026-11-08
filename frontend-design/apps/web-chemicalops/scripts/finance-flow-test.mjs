@@ -21,7 +21,7 @@ import { chromium } from 'playwright';
 
 const BASE = process.env.SMOKE_BASE ?? 'http://localhost:3000';
 const API = process.env.SMOKE_API ?? 'http://127.0.0.1:8888';
-const USER = process.env.SMOKE_USER ?? 'system_admin';
+const USER = process.env.SMOKE_USER ?? 'SystemAdmin';
 const PASSWORD = process.env.SMOKE_PASSWORD;
 if (!PASSWORD) {
   console.error(

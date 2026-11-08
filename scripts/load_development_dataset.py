@@ -153,11 +153,20 @@ def load_organization(db: Session, counts: Counter[str]) -> tuple[dict[str, Depa
 
     users: dict[str, User] = {}
     definitions = (
-        ("buyer", "采购员", "buyer@chemicalops.local", "PROCUREMENT"),
-        ("quality", "质量专员", "quality@chemicalops.local", "QUALITY"),
-        ("warehouse", "仓库管理员", "warehouse@chemicalops.local", "WAREHOUSE"),
+        ("BuyerUser", "采购员", "buyer@chemicalops.local", "PROCUREMENT"),
+        ("QualityInspector", "质量专员", "quality@chemicalops.local", "QUALITY"),
+        ("WarehouseUser", "仓库管理员", "warehouse@chemicalops.local", "WAREHOUSE"),
     )
     for username, display_name, email, department_code in definitions:
+        legacy_names = {"BuyerUser": ("buyer",), "QualityInspector": ("quality", "quality_inspector"),
+                        "WarehouseUser": ("warehouse", "warehouse_receiver")}[username]
+        for legacy_name in legacy_names:
+            if db.scalar(select(User.id).where(User.username.collate("utf8mb4_bin") == legacy_name)) is not None:
+                raise RuntimeError(f"发现历史账号 {legacy_name}，请人工核对后再初始化 {username}，避免创建重复账号")
+        if db.scalar(select(User.id).where(User.username.collate("utf8mb4_bin") == username)) is None and db.scalar(
+            select(User.id).where(User.username == username)
+        ) is not None:
+            raise RuntimeError(f"账号 {username} 存在排序规则等价的其他名称，请人工核对")
         users[username] = ensure(
             db,
             User,
@@ -171,7 +180,7 @@ def load_organization(db: Session, counts: Counter[str]) -> tuple[dict[str, Depa
             },
             counts,
         )
-    for department_code, username in (("PROCUREMENT", "buyer"), ("QUALITY", "quality"), ("WAREHOUSE", "warehouse")):
+    for department_code, username in (("PROCUREMENT", "BuyerUser"), ("QUALITY", "QualityInspector"), ("WAREHOUSE", "WarehouseUser")):
         if departments[department_code].manager_id is None:
             departments[department_code].manager_id = users[username].id
     return departments, users
@@ -245,7 +254,7 @@ def load_procurement_chain(db: Session, products: dict[str, Product], suppliers:
     )
     requests: list[tuple[PurchaseRequest, list[PurchaseRequestItem]]] = []
     for index, (request_no, purpose, priority, budget, day_offset, item_specs) in enumerate(request_specs):
-        request = ensure(db, PurchaseRequest, {"request_no": request_no}, {"applicant_id": users["buyer"].id, "department_id": departments["PROCUREMENT"].id, "purpose": purpose, "priority": priority, "budget_amount": clean_decimal(budget), "currency_code": "CNY", "expected_date": TODAY + timedelta(days=day_offset), "status": "APPROVED" if index < 2 else "SUBMITTED", "submitted_at": datetime.now(timezone.utc) - timedelta(days=5 - index), "approved_at": datetime.now(timezone.utc) - timedelta(days=3 - index) if index < 2 else None}, counts)
+        request = ensure(db, PurchaseRequest, {"request_no": request_no}, {"applicant_id": users["BuyerUser"].id, "department_id": departments["PROCUREMENT"].id, "purpose": purpose, "priority": priority, "budget_amount": clean_decimal(budget), "currency_code": "CNY", "expected_date": TODAY + timedelta(days=day_offset), "status": "APPROVED" if index < 2 else "SUBMITTED", "submitted_at": datetime.now(timezone.utc) - timedelta(days=5 - index), "approved_at": datetime.now(timezone.utc) - timedelta(days=3 - index) if index < 2 else None}, counts)
         items: list[PurchaseRequestItem] = []
         for line_no, (product_code, quantity, unit_code) in enumerate(item_specs, start=1):
             product = products[product_code]
@@ -255,7 +264,7 @@ def load_procurement_chain(db: Session, products: dict[str, Product], suppliers:
     rfq_specs = (("RFQ-26001", requests[0], ("SUP-26001", "SUP-26002", "SUP-26004")), ("RFQ-26002", requests[1], ("SUP-26001", "SUP-26003", "SUP-26004")))
     quote_context: list[tuple[RFQ, dict[str, SupplierQuote], dict[tuple[str, str], SupplierQuoteItem], QuoteComparison]] = []
     for rfq_no, (request, request_items), invited_codes in rfq_specs:
-        rfq = ensure(db, RFQ, {"rfq_no": rfq_no}, {"source_request_id": request.id, "requester_id": users["buyer"].id, "quote_deadline": datetime.now(timezone.utc) + timedelta(days=4), "requested_delivery_date": TODAY + timedelta(days=18), "delivery_requirements": "送货至主仓，随货提供 COA", "status": "SENT", "sent_at": datetime.now(timezone.utc) - timedelta(days=2)}, counts)
+        rfq = ensure(db, RFQ, {"rfq_no": rfq_no}, {"source_request_id": request.id, "requester_id": users["BuyerUser"].id, "quote_deadline": datetime.now(timezone.utc) + timedelta(days=4), "requested_delivery_date": TODAY + timedelta(days=18), "delivery_requirements": "送货至主仓，随货提供 COA", "status": "SENT", "sent_at": datetime.now(timezone.utc) - timedelta(days=2)}, counts)
         rfq_items: list[RFQItem] = []
         for request_item in request_items:
             rfq_items.append(ensure(db, RFQItem, {"rfq_id": rfq.id, "line_no": request_item.line_no}, {"source_request_item_id": request_item.id, "product_id": request_item.product_id, "requested_name": request_item.requested_name, "specification": "分析纯", "quantity": request_item.quantity, "unit_id": request_item.unit_id, "required_delivery_date": request_item.expected_date, "technical_requirements": request_item.technical_requirements}, counts))
@@ -264,7 +273,7 @@ def load_procurement_chain(db: Session, products: dict[str, Product], suppliers:
         for supplier_index, supplier_code in enumerate(invited_codes):
             supplier = suppliers[supplier_code]
             ensure(db, RFQSupplier, {"rfq_id": rfq.id, "supplier_id": supplier.id}, {"response_status": "QUOTED", "response_at": datetime.now(timezone.utc) - timedelta(days=1), "invitation_channel": "EMAIL"}, counts)
-            quote = ensure(db, SupplierQuote, {"quote_no": f"Q-{rfq_no[-5:]}-{supplier_index + 1:02d}"}, {"rfq_id": rfq.id, "supplier_id": supplier.id, "quote_version": 1, "quote_date": TODAY - timedelta(days=1), "valid_until": TODAY + timedelta(days=14), "currency_code": "CNY", "status": "SUBMITTED", "received_by": users["buyer"].id}, counts)
+            quote = ensure(db, SupplierQuote, {"quote_no": f"Q-{rfq_no[-5:]}-{supplier_index + 1:02d}"}, {"rfq_id": rfq.id, "supplier_id": supplier.id, "quote_version": 1, "quote_date": TODAY - timedelta(days=1), "valid_until": TODAY + timedelta(days=14), "currency_code": "CNY", "status": "SUBMITTED", "received_by": users["BuyerUser"].id}, counts)
             quotes[supplier_code] = quote
             for rfq_item in rfq_items:
                 product_code = next(code for code, product in products.items() if product.id == rfq_item.product_id)
@@ -273,7 +282,7 @@ def load_procurement_chain(db: Session, products: dict[str, Product], suppliers:
                 unit_price = base_price + Decimal(str(supplier_index * 2 + (1 if product_code.endswith("H2O2-AR") else 0)))
                 quote_items[(supplier_code, product_code)] = ensure(db, SupplierQuoteItem, {"quote_id": quote.id, "rfq_item_id": rfq_item.id}, {"supplier_product_id": supplier_products[(supplier_code, product_code)].id, "supplier_model": supplier_products[(supplier_code, product_code)].supplier_model, "quoted_quantity": rfq_item.quantity, "unit_id": rfq_item.unit_id, "unit_price": unit_price, "tax_rate": clean_decimal(13), "moq_quantity": clean_decimal(25), "moq_unit_id": rfq_item.unit_id, "lead_days": suppliers[supplier_code].default_lead_days, "payment_terms": "月结 30 天"}, counts)
         selected_supplier = invited_codes[0]
-        comparison = ensure(db, QuoteComparison, {"comparison_no": f"QC-{rfq_no[-5:]}"}, {"rfq_id": rfq.id, "created_by": users["buyer"].id, "selected_quote_id": quotes[selected_supplier].id, "conclusion": "综合价格、交期和历史履约表现后选择报价。", "selection_reason": "满足交期且综合成本最低。", "status": "CONFIRMED", "confirmed_by": users["buyer"].id, "confirmed_at": datetime.now(timezone.utc) - timedelta(hours=12)}, counts)
+        comparison = ensure(db, QuoteComparison, {"comparison_no": f"QC-{rfq_no[-5:]}"}, {"rfq_id": rfq.id, "created_by": users["BuyerUser"].id, "selected_quote_id": quotes[selected_supplier].id, "conclusion": "综合价格、交期和历史履约表现后选择报价。", "selection_reason": "满足交期且综合成本最低。", "status": "CONFIRMED", "confirmed_by": users["BuyerUser"].id, "confirmed_at": datetime.now(timezone.utc) - timedelta(hours=12)}, counts)
         for rfq_item in rfq_items:
             product_code = next(code for code, product in products.items() if product.id == rfq_item.product_id)
             for rank, supplier_code in enumerate(invited_codes, start=1):
@@ -288,30 +297,30 @@ def load_procurement_chain(db: Session, products: dict[str, Product], suppliers:
         product = products[product_code]
         quote = quotes[supplier_code]
         quote_item = quote_items[(supplier_code, product_code)]
-        order = ensure(db, PurchaseOrder, {"po_no": po_no}, {"supplier_id": suppliers[supplier_code].id, "source_comparison_id": comparison.id, "source_quote_id": quote.id, "source_request_id": rfq.source_request_id, "department_id": departments["PROCUREMENT"].id, "buyer_id": users["buyer"].id, "order_amount": quote_item.unit_price * clean_decimal(quantity), "currency_code": "CNY", "delivery_address": "研发园区 A 区主仓", "order_date": TODAY - timedelta(days=10), "expected_arrival_date": TODAY - timedelta(days=3) if delivery_status != "IN_TRANSIT" else TODAY - timedelta(days=1), "status": ("COMPLETED" if delivery_status == "RECEIVED" else "PARTIAL" if delivery_status == "PARTIAL" else "ORDERED"), "supplier_confirmed_at": datetime.now(timezone.utc) - timedelta(days=8), "approved_at": datetime.now(timezone.utc) - timedelta(days=9)}, counts)
+        order = ensure(db, PurchaseOrder, {"po_no": po_no}, {"supplier_id": suppliers[supplier_code].id, "source_comparison_id": comparison.id, "source_quote_id": quote.id, "source_request_id": rfq.source_request_id, "department_id": departments["PROCUREMENT"].id, "buyer_id": users["BuyerUser"].id, "order_amount": quote_item.unit_price * clean_decimal(quantity), "currency_code": "CNY", "delivery_address": "研发园区 A 区主仓", "order_date": TODAY - timedelta(days=10), "expected_arrival_date": TODAY - timedelta(days=3) if delivery_status != "IN_TRANSIT" else TODAY - timedelta(days=1), "status": ("COMPLETED" if delivery_status == "RECEIVED" else "PARTIAL" if delivery_status == "PARTIAL" else "ORDERED"), "supplier_confirmed_at": datetime.now(timezone.utc) - timedelta(days=8), "approved_at": datetime.now(timezone.utc) - timedelta(days=9)}, counts)
         order_item = ensure(db, PurchaseOrderItem, {"po_id": order.id, "line_no": 1}, {"product_id": product.id, "supplier_product_id": supplier_products[(supplier_code, product_code)].id, "source_quote_item_id": quote_item.id, "product_name_snapshot": product.product_name, "supplier_model_snapshot": quote_item.supplier_model, "order_quantity": clean_decimal(quantity), "unit_id": units[unit_code].id, "unit_price": quote_item.unit_price, "tax_rate": clean_decimal(13), "planned_arrival_date": order.expected_arrival_date, "received_quantity": clean_decimal(quantity if delivery_status == "RECEIVED" else quantity * Decimal("0.8") if delivery_status == "PARTIAL" else 0), "status": "COMPLETED" if delivery_status == "RECEIVED" else "OPEN"}, counts)
-        ensure(db, PurchaseOrderEvent, {"po_id": order.id, "event_type": "ORDERED"}, {"event_time": datetime.now(timezone.utc) - timedelta(days=9), "operator_id": users["buyer"].id, "from_status": "APPROVED", "to_status": "ORDERED", "event_note": "订单已正式下单"}, counts)
+        ensure(db, PurchaseOrderEvent, {"po_id": order.id, "event_type": "ORDERED"}, {"event_time": datetime.now(timezone.utc) - timedelta(days=9), "operator_id": users["BuyerUser"].id, "from_status": "APPROVED", "to_status": "ORDERED", "event_note": "订单已正式下单"}, counts)
         orders.append((order, order_item, delivery_status))
 
     delivery_specs = (("DLV-26001", orders[0], "FULL", 0), ("DLV-26002", orders[1], "SHORT", 8), ("DLV-26003", orders[2], "OVERDUE", 0))
     deliveries: list[tuple[Delivery, DeliveryItem, str]] = []
     for delivery_no, (order, order_item, delivery_status), scenario, short_quantity in delivery_specs:
         actual_quantity = order_item.order_quantity if scenario == "FULL" else order_item.order_quantity - clean_decimal(short_quantity) if scenario == "SHORT" else 0
-        delivery = ensure(db, Delivery, {"delivery_no": delivery_no}, {"po_id": order.id, "supplier_id": order.supplier_id, "shipment_date": TODAY - timedelta(days=7), "expected_arrival_date": order.expected_arrival_date, "actual_arrival_date": TODAY - timedelta(days=2) if scenario != "OVERDUE" else None, "logistics_company": "华东化工物流", "tracking_no": f"YT{delivery_no[-5:]}", "status": "RECEIVED" if scenario != "OVERDUE" else "IN_TRANSIT", "received_by": users["warehouse"].id if scenario != "OVERDUE" else None, "received_at": datetime.now(timezone.utc) - timedelta(days=2) if scenario != "OVERDUE" else None}, counts)
+        delivery = ensure(db, Delivery, {"delivery_no": delivery_no}, {"po_id": order.id, "supplier_id": order.supplier_id, "shipment_date": TODAY - timedelta(days=7), "expected_arrival_date": order.expected_arrival_date, "actual_arrival_date": TODAY - timedelta(days=2) if scenario != "OVERDUE" else None, "logistics_company": "华东化工物流", "tracking_no": f"YT{delivery_no[-5:]}", "status": "RECEIVED" if scenario != "OVERDUE" else "IN_TRANSIT", "received_by": users["WarehouseUser"].id if scenario != "OVERDUE" else None, "received_at": datetime.now(timezone.utc) - timedelta(days=2) if scenario != "OVERDUE" else None}, counts)
         delivery_item = ensure(db, DeliveryItem, {"delivery_id": delivery.id, "line_no": 1}, {"po_item_id": order_item.id, "product_id": order_item.product_id, "batch_no": f"B{TODAY.strftime('%y%m')}{delivery_no[-3:]}", "package_spec": "25L/桶" if order_item.unit_id == units["L"].id else "25kg/桶", "planned_quantity": order_item.order_quantity, "actual_quantity": actual_quantity, "short_quantity": clean_decimal(short_quantity), "unit_id": order_item.unit_id, "production_date": TODAY - timedelta(days=40), "expiry_date": TODAY + timedelta(days=320), "document_complete": 1 if scenario == "FULL" else 0, "note": None}, counts)
         deliveries.append((delivery, delivery_item, scenario))
         if scenario != "OVERDUE":
             result = "PASSED" if scenario == "FULL" else "PARTIAL"
-            ensure(db, QualityAcceptance, {"acceptance_no": f"QA-{delivery_no[-5:]}"}, {"delivery_id": delivery.id, "inspector_id": users["quality"].id, "result": result, "inspection_time": datetime.now(timezone.utc) - timedelta(days=1), "test_result": {"appearance": "符合要求", "identity": "合格"}, "certificate_complete": 1 if scenario == "FULL" else 0, "conclusion": "抽检结果符合采购要求。" if scenario == "FULL" else "数量短交，待供应商补发。"}, counts)
+            ensure(db, QualityAcceptance, {"acceptance_no": f"QA-{delivery_no[-5:]}"}, {"delivery_id": delivery.id, "inspector_id": users["QualityInspector"].id, "result": result, "inspection_time": datetime.now(timezone.utc) - timedelta(days=1), "test_result": {"appearance": "符合要求", "identity": "合格"}, "certificate_complete": 1 if scenario == "FULL" else 0, "conclusion": "抽检结果符合采购要求。" if scenario == "FULL" else "数量短交，待供应商补发。"}, counts)
             batch = ensure(db, InventoryBatch, {"product_id": order_item.product_id, "batch_no": delivery_item.batch_no, "source_delivery_id": delivery.id}, {"supplier_id": order.supplier_id, "production_date": delivery_item.production_date, "expiry_date": delivery_item.expiry_date, "status": "ACTIVE"}, counts)
             balance = ensure(db, InventoryBalance, {"warehouse_id": warehouse.id, "location_id": location.id, "product_id": order_item.product_id, "batch_id": batch.id, "unit_id": order_item.unit_id}, {"quantity": actual_quantity, "locked_quantity": 0, "status": "AVAILABLE"}, counts)
-            ensure(db, InventoryTransaction, {"transaction_no": f"IN-{delivery_no[-5:]}"}, {"transaction_type": "INBOUND", "warehouse_id": warehouse.id, "location_id": location.id, "product_id": order_item.product_id, "batch_id": batch.id, "unit_id": order_item.unit_id, "quantity": actual_quantity, "delivery_item_id": delivery_item.id, "source_type": "DELIVERY", "source_id": delivery.id, "operator_id": users["warehouse"].id, "note": None}, counts)
+            ensure(db, InventoryTransaction, {"transaction_no": f"IN-{delivery_no[-5:]}"}, {"transaction_type": "INBOUND", "warehouse_id": warehouse.id, "location_id": location.id, "product_id": order_item.product_id, "batch_id": batch.id, "unit_id": order_item.unit_id, "quantity": actual_quantity, "delivery_item_id": delivery_item.id, "source_type": "DELIVERY", "source_id": delivery.id, "operator_id": users["WarehouseUser"].id, "note": None}, counts)
 
     exception_specs = (("EX-26001", "SHORT_DELIVERY", deliveries[1], "HIGH", "到货数量少于订单数量。", "PROCESSING"), ("EX-26002", "DOCUMENT_MISSING", deliveries[1], "MEDIUM", "到货资料未完整提供。", "OPEN"), ("EX-26003", "OVERDUE", deliveries[2], "HIGH", "采购订单超过计划到货日期仍未收货。", "OPEN"), ("EX-26004", "QUALITY", deliveries[0], "CRITICAL", "质量验收需要复核检测结果。", "CLOSED"))
     for exception_no, exception_type, (delivery, delivery_item, _), severity, description, status in exception_specs:
-        exception = ensure(db, OperationException, {"exception_no": exception_no}, {"exception_type": exception_type, "source_type": "DELIVERY", "source_id": delivery.id, "po_id": delivery.po_id, "delivery_id": delivery.id, "delivery_item_id": delivery_item.id, "responsible_department_id": departments["QUALITY"].id if exception_type == "QUALITY" else departments["WAREHOUSE"].id, "owner_id": users["quality"].id if exception_type == "QUALITY" else users["warehouse"].id, "severity": severity, "description": description, "status": status, "due_at": datetime.now(timezone.utc) + timedelta(days=2), "closed_by": users["quality"].id if status == "CLOSED" else None, "closed_at": datetime.now(timezone.utc) - timedelta(days=1) if status == "CLOSED" else None, "closing_note": "已完成复核并归档。" if status == "CLOSED" else None}, counts)
+        exception = ensure(db, OperationException, {"exception_no": exception_no}, {"exception_type": exception_type, "source_type": "DELIVERY", "source_id": delivery.id, "po_id": delivery.po_id, "delivery_id": delivery.id, "delivery_item_id": delivery_item.id, "responsible_department_id": departments["QUALITY"].id if exception_type == "QUALITY" else departments["WAREHOUSE"].id, "owner_id": users["QualityInspector"].id if exception_type == "QUALITY" else users["WarehouseUser"].id, "severity": severity, "description": description, "status": status, "due_at": datetime.now(timezone.utc) + timedelta(days=2), "closed_by": users["QualityInspector"].id if status == "CLOSED" else None, "closed_at": datetime.now(timezone.utc) - timedelta(days=1) if status == "CLOSED" else None, "closing_note": "已完成复核并归档。" if status == "CLOSED" else None}, counts)
         task = ensure(db, OperationTask, {"exception_id": exception.id, "title": "异常跟进"}, {"assignee_id": exception.owner_id, "priority": "HIGH" if severity in ("HIGH", "CRITICAL") else "NORMAL", "due_at": exception.due_at, "status": "COMPLETED" if status == "CLOSED" else "PROCESSING" if status == "PROCESSING" else "OPEN", "completed_at": exception.closed_at, "completion_note": "复核完成。" if status == "CLOSED" else None}, counts)
-        ensure(db, OperationTaskComment, {"task_id": task.id, "commenter_id": users["buyer"].id}, {"content": "已联系相关人员跟进处理。"}, counts)
+        ensure(db, OperationTaskComment, {"task_id": task.id, "commenter_id": users["BuyerUser"].id}, {"content": "已联系相关人员跟进处理。"}, counts)
         ensure(db, Notification, {"recipient_id": exception.owner_id, "related_type": "OPERATION_EXCEPTION", "related_id": exception.id}, {"notification_type": "EXCEPTION", "title": f"异常待处理：{exception_type}", "content": description, "is_read": 1 if status == "CLOSED" else 0, "read_at": datetime.now(timezone.utc) if status == "CLOSED" else None}, counts)
 
 

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 def _login(client: TestClient, password: str) -> dict[str, str]:
     response = client.post(
         "/api/v1/auth/login",
-        json={"username": "system_admin", "password": password},
+        json={"username": "SystemAdmin", "password": password},
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
@@ -196,13 +196,13 @@ def test_change_password_success_then_login_with_new(
     # 新密码可登录
     ok = client.post(
         "/api/v1/auth/login",
-        json={"username": "system_admin", "password": "NewPass123"},
+        json={"username": "SystemAdmin", "password": "NewPass123"},
     )
     assert ok.status_code == 200, ok.text
 
     # 同一事务内旧密码此时失效（login 走同一会话读到新哈希）
     stale = client.post(
         "/api/v1/auth/login",
-        json={"username": "system_admin", "password": demo_password},
+        json={"username": "SystemAdmin", "password": demo_password},
     )
     assert stale.status_code == 401, stale.text

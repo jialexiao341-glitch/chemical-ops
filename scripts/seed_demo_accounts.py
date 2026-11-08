@@ -248,19 +248,28 @@ ROLE_NAMES = {
 }
 
 USERS = (
-    ("system_admin", "陈明远", "MANAGEMENT", "SYS_ADMIN"),
-    ("procurement_manager", "周文博", "PROCUREMENT", "PROCUREMENT_MANAGER"),
-    ("buyer", "林晓彤", "PROCUREMENT", "BUYER"),
-    ("technical_engineer", "徐子航", "R_AND_D", "TECHNICAL"),
-    ("warehouse_receiver", "赵志成", "WAREHOUSE", "WAREHOUSE"),
-    ("quality_inspector", "何雨晴", "QUALITY", "QUALITY"),
-    ("quality_manager", "孙嘉宁", "QUALITY", "QUALITY_MANAGER"),
-    ("finance_viewer", "郑思涵", "FINANCE", "FINANCE_VIEWER"),
-    ("management_viewer", "吴承泽", "MANAGEMENT", "MANAGEMENT_VIEWER"),
-    ("finance_clerk", "许静怡", "FINANCE", "FINANCE_CLERK"),
-    ("finance_manager", "陆景川", "FINANCE", "FINANCE_MANAGER"),
-    ("supplier_portal", "沈佳禾", "MANAGEMENT", "SUPPLIER_PORTAL"),
+    ("SystemAdmin", "陈明远", "MANAGEMENT", "SYS_ADMIN"),
+    ("ProcManager", "周文博", "PROCUREMENT", "PROCUREMENT_MANAGER"),
+    ("BuyerUser", "林晓彤", "PROCUREMENT", "BUYER"),
+    ("TechEngineer", "徐子航", "R_AND_D", "TECHNICAL"),
+    ("WarehouseUser", "赵志成", "WAREHOUSE", "WAREHOUSE"),
+    ("QualityInspector", "何雨晴", "QUALITY", "QUALITY"),
+    ("QualityManager", "孙嘉宁", "QUALITY", "QUALITY_MANAGER"),
+    ("FinanceViewer", "郑思涵", "FINANCE", "FINANCE_VIEWER"),
+    ("ManagementViewer", "吴承泽", "MANAGEMENT", "MANAGEMENT_VIEWER"),
+    ("FinanceClerk", "许静怡", "FINANCE", "FINANCE_CLERK"),
+    ("FinanceManager", "陆景川", "FINANCE", "FINANCE_MANAGER"),
+    ("SupplierUser", "沈佳禾", "MANAGEMENT", "SUPPLIER_PORTAL"),
 )
+
+LEGACY_USERNAMES = {
+    "SystemAdmin": ("system_admin",), "ProcManager": ("procurement_manager",), "BuyerUser": ("buyer",),
+    "TechEngineer": ("technical_engineer",), "WarehouseUser": ("warehouse_receiver", "warehouse"),
+    "QualityInspector": ("quality_inspector", "quality"), "QualityManager": ("quality_manager",),
+    "FinanceViewer": ("finance_viewer",), "ManagementViewer": ("management_viewer",),
+    "FinanceClerk": ("finance_clerk",), "FinanceManager": ("finance_manager",),
+    "SupplierUser": ("supplier_portal", "supplier_portal_demo"),
+}
 
 
 def ensure_permission(db, code: str, name: str, permission_type: str, resource: str, action: str) -> Permission:
@@ -332,11 +341,12 @@ def main() -> None:
 
         created_users = []
         for username, display_name, department_code, role_code in USERS:
-            user = db.scalar(select(User).where(User.username == username))
-            if user is None and username == "supplier_portal":
-                user = db.scalar(select(User).where(User.username == "supplier_portal_demo"))
-                if user is not None:
-                    user.username = username
+            user = db.scalar(select(User).where(User.username.collate("utf8mb4_bin") == username))
+            for legacy in LEGACY_USERNAMES[username]:
+                if db.scalar(select(User.id).where(User.username.collate("utf8mb4_bin") == legacy)) is not None:
+                    raise RuntimeError(f"发现历史账号 {legacy}，请先运行演示账号迁移并处理冲突")
+            if user is None and db.scalar(select(User.id).where(User.username == username)) is not None:
+                raise RuntimeError(f"账号 {username} 存在排序规则等价的其他名称，请人工核对")
             if user is None:
                 user = User(
                     username=username,
@@ -353,7 +363,7 @@ def main() -> None:
                 db.add(UserRole(user_id=user.id, role_id=roles[role_code].id))
 
         db.flush()
-        portal_user = db.scalar(select(User).where(User.username == "supplier_portal"))
+        portal_user = db.scalar(select(User).where(User.username == "SupplierUser"))
         supplier = db.scalar(select(Supplier).where(Supplier.status == "ACTIVE").order_by(Supplier.id))
         if portal_user is not None and supplier is not None:
             account = db.scalar(select(SupplierPortalAccount).where(SupplierPortalAccount.user_id == portal_user.id))

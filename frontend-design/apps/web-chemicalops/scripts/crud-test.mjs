@@ -16,7 +16,7 @@ import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE = process.env.SMOKE_BASE ?? 'http://localhost:3000';
-const USER = process.env.SMOKE_USER ?? 'system_admin';
+const USER = process.env.SMOKE_USER ?? 'SystemAdmin';
 const PASSWORD = process.env.SMOKE_PASSWORD ?? 'ChemicalOps@2026';
 const OUT = 'C:/self_project/ChemicalOps/.cache/shots';
 

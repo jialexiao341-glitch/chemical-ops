@@ -23,11 +23,11 @@ def test_return_repeat_execute_is_rejected(client: TestClient, db_session, demo_
     assert balance is not None
     batch = db_session.get(InventoryBatch, balance.batch_id)
     assert batch is not None and batch.supplier_id is not None
-    for username in ('warehouse_receiver', 'procurement_manager'):
+    for username in ('WarehouseUser', 'ProcManager'):
         actor = db_session.scalar(select(User).where(User.username == username))
         grant_test_warehouse(db_session, actor.id, balance.warehouse_id)
-    warehouse = login(client, "warehouse_receiver", demo_password)
-    manager = login(client, "procurement_manager", demo_password)
+    warehouse = login(client, "WarehouseUser", demo_password)
+    manager = login(client, "ProcManager", demo_password)
     body = {
         "supplier_id": batch.supplier_id,
         "reason": "自动化测试退货",
@@ -62,7 +62,7 @@ def test_warehouse_user_can_only_read_returns_in_authorized_warehouses(
         .order_by(InventoryBalance.id)
         .limit(1)
     )
-    warehouse_user = db_session.scalar(select(User).where(User.username == "warehouse_receiver"))
+    warehouse_user = db_session.scalar(select(User).where(User.username == "WarehouseUser"))
     other_user = db_session.scalar(
         select(User).where(User.id != warehouse_user.id).order_by(User.id).limit(1)
     ) if warehouse_user else None
@@ -72,7 +72,7 @@ def test_warehouse_user_can_only_read_returns_in_authorized_warehouses(
     assert warehouse_record is not None and batch is not None and batch.supplier_id is not None
     grant_test_warehouse(db_session, warehouse_user.id, warehouse_record.id)
 
-    headers = login(client, "warehouse_receiver", demo_password)
+    headers = login(client, "WarehouseUser", demo_password)
     created = client.post(
         "/api/v1/inventory/returns",
         headers=headers,
@@ -111,7 +111,7 @@ def test_replenishment_flow_can_link_fulfillment_order(client: TestClient, db_se
 
     order = db_session.scalar(select(PurchaseOrder).where(PurchaseOrder.status == "COMPLETED").order_by(PurchaseOrder.id).limit(1))
     assert order is not None
-    manager = login(client, "procurement_manager", demo_password)
+    manager = login(client, "ProcManager", demo_password)
     body = {
         "supplier_id": order.supplier_id,
         "source_po_id": order.id,
@@ -123,7 +123,7 @@ def test_replenishment_flow_can_link_fulfillment_order(client: TestClient, db_se
     replenishment_id = created.json()["id"]
     assert client.post(f"/api/v1/replenishments/{replenishment_id}/submit", headers=manager).status_code == 200
     assert client.post(f"/api/v1/replenishments/{replenishment_id}/approve", headers=manager).status_code == 400
-    admin = login(client, "system_admin", demo_password)
+    admin = login(client, "SystemAdmin", demo_password)
     assert client.post(f"/api/v1/replenishments/{replenishment_id}/approve", headers=admin).status_code == 200
     completed = client.post(f"/api/v1/replenishments/{replenishment_id}/complete", headers=manager, json={"fulfillment_po_id": order.id})
     assert completed.status_code == 200, completed.text
@@ -137,12 +137,12 @@ def test_return_insufficient_stock_rolls_back(client: TestClient, db_session, de
     assert balance is not None
     batch = db_session.get(InventoryBatch, balance.batch_id)
     assert batch is not None and batch.supplier_id is not None
-    for username in ('warehouse_receiver', 'procurement_manager'):
+    for username in ('WarehouseUser', 'ProcManager'):
         actor = db_session.scalar(select(User).where(User.username == username))
         grant_test_warehouse(db_session, actor.id, balance.warehouse_id)
     before = Decimal(balance.quantity)
-    warehouse = login(client, "warehouse_receiver", demo_password)
-    manager = login(client, "procurement_manager", demo_password)
+    warehouse = login(client, "WarehouseUser", demo_password)
+    manager = login(client, "ProcManager", demo_password)
     created = client.post("/api/v1/inventory/returns", headers=warehouse, json={"supplier_id": batch.supplier_id, "reason": "故障注入测试", "items": [{"product_id": balance.product_id, "warehouse_id": balance.warehouse_id, "location_id": balance.location_id, "batch_id": balance.batch_id, "unit_id": balance.unit_id, "requested_quantity": str(before + Decimal('1'))}]})
     assert created.status_code == 201, created.text
     return_id = created.json()["id"]

@@ -15,7 +15,7 @@ from app.modules.ai.llm import chat
 
 
 def _login(client: TestClient, password: str) -> dict[str, str]:
-    response = client.post("/api/v1/auth/login", json={"username": "system_admin", "password": password})
+    response = client.post("/api/v1/auth/login", json={"username": "SystemAdmin", "password": password})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
@@ -169,7 +169,7 @@ def test_cancelled_chat_releases_database_connection_during_model_wait(db_engine
 
     async def run() -> None:
         nonlocal conversation_id
-        user = db.scalar(select(User).where(User.username == "buyer"))
+        user = db.scalar(select(User).where(User.username == "BuyerUser"))
         assert user is not None
         initial = AIChatRequest(messages=[AIChatMessage(role="user", content=question)])
         conversation = conversation_store.ensure_conversation(db, user, initial)
@@ -200,7 +200,7 @@ def test_cancelled_chat_releases_database_connection_during_model_wait(db_engine
     finally:
         db.rollback()
         if conversation_id is not None:
-            user = db.scalar(select(User).where(User.username == "buyer"))
+            user = db.scalar(select(User).where(User.username == "BuyerUser"))
             if user is not None:
                 conversation_store.delete_conversation(db, user, conversation_id)
         db.close()
@@ -351,7 +351,7 @@ def test_ai_chat_persists_attachment_parse_citation(client: TestClient, db_sessi
     from app.modules.ai.schema import AIChatMessage, AIChatResponse
     from app.modules.system.crud import get_user_by_username
 
-    user = get_user_by_username(db_session, "system_admin")
+    user = get_user_by_username(db_session, "SystemAdmin")
     assert user is not None
     uploaded_file = SimpleNamespace(id=77, uploader_id=user.id, file_name="库存.csv", mime_type="text/csv")
 
@@ -384,7 +384,7 @@ def test_ai_chat_uses_mineru_for_enabled_office_attachment(client: TestClient, d
     from app.modules.files.parser import ParsedFile
     from app.modules.system.crud import get_user_by_username
 
-    user = get_user_by_username(db_session, "system_admin")
+    user = get_user_by_username(db_session, "SystemAdmin")
     assert user is not None
     uploaded_file = SimpleNamespace(id=78, uploader_id=user.id, file_name="到货计划.pdf", mime_type="application/pdf")
     calls: list[tuple[str, Settings]] = []

@@ -324,7 +324,7 @@ def test_generate_two_plans_before_execution_with_real_planner_parser(db_session
     monkeypatch.setattr(text2sql, "chat", model)
     monkeypatch.setattr(service, "_run_text2sql_for_chat", execute)
     monkeypatch.setattr(service, "_rewrite_text2sql_answer", no_rewrite)
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     batch = asyncio.run(multi.execute_batch(db_session, user, decision(
         {"id": "t1", "kind": "analytics", "question": "统计采购订单数量"},
         {"id": "t2", "kind": "analytics", "question": "统计采购申请数量"}), Settings(_env_file=None)))
@@ -350,7 +350,7 @@ def test_dependent_plan_receives_only_successful_predecessor_evidence(db_session
         return None
     monkeypatch.setattr(multi, "plan_analytics", plan)
     monkeypatch.setattr(service, "_rewrite_text2sql_answer", no_rewrite)
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     batch = asyncio.run(multi.execute_batch(db_session, user, decision(
         {"id": "t1", "kind": "analytics", "question": "统计订单数量"},
         {"id": "t2", "kind": "analytics", "question": "查询前项对象的订单数量", "depends_on": ["t1"]}), Settings(_env_file=None)))

@@ -21,7 +21,7 @@ pytestmark = pytest.mark.integration
 def test_finance_viewer_cannot_write(client: TestClient, demo_password: str) -> None:
     """财务查看者只能查询，不能创建对账单。"""
 
-    headers = login(client, "finance_viewer", demo_password)
+    headers = login(client, "FinanceViewer", demo_password)
     response = client.post("/api/v1/finance/reconciliations", headers=headers, json={"po_id": 1})
     assert response.status_code == 403
     assert response.json()["message"] == "无权访问"
@@ -30,11 +30,11 @@ def test_finance_viewer_cannot_write(client: TestClient, demo_password: str) -> 
 def test_finance_full_settlement_flow(client: TestClient, db_session, demo_password: str) -> None:
     """验证对账、发票核验、付款审批和结算关闭可以顺序完成。"""
 
-    clerk = login(client, "finance_clerk", demo_password)
-    manager = login(client, "finance_manager", demo_password)
+    clerk = login(client, "FinanceClerk", demo_password)
+    manager = login(client, "FinanceManager", demo_password)
 
     supplier_id = db_session.scalar(select(Supplier.id).where(Supplier.status == "ACTIVE").limit(1))
-    buyer_id = db_session.scalar(select(User.id).where(User.username == "buyer"))
+    buyer_id = db_session.scalar(select(User.id).where(User.username == "BuyerUser"))
     assert supplier_id is not None and buyer_id is not None
     suffix = uuid4().hex[:10]
     order = PurchaseOrder(po_no=f"TEST-FIN-{suffix}", supplier_id=supplier_id,

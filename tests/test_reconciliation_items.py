@@ -22,13 +22,13 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def scenario(client, db_session, demo_password):
-    headers = login(client, "system_admin", demo_password)
-    approver_headers = login(client, "procurement_manager", demo_password)
-    user = db_session.scalar(select(User).where(User.username == "system_admin"))
+    headers = login(client, "SystemAdmin", demo_password)
+    approver_headers = login(client, "ProcManager", demo_password)
+    user = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
     products = list(db_session.scalars(select(Product).where(Product.status == "ACTIVE").limit(2)))
     supplier = db_session.scalar(select(Supplier).where(Supplier.status == "ACTIVE"))
     location = db_session.scalar(select(WarehouseLocation).where(WarehouseLocation.status == "ACTIVE"))
-    approver = db_session.scalar(select(User).where(User.username == "procurement_manager"))
+    approver = db_session.scalar(select(User).where(User.username == "ProcManager"))
     grant_test_warehouse(db_session, approver.id, location.warehouse_id)
     suffix = uuid4().hex[:10]
     order = PurchaseOrder(po_no=f"TEST-ROW-{suffix}", supplier_id=supplier.id, buyer_id=user.id, order_amount=Decimal("314.3950528"), currency_code="CNY", status="COMPLETED")
@@ -162,7 +162,7 @@ def test_precision_and_required_treatment_note(client, scenario):
 def test_read_only_finance_and_existing_invoice_block_refresh(client, scenario, demo_password):
     s = scenario
     identifier = create_reconciliation(client, s)
-    viewer = login(client, "finance_viewer", demo_password)
+    viewer = login(client, "FinanceViewer", demo_password)
     path = f"/api/v1/finance/reconciliations/{identifier}"
     assert client.get(path + "/items", headers=viewer).status_code in {403, 404}
     assert client.post(path + "/items/refresh", headers=viewer, json={}).status_code in {403, 404}
@@ -193,7 +193,7 @@ def test_all_returned_can_close_zero_payable_without_payment(client, db_session,
     settlement = client.post("/api/v1/finance/settlements", headers=s["headers"], json={"reconciliation_id": identifier})
     assert settlement.status_code == 201, settlement.text
     assert client.post(f"/api/v1/finance/settlements/{settlement.json()['id']}/confirm", headers=s["headers"]).status_code == 400
-    finance_approver = login(client, "finance_manager", demo_password)
+    finance_approver = login(client, "FinanceManager", demo_password)
     assert client.post(f"/api/v1/finance/settlements/{settlement.json()['id']}/confirm", headers=finance_approver).status_code == 200
 
 

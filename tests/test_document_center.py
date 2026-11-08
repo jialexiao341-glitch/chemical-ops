@@ -109,7 +109,7 @@ def test_quality_references_include_all_review_snapshots(monkeypatch):
 
 def test_document_center_real_database_and_http(client, db_session, demo_password):
     from tests.conftest import login
-    headers = login(client, 'system_admin', demo_password)
+    headers = login(client, 'SystemAdmin', demo_password)
     response = client.get('/api/v1/ai/documents', headers=headers, params={'page_size': 10})
     assert response.status_code == 200, response.text
     payload = response.json()
@@ -133,7 +133,7 @@ def test_missing_invoice_source_on_real_api(client, db_session, demo_password):
         pytest.skip('测试库没有发票记录')
     invoice.source_file_id = None
     db_session.flush()
-    response = client.get('/api/v1/ai/documents', headers=login(client, 'system_admin', demo_password),
+    response = client.get('/api/v1/ai/documents', headers=login(client, 'SystemAdmin', demo_password),
                           params={'kind': 'invoice', 'keyword': invoice.invoice_no})
     assert response.status_code == 200, response.text
     item = next(row for row in response.json()['items'] if row['object_id'] == invoice.id)
@@ -148,8 +148,8 @@ def test_foreign_rfq_hidden_even_when_buyer_uploaded_file(client, db_session, de
     from app.modules.system.file_model import SysFile
     from app.modules.system.model import User
     from tests.conftest import login
-    buyer = db_session.scalar(select(User).where(User.username == 'buyer'))
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    buyer = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     supplier = db_session.scalar(select(Supplier).limit(1))
     assert buyer and admin and supplier
     marker = uuid4().hex
@@ -167,12 +167,12 @@ def test_foreign_rfq_hidden_even_when_buyer_uploaded_file(client, db_session, de
     quote.source_file_id = file.id
     db_session.flush()
     endpoint = '/api/v1/ai/documents'
-    response = client.get(endpoint, headers=login(client, 'buyer', demo_password), params={'kind': 'quote', 'keyword': marker})
+    response = client.get(endpoint, headers=login(client, 'BuyerUser', demo_password), params={'kind': 'quote', 'keyword': marker})
     assert response.status_code == 200, response.text
     assert response.json()['total'] == 0
-    response = client.get(f'{endpoint}/quote/{quote.rfq_id}/{file.id}/references', headers=login(client, 'buyer', demo_password))
+    response = client.get(f'{endpoint}/quote/{quote.rfq_id}/{file.id}/references', headers=login(client, 'BuyerUser', demo_password))
     assert response.status_code == 404
-    response = client.get(endpoint, headers=login(client, 'system_admin', demo_password), params={'kind': 'quote', 'keyword': marker})
+    response = client.get(endpoint, headers=login(client, 'SystemAdmin', demo_password), params={'kind': 'quote', 'keyword': marker})
     assert response.status_code == 200 and response.json()['total'] == 1
 
 
@@ -184,7 +184,7 @@ def test_quality_search_matches_attached_filename(client, db_session, demo_passw
     from app.modules.system.model import User
     from tests.conftest import login
     acceptance = db_session.scalar(select(QualityAcceptance).limit(1))
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     assert acceptance and admin
     marker = uuid4().hex
     source = SysFile(file_name=f'{marker}.txt', object_key=f'test/{marker}', mime_type='text/plain',
@@ -193,7 +193,7 @@ def test_quality_search_matches_attached_filename(client, db_session, demo_passw
     db_session.flush()
     db_session.add(SysFileAttachment(file_id=source.id, resource_type='QUALITY_ACCEPTANCE', resource_id=acceptance.id, created_by=admin.id))
     db_session.flush()
-    response = client.get('/api/v1/ai/documents', headers=login(client, 'system_admin', demo_password),
+    response = client.get('/api/v1/ai/documents', headers=login(client, 'SystemAdmin', demo_password),
                           params={'kind': 'quality', 'keyword': marker})
     assert response.status_code == 200, response.text
     assert [(row['object_id'], row['file_id']) for row in response.json()['items']] == [(acceptance.id, source.id)]

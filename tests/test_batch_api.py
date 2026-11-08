@@ -29,7 +29,7 @@ def test_batch_requires_login(client: TestClient) -> None:
 
 
 def test_chemical_batch_disable_and_export(client: TestClient, demo_password: str) -> None:
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     suffix = uuid4().hex[:12]
     ids = []
     for number in range(2):
@@ -60,7 +60,7 @@ def test_chemical_batch_disable_and_export(client: TestClient, demo_password: st
 
 
 def test_batch_import_is_atomic_on_invalid_row(client: TestClient, demo_password: str) -> None:
-    headers = login(client, "system_admin", demo_password)
+    headers = login(client, "SystemAdmin", demo_password)
     suffix = uuid4().hex[:12]
     name = f"导入测试-{suffix}"
     csv_content = f'chemical_name,cas_no\n{name},{sample_cas()}\n"",{sample_cas()}\n'.encode("utf-8")
@@ -80,8 +80,8 @@ def test_batch_import_is_atomic_on_invalid_row(client: TestClient, demo_password
 def test_batch_user_disable_rejects_pending_registration_atomically(client: TestClient, db_session, demo_password: str) -> None:
     from sqlalchemy import select
     from app.modules.system.model import User
-    user = db_session.scalar(select(User).where(User.username == 'buyer'))
-    other = db_session.scalar(select(User).where(User.username == 'warehouse_receiver'))
+    user = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
+    other = db_session.scalar(select(User).where(User.username == 'WarehouseUser'))
     if user is None or other is None:
         import pytest
         pytest.skip('缺少采购员演示账号')
@@ -89,7 +89,7 @@ def test_batch_user_disable_rejects_pending_registration_atomically(client: Test
     db_session.flush()
     before = user.token_version
     other_status, other_version = other.status, other.token_version
-    response = client.post('/api/v1/batch/system.users/delete', headers=login(client, 'system_admin', demo_password), json={'ids': [user.id, other.id]})
+    response = client.post('/api/v1/batch/system.users/delete', headers=login(client, 'SystemAdmin', demo_password), json={'ids': [user.id, other.id]})
     assert response.status_code == 400, response.text
     db_session.refresh(user)
     assert user.status == 'PENDING' and user.token_version == before
@@ -105,14 +105,14 @@ def test_batch_role_disable_revokes_member_tokens(client: TestClient, db_session
     user = db_session.scalar(select(User).join(UserRole, UserRole.user_id == User.id).where(UserRole.role_id == role.id))
     assert user is not None
     before = user.token_version
-    response = client.post('/api/v1/batch/system.roles/delete', headers=login(client, 'system_admin', demo_password), json={'ids': [role.id]})
+    response = client.post('/api/v1/batch/system.roles/delete', headers=login(client, 'SystemAdmin', demo_password), json={'ids': [role.id]})
     assert response.status_code == 200, response.text
     db_session.refresh(user)
     assert user.token_version == before + 1
 
 
 def test_batch_import_uses_single_create_validation_and_rolls_back(client: TestClient, demo_password: str) -> None:
-    headers = login(client, 'system_admin', demo_password)
+    headers = login(client, 'SystemAdmin', demo_password)
     suffix = uuid4().hex[:10]
     name = f'批量原子校验-{suffix}'
     cas_no = sample_cas()
@@ -126,7 +126,7 @@ def test_batch_import_uses_single_create_validation_and_rolls_back(client: TestC
 
 
 def test_batch_import_duplicate_within_file_rolls_back(client: TestClient, demo_password: str) -> None:
-    headers = login(client, 'system_admin', demo_password)
+    headers = login(client, 'SystemAdmin', demo_password)
     suffix = uuid4().hex[:10]
     name = f'批内重复-{suffix}'
     cas_no = sample_cas()
@@ -143,7 +143,7 @@ def test_batch_import_records_audit(client: TestClient, db_session, demo_passwor
     from app.modules.system.audit import AuditLog
     suffix = uuid4().hex[:10]
     name = f'批量审计-{suffix}'
-    headers = login(client, 'system_admin', demo_password)
+    headers = login(client, 'SystemAdmin', demo_password)
     content = f'chemical_name,cas_no\n{name},{sample_cas()}\n'.encode('utf-8')
     response = client.post('/api/v1/batch/master.chemicals/import', headers=headers, files={'file': ('data.csv', content, 'text/csv')})
     assert response.status_code == 200, response.text

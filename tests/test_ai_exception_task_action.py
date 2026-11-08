@@ -140,7 +140,7 @@ def test_exception_task_understanding_requires_number_and_safe_fields():
 def test_exception_task_proposal_creates_task_only_after_confirmation(client, demo_password):
     from tests.conftest import login
 
-    token = login(client, "system_admin", demo_password)
+    token = login(client, "SystemAdmin", demo_password)
     source_id = uuid4().int % 1_000_000_000 + 1
     created = client.post("/api/v1/operation-exceptions", headers=token, json={
         "exception_type": "OTHER", "source_type": "OTHER", "source_id": source_id,

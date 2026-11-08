@@ -92,7 +92,7 @@ def test_mysql_concurrent_selection_and_order_creation(db_engine):
     quote_ids = []
     try:
         with SessionLocal() as db:
-            actor = db.scalar(select(User).where(User.username == "system_admin"))
+            actor = db.scalar(select(User).where(User.username == "SystemAdmin"))
             product = db.scalar(select(Product).where(Product.status == "ACTIVE").limit(1))
             supplier = db.scalar(select(Supplier).where(Supplier.status == "ACTIVE").limit(1))
             assert actor and product and supplier

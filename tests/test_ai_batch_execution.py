@@ -80,7 +80,7 @@ def test_disconnect_saves_partial_cancelled_batch_then_retry_skips_finished_quer
     monkeypatch.setattr(multi, "plan_analytics", plan)
     monkeypatch.setattr(service, "_rewrite_text2sql_answer", no_rewrite)
     monkeypatch.setattr(service, "_run_text2sql_for_chat", execute)
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     async def run():
         nonlocal stall
         stream = service.stream_chat_for_user(db_session, user,
@@ -106,7 +106,7 @@ def test_disconnect_saves_partial_cancelled_batch_then_retry_skips_finished_quer
         done = next(json.loads(frame.split("data: ", 1)[1]) for frame in frames if frame.startswith("event: done"))
         assert done["batch_result"]["status"] == "SUCCEEDED"
         assert plans == ["t2"] and executed == ["统计采购申请数量"]
-        other = db_session.scalar(select(User).where(User.username == "system_admin"))
+        other = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
         assert other is not None and other.id != user.id
         with pytest.raises(BusinessValidationError, match="会话不存在或无权访问"):
             multi.retry_decision(db_session, other, snapshot["conversation_id"])
@@ -114,7 +114,7 @@ def test_disconnect_saves_partial_cancelled_batch_then_retry_skips_finished_quer
 
 
 def test_retry_without_batch_returns_stream_error_without_query(db_session):
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     async def run():
         return [frame async for frame in service.stream_chat_for_user(db_session, user,
             AIChatRequest(retry_failed=True, messages=[AIChatMessage(role="user", content="重试")]))]
@@ -123,7 +123,7 @@ def test_retry_without_batch_returns_stream_error_without_query(db_session):
 
 
 def test_retry_rejects_new_attachments_before_restoring_batch(db_session):
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     async def run():
         return [frame async for frame in service.stream_chat_for_user(db_session, user,
             AIChatRequest(retry_failed=True, attachment_file_ids=[123],
@@ -142,7 +142,7 @@ def test_retained_document_rechecks_parsed_status_and_excerpt(db_session):
                                 section_key="SECTION 9", content="验收用文档摘录")
     db_session.add(section)
     db_session.flush()
-    user = db_session.scalar(select(User).where(User.username == "buyer"))
+    user = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     report = {"status": "SUCCEEDED", "tasks": [{"id": "t1", "kind": "document",
         "question": "查询乙醇资料", "status": "SUCCEEDED", "citations": [{
             "document_id": document.id, "section_id": section.id, "content": section.content}]}]}

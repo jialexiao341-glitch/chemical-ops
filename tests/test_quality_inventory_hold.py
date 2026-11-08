@@ -19,7 +19,7 @@ from app.modules.system.model import User
 def test_reinspection_blocks_batch_and_preserves_manual_freeze(db_session, monkeypatch):
     item = db_session.scalar(select(PurchaseOrderItem).limit(1))
     order = db_session.get(PurchaseOrder, item.po_id)
-    admin = db_session.scalar(select(User).where(User.username == 'system_admin'))
+    admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(1))
     location = WarehouseLocation(warehouse_id=warehouse.id, location_code=f'T-{uuid4().hex[:12]}', location_name='测试', status='ACTIVE')
     delivery = Delivery(delivery_no=f'T-{uuid4().hex[:12]}', po_id=order.id, supplier_id=order.supplier_id, status='ACCEPTED')
