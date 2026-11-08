@@ -6,14 +6,14 @@ const mocks = vi.hoisted(() => {
     setAccessCodes(value: string[]) { this.accessCodes = value; },
     setLoginExpired(value: boolean) { this.loginExpired = value; } };
   const user = { userInfo: null as unknown, setUserInfo(value: unknown) { this.userInfo = value; } };
-  return { access, user, replace: vi.fn(), getCurrentUserApi: vi.fn(), loginApi: vi.fn(), logoutApi: vi.fn() };
+  return { access, user, replace: vi.fn(), getCurrentUserApi: vi.fn(), loginApi: vi.fn(), logoutApi: vi.fn(), error: vi.fn() };
 });
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.replace, push: vi.fn(), currentRoute: { value: { fullPath: '/dashboard' } } }) }));
 vi.mock('@vben/constants', () => ({ LOGIN_PATH: '/auth/login' }));
 vi.mock('@vben/preferences', () => ({ preferences: { app: { defaultHomePath: '/dashboard' } } }));
 vi.mock('@vben/stores', () => ({ useAccessStore: () => mocks.access, useUserStore: () => mocks.user,
   resetAllStores: () => { mocks.access.accessToken = null; mocks.access.accessCodes = []; mocks.user.userInfo = null; } }));
-vi.mock('antdv-next', () => ({ notification: { success: vi.fn() } }));
+vi.mock('antdv-next', () => ({ notification: { success: vi.fn() }, message: { error: mocks.error } }));
 vi.mock('#/api', () => mocks);
 vi.mock('#/locales', () => ({ $t: (key: string) => key }));
 import { useAuthStore } from './auth';
@@ -34,5 +34,16 @@ describe('半登录状态清理', () => {
     await expect(useAuthStore().fetchUserInfo()).rejects.toThrow('network');
     expect(mocks.access.accessToken).toBeNull(); expect(mocks.access.accessCodes).toEqual([]);
     expect(mocks.logoutApi).not.toHaveBeenCalled();
+  });
+});
+
+describe('登录失败提示', () => {
+  beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks(); });
+  it.each(['用户名或密码错误', '登录失败次数过多，请稍后重试'])('显示服务端错误：%s', async (reason) => {
+    mocks.loginApi.mockRejectedValueOnce(new Error(reason));
+    const store = useAuthStore();
+    await store.authLogin({ username: 'test', password: 'wrong' });
+    expect(mocks.error).toHaveBeenCalledWith(reason);
+    expect(store.loginLoading).toBe(false);
   });
 });

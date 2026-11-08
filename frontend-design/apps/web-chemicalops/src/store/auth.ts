@@ -7,7 +7,7 @@ import { LOGIN_PATH } from '@vben/constants';
 import { preferences } from '@vben/preferences';
 import { resetAllStores, useAccessStore, useUserStore } from '@vben/stores';
 
-import { notification } from 'antdv-next';
+import { message, notification } from 'antdv-next';
 import { defineStore } from 'pinia';
 
 import { getCurrentUserApi, loginApi, logoutApi } from '#/api';
@@ -59,10 +59,16 @@ export const useAuthStore = defineStore('auth', () => {
     let userInfo: null | UserInfo = null;
     try {
       loginLoading.value = true;
-      const { access_token: accessToken } = await loginApi({
-        password: params.password,
-        username: params.username,
-      });
+      let accessToken: string;
+      try {
+        ({ access_token: accessToken } = await loginApi({
+          password: params.password,
+          username: params.username,
+        }));
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '登录失败，请稍后重试');
+        return { userInfo };
+      }
 
       if (accessToken) {
         clearLookupCache();
