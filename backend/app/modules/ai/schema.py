@@ -55,6 +55,7 @@ class AIChatResponse(BaseModel):
     model: str
     provider: str
     usage: dict[str, int] | None = None
+    call_meta: dict[str, Any] | None = Field(default=None, exclude=True)
     citations: list | None = None
     batch_result: dict[str, Any] | None = None
     query_trace: "AIQueryTrace | None" = None
@@ -1205,6 +1206,7 @@ class TaskRead(ToolSchema):
     messages: list[str]
     trace: list[dict]
     conversation_id: int | None = None
+    run_meta: dict = Field(default_factory=dict)
 
 
 # 多意图批次

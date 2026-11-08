@@ -1,0 +1,10 @@
+{
+  "routing": "8dda38566e19a92d077adbbb76d2ed72b40ef422143f8a10b49329f84b29a315",
+  "planner": "fc37f6a3a8e3f713145bb499b97f3fd91e156e696f5425e6541f0052a2c29f3d",
+  "system": "f56aad09fda8616581ec69e75beea33c4eaa8c7ccb723c7db5f584ca16e699ff",
+  "text2sql_plan": "ee8527d50ffea31289cb30a6c5e03e374849f7fb8b20d5f728579f66e649b3ea",
+  "result_rewrite": "51e124fae35a49fd859a53f9d5708b302be52f9d86260bb272a78d3785b74422",
+  "fallback_guidance": "4be30150c55741f8d0af97e598955227108cf4bda1b81f228fdebf09d9aba680",
+  "context_stream": "5eed69b45f40f29f1caa42b4dd23f8ac4fa9b8afe1c89cfd66c85046aaf3c55b",
+  "guidance": "47edba0dea01b19ae7619771a1a6c9d77a01064a5387cfe94ccb7c03218094fa"
+}

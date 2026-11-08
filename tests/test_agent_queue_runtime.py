@@ -194,6 +194,7 @@ def test_disabled_user_while_queued_never_calls_model(queued_db, model_script, m
     queued_db.expire_all()
     row = queued_db.get(AIAgentTask, task.id)
     assert row.status == "FAILED" and row.error_code == "PERMISSION_DENIED"
+    assert runtime.get_task(queued_db, USER, task.id).run_meta["error"]["class"] == "AUTHORIZATION"
     assert model_script[1] == []
 
 

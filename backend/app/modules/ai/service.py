@@ -26,7 +26,7 @@ from app.modules.ai.schema import (
     Understanding,
 )
 from app.modules.ai.agent_prompt import (
-    REPLY_STYLE,
+    GUIDANCE_PROMPT,
     UNSUPPORTED_REPLY,
     build_project_reply,
     fallback_guidance_prompt,
@@ -429,16 +429,7 @@ async def _compose_non_query_reply(
     if intent is Intent.GUIDANCE:
         payload = {"question": question, "capabilities": manifest.model_dump(mode="json") if manifest else None}
         response = await chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False))]), settings,
-                              system_prompt="""# 任务
-回答 ChemicalOps 业务操作指导，不查询或执行真实业务。
-# 约束
-不编造产品现有按钮、实际状态、单据、库存或价格。不确定系统是否支持时明确说明，必要时询问具体页面。
-能力判断只依据 capabilities 中当前提供的工具、统计数据集和 action_proposals。数据集 outputs/derived_outputs 是可回答结果，不等同独立工具。
-action_proposals 中 chat 入口可以整理待确认提案，business_page 入口需引导到业务页面；准备提案、用户确认和业务执行是不同阶段。
-未列出的能力只说明当前入口未提供，不据此断言整个项目没有该功能。没有能力清单时不得承诺具体系统功能。
-# 输出
-用自然中文说明操作原则和所需信息；不得声称已经执行任何操作。
-""" + REPLY_STYLE, interpret_only=True)
+                              system_prompt=GUIDANCE_PROMPT, interpret_only=True)
         return response.message.content, "guidance"
     if intent is Intent.PROJECT:
         if manifest is not None:

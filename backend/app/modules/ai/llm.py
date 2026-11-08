@@ -8,6 +8,7 @@ import logging
 import json
 import re
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from typing import Any
 from time import perf_counter
 from urllib.parse import urlsplit
@@ -33,6 +34,7 @@ from app.modules.ai.schema import (
 from app.modules.ai.agent_prompt import SYSTEM_PROMPT
 
 LOGGER = logging.getLogger("chemicalops.ai")
+_response_observer = ContextVar("agent_llm_response_observer", default=None)
 USAGE_TOKEN_FIELDS = {
     "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
     "cached_tokens", "reasoning_tokens",
@@ -150,7 +152,7 @@ def _build_messages(
     return messages
 
 
-async def _chat_impl(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, object] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None, interpret_only: bool = False) -> AIChatResponse:
+async def _chat_impl(data: AIChatRequest, settings: Settings | None = None, attachment_context: list[str] | None = None, response_format: dict[str, object] | None = None, image_parts: list[dict[str, object]] | None = None, system_prompt: str | None = None, interpret_only: bool = False, call_meta: dict | None = None) -> AIChatResponse:
     """调用配置的 OpenAI 兼容模型。"""
 
     if not interpret_only:
@@ -182,6 +184,8 @@ async def _chat_impl(data: AIChatRequest, settings: Settings | None = None, atta
     for attempt in range(attempts):
         try:
             async with httpx.AsyncClient(timeout=runtime.llm_timeout_seconds) as client:
+                if call_meta is not None:
+                    call_meta["attempts"] += 1
                 response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             metrics.increment("ai_external_requests", labels={"mode": "sync", "provider": runtime.llm_provider, "status": "success"})
@@ -281,6 +285,7 @@ async def chat(
     *,
     model_name: str | None = None,
     _allow_fallback: bool = True,
+    _call_meta: dict | None = None,
 ) -> AIChatResponse:
     """经统一模型目录、并发配额和熔断策略发起非流式模型调用。"""
 
@@ -289,6 +294,8 @@ async def chat(
         profile = resolve_model_profile(runtime, model_name)
     except ValueError as exc:
         raise BusinessValidationError(str(exc)) from exc
+    call_meta = _call_meta if _call_meta is not None else {
+        "requested_model": profile.model, "attempts": 0, "fallback_used": False}
     task_budget = current_task_token_budget()
     reservation = None
     if task_budget is not None:
@@ -301,6 +308,7 @@ async def chat(
         except TaskTokenBudgetExceeded as exc:
             raise BusinessValidationError(str(exc)) from exc
     result = None
+    fallback_completed = False
     try:
         settled = False
         probe_claimed = False
@@ -334,6 +342,7 @@ async def chat(
                         image_parts,
                         system_prompt,
                         interpret_only,
+                        call_meta,
                     )
             except BusinessValidationError as exc:
                 settled = True
@@ -350,11 +359,19 @@ async def chat(
                 raise
             settled = True
             circuit_breakers.success(profile.key)
+            result.call_meta = dict(call_meta)
+            observer = _response_observer.get()
+            if observer is not None:
+                try:
+                    observer(result)
+                except Exception:
+                    LOGGER.warning("Agent 模型元数据采集失败")
             return result
     except SafeFailoverError:
         if _allow_fallback and profile.fallback_profile:
+            call_meta["fallback_used"] = True
             metrics.increment("llm_model_failovers", labels={"provider": profile.provider, "model": profile.model})
-            return await chat(
+            fallback_result = await chat(
                 data,
                 runtime,
                 attachment_context,
@@ -364,12 +381,22 @@ async def chat(
                 interpret_only,
                 model_name=profile.fallback_profile,
                 _allow_fallback=False,
+                _call_meta=call_meta,
             )
+            fallback_completed = True
+            return fallback_result
         raise
     except asyncio.CancelledError:
         metrics.increment("llm_requests_cancelled", labels={"provider": profile.provider, "model": profile.model, "mode": "sync"})
         raise
     finally:
+        if _call_meta is None and result is None and not fallback_completed:
+            observer = _response_observer.get()
+            if observer is not None:
+                try:
+                    observer(None)
+                except Exception:
+                    LOGGER.warning("Agent 模型元数据采集失败")
         if task_budget is not None and reservation is not None:
             try:
                 await task_budget.settle_async(reservation, result.usage if result is not None else None)

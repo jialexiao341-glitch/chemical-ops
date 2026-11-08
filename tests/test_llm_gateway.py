@@ -237,11 +237,19 @@ def test_chat_uses_explicit_fallback_only_after_connect_failure(monkeypatch) -> 
     )
     request = AIChatRequest(messages=[{"role": "user", "content": "只读模型网关测试"}])
 
-    response = asyncio.run(llm.chat(request, settings, interpret_only=True, model_name="primary"))
+    observed = []
+    token = llm._response_observer.set(observed.append)
+    try:
+        response = asyncio.run(llm.chat(request, settings, interpret_only=True, model_name="primary"))
+    finally:
+        llm._response_observer.reset(token)
 
     assert response.message.content == "备用模型回答"
     assert response.model == "backup-model"
     assert requests == ["primary.example", "backup.example"]
+    assert response.call_meta == {"requested_model": "primary-model", "attempts": 2, "fallback_used": True}
+    assert "call_meta" not in response.model_dump()
+    assert observed == [response]
 
 
 def test_chat_retries_only_explicit_rate_limit_rejection_with_bounded_attempts(monkeypatch):
@@ -267,6 +275,8 @@ def test_chat_retries_only_explicit_rate_limit_rejection_with_bounded_attempts(m
         Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=1), interpret_only=True))
     assert result.message.content == "回答"
     assert len(attempts) == 2 and waits == [0]
+    assert result.call_meta["attempts"] == 2
+    assert result.call_meta["fallback_used"] is False
 
 
 def test_business_write_intent_is_rejected_before_any_model_request(monkeypatch):

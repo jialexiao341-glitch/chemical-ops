@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.modules.ai import llm
+from app.modules.ai.context_assembler import (assemble_planner_context, _clip_planner_text, _compact_planner_step, _clip_planner_tree, PLANNER_RESULT_ROW_LIMIT)
 from app.modules.ai.gateway import (
     TaskTokenBudget,
     bind_task_token_budget,
@@ -130,6 +131,33 @@ class RunState:
     llm_calls: int = 0
     department_scope: list[int] | None = None
     warehouse_scope: list[int] | None = None
+    run_meta: dict = field(default_factory=dict)
+
+
+def _record_model_response(state: RunState, response) -> None:
+    """只记录模型响应中可核实的元数据，不保存模型内容。"""
+    retries = state.run_meta.setdefault("retries", {"llm": None, "tool": None})
+    if response is None:
+        retries["llm"] = None
+        retries["llm_incomplete"] = True
+        return
+    call = getattr(response, "call_meta", None) or {}
+    state.run_meta["model"] = {
+        "provider": getattr(response, "provider", None), "name": getattr(response, "model", None),
+        "usage": getattr(response, "usage", None), "requested_model": call.get("requested_model"),
+        "fallback_used": call.get("fallback_used"),
+    }
+    attempts = call.get("attempts")
+    if isinstance(attempts, int) and attempts > 0 and not retries.get("llm_incomplete"):
+        retries["llm"] = (retries.get("llm") or 0) + attempts - 1
+    else:
+        retries["llm"] = None
+        retries["llm_incomplete"] = True
+
+
+def _record_prompt(state: RunState, name: str) -> None:
+    from app.modules.ai.prompt_registry import prompt_version
+    state.run_meta.setdefault("prompt_versions", {})[name] = prompt_version(name)
 
 
 class GraphState(TypedDict):
@@ -400,6 +428,18 @@ def _formatted_task_reply(task) -> str:
         return task.reply
 
 
+def _public_run_meta(task) -> dict:
+    """对队列终止的任务补充已有的安全错误码；旧任务仍返回空对象。"""
+    meta = copy.deepcopy((task.payload or {}).get("run_meta") or {})
+    if meta and task.status == "FAILED":
+        meta["error"] = {"class": None, "recovery": None, **(meta.get("error") or {}), "code": task.error_code}
+        if meta["error"].get("class") is None:
+            from app.modules.ai.error_policy import classify
+            category, recovery, hint = classify(task.error_code)
+            meta["error"].update({"class": category.value, "recovery": recovery.value, "hint": hint})
+    return meta
+
+
 def get_task(db: Session, user: User, task_id: str) -> TaskRead:
     """返回本人任务的公开步骤/结果；不返回提示词、模型思维链或服务端异常原文。"""
     task = _reap_unclaimed_task(db, _load(db, user, task_id))
@@ -407,7 +447,8 @@ def get_task(db: Session, user: User, task_id: str) -> TaskRead:
     return TaskRead(id=task.id, status=task.status, revision=task.revision, reply=_formatted_task_reply(task),
         can_select_all_products=(task.payload.get('memory_state') or {}).get('goal', {}).get('intent') == 'inventory_query',
         error_code=task.error_code, messages=task.payload["messages"], trace=task.payload["trace"],
-        conversation_id=(task.payload.get("chat") or {}).get("conversation_id"))
+        conversation_id=(task.payload.get("chat") or {}).get("conversation_id"),
+        run_meta=_public_run_meta(task))
 
 
 def list_tasks(db: Session, user: User, *, page: int = 1, page_size: int = 20,
@@ -433,7 +474,8 @@ def list_tasks(db: Session, user: User, *, page: int = 1, page_size: int = 20,
             items.append(TaskRead(id=task.id, status=task.status, revision=task.revision, reply=_formatted_task_reply(task),
                 can_select_all_products=(task.payload.get('memory_state') or {}).get('goal', {}).get('intent') == 'inventory_query',
                 error_code=task.error_code, messages=task.payload.get("messages", []), trace=task.payload.get("trace", []),
-                conversation_id=(task.payload.get("chat") or {}).get("conversation_id")))
+                conversation_id=(task.payload.get("chat") or {}).get("conversation_id"),
+                run_meta=_public_run_meta(task)))
         except (AuthorizationError, ResourceNotFoundError, BusinessValidationError):
             items.append(TaskRead(id=task.id, status=task.status, revision=task.revision,
                 reply="当前权限或数据范围已变化，任务结果不可访问。", error_code="RESULT_UNAVAILABLE",
@@ -477,6 +519,14 @@ def _persist(db: Session, user: User, state: RunState) -> None:
     if warehouse_scope_snapshot(db, user) != state.warehouse_scope:
         raise TaskInterrupted()
     memory = _sync_memory_state(state)
+    prior_error = state.run_meta.get("error") or {}
+    if state.status == "FAILED" and prior_error.get("class") is None:
+        from app.modules.ai.error_policy import classify
+        category, recovery, hint = classify(state.error_code)
+        state.run_meta["error"] = {"code": state.error_code, "class": category.value,
+                                   "recovery": recovery.value, "hint": hint}
+    else:
+        state.run_meta["error"] = {"class": None, "recovery": None, **prior_error, "code": state.error_code}
     try:
         execution = execution_context.guard(db)
     except Exception:
@@ -485,7 +535,7 @@ def _persist(db: Session, user: User, state: RunState) -> None:
     count = db.execute(update(AIAgentTask).where(AIAgentTask.id == state.task_id,
         AIAgentTask.user_id == user.id, AIAgentTask.revision == state.revision,
         AIAgentTask.status == "RUNNING").values(
-        payload={"messages": state.messages, "trace": state.trace,
+        payload={"messages": state.messages, "trace": state.trace, "run_meta": state.run_meta,
                  "department_scope": state.department_scope,
                  "warehouse_scope": state.warehouse_scope,
                  "chat": state.chat,
@@ -571,7 +621,6 @@ def _decision_messages(messages: list[str], *, history_count: int = 6,
     return [*(message[:old_message_limit] for message in recent[:-1]), recent[-1]]
 
 
-PLANNER_RESULT_ROW_LIMIT = 10
 
 def _ensure_agent_capabilities(decision: Understanding, catalog: set[str]) -> None:
     """在创建/启动任务前拒绝当前账号没有对应工具的 Agent 目标。"""
@@ -612,136 +661,9 @@ def _planner_view(entry: dict) -> dict:
     return compact
 
 
-def _clip_planner_text(value: str, limit: int) -> str:
-    """压缩规划输入文本并保留首尾，尽量保住实体名、条件和末尾补充。"""
-    if len(value) <= limit:
-        return value
-    marker = "…[上下文已裁剪]…"
-    available = max(0, limit - len(marker))
-    head = available // 2
-    return value[:head] + marker + value[-(available - head):]
-
-
-def _compact_planner_step(step: dict, *, keep_rows: int, text_limit: int) -> dict:
-    """保留证据步骤及摘要字段，缩减该步骤对规划上下文的占用。"""
-    compact = {key: value for key, value in step.items() if key != "result"}
-    for key in ("tool", "status", "step", "action"):
-        if key in step:
-            compact[key] = step[key]
-    arguments = step.get("arguments")
-    if isinstance(arguments, dict):
-        compact["arguments"] = arguments
-    result = step.get("result")
-    if not isinstance(result, dict):
-        if result is not None:
-            compact["result"] = _clip_planner_text(str(result), text_limit)
-        return compact
-    keys = (
-        "tool", "product_id", "product_name", "keyword", "rfq_item_id", "rfq_no",
-        "total_rows", "truncated", "totals", "planner_truncated", "planner_note",
-        "planner_sources_truncated", "scope", "warnings", "rows", "sources",
-        "request_no", "po_no", "purpose", "status", "items", "answer", "stages",
-        "conclusion", "unavailable_stages", "source_records", "recommendation",
-    )
-    compact_result = {key: result[key] for key in keys if key in result}
-    for key in ("rows", "sources", "warnings"):
-        values = compact_result.get(key)
-        if isinstance(values, list):
-            compact_result[key] = values[:keep_rows]
-    compact_result = _clip_planner_tree(compact_result, text_limit)
-    if isinstance(result.get("rows"), list) and len(result["rows"]) > len(compact_result.get("rows", [])):
-        compact_result["planner_truncated"] = True
-        compact_result.setdefault("planner_note", "规划上下文已压缩明细；完整结果仍保存在任务证据中。")
-    if isinstance(result.get("sources"), list) and len(result["sources"]) > len(compact_result.get("sources", [])):
-        compact_result["planner_sources_truncated"] = True
-    compact["result"] = compact_result
-    return compact
-
-
-def _clip_planner_tree(value, text_limit: int):
-    """递归限制非关键说明和数组，避免单个字段绕过行数限制。"""
-    if isinstance(value, str):
-        return _clip_planner_text(value, text_limit)
-    if isinstance(value, list):
-        return [_clip_planner_tree(item, text_limit) for item in value]
-    if isinstance(value, dict):
-        return {key: _clip_planner_tree(item, text_limit) for key, item in value.items()}
-    return value
-
-
 def _fit_planner_context(payload: dict, max_chars: int) -> str:
-    """按固定层级压缩临时规划 payload，保留目标、当前问题和证据步骤。"""
-    if max_chars < 1:
-        raise BusinessValidationError("CONTEXT_LIMIT")
-    fitted = copy.deepcopy(payload)
-
-    def serialize() -> str:
-        return json.dumps(fitted, ensure_ascii=False)
-
-    context = serialize()
-    if len(context) <= max_chars:
-        return context
-
-    # 先缩历史文本和记忆；最近输入与结构化目标单独保留。
-    messages = fitted.get("messages")
-    if isinstance(messages, list) and messages:
-        fitted["messages"] = [*(_clip_planner_text(str(item), 320) for item in messages[-3:-1]),
-                               _clip_planner_text(str(messages[-1]), 1800)]
-    memory = fitted.get("recent_task_memory")
-    if isinstance(memory, dict):
-        recent = memory.get("recent_context")
-        if isinstance(recent, list):
-            memory["recent_context"] = [
-                {**item, "text": _clip_planner_text(str(item.get("text", "")), 320)}
-                if isinstance(item, dict) else _clip_planner_text(str(item), 320)
-                for item in recent[-3:]
-            ]
-        goal = memory.get("goal")
-        if isinstance(goal, dict):
-            for key in ("description", "last_user_input"):
-                if isinstance(goal.get(key), str):
-                    goal[key] = _clip_planner_text(goal[key], 700)
-        focus = memory.get("focus")
-        if isinstance(focus, dict) and isinstance(focus.get("candidates"), list):
-            focus["candidates"] = focus["candidates"][:PLANNER_RESULT_ROW_LIMIT]
-        pending = memory.get("pending")
-        if isinstance(pending, dict) and isinstance(pending.get("candidates"), list):
-            pending["candidates"] = pending["candidates"][:PLANNER_RESULT_ROW_LIMIT]
-    context = serialize()
-    if len(context) <= max_chars:
-        return context
-
-    # 保留全部步骤编号和完整 totals，只为规划保留少量明细/来源。
-    steps = fitted.get("current_turn_steps")
-    if isinstance(steps, list):
-        fitted["current_turn_steps"] = [_compact_planner_step(step, keep_rows=3, text_limit=500)
-                                        if isinstance(step, dict) else step for step in steps]
-    context = serialize()
-    if len(context) <= max_chars:
-        return context
-
-    # 最后压成目标、当前输入、已核验对象和逐步证据摘要；不改原始 RunState。
-    if isinstance(messages, list) and messages:
-        fitted["messages"] = [_clip_planner_text(str(messages[-1]), 1200)]
-    if isinstance(memory, dict):
-        goal = memory.get("goal")
-        if isinstance(goal, dict):
-            memory["goal"] = {key: goal[key] for key in ("intent", "description", "last_user_input", "status")
-                               if key in goal}
-        focus = memory.get("focus")
-        if isinstance(focus, dict):
-            memory["focus"] = {key: focus[key] for key in
-                                ("entity_type", "product_name", "product_code", "resolution") if key in focus}
-        memory.pop("recent_context", None)
-        memory.pop("pending", None)
-        memory.pop("evidence_ref", None)
-    if isinstance(steps, list):
-        fitted["current_turn_steps"] = [_compact_planner_step(step, keep_rows=0, text_limit=180)
-                                        if isinstance(step, dict) else step for step in steps]
-    # Arbitrary debug/extension payloads are omitted from this last-resort planner view.
-    context = serialize()
-    if len(context) > max_chars:
-        raise BusinessValidationError("CONTEXT_LIMIT")
+    """保留历史调用接口；运行时使用可配置的 token 预算。"""
+    context, _ = assemble_planner_context(payload, max_tokens=12000, max_chars=max_chars)
     return context
 
 
@@ -755,7 +677,19 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
         "selected_product_id": state.selected_product, "selected_rfq_item_id": state.selected_rfq_item,
         "verified_product_id": state.verified_product, "verified_rfq_item_id": state.verified_rfq_item,
     }
-    context = _fit_planner_context(payload, settings.agent_context_max_chars)
+    _record_prompt(state, "planner")
+    def assemble(value: dict) -> str:
+        from app.core.observability import metrics
+        context, stats = assemble_planner_context(value, max_tokens=settings.agent_context_max_tokens,
+                                                  max_chars=settings.agent_context_max_chars)
+        state.run_meta["context"] = {"estimated_tokens": stats.estimated_tokens, "max_tokens": stats.max_tokens,
+            "max_chars": settings.agent_context_max_chars, "truncated_sections": stats.truncated_sections}
+        metrics.observe("agent_context_tokens", stats.estimated_tokens)
+        for section in stats.truncated_sections:
+            metrics.increment("agent_context_truncated", labels={"section": section})
+        return context
+
+    context = assemble(payload)
     model_settings = settings.model_copy(update={"llm_max_tokens": min(settings.llm_max_tokens, 2048),
         "llm_max_retries": 0})
     for attempt in range(2):
@@ -770,7 +704,7 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
             correction = json.loads(context)
             correction["format_correction"] = "上一动作未通过严格 JSON schema 校验；请仅输出符合 action schema 的 JSON，不添加身份字段。"
             try:
-                context = _fit_planner_context(correction, settings.agent_context_max_chars)
+                context = assemble(correction)
             except BusinessValidationError:
                 raise BusinessValidationError("CONTEXT_LIMIT") from None
 
@@ -1086,11 +1020,17 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
         calls=state.llm_calls, on_settle=persist_budget)
     user_token = bind_user(user.id)
     budget_token = bind_task_token_budget(budget)
+    observer_token = llm._response_observer.set(lambda response: _record_model_response(state, response))
+    state.run_meta.setdefault("prompt_versions", {})
+    state.run_meta.setdefault("model", {"provider": None, "name": None, "usage": None})
+    state.run_meta.setdefault("context", {"estimated_tokens": None, "max_tokens": None, "truncated_sections": None})
+    state.run_meta.setdefault("retries", {"llm": None, "tool": None})
     try:
         from app.core.telemetry import trace_span
         with trace_span("agent.execute", {"chemicalops.agent.task_id": state.task_id}):
             return await _drive_impl(db, user, state, settings)
     finally:
+        llm._response_observer.reset(observer_token)
         reset_task_token_budget(budget_token)
         reset_user(user_token)
 
@@ -1115,6 +1055,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             context = {"memory": current.memory_state, "messages": current.messages[:-1]}
             from app.modules.ai import capabilities
             manifest = await _offload_db_call(capabilities.build_capability_manifest, db, user)
+            _record_prompt(current, "routing")
             decision = await routing.understand(current.messages[-1], context, settings, manifest=manifest)
             await _offload_db_call(_assert_running, db, user, current)
             current.memory_state["understanding"] = decision.model_dump(mode="json")
@@ -1127,6 +1068,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                     current.status, current.reply = "CANCELLED", "已取消本次查询。"
                 elif decision.route in {"capability", "greeting", "guidance"}:
                     from app.modules.ai.schema import Intent
+                    if decision.route == "guidance":
+                        _record_prompt(current, "guidance")
                     current.reply, _ = await service._compose_non_query_reply(
                         {"capability": Intent.PROJECT, "greeting": Intent.GREETING, "guidance": Intent.GUIDANCE}[decision.route],
                         "semantic_route", current.messages[-1], settings, manifest=manifest,
@@ -1314,9 +1257,15 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             "DATABASE_ERROR" if isinstance(exc, SQLAlchemyError) else str(exc) if str(exc) in codes else "RUNTIME_ERROR")
         if state.error_code == "RUNTIME_ERROR" and transient(exc):
             state.error_code = "MODEL_SERVICE_ERROR"
+        from app.modules.ai.error_policy import classify
+        category, recovery, hint = classify(state.error_code, exc)
+        state.run_meta["error"] = {"code": state.error_code, "class": category.value,
+                                   "recovery": recovery.value, "hint": hint}
         state.reply = (str(exc) if isinstance(exc, routing.IntentRecognitionError) else
                        "本次只读任务已停止，请核对权限、输入或服务状态后重新发起。")
-        state.trace.append({"step": len(state.trace) + 1, "action": "stop", "status": "FAILED", "error_code": state.error_code})
+        state.trace.append({"step": len(state.trace) + 1, "action": "stop", "status": "FAILED",
+                            "error_code": state.error_code, "error_class": category.value,
+                            "recovery_action": recovery.value, "recovery_advisory_only": True})
         _append_memory_context(state.memory_state, "assistant", state.reply)
         await _offload_db_call(db.rollback)
         try:
@@ -1346,6 +1295,9 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
     state = RunState(task_id, 0, [data.question], [], 0, memory_state=_new_memory_state(data.question),
                      llm_token_limit=get_settings().agent_max_total_tokens,
                      workflow=Workflow())
+    state.run_meta = {"prompt_versions": {}, "model": {"provider": None, "name": None, "usage": None},
+        "context": {"estimated_tokens": None, "max_tokens": None, "truncated_sections": None},
+        "retries": {"llm": None, "tool": None}, "error": {"code": None, "class": None, "recovery": None}}
     from app.modules.system.data_scope import department_scope_snapshot, warehouse_scope_snapshot
     state.department_scope = department_scope_snapshot(db, user)
     state.warehouse_scope = warehouse_scope_snapshot(db, user)
@@ -1370,7 +1322,7 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
         state.memory_state["route_turn"] = 1
         state.memory_state["goal"]["intent"] = decision.agent_goal
     db.add(AIAgentTask(id=task_id, user_id=user.id, status="RUNNING", revision=0,
-        payload={"messages": state.messages, "trace": [], "turn_start": 0, "department_scope": state.department_scope, "warehouse_scope": state.warehouse_scope,
+        payload={"messages": state.messages, "trace": [], "turn_start": 0, "department_scope": state.department_scope, "warehouse_scope": state.warehouse_scope, "run_meta": state.run_meta,
                  "memory_state": state.memory_state, "workflow": state.workflow.model_dump(mode="json"),
                  "token_budget": {"limit": state.llm_token_limit,
                                   "used_tokens": 0, "estimated_tokens": 0, "calls": 0}},
@@ -1458,23 +1410,27 @@ def prepare_continue(db: Session, user: User, task_id: str, data: TaskContinue, 
         memory["route_turn"] = len(task.payload["messages"]) + 1
         memory["understanding_applied_turn"] = len(task.payload["messages"]) + 1
     messages = [*task.payload["messages"], data.question]
-    count = db.execute(update(AIAgentTask).where(AIAgentTask.id == task.id,
-        AIAgentTask.user_id == user.id, AIAgentTask.revision == data.revision,
-        AIAgentTask.status == "WAITING_INPUT").values(status="RUNNING", revision=data.revision + 1,
-        payload={**task.payload, "messages": messages, "selected_product": product,
-                 "selected_rfq_item": rfq_item, "turn_start": len(task.payload["trace"]),
-                 "workflow": workflow.model_dump(mode="json"), "memory_state": memory},
-        updated_at=_now()).execution_options(synchronize_session=False)).rowcount
-    if count != 1:
-        db.rollback()
-        raise DuplicateResourceError("任务已被其他请求继续或取消")
     state = RunState(task.id, data.revision + 1, messages,
         list(task.payload["trace"]), len(task.payload["trace"]), product, rfq_item,
         chat=task.payload.get("chat"), memory_state=memory, workflow=workflow, department_scope=task.payload.get("department_scope"), warehouse_scope=task.payload.get("warehouse_scope"),
         llm_token_limit=(task.payload.get("token_budget") or {}).get("limit", get_settings().agent_max_total_tokens),
         llm_tokens_used=(task.payload.get("token_budget") or {}).get("used_tokens", 0),
         llm_tokens_estimated=(task.payload.get("token_budget") or {}).get("estimated_tokens", 0),
-        llm_calls=(task.payload.get("token_budget") or {}).get("calls", 0))
+        llm_calls=(task.payload.get("token_budget") or {}).get("calls", 0),
+        run_meta=copy.deepcopy(task.payload.get("run_meta") or {}))
+    if data.route_token:
+        _record_prompt(state, "routing")
+    count = db.execute(update(AIAgentTask).where(AIAgentTask.id == task.id,
+        AIAgentTask.user_id == user.id, AIAgentTask.revision == data.revision,
+        AIAgentTask.status == "WAITING_INPUT").values(status="RUNNING", revision=data.revision + 1,
+        payload={**task.payload, "messages": messages, "selected_product": product,
+                 "selected_rfq_item": rfq_item, "turn_start": len(task.payload["trace"]),
+                 "workflow": workflow.model_dump(mode="json"), "memory_state": memory,
+                 "run_meta": state.run_meta},
+        updated_at=_now()).execution_options(synchronize_session=False)).rowcount
+    if count != 1:
+        db.rollback()
+        raise DuplicateResourceError("任务已被其他请求继续或取消")
     if commit:
         db.commit()
     return state
@@ -1595,7 +1551,8 @@ def _restore_prepared_state(db: Session, task_id: str, user_id: int, revision: i
         llm_token_limit=(task.payload.get("token_budget") or {}).get("limit", get_settings().agent_max_total_tokens),
         llm_tokens_used=(task.payload.get("token_budget") or {}).get("used_tokens", 0),
         llm_tokens_estimated=(task.payload.get("token_budget") or {}).get("estimated_tokens", 0),
-        llm_calls=(task.payload.get("token_budget") or {}).get("calls", 0))
+        llm_calls=(task.payload.get("token_budget") or {}).get("calls", 0),
+        run_meta=copy.deepcopy(task.payload.get("run_meta") or {}))
     execution = execution_context.guard(db)
     if execution:
         state.decisions = execution.checkpoint.get("decisions", 0)

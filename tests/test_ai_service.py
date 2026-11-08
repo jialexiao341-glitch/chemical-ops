@@ -86,6 +86,8 @@ def test_ai_service_retries_transient_network_failure(monkeypatch: pytest.Monkey
 
     assert response.message.content.startswith("已收到")
     assert FlakyClient.attempts == 2
+    assert response.call_meta["attempts"] == 2
+    assert response.call_meta["fallback_used"] is False
 
 
 def test_ai_service_does_not_retry_ambiguous_response_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -103,10 +105,16 @@ def test_ai_service_does_not_retry_ambiguous_response_timeout(monkeypatch: pytes
     settings = Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=3)
     request = AIChatRequest(messages=[{"role": "user", "content": "查询库存"}])
 
-    with pytest.raises(BusinessValidationError, match="响应超时"):
-        asyncio.run(chat(request, settings))
+    observed = []
+    token = llm._response_observer.set(observed.append)
+    try:
+        with pytest.raises(BusinessValidationError, match="响应超时"):
+            asyncio.run(chat(request, settings))
+    finally:
+        llm._response_observer.reset(token)
 
     assert TimedOutClient.attempts == 1
+    assert observed == [None]
 
 
 def test_ai_service_treats_missing_usage_as_unavailable_not_zero(monkeypatch: pytest.MonkeyPatch) -> None:

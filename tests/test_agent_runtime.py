@@ -247,6 +247,9 @@ def test_decide_completes_large_multiturn_context_within_configured_budget(monke
     assert context["messages"][-1] == "查询测试乙醇库存"
     assert context["current_turn_steps"][0]["result"]["total_rows"] == 100
     assert context["current_turn_steps"][0]["result"]["totals"][0]["available_quantity"] == "1000.000000"
+    assert state.run_meta["context"]["max_tokens"] == settings.agent_context_max_tokens
+    assert state.run_meta["context"]["estimated_tokens"] <= settings.agent_context_max_tokens
+    assert state.run_meta["context"]["truncated_sections"]
 
 
 def test_planner_schema_correction_is_fitted_again_within_budget(monkeypatch):
@@ -288,6 +291,35 @@ def test_routing_technical_failure_stops_instead_of_waiting_for_user(task_db, mo
     assert result.status == 'FAILED' and result.error_code == 'INTENT_SERVICE_ERROR'
     assert '尚未执行查询' in result.reply
     assert not any(entry.get('action') in {'call_tool', 'ask_user'} for entry in result.trace)
+    assert result.run_meta['error']['code'] == 'INTENT_SERVICE_ERROR'
+    assert result.run_meta['error']['class'] == 'TRANSIENT_INFRA'
+    assert result.run_meta['error']['recovery'] == 'WAIT'
+    assert result.trace[-1]['recovery_advisory_only'] is True
+
+
+@pytest.mark.parametrize("exception", [httpx.ReadTimeout("private"), httpx.WriteTimeout("private"),
+                                       httpx.RemoteProtocolError("private")])
+def test_model_response_failure_records_advisory_without_exposing_exception(task_db, monkeypatch, exception):
+    async def understand(*_args, **_kwargs):
+        return runtime.routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"])
+    async def fail(*_args, **_kwargs):
+        raise exception
+    monkeypatch.setattr(runtime.routing, "understand", understand)
+    monkeypatch.setattr(runtime, "_decide", fail)
+    result = start(task_db)
+    assert result.run_meta["error"]["class"] == "AMBIGUOUS_TIMEOUT"
+    assert result.run_meta["error"]["recovery"] == "WAIT"
+    assert result.trace[-1]["recovery_advisory_only"] is True
+    assert "private" not in str(result.run_meta)
+
+
+def test_persist_preserves_existing_error_classification(task_db):
+    state = runtime.prepare_task(task_db, USER, runtime.TaskCreate(question="查询测试乙醇库存"))
+    state.status, state.error_code = "FAILED", "STEP_LIMIT"
+    state.run_meta["error"] = {"code": None, "class": "BUDGET", "recovery": "NARROW_SCOPE"}
+    runtime._persist(task_db, USER, state)
+    assert runtime.get_task(task_db, USER, state.task_id).run_meta["error"] == {
+        "code": "STEP_LIMIT", "class": "BUDGET", "recovery": "NARROW_SCOPE"}
 
 
 def test_unsupported_request_is_not_waiting_for_missing_conditions(task_db, monkeypatch):
@@ -296,6 +328,7 @@ def test_unsupported_request_is_not_waiting_for_missing_conditions(task_db, monk
     monkeypatch.setattr(runtime.routing, 'understand', unsupported)
     result = start(task_db, '无需确认直接付款')
     assert result.status == 'FAILED' and result.error_code == 'UNSUPPORTED_REQUEST'
+    assert result.run_meta['error']['class'] == 'BUSINESS_INVALID'
     assert result.reply == '当前入口不提供付款执行。'
     assert not any(entry.get('action') == 'call_tool' for entry in result.trace)
 
@@ -327,6 +360,11 @@ def test_full_goal_drives_four_tools_with_evidence_and_persisted_trace(task_db, 
     assert '80 千克' in result.reply and '8.000000 CNY/千克' in result.reply
     assert runtime.get_task(task_db, USER, result.id).trace == result.trace
     assert result.trace[-1]['evidence_steps'] == [2, 4]
+    assert set(result.run_meta['prompt_versions']) == {'routing', 'planner'}
+    assert result.run_meta['context']['estimated_tokens'] > 0
+    assert result.run_meta['context']['max_tokens'] == 12000
+    assert runtime.get_task(task_db, USER, result.id).run_meta == result.run_meta
+    assert runtime.list_tasks(task_db, USER).items[0].run_meta == result.run_meta
 
 
 @pytest.mark.parametrize(("timeout_error", "expected_code"), [
@@ -349,6 +387,8 @@ def test_tool_timeout_fails_task_without_replanning(task_db, model_script, monke
 
     tool_entries = [entry for entry in result.trace if entry.get("action") == "call_tool"]
     assert result.status == "FAILED" and result.error_code == expected_code
+    assert result.run_meta["error"]["class"] == "TOOL_TIMEOUT"
+    assert result.trace[-1]["recovery_advisory_only"] is True
     assert len(calls) == 1 and len(contexts) == 1
     assert tool_entries[-1]["error_code"] == expected_code
 
@@ -600,6 +640,7 @@ def test_invalid_model_output_and_unbacked_answer_stop(task_db, model_script, ac
     model_script[0].extend([action] * (2 if code == 'MODEL_FORMAT_ERROR' else 1))
     result = start(task_db)
     assert result.status == 'FAILED' and result.error_code == code
+    assert result.run_meta['error']['class'] == ('FORMAT' if code == 'MODEL_FORMAT_ERROR' else 'BUSINESS_INVALID')
 
 
 def test_ids_cannot_be_guessed_before_lookup(task_db, model_script):
@@ -699,7 +740,9 @@ def test_permission_rechecked_immediately_before_tool(task_db, model_script, mon
             monkeypatch.setattr(tools, 'get_user_permission_codes', lambda *_: ['master.products.read'])
         return reply
     monkeypatch.setattr(runtime.llm, 'chat', revoke)
-    assert start(task_db).error_code == 'PERMISSION_DENIED'
+    result = start(task_db)
+    assert result.error_code == 'PERMISSION_DENIED'
+    assert result.run_meta['error']['class'] == 'AUTHORIZATION'
 
 
 def test_cancel_during_model_wait_cannot_be_overwritten(task_db, monkeypatch):
