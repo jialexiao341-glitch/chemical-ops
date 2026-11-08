@@ -440,8 +440,79 @@ def test_agent_waits_before_tools_for_unsupported_product_slots(task_db, model_s
     ))
 
     assert result.status == "WAITING_INPUT", result.model_dump()
+    assert "routing" in result.run_meta["prompt_versions"]
     assert result.reply == unsupported_product_slot_prompt(tuple(unsupported_slots))
     assert calls == []
+
+
+def test_unresolvable_warehouse_slot_waits_for_clarification(task_db, model_script, monkeypatch):
+    """仓库槽位无法唯一匹配时应追问，而不是把可恢复输入问题升级为运行错误。"""
+    actions, _contexts = model_script
+    question = "查询测试乙醇在 WH-OTHER 的库存"
+    decision = runtime.routing.Understanding(
+        purpose="query", execution_mode="agent", tasks=["inventory"],
+        slots={"product_keyword": "测试乙醇", "warehouse_keyword": "WH-OTHER"},
+    )
+    route_token = runtime.routing.issue_ticket(decision, USER.id, question, None)
+    calls = []
+    execute_tool = runtime.tools.execute_tool
+
+    def record_tool_call(db, user, call):
+        calls.append(call.tool)
+        return execute_tool(db, user, call)
+
+    monkeypatch.setattr(runtime.tools, "execute_tool", record_tool_call)
+    result = asyncio.run(runtime.create_task(
+        task_db, USER, runtime.TaskCreate(question=question, route_token=route_token)
+    ))
+
+    assert result.status == "WAITING_INPUT", result.model_dump()
+    assert result.reply == "请提供当前可访问仓库的准确名称或编码"
+    assert calls == []
+
+
+def test_quote_task_ignores_misfilled_warehouse_slot(task_db, model_script):
+    """纯报价任务不使用仓库范围，模型误填的仓库槽位不应中断查询。"""
+    actions, _contexts = model_script
+    actions.extend([
+        tool("catalog.search_products", keyword="测试乙醇"),
+        tool("supplier_quotes.find_rfq_items", product_id=1),
+        tool("supplier_quotes.compare", product_id=1, rfq_item_id=11),
+        {"action": "finish", "evidence_steps": [3]},
+    ])
+    question = "比较测试乙醇在 EVAL-R01 的有效最新报价"
+    decision = runtime.routing.Understanding(
+        purpose="query", execution_mode="agent", tasks=["quotes"],
+        slots={"product_keyword": "测试乙醇", "warehouse_keyword": "EVAL-R01"},
+    )
+    route_token = runtime.routing.issue_ticket(decision, USER.id, question, None)
+    result = asyncio.run(runtime.create_task(
+        task_db, USER, runtime.TaskCreate(question=question, route_token=route_token)
+    ))
+
+    assert result.status == "SUCCEEDED", result.model_dump()
+    assert "找到 9 条" in result.reply
+
+
+def test_continue_route_token_persists_routing_version_before_execution(task_db, model_script):
+    model_script[0].append({"action": "ask_user", "question": "请补充产品"})
+    waiting = start(task_db)
+    task = task_db.get(AIAgentTask, waiting.id)
+    meta = dict(task.payload["run_meta"])
+    meta["prompt_versions"] = {}
+    task.payload = {**task.payload, "run_meta": meta}
+    task_db.commit()
+    question = "查询测试乙醇库存"
+    decision = runtime.routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"])
+    ticket = runtime.routing.issue_ticket(decision, USER.id, question, None)
+    state = runtime.prepare_continue(task_db, USER, waiting.id,
+        runtime.TaskContinue(question=question, revision=waiting.revision, route_token=ticket))
+    assert "routing" in state.run_meta["prompt_versions"]
+    task_db.expire_all()
+    assert "routing" in task_db.get(AIAgentTask, waiting.id).payload["run_meta"]["prompt_versions"]
+    model_script[0].append({"action": "ask_user", "question": "请确认规格"})
+    result = asyncio.run(runtime._drive(task_db, USER, state, runtime.get_settings()))
+    assert "routing" in result.run_meta["prompt_versions"]
 
 
 def test_agent_sync_tool_runs_off_event_loop_and_keeps_heartbeat_responsive(task_db, model_script, monkeypatch):

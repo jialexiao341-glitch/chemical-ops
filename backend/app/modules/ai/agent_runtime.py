@@ -1086,6 +1086,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                 _append_memory_context(current.memory_state, "assistant", current.reply)
                 await _offload_db_call(_persist, db, user, current)
                 return {"data": current}
+        clarification = None
         if current.memory_state.get("understanding_applied_turn") != len(current.messages):
             decision = Understanding.model_validate(current.memory_state["understanding"])
             if decision.dialogue_action == "switch":
@@ -1099,10 +1100,16 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             current.memory_state["goal"]["intent"] = decision.agent_goal
             if decision.slots.rfq_no:
                 current.workflow.rfq_no = decision.slots.rfq_no
-            if decision.slots.warehouse_keyword:
-                warehouse_id = await _offload_db_call(
-                    _resolve_agent_warehouse, db, user, decision.slots.warehouse_keyword)
-                current.memory_state.setdefault("slots", {})["warehouse"] = warehouse_id
+            if decision.slots.warehouse_keyword and "inventory" in set(decision.tasks):
+                # 仓库名称/编码无法唯一匹配属于可恢复的输入问题，按澄清处理而不是运行错误；
+                # 纯报价任务不使用仓库范围，忽略模型误填的仓库槽位。
+                try:
+                    warehouse_id = await _offload_db_call(
+                        _resolve_agent_warehouse, db, user, decision.slots.warehouse_keyword)
+                except BusinessValidationError as exc:
+                    clarification = str(exc)
+                else:
+                    current.memory_state.setdefault("slots", {})["warehouse"] = warehouse_id
             current.memory_state["understanding_applied_turn"] = len(current.messages)
         understanding = Understanding.model_validate(current.memory_state["understanding"])
         from app.modules.ai.product_query_policy import unsupported_product_slot_prompt, unsupported_product_slots
@@ -1112,6 +1119,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         ))
         if unsupported:
             current.action = AskAction(action="ask_user", question=unsupported_product_slot_prompt(unsupported))
+        elif clarification:
+            current.action = AskAction(action="ask_user", question=clarification)
         else:
             current.action = None
         current.decisions += 1
