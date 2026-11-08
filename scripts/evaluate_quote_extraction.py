@@ -21,10 +21,18 @@ from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
 from app.modules.files.parser import ParsedFile, parse_file_content
 from app.modules.rfqs import quote_extraction
+from app.modules.system import crud as system_crud
 
 HEADER_LINES=['Supplier: Demo A','Currency: CNY','Quote date: 2026-10-20','Valid until: 2026-11-20']
 ITEM_LINE='Ethanol | Model E99 | Quantity 10 L | Unit price 12.50 CNY/L | Tax 13% excluded | MOQ 20 L | Lead 7 days | Payment net 30 days'
 TEXT='\n'.join([*HEADER_LINES,ITEM_LINE])
+
+
+class _EvalSession:
+    """解析后的权限复核只要求刷新会话；评测不连接业务库。"""
+
+    def expire_all(self):
+        pass
 
 
 @lru_cache(maxsize=4)
@@ -194,13 +202,15 @@ def run_case(case_id, case, *, live_model=False, live_ocr=False):
     candidate=None; error=None
     with patch.object(quote_extraction,'get_settings',return_value=settings),\
          patch.object(quote_extraction.rfq_service,'get_rfq',return_value=rfq),\
+         patch.object(system_crud,'get_user_role_codes',return_value=['BUYER']),\
+         patch.object(system_crud,'get_user_permission_codes',return_value=['procurement.rfqs.quote']),\
          patch.object(quote_extraction.file_service,'scan_content',return_value=NS(status=case.get('scan_status','CLEAN'))),\
          patch.object(quote_extraction.file_service,'upload_file',side_effect=upload),\
          patch.object(quote_extraction,'chat',side_effect=chat),\
          patch.object(quote_extraction,'parse_file_content',side_effect=parse),\
          patch.object(quote_extraction.mineru,'parse_bytes',side_effect=ocr):
         async def invoke():
-            return await quote_extraction.parse_quote_file(NS(),NS(id=1),14,file_name='synthetic-quote.'+extension,
+            return await quote_extraction.parse_quote_file(_EvalSession(),NS(id=1,status='ACTIVE'),14,file_name='synthetic-quote.'+extension,
                 mime_type='text/csv' if extension=='csv' else 'application/octet-stream',content=content)
         try:
             if not live_model:

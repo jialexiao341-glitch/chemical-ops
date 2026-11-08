@@ -58,7 +58,7 @@ def test_outbound_never_consumes_another_batch(db_session):
     db_session.flush()
     other = layer(db_session, actor, {**slot, "batch_id": other_batch.id}, cost="2")
     tx = transaction(db_session, actor, {**slot, "batch_id": other_batch.id}, "3")
-    assert allocate_outbound_cost(db_session, tx, Decimal("3")) == Decimal("6")
+    assert allocate_outbound_cost(db_session, tx, Decimal("3")) == (Decimal("6"), "CNY")
     assert other.remaining_quantity == Decimal("7")
     assert own.remaining_quantity == Decimal("10")
     with pytest.raises(BusinessValidationError, match="成本层不足"):

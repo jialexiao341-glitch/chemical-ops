@@ -92,8 +92,14 @@ def test_manual_corrections_reach_quote_and_total_cost_without_being_replaced_by
     class Db:
         quote=None
         commits=0
+        lock_reads=0
         def get(self,*_): return NS(uploader_id=1,file_category='SUPPLIER_QUOTE')
-        def scalar(self,*_): return None
+        def scalar(self,*_):
+            # 依次是重新锁定询价单、报价版本、来源文件附件关联查询。
+            self.lock_reads+=1
+            if self.lock_reads==1: return rfq
+            if self.lock_reads==3: return 1
+            return None
         def add(self,quote): self.quote=quote
         def flush(self): self.quote.id=201
         def commit(self): self.commits+=1

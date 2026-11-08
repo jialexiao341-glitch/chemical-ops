@@ -6,6 +6,18 @@ import pytest
 
 from app.core.errors import BusinessValidationError
 from app.modules.rfqs import quote_extraction, service as rfq_service
+from app.modules.system import crud as system_crud
+
+
+class _FakeSession:
+    """权限复核只要求刷新会话，用例不与真实数据库交互。"""
+
+    def expire_all(self):
+        pass
+
+
+def _user():
+    return SimpleNamespace(id=5, status="ACTIVE")
 
 
 def _rfq(status="RESPONDING"):
@@ -62,6 +74,11 @@ def _model_result(*, item_id=31, quote="物料：乙醇，数量：10 L，单价
 
 def _configure(monkeypatch, model_result):
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: _rfq())
+    monkeypatch.setattr(system_crud, "get_user_role_codes", lambda *_args, **_kwargs: ["BUYER"])
+    monkeypatch.setattr(
+        system_crud, "get_user_permission_codes",
+        lambda *_args, **_kwargs: ["procurement.rfqs.quote"],
+    )
     monkeypatch.setattr(quote_extraction.file_service, "scan_content", lambda _content: SimpleNamespace(status="CLEAN"))
     monkeypatch.setattr(
         quote_extraction.file_service,
@@ -96,8 +113,7 @@ def test_quote_file_extracts_candidates_with_verifiable_source_and_stores_only_f
     ))
 
     result = _run_immediate(quote_extraction.parse_quote_file(
-        SimpleNamespace(),
-        SimpleNamespace(id=5),
+        _FakeSession(), _user(),
         14,
         file_name="报价.csv",
         mime_type="text/csv",
@@ -123,8 +139,7 @@ def test_quote_file_preserves_explicit_tax_basis_for_manual_review(monkeypatch):
     ))
 
     result = _run_immediate(quote_extraction.parse_quote_file(
-        SimpleNamespace(),
-        SimpleNamespace(id=5),
+        _FakeSession(), _user(),
         14,
         file_name="报价.csv",
         mime_type="text/csv",
@@ -139,7 +154,7 @@ def test_quote_file_preserves_moq_unit_for_manual_review(monkeypatch):
     _configure(monkeypatch, _model_result(quote=quote, moq_quantity="20", moq_unit_name="L"))
 
     result = _run_immediate(quote_extraction.parse_quote_file(
-        SimpleNamespace(), SimpleNamespace(id=5), 14,
+        _FakeSession(), _user(), 14,
         file_name="报价.csv", mime_type="text/csv", content=quote.encode(),
     ))
 
@@ -152,7 +167,7 @@ def test_quote_file_discards_items_without_exact_source_quote(monkeypatch):
 
     with pytest.raises(BusinessValidationError, match="带可核对原文引用"):
         _run_immediate(quote_extraction.parse_quote_file(
-            SimpleNamespace(), SimpleNamespace(id=5), 14,
+            _FakeSession(), _user(), 14,
             file_name="报价.csv", mime_type="text/csv",
             content="物料：乙醇，数量：10 L，单价：12.5 CNY/L".encode(),
         ))
@@ -162,7 +177,7 @@ def test_quote_file_keeps_unmatched_item_for_manual_review(monkeypatch):
     _configure(monkeypatch, _model_result(item_id=999))
 
     result = _run_immediate(quote_extraction.parse_quote_file(
-        SimpleNamespace(), SimpleNamespace(id=5), 14,
+        _FakeSession(), _user(), 14,
         file_name="报价.csv", mime_type="text/csv",
         content="物料：乙醇，数量：10 L，单价：12.5 CNY/L".encode(),
     ))
@@ -183,13 +198,18 @@ def test_quote_file_rejects_rfq_that_no_longer_accepts_quotes(monkeypatch):
 
     with pytest.raises(BusinessValidationError, match="不接受报价文件"):
         _run_immediate(quote_extraction.parse_quote_file(
-            SimpleNamespace(), SimpleNamespace(id=5), 14,
+            _FakeSession(), _user(), 14,
             file_name="报价.csv", mime_type="text/csv", content=b"quote",
         ))
 
 
 def test_quote_create_rejects_source_file_owned_by_another_user():
     class FakeDb:
+        @staticmethod
+        def scalar(_query):
+            # 录入报价前会重新读取并锁定询价单主单。
+            return _rfq()
+
         @staticmethod
         def get(_model, _file_id):
             return SimpleNamespace(uploader_id=99, file_category="SUPPLIER_QUOTE")
@@ -205,7 +225,7 @@ def test_fields_without_individual_evidence_are_not_prefilled(monkeypatch):
     prediction = _model_result()
     prediction['items'][0].pop('evidence')
     _configure(monkeypatch, prediction)
-    result = _run_immediate(quote_extraction.parse_quote_file(SimpleNamespace(), SimpleNamespace(id=5), 14,
+    result = _run_immediate(quote_extraction.parse_quote_file(_FakeSession(), _user(), 14,
         file_name='quote.csv', mime_type='text/csv', content=prediction['items'][0]['quote'].encode()))
     assert result.items[0].unit_price is None
     assert result.items[0].tax_rate is None
@@ -216,7 +236,7 @@ def test_header_value_must_match_its_actual_evidence(monkeypatch):
     prediction = _model_result()
     prediction['currency_code'] = 'USD'
     _configure(monkeypatch, prediction)
-    result = _run_immediate(quote_extraction.parse_quote_file(SimpleNamespace(), SimpleNamespace(id=5), 14,
+    result = _run_immediate(quote_extraction.parse_quote_file(_FakeSession(), _user(), 14,
         file_name='quote.csv', mime_type='text/csv', content=('币种：CNY\n'+prediction['items'][0]['quote']).encode()))
     assert result.currency_code is None
 
@@ -241,7 +261,7 @@ def test_field_evidence_boundaries(field, value, proof, expected):
 def _parse_prediction(monkeypatch, prediction, *, source=None):
     _configure(monkeypatch, prediction)
     return _run_immediate(quote_extraction.parse_quote_file(
-        SimpleNamespace(), SimpleNamespace(id=5), 14, file_name='quote.csv',
+        _FakeSession(), _user(), 14, file_name='quote.csv',
         mime_type='text/csv', content=(source or '\n'.join(item['quote'] for item in prediction['items'])).encode()))
 
 
@@ -259,7 +279,7 @@ def test_matching_requires_verified_specification(monkeypatch):
     rfq.items[0].specification = '纯度99%'
     monkeypatch.setattr(rfq_service, 'get_rfq', lambda *_args: rfq)
     result = _run_immediate(quote_extraction.parse_quote_file(
-        SimpleNamespace(), SimpleNamespace(id=5), 14, file_name='quote.csv',
+        _FakeSession(), _user(), 14, file_name='quote.csv',
         mime_type='text/csv', content=prediction['items'][0]['quote'].encode()))
     assert result.items[0].rfq_item_id is None
 
@@ -276,7 +296,7 @@ def test_verified_name_and_specification_bind_only_one_inquiry_row(monkeypatch, 
         rfq.items.append(SimpleNamespace(id=32, requested_name='乙醇', specification='纯度99%', quantity='20'))
     monkeypatch.setattr(rfq_service, 'get_rfq', lambda *_args: rfq)
     result = _run_immediate(quote_extraction.parse_quote_file(
-        SimpleNamespace(), SimpleNamespace(id=5), 14, file_name='quote.csv',
+        _FakeSession(), _user(), 14, file_name='quote.csv',
         mime_type='text/csv', content=prediction['items'][0]['quote'].encode()))
     assert result.items[0].rfq_item_id == (None if ambiguous else 31)
 

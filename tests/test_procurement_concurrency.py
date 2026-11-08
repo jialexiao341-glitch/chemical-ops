@@ -1,5 +1,6 @@
 """采购并发约束与采购、到货、库存查询的行锁回归。"""
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 from threading import Barrier
 from unittest.mock import Mock
 from uuid import uuid4
@@ -9,6 +10,7 @@ from sqlalchemy import delete, select, func
 from app.core.db import SessionLocal
 from app.core.errors import DuplicateResourceError
 from app.modules.deliveries import crud as delivery_crud
+from app.modules.deliveries.model import Delivery
 from app.modules.inventory import crud as inventory_crud
 from app.modules.products.model import Product
 from app.modules.suppliers.model import Supplier
@@ -108,7 +110,7 @@ def test_mysql_concurrent_selection_and_order_creation(db_engine):
             db.add(comparison); db.flush()
             for version in (1, 2):
                 quote = SupplierQuote(quote_no=f"RACE-Q{version}-{suffix}", rfq_id=rfq.id, supplier_id=supplier.id, quote_version=version, status="SUBMITTED")
-                quote.items.append(SupplierQuoteItem(rfq_item_id=rfq.items[0].id, quoted_quantity=2, unit_id=product.unit_id, unit_price=version))
+                quote.items.append(SupplierQuoteItem(rfq_item_id=rfq.items[0].id, quoted_quantity=2, unit_id=product.unit_id, unit_price=version, tax_rate=Decimal("13"), tax_included=False))
                 db.add(quote); db.flush()
                 comparison.items.append(QuoteComparisonItem(quote_id=quote.id, rfq_item_id=rfq.items[0].id, supplier_id=supplier.id, quoted_unit_price=version))
                 quote_ids.append(quote.id)
@@ -173,12 +175,20 @@ def _captured_statement(callable_, *args, **kwargs):
     return callable_(db, *args, **kwargs)
 
 def test_delivery_query_can_lock_delivery_row():
-    statement = _captured_statement(delivery_crud.get_by_id, 1, for_update=True)
+    db = Mock()
+    db.scalar.return_value = Delivery(id=1)
+    db.scalars.return_value.all.return_value = []
+    delivery_crud.get_by_id(db, 1, for_update=True)
+    statement = db.scalar.call_args.args[0]
 
     assert statement._for_update_arg is not None
 
 def test_purchase_order_query_can_lock_order_row():
-    statement = _captured_statement(delivery_crud.get_order, 1, for_update=True)
+    db = Mock()
+    db.scalar.return_value = PurchaseOrder(id=1)
+    db.scalars.return_value.all.return_value = []
+    delivery_crud.get_order(db, 1, for_update=True)
+    statement = db.scalar.call_args.args[0]
 
     assert statement._for_update_arg is not None
 

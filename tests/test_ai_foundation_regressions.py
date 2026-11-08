@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.ai.text2sql import QueryPlan, build_statement, _validate_scoped_statement
 from app.modules.ai.catalog import CATALOG
+from app.modules.ai.formatting import format_decimal
 from app.modules.deliveries.model import Delivery
 from app.modules.doc_kb.retrieve import resolve_doc_targets
 from app.modules.finance import service as finance
@@ -71,7 +72,7 @@ def test_consumption_excludes_transfers_returns_and_uses_same_inventory_scope(db
     assert int(new_count.split()[0]) == int(old_count.split()[0]) + 1
     expected = sum((max(Decimal(0), x.quantity-x.locked_quantity) for x in db_session.scalars(select(InventoryBalance).where(InventoryBalance.product_id == balance.product_id, InventoryBalance.unit_id == balance.unit_id, InventoryBalance.status == "AVAILABLE"))), Decimal(0))
     assert evidence["范围内可用库存"].startswith(f"{expected.normalize():f} · 单位 #{balance.unit_id}")
-    assert evidence["粗略日均 / 可用量覆盖天数"].startswith(f"{(expected_consumed / 30).quantize(Decimal('0.01'))} /")
+    assert evidence["粗略日均 / 可用量覆盖天数"].startswith(f"{format_decimal((expected_consumed / 30).quantize(Decimal('0.01')))} /")
     assert "不计消耗：调拨出库" in evidence
     assert "不计消耗：供应商退货" in evidence
 

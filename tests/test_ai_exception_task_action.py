@@ -19,6 +19,9 @@ class _DB:
     def get(self, _model, user_id):
         return self.users.get(user_id)
 
+    def scalars(self, _statement):
+        return SimpleNamespace(all=lambda: [])
+
 
 def _exception(**overrides):
     values = {

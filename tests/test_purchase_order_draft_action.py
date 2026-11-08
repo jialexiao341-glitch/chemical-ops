@@ -45,11 +45,11 @@ def source(monkeypatch):
     product_b = SimpleNamespace(id=12, line_no=2, requested_name="乙", product_id=22, required_delivery_date=None)
     quote_item_a = SimpleNamespace(
         id=101, rfq_item_id=11, supplier_product_id=None, supplier_model="A", quoted_quantity=2,
-        unit_id=3, unit_price=10, tax_rate=13, payment_terms="先款后货",
+        unit_id=3, unit_price=10, tax_rate=13, tax_included=True, payment_terms="先款后货",
     )
     quote_item_b = SimpleNamespace(
         id=102, rfq_item_id=12, supplier_product_id=None, supplier_model="B", quoted_quantity=4,
-        unit_id=3, unit_price=20, tax_rate=13, payment_terms=None,
+        unit_id=3, unit_price=20, tax_rate=13, tax_included=False, payment_terms=None,
     )
     comparison = SimpleNamespace(id=7)
     request = SimpleNamespace(id=9, department_id=2)
@@ -77,6 +77,9 @@ def test_order_lines_copy_each_quote_line_payment_terms(source):
 
     assert [item.payment_terms_snapshot for item in order.items] == ["先款后货", None]
     assert [item.source_quote_item_id for item in order.items] == [101, 102]
+    assert [item.tax_included for item in order.items] == [True, False]
+    # 含税行按原价，未税行按 13% 换算，保留报价税务口径。
+    assert order.order_amount == Decimal("110.40")
     assert order.status == "DRAFT"
 
 
