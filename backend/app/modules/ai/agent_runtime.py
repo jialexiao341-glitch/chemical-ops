@@ -1314,6 +1314,7 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
         if decision.route != "agent":
             raise BusinessValidationError("该请求不是 Agent 记录查询任务，请重新识别请求")
         _ensure_agent_capabilities(decision, catalog)
+        _record_prompt(state, "routing")
         if pending is not None:
             conversation_store.clear_pending_clarification(
                 db, user, conversation_id, state_id=pending.state_id,
