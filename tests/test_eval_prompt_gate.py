@@ -75,6 +75,35 @@ def test_promote_baseline_copies_reports_and_manifest(tmp_path):
     assert manifest["files"] == ["agent_tasks.json"]
 
 
+def test_promote_records_versions_and_carried_forward_reports(tmp_path):
+    candidate = tmp_path / "candidate"
+    report = {"cases": [{"id": "B01", "passed": True, "rounds": [{
+        "run_meta": {"prompt_versions": {
+            "routing": "routing@1-old", "planner": "planner@1-fixed"}}}]}]}
+    _write(candidate / "agent_business.json", report)
+
+    result = gate.promote_baseline(candidate, tmp_path / "baselines")
+
+    assert result["report_versions"]["agent_business.json"] == {
+        "planner": ["planner@1-fixed"], "routing": ["routing@1-old"]}
+    assert result["carried_forward"] == [{
+        "file": "agent_business.json", "versions": {"routing": ["routing@1-old"]}}]
+    manifest = json.loads(
+        (tmp_path / "baselines" / result["prompt_key"] / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["carried_forward"] == result["carried_forward"]
+
+
+def test_promote_marks_current_version_reports_as_not_carried(tmp_path):
+    candidate = tmp_path / "candidate"
+    report = {"prompt_versions": {"routing": "routing@1-fixed", "planner": "planner@1-fixed"},
+              "cases": [{"id": "PR-1", "passed": True}]}
+    _write(candidate / "prod_regression.json", report)
+
+    result = gate.promote_baseline(candidate, tmp_path / "baselines")
+
+    assert result["carried_forward"] == []
+
+
 def test_promote_requires_force_to_overwrite(tmp_path):
     candidate = tmp_path / "candidate"
     _write(candidate / "agent_tasks.json", _report(True))

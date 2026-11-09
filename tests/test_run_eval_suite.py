@@ -14,14 +14,16 @@ def _args(tmp_path: Path, suite: str = "all"):
     )
 
 
-def test_build_commands_covers_three_reports(tmp_path):
+def test_build_commands_covers_four_reports(tmp_path):
     commands = run_eval_suite.build_commands(_args(tmp_path))
 
-    assert [name for name, _ in commands] == ["intent_routing", "agent_tasks", "agent_business"]
+    assert [name for name, _ in commands] == [
+        "intent_routing", "agent_tasks", "agent_business", "prod_regression"]
     assert str(tmp_path / "intent_routing.json") in commands[0][1]
     assert "--repeats" in commands[0][1] and "2" in commands[0][1]
     assert str(tmp_path / "agent_business.json") in commands[2][1]
     assert "--repetitions" in commands[2][1]
+    assert str(tmp_path / "prod_regression.json") in commands[3][1]
 
 
 def test_gate_still_runs_when_eval_cases_fail(tmp_path, monkeypatch):

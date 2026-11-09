@@ -66,8 +66,42 @@ def run_gate(candidate_dir: Path, baseline_root: Path) -> dict:
             "candidate_dir": str(candidate_dir), "reports": reports, "verdict": verdict}
 
 
+def _report_versions(data: dict) -> dict[str, list[str]]:
+    """从报告中收集实际使用的 prompt 版本；同一报告出现多版本时全部保留。"""
+    seen: dict[str, set[str]] = {}
+    top = data.get("prompt_versions")
+    if isinstance(top, dict):
+        for name, version in top.items():
+            if isinstance(version, str) and version:
+                seen.setdefault(str(name), set()).add(version)
+    for row in data.get("cases") or []:
+        if not isinstance(row, dict):
+            continue
+        rounds = row.get("rounds") or []
+        for round_data in rounds:
+            if not isinstance(round_data, dict):
+                continue
+            versions = ((round_data.get("run_meta") or {}).get("prompt_versions") or {})
+            for name, version in versions.items():
+                if isinstance(version, str) and version:
+                    seen.setdefault(str(name), set()).add(version)
+        versions = (row.get("run_meta") or {}).get("prompt_versions") or {}
+        for name, version in versions.items():
+            if isinstance(version, str) and version:
+                seen.setdefault(str(name), set()).add(version)
+    result = {name: sorted(values) for name, values in sorted(seen.items())}
+    sha = data.get("prompt_sha256")
+    if isinstance(sha, str) and sha:
+        result.setdefault("routing_sha256", [sha])
+    return result
+
+
 def promote_baseline(candidate_dir: Path, baseline_root: Path, *, force: bool = False) -> dict:
-    """把候选报告登记为当前 prompt 版本基线；覆盖已有基线需 --force。"""
+    """把候选报告登记为当前 prompt 版本基线；覆盖已有基线需 --force。
+
+    候选报告可能只重跑了部分套件，其余报告从上一版本延用。manifest 记录每份
+    报告实际使用的 prompt 版本和未重跑项，避免把旧证据当成当前版本证据。
+    """
     key = prompt_key()
     target = baseline_root / key
     existing = [name for name in REPORT_FILES.values() if (target / name).exists()]
@@ -77,6 +111,18 @@ def promote_baseline(candidate_dir: Path, baseline_root: Path, *, force: bool = 
     if not files:
         raise ValueError(f"候选目录 {candidate_dir} 没有可登记报告")
     target.mkdir(parents=True, exist_ok=True)
+    report_versions = {
+        name: _report_versions(json.loads((candidate_dir / name).read_text(encoding="utf-8")))
+        for name in files
+    }
+    current = {"routing": prompt_registry.prompt_version("routing"),
+               "planner": prompt_registry.prompt_version("planner")}
+    carried_forward = [
+        {"file": name, "versions": {prompt: versions for prompt, versions in versions.items()
+                                    if prompt in current and versions != [current[prompt]]}}
+        for name, versions in report_versions.items()
+    ]
+    carried_forward = [item for item in carried_forward if item["versions"]]
     for name in files:
         shutil.copyfile(candidate_dir / name, target / name)
     manifest = {
@@ -85,10 +131,13 @@ def promote_baseline(candidate_dir: Path, baseline_root: Path, *, force: bool = 
         "planner_version": prompt_registry.prompt_version("planner"),
         "registered_at": datetime.now().isoformat(timespec="seconds"),
         "files": files,
+        "report_versions": report_versions,
+        "carried_forward": carried_forward,
     }
     (target / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"prompt_key": key, "baseline_dir": str(target), "files": files}
+    return {"prompt_key": key, "baseline_dir": str(target), "files": files,
+            "report_versions": report_versions, "carried_forward": carried_forward}
 
 
 def render_text(result: dict) -> str:
@@ -125,6 +174,11 @@ def main(argv: list[str] | None = None) -> int:
             result = promote_baseline(args.candidate_dir, args.baseline_root, force=args.force)
             print(json.dumps(result, ensure_ascii=False) if args.json else
                   f"已登记基线：{result['baseline_dir']}（{', '.join(result['files'])}）")
+            if not args.json:
+                for item in result["carried_forward"]:
+                    detail = "、".join(f"{name}={','.join(versions)}"
+                                       for name, versions in item["versions"].items())
+                    print(f"注意：{item['file']} 延用旧版本报告（{detail}），需在报告中保留说明")
             return 0
         result = run_gate(args.candidate_dir, args.baseline_root)
     except (OSError, ValueError) as exc:
