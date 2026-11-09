@@ -1062,6 +1062,11 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
     state.run_meta.setdefault("context", {"estimated_tokens": None, "max_tokens": None, "truncated_sections": None})
     state.run_meta.setdefault("retries", {"llm": None, "tool": None})
     state.run_meta.setdefault("usage_totals", _empty_usage_totals())
+    counts = state.run_meta.setdefault("tool_calls", {})
+    if not isinstance(counts, dict):
+        counts = state.run_meta["tool_calls"] = {}
+    tool_quota = tools.ToolCallQuota(settings.agent_tool_call_quota_per_tool, counts)
+    tool_quota_token = tools.bind_tool_call_quota(tool_quota)
     try:
         from app.core.telemetry import trace_span
         with trace_span("agent.execute", {"chemicalops.agent.task_id": state.task_id}):
@@ -1070,6 +1075,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
         llm._response_observer.reset(observer_token)
         reset_task_token_budget(budget_token)
         reset_user(user_token)
+        tools.reset_tool_call_quota(tool_quota_token)
 
 
 async def _drive_impl(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
@@ -1252,6 +1258,9 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         except ToolTimeoutUnsupported:
             entry["error_code"] = "TOOL_TIMEOUT_UNSUPPORTED"
             raise
+        except tools.ToolQuotaExceeded:
+            entry["error_code"] = "QUOTA_EXCEEDED"
+            raise
         except AuthorizationError:
             entry["error_code"] = "PERMISSION_DENIED"
             raise
@@ -1293,10 +1302,11 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             await _offload_db_call(db.rollback)
             raise  # Queue adapter persists a bounded retry from the last checkpoint.
         state.status = "FAILED"
-        codes = {"STEP_LIMIT", "CONTEXT_LIMIT", "INVALID_EVIDENCE", "INCOMPLETE_TASK", "REPEATED_TOOL", "TOOL_ERRORS", "INTENT_MISMATCH", "TOKEN_BUDGET_EXCEEDED"}
+        codes = {"STEP_LIMIT", "CONTEXT_LIMIT", "INVALID_EVIDENCE", "INCOMPLETE_TASK", "REPEATED_TOOL", "TOOL_ERRORS", "INTENT_MISMATCH", "TOKEN_BUDGET_EXCEEDED", "QUOTA_EXCEEDED"}
         state.error_code = ("TOOL_TIMEOUT" if isinstance(exc, ToolExecutionTimeout) else
             exc.code if isinstance(exc, routing.IntentRecognitionError) else
             "TOOL_TIMEOUT_UNSUPPORTED" if isinstance(exc, ToolTimeoutUnsupported) else
+            "QUOTA_EXCEEDED" if isinstance(exc, tools.ToolQuotaExceeded) else
             "TASK_TIMEOUT" if isinstance(exc, TimeoutError) else
             "PERMISSION_DENIED" if isinstance(exc, AuthorizationError) else
             "MODEL_FORMAT_ERROR" if isinstance(exc, ValidationError) else
@@ -1307,8 +1317,13 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         category, recovery, hint = classify(state.error_code, exc)
         state.run_meta["error"] = {"code": state.error_code, "class": category.value,
                                    "recovery": recovery.value, "hint": hint}
-        state.reply = (str(exc) if isinstance(exc, routing.IntentRecognitionError) else
-                       "本次只读任务已停止，请核对权限、输入或服务状态后重新发起。")
+        if isinstance(exc, routing.IntentRecognitionError):
+            state.reply = str(exc)
+        elif isinstance(exc, tools.ToolQuotaExceeded):
+            state.reply = (f"本次只读任务的工具调用次数已达配额（{exc.tool} 每任务最多 "
+                           f"{exc.limit} 次），请缩小查询范围或拆分任务后重新发起。")
+        else:
+            state.reply = "本次只读任务已停止，请核对权限、输入或服务状态后重新发起。"
         state.trace.append({"step": len(state.trace) + 1, "action": "stop", "status": "FAILED",
                             "error_code": state.error_code, "error_class": category.value,
                             "recovery_action": recovery.value, "recovery_advisory_only": True})

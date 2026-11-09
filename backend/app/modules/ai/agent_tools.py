@@ -1,6 +1,7 @@
 """采购 Agent 的只读工具：定位业务对象、读取库存和比较报价。"""
 
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import re
@@ -761,6 +762,49 @@ def search_exceptions(db: Session, user: User, arguments: ExceptionSearchInput) 
         sources=[Source(resource="operation_exceptions", record_id=exception.id) for exception in exceptions])
 
 
+TOOL_QUOTA_PER_TASK_CALLS = "PER_TASK_CALLS"
+
+
+class ToolQuotaExceeded(Exception):
+    """单任务内同一只读工具的调用次数超过确定性配额。"""
+
+    def __init__(self, tool: str, limit: int) -> None:
+        self.tool = tool
+        self.limit = limit
+        super().__init__(f"QUOTA_EXCEEDED：{tool} 每任务最多调用 {limit} 次")
+
+
+@dataclass
+class ToolCallQuota:
+    """随任务状态持久化的每工具调用计数；第 limit + 1 次直接拒绝。"""
+
+    limit: int
+    counts: dict[str, int] = field(default_factory=dict)
+
+    def consume(self, tool: str) -> None:
+        used = self.counts.get(tool, 0)
+        if used >= self.limit:
+            raise ToolQuotaExceeded(tool, self.limit)
+        self.counts[tool] = used + 1
+
+
+_current_tool_quota: ContextVar[ToolCallQuota | None] = ContextVar(
+    "agent_tool_call_quota", default=None)
+
+
+def bind_tool_call_quota(quota: ToolCallQuota):
+    """绑定当前任务配额；未绑定（如草稿整理）不改变原执行行为。"""
+    return _current_tool_quota.set(quota)
+
+
+def reset_tool_call_quota(token) -> None:
+    _current_tool_quota.reset(token)
+
+
+def current_tool_call_quota() -> ToolCallQuota | None:
+    return _current_tool_quota.get()
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """静态工具契约：Schema 与处理函数由代码登记，禁止按模型文本动态查找函数。"""
@@ -795,61 +839,61 @@ TOOLS = {
         ToolSpec("catalog.search_products", "按产品名称/编码、化学品名称/英文名/登记别名或 CAS 找规格；多候选必须让用户选择",
                  "master.products.read", ProductSearchInput, ProductSearchResult, search_products,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("supplier_quotes.find_rfq_items", "定位产品的可见询价明细；多候选必须让用户选择",
                  "procurement.rfqs.read", RFQSearchInput, RFQSearchResult, find_rfq_items,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("inventory.query_available", "按产品查询可见仓库余额，分单位合计，保留明细来源",
                  "warehouse.inventory.read", InventoryInput, InventoryResult, query_inventory,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("inventory.replenishment_plan", "按产品安全库存、当前可用量、在途采购和未完成补货计算只读补货缺口",
                  "warehouse.inventory.read", ReplenishmentPlanInput, ReplenishmentPlanResult, replenishment_plan,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("supplier_quotes.compare", "比较同一可见询价明细的最新有效报价，并在完整可比报价中提供成本候选及交期、账期、可见质量事实风险",
                  "procurement.rfqs.read", QuoteInput, QuoteResult, compare_quotes,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("purchase_requests.get_by_no", "按精确编号读取当前用户可见采购申请及明细",
                  "procurement.requests.read", PurchaseRequestInput, PurchaseRequestResult, get_purchase_request,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("purchase_orders.trace_by_no", "按精确订单号跨业务环节追溯采购订单",
                  "procurement.orders.read", PurchaseOrderTraceInput, PurchaseOrderTraceResult, trace_purchase_order,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("quality_acceptances.get_by_no", "按精确验收编号读取可见的验收事实和已保存的报告核对、人工复核及冲突",
                  "quality.acceptances.read", QualityAcceptanceInput, QualityAcceptanceResult, get_quality_acceptance,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("deliveries.get_by_no", "按精确到货单号读取可见的收货事实及有权限查看的质量报告核对",
                  "warehouse.deliveries.read", DeliveryInput, DeliveryResult, get_delivery,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("finance_reconciliations.get_by_no", "按精确对账单号读取当前用户可见的对账行级数量/金额、发票匹配与来源差异、付款状态和当前付款额度上限",
                  "finance.reconciliations.read", FinanceReconciliationInput, FinanceReconciliationResult,
                  get_finance_reconciliation,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED",
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS,
                  additional_permissions=("finance.invoices.read", "finance.payments.read")),
         ToolSpec("suppliers.get_by_code", "按准确供应商编码读取当前用户可见的供应商合作状态与基本业务资料",
                  "master.suppliers.read", SupplierInput, SupplierResult, get_supplier,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("suppliers.profile", "按准确供应商编码汇总订单、到货、质量验收、异常与财务进度；各段按当前权限裁剪",
                  "master.suppliers.read", SupplierProfileInput, SupplierProfileResult, supplier_profile_tool,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("purchase_orders.search", "按订单号、供应商、状态或预计到货日期检索当前用户可见采购订单列表；精确追溯仍用 trace_by_no",
                  "procurement.orders.read", PurchaseOrderSearchInput, PurchaseOrderSearchResult, search_purchase_orders,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
         ToolSpec("exceptions.search", "按类型、严重度、状态或关键词检索当前用户可见运营异常列表；不替代按编号创建处理任务",
                  "operations.exceptions.read", ExceptionSearchInput, ExceptionSearchResult, search_exceptions,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
-                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
     )
 }
 
@@ -915,6 +959,11 @@ def _execute_tool_with_deadline(db: Session, user: User, call: ToolCall) -> Tool
         raise BusinessValidationError("未注册的只读工具")
     if not admin and not {spec.permission, *spec.additional_permissions} <= permissions:
         raise AuthorizationError("没有执行该工具的权限")
+    if spec.quota_class == TOOL_QUOTA_PER_TASK_CALLS:
+        quota = current_tool_call_quota()
+        if quota is not None:
+            # 在统一入口计数；参数错误也消耗一次，避免无效调用绕过配额。
+            quota.consume(spec.name)
     try:
         arguments = spec.input_schema.model_validate(call.arguments)
     except ValidationError as exc:

@@ -230,7 +230,7 @@ def test_tool_catalog_exposes_explicit_governance_metadata(tool_db):
         assert entry["retry_policy"] == "MANUAL_ONLY"
         assert entry["idempotent"] is True
         assert entry["cost_class"] == "DATABASE_READ"
-        assert entry["quota_class"] == "UNMETERED"
+        assert entry["quota_class"] == "PER_TASK_CALLS"
 
 
 @pytest.mark.parametrize("arguments", [

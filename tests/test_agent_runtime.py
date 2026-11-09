@@ -745,6 +745,22 @@ def test_repeat_call_and_step_limit_stop(task_db, model_script, monkeypatch):
     assert start(task_db).error_code == 'STEP_LIMIT'
 
 
+def test_tool_call_quota_stops_with_recovery_advice(task_db, model_script, monkeypatch):
+    """第 N + 1 次同工具调用在执行入口被拒，任务以 QUOTA_EXCEEDED 安全停止。"""
+    monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(
+        _env_file=None, agent_execution_mode="in_process", agent_tool_call_quota_per_tool=1))
+    actions, _ = model_script
+    actions.extend([tool('catalog.search_products', keyword='测试乙醇'),
+                   tool('inventory.query_available', product_id=1, limit=1),
+                   tool('inventory.query_available', product_id=1, limit=2)])
+    result = start(task_db)
+
+    assert result.status == 'FAILED' and result.error_code == 'QUOTA_EXCEEDED', result.trace
+    assert result.run_meta['error']['class'] == 'BUDGET'
+    assert result.run_meta['error']['recovery'] == 'NARROW_SCOPE'
+    assert '配额' in result.reply
+
+
 def test_context_and_time_budget_stop(task_db, model_script, monkeypatch):
     """超出上下文或模型等待预算时安全停止，不能无限积累上下文/等待。"""
     monkeypatch.setattr(runtime, 'get_settings', lambda: Settings(_env_file=None, agent_execution_mode="in_process", agent_context_max_chars=2000))
