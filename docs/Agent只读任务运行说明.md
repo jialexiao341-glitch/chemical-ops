@@ -131,3 +131,26 @@ AI 工作台的聊天输入框可发起只读库存/报价任务。产品及询�
 ```
 
 报告按错误码、错误类别、工具、prompt 版本和反馈原因聚合，并附失败任务编号。管理员可在 AI 任务中心的“反馈看板”查看跨用户聚合（只含计数，不含身份和原文）。已审阅差评可用 `scripts/promote_agent_case.py` 导出为脱敏路由回归用例，由 `scripts/evaluate_prod_regression.py` 回放；回答质量与工具参数仍需人工复核，未实现自动样本转正。
+
+## 7. Token 与费用报告
+
+运行时在 `run_meta.usage_totals` 累计一次任务内每次模型调用的输入/输出 token、调用次数和缺 usage 次数；
+`run_meta.model.usage` 仍保留最后一次响应，便于单次排查。累计值只包含可核实的 usage，不保存模型内容。
+
+离线脚本只读 `ai_agent_tasks.payload`，按场景、模型和 prompt 版本聚合 token、成功率、P50/P95 墙钟耗时和估算费用：
+
+```powershell
+.venv/Scripts/python.exe scripts/agent_cost_report.py --days 30
+```
+
+单价配置在 `.env`：
+
+```text
+LLM_PRICE_INPUT_PER_MILLION=0
+LLM_PRICE_OUTPUT_PER_MILLION=0
+```
+
+单价只用于估算，不参与业务判断；未配置时费用显示为空，不把 0 当作免费。缺少 `run_meta.usage_totals`
+的历史任务只统计 `token_budget.used_tokens` 总量，不伪造输入/输出拆分或费用；报告的 `coverage`
+段列出有累计用量、只有预算总量和无用量的任务数。P50/P95 按已终止任务的 `created_at → updated_at`
+墙钟计算，包含排队和等待续答，不是单次模型调用延迟。
