@@ -9,8 +9,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.errors import BusinessValidationError
+from app.core.errors import AuthorizationError, BusinessValidationError
 from app.modules.ai import conversation_store
+from app.modules.system.crud import get_user_role_codes
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
 from app.core.rate_limit import limit_ai
@@ -21,6 +22,10 @@ from app.modules.ai.schema import (
     AIContextAskRequest,
     AIListContextAskRequest,
     AIContextAskResponse,
+    AIFeedbackAdminSummary,
+    AIFeedbackCreate,
+    AIFeedbackRead,
+    AIFeedbackSummary,
     AIConversationPage,
     AIConversationRead,
     AIConversationUpdate,
@@ -44,6 +49,8 @@ from app.modules.ai.schema import (
     TaskRead,
     AgentTaskPage,
     AIPurchaseDraftPatch,
+    AIActionProposalBatchCreate,
+    AIActionProposalBatchResult,
     AIActionProposalCreate,
     AIActionProposalRevise,
     AIActionProposalCancel,
@@ -126,6 +133,14 @@ def action_proposal_create(data: AIActionProposalCreate, db: Session = Depends(g
                            user: User = Depends(get_current_user)) -> AIActionProposalPreview:
     return action_proposals.propose_action(db, user, data.action_type, data.payload,
                                            idempotency_key=data.idempotency_key)
+
+
+@router.post("/action-proposals/batch", response_model=AIActionProposalBatchResult,
+             summary="批量生成待用户确认的 Agent 动作提案")
+def action_proposal_batch_create(data: AIActionProposalBatchCreate, db: Session = Depends(get_db),
+                                 user: User = Depends(get_current_user)) -> AIActionProposalBatchResult:
+    """每项独立校验权限与业务事实；单项失败不影响已成功项。"""
+    return action_proposals.propose_action_batch(db, user, data.items)
 
 
 @router.get("/action-proposals", response_model=AIActionProposalPage, summary="分页查询本人动作提案")
@@ -319,6 +334,40 @@ async def agent_task_continue(task_id: str, data: TaskContinue, db: Session = De
 def agent_task_cancel(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """取消运行或等待任务，并阻止旧运行者覆盖取消后的状态。"""
     return agent_runtime.cancel_task(db, user, task_id)
+
+
+@router.post("/feedback", response_model=AIFeedbackRead, summary="提交本人 Agent 任务反馈")
+def submit_agent_feedback(data: AIFeedbackCreate, db: Session = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    """评分与纠错文本只落在本人任务；prompt/模型版本由服务端 run_meta 补齐。"""
+    from app.modules.ai import feedback as feedback_service
+    return feedback_service.submit_feedback(db, user, data)
+
+
+@router.get("/feedback/summary/all", response_model=AIFeedbackAdminSummary,
+            summary="管理员查看跨用户 Agent 反馈聚合")
+def agent_feedback_admin_summary(days: int = Query(default=7, ge=1, le=90),
+                                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """只返回评分、原因码、prompt 版本和模型计数，不返回用户身份或反馈原文。"""
+    if "SYS_ADMIN" not in set(get_user_role_codes(db, user.id)):
+        raise AuthorizationError("仅管理员可查看跨用户反馈聚合")
+    from app.modules.ai import feedback as feedback_service
+    return feedback_service.summary_all(db, days=days)
+
+
+@router.get("/feedback/summary", response_model=AIFeedbackSummary, summary="汇总本人 Agent 反馈")
+def agent_feedback_summary(days: int = Query(default=7, ge=1, le=90),
+                           db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """按时间窗口聚合评分、原因码和 prompt 版本，不输出反馈原文。"""
+    from app.modules.ai import feedback as feedback_service
+    return feedback_service.summary(db, user, days=days)
+
+
+@router.get("/feedback/task/{task_id}", response_model=AIFeedbackRead | None, summary="读取本人任务反馈")
+def agent_feedback_read(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """返回本人当前反馈，供任务详情回显；无反馈返回 null。"""
+    from app.modules.ai import feedback as feedback_service
+    return feedback_service.get_feedback(db, user, task_id)
 
 
 @router.post("/text2sql", response_model=Text2SQLResponse, summary="自然语言只读查询")

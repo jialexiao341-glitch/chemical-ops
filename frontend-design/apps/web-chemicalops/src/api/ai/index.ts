@@ -198,6 +198,17 @@ export namespace AiApi {
     items: ActionProposalRead[];
     total: number;
   }
+
+  export interface ActionProposalBatchFailure {
+    index: number;
+    resource_id?: null | string;
+    error: string;
+  }
+
+  export interface ActionProposalBatchResult {
+    created: ActionProposalPreview[];
+    failed: ActionProposalBatchFailure[];
+  }
 }
 
 /** 生成运营晨报；推送时由调用方先向用户确认接收角色。 */
@@ -235,6 +246,14 @@ export async function createActionProposalApi(actionType: string, payload: Recor
     idempotency_key: idempotencyKey,
     payload,
   });
+  notifyNotificationChanged();
+  return result;
+}
+
+export async function createActionProposalBatchApi(
+  items: Array<{ action_type: string; idempotency_key: string; payload: Record<string, unknown> }>,
+) {
+  const result = await requestClient.post<AiApi.ActionProposalBatchResult>('/ai/action-proposals/batch', { items });
   notifyNotificationChanged();
   return result;
 }

@@ -357,11 +357,13 @@ def supplier_exception_counts(db: Session, user: User, supplier_id: int) -> dict
     return {str(status): int(count) for status, count in rows}
 
 
-def list_exceptions(db: Session, user: User, *, exception_type: str | None, status: str | None, page: int, page_size: int):
-    """按用户数据范围分页查询异常。"""
+def list_exceptions(db: Session, user: User, *, exception_type: str | None, status: str | None, page: int, page_size: int,
+                    severity: str | None = None, keyword: str | None = None):
+    """按用户数据范围分页查询异常；筛选条件只缩小范围，不扩大授权。"""
 
     scope = _exception_record_scope_condition(db, user)
-    return crud.list_page(db, scope_condition=scope, exception_type=exception_type, status=status, page=page, page_size=page_size)
+    return crud.list_page(db, scope_condition=scope, exception_type=exception_type, status=status, page=page,
+                          page_size=page_size, severity=severity, keyword=keyword)
 
 
 def get_exception(db: Session, user: User, exception_id: int, *, for_update: bool = False) -> OperationException:

@@ -1,6 +1,6 @@
 """异常管理模块的数据访问操作。"""
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment
@@ -15,7 +15,8 @@ def get_by_id(db: Session, exception_id: int, *, for_update: bool = False) -> Op
     return db.scalar(statement)
 
 
-def list_page(db: Session, *, scope_condition, exception_type: str | None, status: str | None, page: int, page_size: int) -> tuple[list[OperationException], int]:
+def list_page(db: Session, *, scope_condition, exception_type: str | None, status: str | None, page: int, page_size: int,
+              severity: str | None = None, keyword: str | None = None) -> tuple[list[OperationException], int]:
     """按数据范围和筛选条件分页查询异常。"""
 
     conditions = []
@@ -24,6 +25,13 @@ def list_page(db: Session, *, scope_condition, exception_type: str | None, statu
         conditions.append(OperationException.exception_type == exception_type)
     if status:
         conditions.append(OperationException.status == status)
+    if severity:
+        conditions.append(OperationException.severity == severity)
+    if keyword:
+        conditions.append(or_(
+            OperationException.exception_no.contains(keyword, autoescape=True),
+            OperationException.description.contains(keyword, autoescape=True),
+        ))
     total = db.scalar(select(func.count(OperationException.id)).where(*conditions)) or 0
     items = list(
         db.scalars(

@@ -111,6 +111,21 @@ export namespace AgentApi {
     arguments?: Record<string, unknown>;
     evidence_steps?: number[];
   }
+  export interface RunMeta {
+    prompt_versions?: Record<string, string>;
+    model?: {
+      provider?: null | string;
+      name?: null | string;
+      usage?: null | Record<string, unknown>;
+    };
+    context?: {
+      estimated_tokens?: null | number;
+      max_tokens?: null | number;
+      truncated_sections?: null | string[];
+    };
+    retries?: { llm?: null | number; tool?: null | number };
+    error?: { code?: null | string; class?: null | string; recovery?: null | string };
+  }
   export interface Task {
     can_select_all_products?: boolean;
     id: string;
@@ -121,6 +136,31 @@ export namespace AgentApi {
     error_code: null | string;
     messages: string[];
     trace: Step[];
+    run_meta?: RunMeta;
+  }
+  export interface Feedback {
+    task_id: string;
+    rating: 'DOWN' | 'UP';
+    reason_code: null | string;
+    comment: null | string;
+    correction: null | string;
+    prompt_version?: null | string;
+    prompt_versions?: Record<string, string>;
+    model_name?: null | string;
+    created_at: string;
+    updated_at: string;
+  }
+  export interface FeedbackSummary {
+    days: number;
+    total: number;
+    up: number;
+    down: number;
+    by_reason: Record<string, number>;
+    by_prompt_version: Record<string, number>;
+  }
+  export interface FeedbackAdminSummary extends FeedbackSummary {
+    users: number;
+    by_model: Record<string, number>;
   }
   export interface TaskPage {
     items: Task[];
@@ -170,4 +210,23 @@ export function createAgentChatApi(question: string, conversationId?: number, ro
 }
 export function continueAgentChatApi(id: string, data: AgentApi.Continue) {
   return requestClient.post<AgentApi.Task>(`/ai/agent/chat/${encodeURIComponent(id)}/continue`, data);
+}
+
+export function submitAgentFeedbackApi(data: {
+  task_id: string;
+  rating: 'DOWN' | 'UP';
+  reason_code?: string;
+  comment?: string;
+  correction?: string;
+}) {
+  return requestClient.post<AgentApi.Feedback>('/ai/feedback', data);
+}
+export function getAgentFeedbackApi(id: string) {
+  return requestClient.get<AgentApi.Feedback | null>(`/ai/feedback/task/${encodeURIComponent(id)}`);
+}
+export function getAgentFeedbackSummaryApi(days = 7) {
+  return requestClient.get<AgentApi.FeedbackSummary>('/ai/feedback/summary', { params: { days } });
+}
+export function getAgentFeedbackAdminSummaryApi(days = 7) {
+  return requestClient.get<AgentApi.FeedbackAdminSummary>('/ai/feedback/summary/all', { params: { days } });
 }

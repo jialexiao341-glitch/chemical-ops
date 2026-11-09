@@ -342,6 +342,27 @@ class AIActionProposalPage(BaseModel):
     total: int
 
 
+class AIActionProposalBatchCreate(BaseModel):
+    """批量生成相互独立的动作提案；每项仍走同一处理器和幂等键。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AIActionProposalCreate] = Field(min_length=1, max_length=20)
+
+
+class AIActionProposalBatchFailure(BaseModel):
+    """批量中单项失败；不包含服务端异常原文。"""
+
+    index: int
+    resource_id: str | None = None
+    error: str
+
+
+class AIActionProposalBatchResult(BaseModel):
+    created: list[AIActionProposalPreview] = Field(default_factory=list)
+    failed: list[AIActionProposalBatchFailure] = Field(default_factory=list)
+
+
 # 共享意图与状态
 
 class Intent(StrEnum):
@@ -396,7 +417,7 @@ TASK_STATUS_LABELS = {
 
 # 语义理解与路由
 
-Task = Literal["inventory", "replenishment_plan", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile", "analytics", "document"]
+Task = Literal["inventory", "replenishment_plan", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile", "order_search", "exception_search", "analytics", "document"]
 
 
 class Slots(BaseModel):
@@ -580,8 +601,8 @@ class Understanding(BaseModel):
 
         if self.purpose == "query" and self.dialogue_action != "cancel":
             if self.execution_mode == "agent":
-                if not set(self.tasks) <= {"inventory", "replenishment_plan", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile"} or self.sub_tasks:
-                    raise ValueError("agent 模式仅支持未拆分的库存、补货量建议、报价、采购申请、订单追溯、质量验收、到货、财务对账、供应商或供应商 360 查询目标")
+                if not set(self.tasks) <= {"inventory", "replenishment_plan", "quotes", "purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile", "order_search", "exception_search"} or self.sub_tasks:
+                    raise ValueError("agent 模式仅支持未拆分的库存、补货量建议、报价、采购申请、订单追溯、质量验收、到货、财务对账、供应商、供应商 360、订单列表检索或异常列表检索查询目标")
                 if set(self.tasks) & {"purchase_request", "order_trace", "quality_acceptance", "delivery", "finance_reconciliation", "supplier", "supplier_profile"} and len(self.tasks) != 1:
                     raise ValueError("按编号读取采购申请、订单追溯、质量验收、到货单、对账单、供应商和供应商 360 必须作为单一 Agent 目标执行")
                 if "quality_acceptance" in self.tasks and not self.slots.acceptance_no:
@@ -799,6 +820,26 @@ class SupplierProfileInput(ToolSchema):
     supplier_code: str = Field(min_length=1, max_length=64)
 
 
+class PurchaseOrderSearchInput(ToolSchema):
+    """采购订单列表检索；精确追溯仍使用 trace_by_no。"""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    keyword: str | None = Field(default=None, min_length=1, max_length=32)
+    supplier_keyword: str | None = Field(default=None, min_length=1, max_length=100)
+    status: Literal["DRAFT", "APPROVING", "APPROVED", "ORDERED", "PARTIAL", "COMPLETED", "CANCELLED"] | None = None
+    expected_arrival_before: date | None = None
+    limit: Annotated[int, Field(strict=True, ge=1, le=50)] = 20
+
+
+class ExceptionSearchInput(ToolSchema):
+    """运营异常列表检索；按准确编号创建任务仍使用动作提案。"""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    keyword: str | None = Field(default=None, min_length=1, max_length=100)
+    exception_type: Literal["SHORT_DELIVERY", "QUALITY", "QUALITY_PENDING", "LOW_STOCK", "DOCUMENT", "OVERDUE", "INVENTORY_EXPIRY", "OTHER"] | None = None
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = None
+    status: Literal["OPEN", "PROCESSING", "RESOLVED", "CLOSED", "CANCELLED"] | None = None
+    limit: Annotated[int, Field(strict=True, ge=1, le=50)] = 20
+
+
 class ProductCandidate(ToolSchema):
     product_id: int
     product_code: str
@@ -840,6 +881,47 @@ class PurchaseRequestResult(ToolSchema):
     tool: Literal["purchase_requests.get_by_no"] = "purchase_requests.get_by_no"
     total_rows: int
     rows: list[dict[str, Any]]
+    sources: list["Source"]
+
+
+class PurchaseOrderSearchRow(ToolSchema):
+    po_no: str
+    supplier_name: str
+    status: str
+    order_date: date | None
+    expected_arrival_date: date | None
+    order_amount: Decimal
+    currency_code: str
+    item_count: int
+    open_item_count: int
+
+
+class PurchaseOrderSearchResult(ToolSchema):
+    tool: Literal["purchase_orders.search"] = "purchase_orders.search"
+    total_rows: int
+    truncated: bool
+    rows: list[PurchaseOrderSearchRow]
+    sources: list["Source"]
+
+
+class ExceptionSearchRow(ToolSchema):
+    exception_no: str
+    exception_type: str
+    severity: str
+    status: str
+    description: str
+    due_at: datetime | None
+    created_at: datetime
+    source_type: str
+    source_id: int
+    po_no: str | None = None
+
+
+class ExceptionSearchResult(ToolSchema):
+    tool: Literal["exceptions.search"] = "exceptions.search"
+    total_rows: int
+    truncated: bool
+    rows: list[ExceptionSearchRow]
     sources: list["Source"]
 
 
@@ -1207,6 +1289,44 @@ class TaskRead(ToolSchema):
     trace: list[dict]
     conversation_id: int | None = None
     run_meta: dict = Field(default_factory=dict)
+
+
+class AIFeedbackCreate(ToolSchema):
+    """对本人 Agent 任务的单条反馈；服务端补齐 prompt/模型快照。"""
+    task_id: str = Field(min_length=1, max_length=32)
+    rating: Literal["UP", "DOWN"]
+    reason_code: Literal["FACT_ERROR", "SCOPE_ERROR", "TOOL_ERROR", "FORMAT", "SLOW", "OTHER"] | None = None
+    comment: str | None = Field(default=None, max_length=1000)
+    correction: str | None = Field(default=None, max_length=4000)
+
+
+class AIFeedbackRead(ToolSchema):
+    task_id: str
+    rating: Literal["UP", "DOWN"]
+    reason_code: str | None
+    comment: str | None
+    correction: str | None
+    prompt_version: str | None = None
+    prompt_versions: dict = Field(default_factory=dict)
+    model_name: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AIFeedbackSummary(ToolSchema):
+    days: int
+    total: int
+    up: int
+    down: int
+    by_reason: dict[str, int] = Field(default_factory=dict)
+    by_prompt_version: dict[str, int] = Field(default_factory=dict)
+
+
+class AIFeedbackAdminSummary(AIFeedbackSummary):
+    """管理员跨用户聚合；不返回用户身份、评论或纠错原文。"""
+
+    users: int = 0
+    by_model: dict[str, int] = Field(default_factory=dict)
 
 
 # 多意图批次

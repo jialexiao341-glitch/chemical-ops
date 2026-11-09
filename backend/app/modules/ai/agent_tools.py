@@ -32,11 +32,17 @@ from app.modules.ai.schema import (
     QualityReportEvidence,
     DeliveryInput,
     DeliveryResult,
+    ExceptionSearchInput,
+    ExceptionSearchResult,
+    ExceptionSearchRow,
     FinanceReconciliationInput,
     FinanceReconciliationResult,
     FinanceReconciliationLine,
     FinancePaymentPrecheck,
     FinanceStatusCount,
+    PurchaseOrderSearchInput,
+    PurchaseOrderSearchResult,
+    PurchaseOrderSearchRow,
     SupplierInput,
     SupplierProfileInput,
     SupplierProfileResult,
@@ -703,6 +709,58 @@ def get_supplier(db: Session, user: User, arguments: SupplierInput) -> SupplierR
         sources=[Source(resource="suppliers", record_id=supplier.id)])
 
 
+def search_purchase_orders(db: Session, user: User,
+                           arguments: PurchaseOrderSearchInput) -> PurchaseOrderSearchResult:
+    """按条件检索当前用户可见订单；列表结果不替代精确追溯。"""
+    from app.modules.purchase_orders import service as order_service
+
+    orders, total = order_service.list_orders(
+        db, user, keyword=arguments.keyword, status=arguments.status, page=1, page_size=arguments.limit,
+        supplier_keyword=arguments.supplier_keyword, expected_arrival_before=arguments.expected_arrival_before)
+    supplier_ids = {order.supplier_id for order in orders}
+    names = dict(db.execute(select(Supplier.id, Supplier.supplier_name).where(
+        Supplier.id.in_(supplier_ids))).all()) if supplier_ids else {}
+    rows = [PurchaseOrderSearchRow(
+        po_no=order.po_no,
+        supplier_name=names.get(order.supplier_id, ""),
+        status=order.status,
+        order_date=order.order_date,
+        expected_arrival_date=order.expected_arrival_date,
+        order_amount=order.order_amount,
+        currency_code=order.currency_code,
+        item_count=len(order.items),
+        open_item_count=sum(1 for item in order.items if item.received_quantity < item.order_quantity),
+    ) for order in orders]
+    return PurchaseOrderSearchResult(total_rows=total, truncated=total > len(orders), rows=rows,
+        sources=[Source(resource="purchase_orders", record_id=order.id) for order in orders])
+
+
+def search_exceptions(db: Session, user: User, arguments: ExceptionSearchInput) -> ExceptionSearchResult:
+    """按条件检索当前用户可见异常；不返回任务评论或附件。"""
+    from app.modules.operation_exceptions import service as exception_service
+
+    exceptions, total = exception_service.list_exceptions(
+        db, user, exception_type=arguments.exception_type, status=arguments.status,
+        severity=arguments.severity, keyword=arguments.keyword, page=1, page_size=arguments.limit)
+    po_ids = {exception.po_id for exception in exceptions if exception.po_id is not None}
+    po_nos = dict(db.execute(select(PurchaseOrder.id, PurchaseOrder.po_no).where(
+        PurchaseOrder.id.in_(po_ids))).all()) if po_ids else {}
+    rows = [ExceptionSearchRow(
+        exception_no=exception.exception_no,
+        exception_type=exception.exception_type,
+        severity=exception.severity,
+        status=exception.status,
+        description=exception.description[:500],
+        due_at=exception.due_at,
+        created_at=exception.created_at,
+        source_type=exception.source_type,
+        source_id=exception.source_id,
+        po_no=po_nos.get(exception.po_id),
+    ) for exception in exceptions]
+    return ExceptionSearchResult(total_rows=total, truncated=total > len(exceptions), rows=rows,
+        sources=[Source(resource="operation_exceptions", record_id=exception.id) for exception in exceptions])
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """静态工具契约：Schema 与处理函数由代码登记，禁止按模型文本动态查找函数。"""
@@ -782,6 +840,14 @@ TOOLS = {
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
         ToolSpec("suppliers.profile", "按准确供应商编码汇总订单、到货、质量验收、异常与财务进度；各段按当前权限裁剪",
                  "master.suppliers.read", SupplierProfileInput, SupplierProfileResult, supplier_profile_tool,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+        ToolSpec("purchase_orders.search", "按订单号、供应商、状态或预计到货日期检索当前用户可见采购订单列表；精确追溯仍用 trace_by_no",
+                 "procurement.orders.read", PurchaseOrderSearchInput, PurchaseOrderSearchResult, search_purchase_orders,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class="UNMETERED"),
+        ToolSpec("exceptions.search", "按类型、严重度、状态或关键词检索当前用户可见运营异常列表；不替代按编号创建处理任务",
+                 "operations.exceptions.read", ExceptionSearchInput, ExceptionSearchResult, search_exceptions,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class="UNMETERED"),
     )

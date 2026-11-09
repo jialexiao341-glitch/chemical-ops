@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -11,10 +12,13 @@ from sqlalchemy.orm import Session
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.modules.ai import action_handlers, purchase_draft_bridge as bridge_module
 from app.modules.ai.model import AIAgentActionProposal
-from app.modules.ai.schema import (AIActionProposalConfirm, AIActionProposalPage, AIActionProposalPreview,
-                                   AIActionProposalRead)
+from app.modules.ai.schema import (AIActionProposalBatchFailure, AIActionProposalBatchResult, AIActionProposalConfirm,
+                                   AIActionProposalPage, AIActionProposalPreview, AIActionProposalRead)
 from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system.model import User
+
+
+LOGGER = logging.getLogger("chemicalops.ai.action_proposals")
 
 
 PROPOSAL_NOTIFICATION_LABELS = {
@@ -129,6 +133,32 @@ def propose_action(db: Session, user: User, action_type: str, payload: dict, *, 
             related_type="AI_ACTION_PROPOSAL", related_id=proposal.id))
     db.commit()
     return _preview(proposal)
+
+
+def propose_action_batch(db: Session, user: User, items) -> AIActionProposalBatchResult:
+    """批量生成相互独立的提案；单项失败不回滚已成功项，也不吞掉权限校验。"""
+    created: list[AIActionProposalPreview] = []
+    failed: list[AIActionProposalBatchFailure] = []
+    for index, item in enumerate(items):
+        try:
+            created.append(propose_action(
+                db, user, item.action_type, item.payload, idempotency_key=item.idempotency_key))
+        except (AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError) as exc:
+            db.rollback()
+            failed.append(AIActionProposalBatchFailure(
+                index=index, resource_id=_batch_resource_id(item.payload), error=str(exc)))
+        except Exception:
+            db.rollback()
+            LOGGER.exception("批量动作提案单项失败 action_type=%s index=%s", item.action_type, index)
+            failed.append(AIActionProposalBatchFailure(
+                index=index, resource_id=_batch_resource_id(item.payload),
+                error="执行失败，请重试或单独提交"))
+    return AIActionProposalBatchResult(created=created, failed=failed)
+
+
+def _batch_resource_id(payload: dict) -> str | None:
+    value = payload.get("order_id") if isinstance(payload, dict) else None
+    return str(value) if value is not None else None
 
 
 def _owned_proposal(db: Session, user: User, confirmation_id: str, *, for_update: bool = True) -> AIAgentActionProposal:

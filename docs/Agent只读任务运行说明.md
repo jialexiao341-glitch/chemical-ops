@@ -113,3 +113,21 @@ AI 工作台的聊天输入框可发起只读库存/报价任务。产品及询�
 ```
 
 真实模型复测需配置模型并使用独立输出路径；固定样本及历史原始证据见 [评测文件说明](evaluation/评测文件说明.md)。Mock 控制流测试不代表真实模型业务质量或生产容量。
+
+## 6. 反馈与运行信息
+
+任务详情和聊天结果可提交本人反馈，用于后续评测和失败归因：
+
+- `POST /api/v1/ai/feedback`：提交 `task_id`、`rating`（UP/DOWN）、原因码、说明和纠错文本；prompt 版本与模型由服务端从任务 `run_meta` 快照补齐，不接受客户端指定的版本。
+- `GET /api/v1/ai/feedback/task/{task_id}`：回显本人对当前任务的反馈。
+- `GET /api/v1/ai/feedback/summary?days=7`：按原因码和 prompt 版本聚合本人反馈，不输出反馈原文。
+
+反馈只能落在本人任务，同一任务重复提交会覆盖原记录。任务详情同时展示 `run_meta` 中的模型、prompt 版本、上下文估算、重试和错误分类，便于定位失败；仍不展示提示词正文、模型思维链或服务端异常原文。
+
+周度失败与反馈趋势可用离线脚本生成，不调用模型、不输出用户原文：
+
+```powershell
+.venv/Scripts/python.exe scripts/agent_failure_report.py --days 7
+```
+
+报告按错误码、错误类别、工具、prompt 版本和反馈原因聚合，并附失败任务编号。管理员可在 AI 任务中心的“反馈看板”查看跨用户聚合（只含计数，不含身份和原文）。已审阅差评可用 `scripts/promote_agent_case.py` 导出为脱敏路由回归用例，由 `scripts/evaluate_prod_regression.py` 回放；回答质量与工具参数仍需人工复核，未实现自动样本转正。

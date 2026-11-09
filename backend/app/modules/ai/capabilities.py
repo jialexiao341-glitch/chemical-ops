@@ -28,6 +28,8 @@ AGENT_TASK_REQUIREMENTS = {
     "supplier": frozenset({"suppliers.get_by_code"}),
     "supplier_profile": frozenset({"suppliers.profile"}),
     "replenishment_plan": frozenset({"inventory.replenishment_plan"}),
+    "order_search": frozenset({"purchase_orders.search"}),
+    "exception_search": frozenset({"exceptions.search"}),
 }
 
 # 入口说明是产品契约；是否可用仍由已注册 handler、开关和实时权限决定。

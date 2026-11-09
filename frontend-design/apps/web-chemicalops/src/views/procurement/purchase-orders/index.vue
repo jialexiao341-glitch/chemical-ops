@@ -3,12 +3,13 @@ import type {
   OnActionClickParams,
   VxeTableGridOptions,
 } from '#/adapter/vxe-table';
-import type { PurchaseOrderApi } from '#/api';
+import type { AiApi, PurchaseOrderApi } from '#/api';
 
-import { onActivated, onDeactivated, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onActivated, onDeactivated, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 
 import { Button, message, Modal } from 'antdv-next';
 
@@ -18,6 +19,7 @@ import {
   placePurchaseOrderApi,
   submitPurchaseOrderApi,
 } from '#/api';
+import { createActionProposalBatchApi } from '#/api/ai';
 import { getSupplierNameMap } from '#/utils/lookup';
 import { applyAiFiltersToList } from '#/utils/ai-list-filters';
 import { clearOrderListCopilotContext, setOrderListCopilotContext } from '#/utils/page-copilot-context';
@@ -29,6 +31,7 @@ import EditModal from './modules/edit.vue';
 
 defineOptions({ name: 'PurchaseOrderList' });
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
 let lastListFilters: { keyword?: string; status?: string } = {};
 let listActive = true;
 let listQueryVersion = 0;
@@ -54,13 +57,24 @@ const [Edit, editApi] = useVbenModal({
 });
 
 const resolveSupplier = ref<(id?: null | number) => string>(() => '-');
+const batchVisible = ref(false);
+const batchBusy = ref(false);
+const batchResult = ref<AiApi.ActionProposalBatchResult>();
+const batchEligible = ref<PurchaseOrderApi.PurchaseOrder[]>([]);
+const batchFailures = computed(() => (batchResult.value?.failed ?? []).map((item) => ({
+  ...item,
+  poNo: batchEligible.value[item.index]?.po_no ?? `第 ${item.index + 1} 条`,
+})));
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
     schema: useGridFormSchema(),
   },
   gridOptions: {
-    columns: useColumns(onActionClick, (id) => resolveSupplier.value(id)),
+    columns: [
+      { type: 'checkbox' as const, width: 48, align: 'center' as const },
+      ...(useColumns(onActionClick, (id) => resolveSupplier.value(id)) as unknown as Record<string, unknown>[]),
+    ],
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -158,6 +172,39 @@ function onPlace(row: PurchaseOrderApi.PurchaseOrder) {
   });
 }
 
+async function createBatchFollowups() {
+  const selected = gridApi.grid.getCheckboxRecords() as PurchaseOrderApi.PurchaseOrder[];
+  const eligible = selected.filter((row) => row.status === 'ORDERED' || row.status === 'PARTIAL');
+  if (!eligible.length) {
+    message.warning('请选择已下单或部分到货的订单');
+    return;
+  }
+  batchBusy.value = true;
+  try {
+    const stamp = Date.now().toString(36);
+    const result = await createActionProposalBatchApi(
+      eligible.map((row) => ({
+        action_type: 'deliveries.followup_draft',
+        payload: { order_id: row.id },
+        idempotency_key: `followup-batch-${stamp}-${row.id}`,
+      })),
+    );
+    batchResult.value = result;
+    batchEligible.value = eligible;
+    batchVisible.value = true;
+    if (result.created.length) message.success(`已生成 ${result.created.length} 条催办草稿`);
+    if (result.failed.length) message.warning(`${result.failed.length} 条未生成，请查看原因`);
+    gridApi.grid.clearCheckboxRow();
+  } finally {
+    batchBusy.value = false;
+  }
+}
+
+function goToProposalInbox() {
+  batchVisible.value = false;
+  router.push({ name: 'AiTaskHistory' });
+}
+
 onMounted(async () => {
   const suppliers = await getSupplierNameMap();
   resolveSupplier.value = (id) => {
@@ -190,6 +237,15 @@ watch(
     <Cancel @success="gridApi.query()" />
     <Edit @success="gridApi.query()" />
     <Grid table-title="采购订单">
+      <template #toolbar-tools>
+        <Button
+          v-if="hasAccessByCodes(['procurement.orders.write'])"
+          :loading="batchBusy"
+          @click="createBatchFollowups"
+        >
+          批量生成催办草稿
+        </Button>
+      </template>
       <template #po_no="{ row }">
         <Button
           size="small"
@@ -202,5 +258,40 @@ watch(
         </Button>
       </template>
     </Grid>
+    <Modal
+      v-model:open="batchVisible"
+      :footer="null"
+      title="批量生成交期催办草稿"
+      width="680"
+    >
+      <div class="space-y-3 py-2 text-sm">
+        <p>
+          成功 {{ batchResult?.created.length ?? 0 }} 条，失败
+          {{ batchResult?.failed.length ?? 0 }} 条。
+        </p>
+        <ul
+          v-if="batchResult?.created.length"
+          class="max-h-60 space-y-1 overflow-auto"
+        >
+          <li v-for="item in batchResult?.created ?? []" :key="item.confirmation_id">
+            订单 #{{ item.resource_id }} · 待确认
+          </li>
+        </ul>
+        <div v-if="batchFailures.length" class="text-red-500">
+          <p v-for="item in batchFailures" :key="item.index">
+            {{ item.poNo }}：{{ item.error }}
+          </p>
+        </div>
+        <p class="text-muted-foreground">
+          草稿尚未保存；请到任务中心逐条核对并确认。
+        </p>
+        <div class="flex justify-end gap-2">
+          <Button @click="batchVisible = false">关闭</Button>
+          <Button type="primary" @click="goToProposalInbox">
+            去任务中心逐条确认
+          </Button>
+        </div>
+      </div>
+    </Modal>
   </Page>
 </template>

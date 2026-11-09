@@ -33,16 +33,18 @@ import ActionProposalDetail from './ActionProposalDetail.vue';
 import { parseProposalNotificationId } from '#/utils/proposal-notification';
 import OperationSuggestionInbox from './OperationSuggestionInbox.vue';
 import MyOperationTasks from './MyOperationTasks.vue';
+import FeedbackDashboard from './FeedbackDashboard.vue';
 
 defineOptions({ name: 'AiTaskHistory' });
 
 const router = useRouter();
 const route = useRoute();
-const { hasAccessByCodes } = useAccess();
+const { hasAccessByCodes, hasAccessByRoles } = useAccess();
 
 const status = ref<AgentApi.Task['status']>();
 const inboxOnly = ref(true);
 const showProposals = ref(false);
+const showFeedback = ref(false);
 const showAssignedTasks = ref(false);
 const showSuggestions = ref(useRoute().query.inbox === 'suggestions' && hasAccessByCodes(['operations.exceptions.read']));
 const proposalInboxOnly = ref(true);
@@ -518,13 +520,14 @@ watch(() => route.query.proposal_notification, async (value) => {
         <div class="flex w-full flex-wrap items-center justify-between gap-3">
           <Button @click="router.push('/ai/workspace')">返回 AI 工作台</Button>
           <div class="ml-auto flex items-center gap-2">
-            <Button v-if="hasAccessByCodes(['operations.exceptions.read'])" :type="showAssignedTasks ? 'primary' : 'default'" @click="showAssignedTasks = true; showSuggestions = false; showProposals = false">分配给我</Button>
-            <Button v-if="hasAccessByCodes(['operations.exceptions.read'])" :type="showSuggestions ? 'primary' : 'default'" @click="showSuggestions = true; showAssignedTasks = false; showProposals = false">运营建议</Button>
-            <Button :type="!showAssignedTasks && !showSuggestions && !showProposals && inboxOnly ? 'primary' : 'default'" @click="showInbox(true)">待处理任务</Button>
-            <Button :type="showProposals && proposalInboxOnly ? 'primary' : 'default'" @click="showProposalInbox(true)">待确认提案</Button>
-            <Button :type="!showAssignedTasks && !showSuggestions && !showProposals && !inboxOnly ? 'primary' : 'default'" @click="showInbox(false)">全部任务</Button>
-            <Button :type="showProposals && !proposalInboxOnly ? 'primary' : 'default'" @click="showProposalInbox(false)">全部提案</Button>
-            <template v-if="!showAssignedTasks && !showSuggestions && !showProposals && !inboxOnly">
+            <Button v-if="hasAccessByRoles(['SYS_ADMIN'])" :type="showFeedback ? 'primary' : 'default'" @click="showFeedback = true; showAssignedTasks = false; showSuggestions = false; showProposals = false">反馈看板</Button>
+            <Button v-if="hasAccessByCodes(['operations.exceptions.read'])" :type="showAssignedTasks ? 'primary' : 'default'" @click="showFeedback = false; showAssignedTasks = true; showSuggestions = false; showProposals = false">分配给我</Button>
+            <Button v-if="hasAccessByCodes(['operations.exceptions.read'])" :type="showSuggestions ? 'primary' : 'default'" @click="showFeedback = false; showSuggestions = true; showAssignedTasks = false; showProposals = false">运营建议</Button>
+            <Button :type="!showFeedback && !showAssignedTasks && !showSuggestions && !showProposals && inboxOnly ? 'primary' : 'default'" @click="showFeedback = false; showInbox(true)">待处理任务</Button>
+            <Button :type="showProposals && proposalInboxOnly ? 'primary' : 'default'" @click="showFeedback = false; showProposalInbox(true)">待确认提案</Button>
+            <Button :type="!showFeedback && !showAssignedTasks && !showSuggestions && !showProposals && !inboxOnly ? 'primary' : 'default'" @click="showFeedback = false; showInbox(false)">全部任务</Button>
+            <Button :type="showProposals && !proposalInboxOnly ? 'primary' : 'default'" @click="showFeedback = false; showProposalInbox(false)">全部提案</Button>
+            <template v-if="!showFeedback && !showAssignedTasks && !showSuggestions && !showProposals && !inboxOnly">
               <Select v-model:value="status" :options="statusOptions" allow-clear placeholder="全部状态" class="w-40" />
               <Button @click="status = undefined; search()">重置</Button>
               <Button type="primary" @click="search">搜索</Button>
@@ -532,7 +535,8 @@ watch(() => route.query.proposal_notification, async (value) => {
           </div>
         </div>
       </section>
-      <MyOperationTasks v-if="showAssignedTasks" />
+      <FeedbackDashboard v-if="showFeedback" />
+      <MyOperationTasks v-else-if="showAssignedTasks" />
       <OperationSuggestionInbox v-else-if="showSuggestions" />
       <Grid v-else-if="!showProposals" :table-title="inboxOnly ? 'Agent Inbox · 待处理任务' : 'AI 任务记录'" />
       <ProposalGrid v-else :table-title="proposalInboxOnly ? 'Agent Inbox · 待确认提案' : '动作提案记录'" />

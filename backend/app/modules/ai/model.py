@@ -156,6 +156,30 @@ class AIQueryLog(Base):
     executed_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=3), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
 
+class AIFeedback(Base):
+    """Agent 任务反馈；只保存公开运行元数据，不保存提示词正文或模型思维链。"""
+
+    __tablename__ = "ai_feedback"
+    __table_args__ = (
+        UniqueConstraint("user_id", "task_id", name="uq_ai_feedback_user_task"),
+        Index("ix_ai_feedback_task", "task_id"),
+        Index("ix_ai_feedback_rating_created", "rating", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
+    task_id: Mapped[str] = mapped_column(ForeignKey("ai_agent_tasks.id"), nullable=False)
+    rating: Mapped[str] = mapped_column(String(8), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    comment: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    correction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    prompt_versions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+    updated_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3))
+
+
 class AIOperationSuggestion(Base):
     """每个运营异常对应一条共享建议，处理状态由有权限的人员共同维护。"""
 

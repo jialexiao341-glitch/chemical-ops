@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS ai_feedback (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id BIGINT UNSIGNED NOT NULL,
+    task_id VARCHAR(32) NOT NULL,
+    rating VARCHAR(8) NOT NULL,
+    reason_code VARCHAR(32) NULL,
+    comment VARCHAR(1000) NULL,
+    correction TEXT NULL,
+    prompt_version VARCHAR(100) NULL,
+    prompt_versions JSON NULL,
+    model_name VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ai_feedback_user_task (user_id, task_id),
+    KEY ix_ai_feedback_task (task_id),
+    KEY ix_ai_feedback_rating_created (rating, created_at),
+    CONSTRAINT fk_ai_feedback_user FOREIGN KEY (user_id) REFERENCES sys_users (id),
+    CONSTRAINT fk_ai_feedback_task FOREIGN KEY (task_id) REFERENCES ai_agent_tasks (id),
+    CONSTRAINT ck_ai_feedback_rating CHECK (rating IN ('UP', 'DOWN'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Agent 任务反馈与运行版本快照';

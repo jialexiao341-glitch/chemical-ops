@@ -1,10 +1,13 @@
 """采购订单模块的数据访问操作。"""
 
-from sqlalchemy import func, select
+from datetime import date
+
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderApproval, PurchaseOrderEvent
 from app.modules.rfqs.model import QuoteComparison, SupplierQuote
+from app.modules.suppliers.model import Supplier
 
 
 def detail_options():
@@ -34,14 +37,25 @@ def list_page(
     status: str | None,
     page: int,
     page_size: int,
+    supplier_keyword: str | None = None,
+    expected_arrival_before: date | None = None,
 ) -> tuple[list[PurchaseOrder], int]:
     """按用户范围和筛选条件分页查询采购订单。"""
 
     conditions = [scope_condition]
     if keyword:
-        conditions.append(PurchaseOrder.po_no.like(f"%{keyword}%"))
+        conditions.append(PurchaseOrder.po_no.contains(keyword, autoescape=True))
     if status:
         conditions.append(PurchaseOrder.status == status)
+    if supplier_keyword:
+        conditions.append(PurchaseOrder.supplier_id.in_(
+            select(Supplier.id).where(or_(
+                Supplier.supplier_name.contains(supplier_keyword, autoescape=True),
+                Supplier.supplier_code.contains(supplier_keyword, autoescape=True),
+            ))
+        ))
+    if expected_arrival_before:
+        conditions.append(PurchaseOrder.expected_arrival_date <= expected_arrival_before)
     total = db.scalar(select(func.count(PurchaseOrder.id)).where(*conditions)) or 0
     items = list(
         db.scalars(

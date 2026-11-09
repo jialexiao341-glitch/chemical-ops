@@ -196,11 +196,13 @@ def create_order(db: Session, user: User, data: PurchaseOrderCreate, *, commit: 
     return _require_order(db, order.id)
 
 
-def list_orders(db: Session, user: User, *, keyword: str | None, status: str | None, page: int, page_size: int):
-    """按用户数据范围分页查询采购订单。"""
+def list_orders(db: Session, user: User, *, keyword: str | None, status: str | None, page: int, page_size: int,
+                supplier_keyword: str | None = None, expected_arrival_before: date | None = None):
+    """按用户数据范围分页查询采购订单；筛选条件只缩小范围，不扩大授权。"""
 
     scope = order_read_condition(user, get_user_role_codes(db, user.id))
-    return crud.list_page(db, scope_condition=scope, keyword=keyword, status=status, page=page, page_size=page_size)
+    return crud.list_page(db, scope_condition=scope, keyword=keyword, status=status, page=page, page_size=page_size,
+                          supplier_keyword=supplier_keyword, expected_arrival_before=expected_arrival_before)
 
 
 def read_order(db: Session, user: User, order_id: int) -> PurchaseOrder:

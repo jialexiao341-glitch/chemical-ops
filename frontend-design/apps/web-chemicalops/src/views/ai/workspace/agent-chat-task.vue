@@ -8,6 +8,7 @@ import { formatDate, formatDateTime } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
 import { agentDisplayNumber, inventoryProductLabel, inventorySummary, primaryTaskResults } from './task-view';
 import AgentSourcePopover from './agent-source-popover.vue';
+import AgentFeedback from './agent-feedback.vue';
 import { inventorySource, TASK_ERROR_HELP, TASK_LABELS, TOOL_LABELS, waitingCandidates } from './task-view';
 const props = withDefaults(defineProps<{ task: AgentApi.Task; busy: boolean; showActions?: boolean; progress?: AiApi.BatchProgress; compactDetails?: boolean }>(), { showActions: true, compactDetails: false });
 const emit = defineEmits<{ continue: [data: AgentApi.Continue] }>();
@@ -17,6 +18,11 @@ const candidates = computed(() => waitingCandidates(props.task));
 const results = computed(() => primaryTaskResults(props.task));
 const showInventorySummary = computed(() => !props.compactDetails && props.task.status === 'SUCCEEDED' && results.value.length > 1 && results.value.every((entry) => entry.result?.tool === 'inventory.query_available'));
 const hasDedicatedResult = computed(() => results.value.some((entry) => entry.result?.tool === 'inventory.query_available' || entry.result?.tool === 'supplier_quotes.compare'));
+const runMeta = computed(() => props.task.run_meta ?? {});
+const hasRunMeta = computed(() => Boolean(runMeta.value.model?.name || Object.keys(runMeta.value.prompt_versions ?? {}).length));
+const modelLabel = computed(() => runMeta.value.model?.name || '未知模型');
+const promptLabel = computed(() => runMeta.value.prompt_versions?.planner || runMeta.value.prompt_versions?.routing || '未登记');
+const contextTokens = computed(() => runMeta.value.context?.estimated_tokens ?? null);
 const inventoryContext = computed(() => {
   const inventory = results.value.flatMap((entry) => entry.result?.tool === 'inventory.query_available' ? [entry.result] : []);
   return {
@@ -91,6 +97,13 @@ function quoteRecommendationLines(result?: AgentApi.Result) {
       <p v-if="task.status === 'RUNNING'" class="agent-muted">查询结果会自动更新。</p>
     </template>
     <p v-if="task.error_code" class="agent-error">{{ TASK_ERROR_HELP[task.error_code] || '请核对条件、权限及模型服务后重新查询。' }}（{{ task.error_code }}）</p>
+    <details v-if="!compactDetails && hasRunMeta" class="mt-3 border-t border-border/50 pt-2">
+      <summary class="text-muted-foreground cursor-pointer select-none text-xs font-medium">运行信息（排查用）</summary>
+      <p class="agent-muted">模型 {{ modelLabel }} · 提示词 {{ promptLabel }}<template v-if="contextTokens"> · 上下文约 {{ contextTokens }} tokens</template></p>
+      <p v-if="runMeta.retries" class="agent-muted">LLM 重试 {{ runMeta.retries.llm ?? 0 }} 次 · 工具重试 {{ runMeta.retries.tool ?? 0 }} 次</p>
+      <p v-if="runMeta.error?.class" class="agent-muted">错误类别 {{ runMeta.error.class }} · 建议 {{ runMeta.error.recovery || '-' }}</p>
+    </details>
+    <AgentFeedback v-if="!compactDetails" :task="task" />
 
     <form v-if="candidates && showActions !== false" class="agent-selection" @submit.prevent="choose">
       <fieldset :disabled="busy">

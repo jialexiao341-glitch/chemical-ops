@@ -24,7 +24,7 @@ def test_manifest_exposes_only_current_tools_datasets_and_non_identifying_scopes
     assert {item["name"] for item in payload["agent_tools"]} == {
         "catalog.search_products", "inventory.query_available", "inventory.replenishment_plan",
         "supplier_quotes.find_rfq_items", "supplier_quotes.compare",
-        "purchase_orders.trace_by_no",
+        "purchase_orders.trace_by_no", "purchase_orders.search", "exceptions.search",
         "deliveries.get_by_no", "suppliers.get_by_code", "suppliers.profile",
     }
     datasets = {item["key"] for item in payload["analytics_datasets"]}
