@@ -39,3 +39,6 @@ storage/
 
 # 本地 Prometheus 抓取凭据
 /deploy/observability/secrets/
+
+# 评测候选报告为本地运行产物；基线目录需显式提交
+docs/evaluation/candidate/
