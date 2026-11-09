@@ -74,6 +74,7 @@
 - `AGENT_MAX_STEPS=12`，允许 1～24；每轮计算模型决策次数，包括追问/完成。最多 10 条用户输入；达到 100 条历史步骤后不再允许续跑。
 - `AGENT_TASK_TIMEOUT_SECONDS=120`，允许 1～300；`AGENT_CONTEXT_MAX_CHARS=18000`，允许 2000～18000。模型单次输出最多 2048 token，本循环不自动重试模型请求。
 - 同轮同工具同参数重复调用立即停止；连续两个无效工具请求停止。模型格式异常、未授权请求、步骤/上下文/时间超限均失败并记录规范化错误。
+- `AGENT_TOOL_CALL_QUOTA_PER_TOOL=8`，允许 1～100；同一任务内每个只读工具最多调用 N 次，第 N+1 次在 `execute_tool` 入口拒绝并返回 `QUOTA_EXCEEDED`（BUDGET / NARROW_SCOPE）。计数保存在 `run_meta.tool_calls`，随任务续答延续；参数错误也消耗一次，避免无效调用绕过配额。
 - 总超时可中断异步模型等待；同步数据库查询不能靠 `asyncio.timeout` 强行终止，工具完成后检查总耗时。单条 SQL/连接超时需在数据库驱动和数据库侧设置，示例中的 `AGENT_TOOL_TIMEOUT_SECONDS` 尚未实现为独立 SQL 超时。
 - `AGENT_ENABLED=false` 拒绝工具目录、执行和任务运行。现有任务仍遵守访问鉴权；读取依赖工具目录，因此关闭时也不能回看完整历史。`AGENT_ALLOW_WRITE_TOOLS` 不会新增写工具。
 
