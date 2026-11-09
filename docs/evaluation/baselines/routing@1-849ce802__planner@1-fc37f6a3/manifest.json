@@ -1,0 +1,11 @@
+{
+  "prompt_key": "routing@1-849ce802__planner@1-fc37f6a3",
+  "routing_version": "routing@1-849ce802",
+  "planner_version": "planner@1-fc37f6a3",
+  "registered_at": "2026-11-09T14:05:50",
+  "files": [
+    "intent_routing.json",
+    "agent_tasks.json",
+    "agent_business.json"
+  ]
+}

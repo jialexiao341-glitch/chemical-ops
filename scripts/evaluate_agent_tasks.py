@@ -207,10 +207,10 @@ async def evaluate(case: Case, *, db_factory=evaluation_db, evidence_checker=che
     try:
         with db_factory() as db:
             if db_factory is evaluation_db and case.variant == 'products':
-                db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1)"))
+                db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '桶', 1, 1)"))
             if db_factory is evaluation_db and case.variant == 'rfqs':
                 db.execute(text("INSERT INTO rfqs (id, rfq_no, requester_id, status) VALUES (4, 'RFQ-OWN-2', 7, 'SENT')"))
-                db.execute(text("INSERT INTO rfq_items VALUES (41, 4, 1, '工业级', NULL)"))
+                db.execute(text("INSERT INTO rfq_items VALUES (41, 4, 1, '工业级', NULL, 1, 20)"))
             db.commit()
             event.listen(db.bind, 'before_cursor_execute', capture)
             actor = SimpleNamespace(id=case.actor)

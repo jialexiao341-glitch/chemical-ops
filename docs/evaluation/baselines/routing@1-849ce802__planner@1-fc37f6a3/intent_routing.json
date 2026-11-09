@@ -1,0 +1,2399 @@
+{
+  "evaluated_at": "2026-11-09T06:03:02.530582+00:00",
+  "model": "deepseek-flash",
+  "prompt_sha256": "849ce802530461c9fc6d341b6f084906706091e0da46ba3df6479b558dcbe7c5",
+  "scope": "合成语义路由样本；不衡量工具执行、检索或生产业务效果",
+  "repeats": 1,
+  "sample_count": 34,
+  "total": 34,
+  "passed": 29,
+  "cases": [
+    {
+      "round": 1,
+      "question": "统计本月采购订单数量和金额",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "query",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": "2026-11-01",
+          "date_to": "2026-11-09",
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "统计本月（2026-11-01 至 2026-11-09）的采购订单数量和金额",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "统计本月（2026-11-01 至 2026-11-09）的采购订单数量和金额，订单数按唯一采购订单编号计数，金额按订单金额汇总并区分币种",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": "2026-11-01",
+              "date_to": "2026-11-09",
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "query",
+      "recognition_passed": false,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": false,
+      "tool_invoked": false,
+      "passed": false,
+      "seconds": 3.82
+    },
+    {
+      "round": 1,
+      "question": "查乙醇和甲醇库存",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查乙醇和甲醇库存",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "inventory",
+            "question": "查询乙醇的可用库存",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "inventory",
+            "question": "查询甲醇的可用库存",
+            "slots": {
+              "product_keyword": "甲醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": true,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.67
+    },
+    {
+      "round": 1,
+      "question": "查乙醇库存并统计本月订单数量",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "inventory",
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory",
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": null,
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "inventory",
+            "question": "查询乙醇当前的可用库存",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "analytics",
+            "question": "统计本月（2026-11-01 至 2026-11-09）的订单数量，按唯一订单编号计数",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": "2026-11-01",
+              "date_to": "2026-11-09",
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 3.94
+    },
+    {
+      "round": 1,
+      "question": "你好，查乙醇库存",
+      "context": {},
+      "expected_route": "agent",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "你好，查乙醇库存",
+        "sub_tasks": []
+      },
+      "route": "agent",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "agent",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 1.22
+    },
+    {
+      "round": 1,
+      "question": "查乙醇最近的供应商报价",
+      "context": {},
+      "expected_route": "agent",
+      "expected_tasks": [
+        "quotes"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "quotes"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查乙醇最近的供应商报价",
+        "sub_tasks": []
+      },
+      "route": "agent",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "agent",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.07
+    },
+    {
+      "round": 1,
+      "question": "查乙醇库存并比较报价",
+      "context": {},
+      "expected_route": "agent",
+      "expected_tasks": [
+        "inventory",
+        "quotes"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory",
+          "quotes"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查乙醇库存并比较报价",
+        "sub_tasks": []
+      },
+      "route": "agent",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "agent",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 1.71
+    },
+    {
+      "round": 1,
+      "question": "乙醇的闪点是多少",
+      "context": {},
+      "expected_route": "document",
+      "expected_tasks": [
+        "document"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "document",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "document"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "乙醇（酒精）的闪点是多少？",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "document",
+            "question": "乙醇（酒精）的闪点是多少？请依据化学品安全资料说明闪点数值及测定条件。",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "document",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "document",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.2
+    },
+    {
+      "round": 1,
+      "question": "帮我起草一份甲醇采购申请",
+      "context": {},
+      "expected_route": "purchase_draft",
+      "expected_tasks": [],
+      "actual": {
+        "purpose": "purchase_draft",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "甲醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "准备起草甲醇采购申请草稿，待您确认后提交。",
+        "sub_tasks": []
+      },
+      "route": "purchase_draft",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "none",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.31
+    },
+    {
+      "round": 1,
+      "question": "查 64-17-5 的库存",
+      "context": {},
+      "expected_route": "agent",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "64-17-5",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": null,
+        "sub_tasks": []
+      },
+      "route": "agent",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "agent",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 1.38
+    },
+    {
+      "round": 1,
+      "question": "库存查询支持哪些筛选条件？",
+      "context": {},
+      "expected_route": "capability",
+      "expected_tasks": [],
+      "actual": {
+        "purpose": "capability",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": null,
+        "sub_tasks": []
+      },
+      "route": "capability",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "none",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 1.81
+    },
+    {
+      "round": 1,
+      "question": "库存不足怎么处理？",
+      "context": {},
+      "expected_route": "guidance",
+      "expected_tasks": [],
+      "actual": {
+        "purpose": "guidance",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "库存不足怎么处理？",
+        "sub_tasks": []
+      },
+      "route": "guidance",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "none",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 1.43
+    },
+    {
+      "round": 1,
+      "question": "查乙醇库存，不用比较报价",
+      "context": {},
+      "expected_route": "agent",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [
+          "quotes"
+        ],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查乙醇库存，不用比较报价",
+        "sub_tasks": []
+      },
+      "route": "agent",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "agent",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 1.83
+    },
+    {
+      "round": 1,
+      "question": "不要创建订单，只统计本月订单金额",
+      "context": {},
+      "expected_route": "query",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "query",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": "2026-11-01",
+          "date_to": "2026-11-09",
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "统计本月（2026-11-01 至 2026-11-09）的采购订单金额合计，不创建任何订单",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "统计本月（2026-11-01 至 2026-11-09）的采购订单金额合计，不创建任何订单",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": "2026-11-01",
+              "date_to": "2026-11-09",
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "query",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "query",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.86
+    },
+    {
+      "round": 1,
+      "question": "查供应商总数",
+      "context": {},
+      "expected_route": "query",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "query",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "统计供应商总数",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "统计当前可见范围内的供应商总数（按唯一供应商编码计数）",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "query",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "query",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 1.98
+    },
+    {
+      "round": 1,
+      "question": "把时间改成上个月",
+      "context": {
+        "query_plan": {
+          "dataset": "purchase_orders"
+        },
+        "messages": [
+          {
+            "role": "user",
+            "content": "统计本月采购订单金额"
+          }
+        ]
+      },
+      "expected_route": "query",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "query",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "modify",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": "2026-10-01",
+          "date_to": "2026-10-31",
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "统计上个月（2026-10-01 至 2026-10-31）的采购订单金额",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "统计上个月（2026-10-01 至 2026-10-31）的采购订单总金额",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": "2026-10-01",
+              "date_to": "2026-10-31",
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "query",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "query",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.69
+    },
+    {
+      "round": 1,
+      "question": "查乙醇闪点并查库存",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "document",
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "document",
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查乙醇闪点并查库存",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "document",
+            "question": "乙醇（乙醇）的闪点是多少？请给出化学品资料中的闪点数值和测试条件。",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "inventory",
+            "question": "查询乙醇当前的可用库存数量及所在仓库。",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 3.48
+    },
+    {
+      "round": 1,
+      "question": "帮我创建采购订单",
+      "context": {},
+      "expected_route": "unsupported",
+      "expected_tasks": [],
+      "actual": {
+        "purpose": "unsupported",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "当前入口无法直接创建采购订单（正式下单属于受控业务动作，需在业务系统页面完成）。可协助的范围包括：创建采购申请草稿、修改已有采购申请草稿、检查并提交采购申请、对已有采购订单提交审批（需提供准确采购订单号）、基于已审批申请创建询价草稿。请说明你需要的具体动作。",
+        "sub_tasks": []
+      },
+      "route": "unsupported",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "none",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 3.07
+    },
+    {
+      "round": 1,
+      "question": "查一下它的库存",
+      "context": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "乙醇闪点是多少"
+          }
+        ]
+      },
+      "expected_route": "agent",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "switch",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查询乙醇的当前可用库存",
+        "sub_tasks": []
+      },
+      "route": "agent",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "agent",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.07
+    },
+    {
+      "round": 1,
+      "question": "改查甲醇库存",
+      "context": {
+        "memory": {
+          "goal": {
+            "intent": "inventory_and_quotes_query",
+            "description": "查乙醇库存并比较报价"
+          }
+        }
+      },
+      "expected_route": "agent",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "modify",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "甲醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查询甲醇的可用库存",
+        "sub_tasks": []
+      },
+      "route": "agent",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "agent",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.35
+    },
+    {
+      "round": 1,
+      "question": "不用查乙醇，只查甲醇库存",
+      "context": {},
+      "expected_route": "agent",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "agent",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "甲醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "只查甲醇的当前可用库存，不查乙醇。",
+        "sub_tasks": []
+      },
+      "route": "agent",
+      "recognition_passed": true,
+      "plan_contract_passed": true,
+      "expected_execution_mode": "agent",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 3.32
+    },
+    {
+      "round": 1,
+      "question": "只统计订单数量，不要金额",
+      "context": {},
+      "expected_route": "query",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "clarify",
+        "execution_mode": "none",
+        "clarification_slot": "order_scope",
+        "clarification_options": [
+          "全部可见采购订单（不限时间）",
+          "本月（2026-11-01 至 2026-11-09）采购订单",
+          "上月（2026-10-01 至 2026-10-31）采购订单",
+          "指定供应商的采购订单"
+        ],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "已明确只看订单数量、不含金额。请确认统计范围：按全部可见采购订单、本月、上月，还是某个指定供应商的采购订单来统计订单数量？",
+        "sub_tasks": []
+      },
+      "route": "clarify",
+      "recognition_passed": false,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "query",
+      "execution_contract_passed": false,
+      "tool_invoked": false,
+      "passed": false,
+      "seconds": 4.14
+    },
+    {
+      "round": 1,
+      "question": "查乙醇和甲醇库存，不要报价",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [
+          "quotes"
+        ],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查乙醇和甲醇库存，不要报价",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "inventory",
+            "question": "查询乙醇的可用库存",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "inventory",
+            "question": "查询甲醇的可用库存",
+            "slots": {
+              "product_keyword": "甲醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": true,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.3
+    },
+    {
+      "round": 1,
+      "question": "查乙醇库存和甲醇报价",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "inventory",
+        "quotes"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory",
+          "quotes"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查乙醇库存和甲醇报价",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "inventory",
+            "question": "查询乙醇当前可用库存",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "quotes",
+            "question": "查询甲醇的供应商报价并比较",
+            "slots": {
+              "product_keyword": "甲醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": true,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.6
+    },
+    {
+      "round": 1,
+      "question": "分别统计已付款和待付款的金额",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "query",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "分别统计已付款和待付款的金额，按付款状态分组汇总金额，并说明使用的日期字段与数据范围",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "分别统计已付款和待付款的金额：按付款状态分组汇总金额，输出已付款金额合计与待付款金额合计，并说明统计使用的日期字段与数据范围",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "query",
+      "recognition_passed": false,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": false,
+      "tool_invoked": false,
+      "passed": false,
+      "seconds": 2.46
+    },
+    {
+      "round": 1,
+      "question": "分别统计采购申请和采购订单数量",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "分别统计采购申请数量和采购订单数量",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "统计采购申请的数量（按采购申请编号计数）",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "analytics",
+            "question": "统计采购订单的数量（按订单编号计数）",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.92
+    },
+    {
+      "round": 1,
+      "question": "查它的库存",
+      "context": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "乙醇和甲醇有什么区别"
+          }
+        ]
+      },
+      "expected_route": "clarify",
+      "expected_tasks": [],
+      "actual": {
+        "purpose": "clarify",
+        "execution_mode": "none",
+        "clarification_slot": "product_keyword",
+        "clarification_options": [
+          "乙醇",
+          "甲醇",
+          "乙醇和甲醇都查"
+        ],
+        "dialogue_action": "switch",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "您想查询哪个产品的库存：乙醇、甲醇，还是两者都查？",
+        "sub_tasks": []
+      },
+      "route": "clarify",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "none",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.51
+    },
+    {
+      "round": 1,
+      "question": "换成上个月",
+      "context": {
+        "memory": {
+          "batch_tasks": [
+            {
+              "id": "t1",
+              "kind": "analytics",
+              "question": "统计订单数量"
+            },
+            {
+              "id": "t2",
+              "kind": "analytics",
+              "question": "统计付款金额"
+            }
+          ]
+        }
+      },
+      "expected_route": "clarify",
+      "expected_tasks": [],
+      "actual": {
+        "purpose": "clarify",
+        "execution_mode": "none",
+        "clarification_slot": "modify_scope",
+        "clarification_options": [
+          "订单数量和付款金额两项都改成上个月",
+          "只改订单数量为上个月",
+          "只改付款金额为上个月"
+        ],
+        "dialogue_action": "modify",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "您原有两个查询（订单数量、付款金额），这次“上个月”是指两项都改，还是只改其中一项？",
+        "sub_tasks": []
+      },
+      "route": "clarify",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "none",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.81
+    },
+    {
+      "round": 1,
+      "question": "以上两项都改成上个月",
+      "context": {
+        "memory": {
+          "batch_tasks": [
+            {
+              "id": "t1",
+              "kind": "analytics",
+              "question": "统计订单数量"
+            },
+            {
+              "id": "t2",
+              "kind": "analytics",
+              "question": "统计付款金额"
+            }
+          ]
+        }
+      },
+      "expected_route": "batch",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "modify",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": "2026-10-01",
+          "date_to": "2026-10-31",
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": null,
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "统计上个月（2026-10-01 至 2026-10-31）的订单数量",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": "2026-10-01",
+              "date_to": "2026-10-31",
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "analytics",
+            "question": "统计上个月（2026-10-01 至 2026-10-31）的付款金额",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": "2026-10-01",
+              "date_to": "2026-10-31",
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 4.72
+    },
+    {
+      "round": 1,
+      "question": "第二项改为甲醇报价，第一项不变",
+      "context": {
+        "memory": {
+          "batch_tasks": [
+            {
+              "id": "t1",
+              "kind": "inventory",
+              "question": "查乙醇库存"
+            },
+            {
+              "id": "t2",
+              "kind": "quotes",
+              "question": "查乙醇报价"
+            }
+          ]
+        }
+      },
+      "expected_route": "batch",
+      "expected_tasks": [
+        "inventory",
+        "quotes"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "modify",
+        "tasks": [
+          "inventory",
+          "quotes"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "第二项改为甲醇报价，第一项不变",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "inventory",
+            "question": "查乙醇库存",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "quotes",
+            "question": "查甲醇报价",
+            "slots": {
+              "product_keyword": "甲醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 2.59
+    },
+    {
+      "round": 1,
+      "question": "先查乙醇库存，再根据结果查询该批次库存流水",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "inventory",
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "clarify",
+        "execution_mode": "none",
+        "clarification_slot": "inventory_flow_scope",
+        "clarification_options": [
+          "先只查乙醇库存，流水稍后另行指定",
+          "不限定批次，直接按产品乙醇查询库存流水",
+          "两段分开执行：先出库存结果，再由我指定批次查流水"
+        ],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "乙醇库存可以直接查询，但“该批次库存流水”要等库存结果确定具体批次后才能定位，当前链路无法把库存查询结果自动传入流水统计。请确认按哪种方式处理：只查库存；还是按产品乙醇直接查库存流水（不限批次）；或先出库存结果、再由你指定批次查流水？",
+        "sub_tasks": []
+      },
+      "route": "clarify",
+      "recognition_passed": false,
+      "plan_contract_passed": false,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": false,
+      "tool_invoked": false,
+      "passed": false,
+      "seconds": 6.27
+    },
+    {
+      "round": 1,
+      "question": "先找已审批但未询价的采购申请，再统计这些申请的数量",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "analytics"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "query",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "analytics"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "列出已审批但尚未询价的采购申请清单，并统计这些申请的数量（按唯一采购申请编号计数）",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "列出已审批但尚未创建询价的采购申请明细，并统计这些采购申请的数量（按唯一采购申请编号计数）",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "query",
+      "recognition_passed": false,
+      "plan_contract_passed": false,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": false,
+      "tool_invoked": false,
+      "passed": false,
+      "seconds": 4.0
+    },
+    {
+      "round": 1,
+      "question": "先查乙醇库存，然后创建采购申请",
+      "context": {},
+      "expected_route": "unsupported",
+      "expected_tasks": [],
+      "actual": {
+        "purpose": "unsupported",
+        "execution_mode": "none",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": "乙醇",
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "该请求把库存查询和创建采购申请放在同一轮里，当前入口无法在一次请求中先查询再自动据此创建采购申请草稿。请先单独查询乙醇库存；确认结果后，我再基于这次查询整理采购申请草稿，并停在确认前。",
+        "sub_tasks": []
+      },
+      "route": "unsupported",
+      "recognition_passed": true,
+      "plan_contract_passed": null,
+      "expected_execution_mode": "none",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 4.3
+    },
+    {
+      "round": 1,
+      "question": "查乙醇库存，再查甲醇库存，两项各看前5条",
+      "context": {},
+      "expected_route": "batch",
+      "expected_tasks": [
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "new",
+        "tasks": [
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": 5,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "查乙醇库存和甲醇库存，两项各看前5条",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "inventory",
+            "question": "查询乙醇的可用库存，展示前5条",
+            "slots": {
+              "product_keyword": "乙醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": 5,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "inventory",
+            "question": "查询甲醇的可用库存，展示前5条",
+            "slots": {
+              "product_keyword": "甲醇",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": 5,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": true,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 3.24
+    },
+    {
+      "round": 1,
+      "question": "第二项使用产品编码 PRD-ETHANOL-AR，第一项保持不变",
+      "context": {
+        "memory": {
+          "batch_tasks": [
+            {
+              "id": "t1",
+              "kind": "analytics",
+              "question": "统计采购订单数量",
+              "status": "SUCCEEDED"
+            },
+            {
+              "id": "t2",
+              "kind": "inventory",
+              "question": "查询乙醇的可用库存",
+              "status": "WAITING_INPUT"
+            }
+          ]
+        }
+      },
+      "expected_route": "batch",
+      "expected_tasks": [
+        "analytics",
+        "inventory"
+      ],
+      "actual": {
+        "purpose": "query",
+        "execution_mode": "batch",
+        "clarification_slot": null,
+        "clarification_options": [],
+        "dialogue_action": "modify",
+        "tasks": [
+          "analytics",
+          "inventory"
+        ],
+        "excluded_tasks": [],
+        "slots": {
+          "product_keyword": null,
+          "rfq_no": null,
+          "request_no": null,
+          "po_no": null,
+          "acceptance_no": null,
+          "delivery_no": null,
+          "reconciliation_no": null,
+          "exception_no": null,
+          "supplier_code": null,
+          "warehouse_keyword": null,
+          "date_from": null,
+          "date_to": null,
+          "limit": null,
+          "unit": null,
+          "aggregate_products": false
+        },
+        "action_fields": null,
+        "question": "统计采购订单数量；查询产品编码 PRD-ETHANOL-AR 的可用库存",
+        "sub_tasks": [
+          {
+            "id": "t1",
+            "kind": "analytics",
+            "question": "统计采购订单数量",
+            "slots": {
+              "product_keyword": null,
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          },
+          {
+            "id": "t2",
+            "kind": "inventory",
+            "question": "查询产品编码 PRD-ETHANOL-AR 的可用库存",
+            "slots": {
+              "product_keyword": "PRD-ETHANOL-AR",
+              "rfq_no": null,
+              "request_no": null,
+              "po_no": null,
+              "acceptance_no": null,
+              "delivery_no": null,
+              "reconciliation_no": null,
+              "exception_no": null,
+              "supplier_code": null,
+              "warehouse_keyword": null,
+              "date_from": null,
+              "date_to": null,
+              "limit": null,
+              "unit": null,
+              "aggregate_products": false
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      "route": "batch",
+      "recognition_passed": true,
+      "plan_contract_passed": true,
+      "expected_execution_mode": "batch",
+      "execution_contract_passed": true,
+      "tool_invoked": false,
+      "passed": true,
+      "seconds": 5.06
+    }
+  ],
+  "recognition": {
+    "total": 34,
+    "passed": 29
+  },
+  "plan_contract": {
+    "total": 8,
+    "passed": 6
+  },
+  "execution_contract": {
+    "total": 34,
+    "passed": 29,
+    "note": "只核对执行模式与任务结构；不调用工具或数据库，也不代表执行成功率"
+  },
+  "tool_execution": {
+    "total": 0,
+    "passed": 0,
+    "note": "本脚本不会调用工具"
+  },
+  "stability": {
+    "total_samples": 34,
+    "passed_all_rounds": 29
+  }
+}

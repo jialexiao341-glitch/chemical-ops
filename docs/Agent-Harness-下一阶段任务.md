@@ -400,8 +400,8 @@ python -m compileall -q backend/app tests
 
 | 任务 | 状态 | 验收人 | 备注 |
 | --- | --- | --- | --- |
-| T1 Prompt Registry | 待开始 |  |  |
+| T1 Prompt Registry | 已完成 |  | 实现为 prompt_registry.py 与快照测试；真实模型回归尚未重跑 |
 | T2 Trace v2 | 已完成 |  | 已补充路由票据版本记录及错误分类保留回归；真实模型和完整 MySQL 环境尚未验收 |
 | T3 Error Policy | 已完成 |  | 分类和恢复动作仅为建议；队列重试差异留待 T3b |
 | T4 Context Assembler | 已实现（待验收） |  | 已通过离线上下文及 Agent 回归；真实模型 token 估算偏差尚未验证 |
-| T5 Eval Gate | 已实现（待验收） |  | `scripts/compare_eval_reports.py` 支持三类评测报告对比、逐用例回归清单与 `--fail-on-regression`；仅在离线夹具上验证，未与真实模型报告交叉验收 |
+| T5 Eval Gate | 已实现（待验收） |  | `scripts/compare_eval_reports.py` 支持三类评测报告对比、逐用例回归清单与 `--fail-on-regression`；新增 `scripts/run_eval_suite.py` 与 `scripts/eval_prompt_gate.py`，基线按 routing+planner 版本登记；仅在离线夹具上验证，尚未与真实模型报告交叉验收 |

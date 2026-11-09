@@ -109,16 +109,27 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
     async def run(case: tuple[str, dict, str, list[str]]) -> dict:
         """评测一条问题及会话上下文，记录期望、实际分类和耗时。"""
         question, context, expected_route, expected_tasks = case
+        expected_mode = expected_route if expected_route in {"agent", "batch", "query", "document"} else "none"
         async with semaphore:
             start = perf_counter()
-            result = await understand(question, context, settings)
+            try:
+                result = await understand(question, context, settings)
+            except Exception as exc:
+                # 单条模型格式失败不能中断整批评测；保存失败类型但不保存异常原文或密钥。
+                return {"question": question, "context": context, "expected_route": expected_route,
+                        "expected_tasks": expected_tasks, "actual": None, "route": None,
+                        "recognition_passed": False, "plan_contract_passed": None,
+                        "expected_execution_mode": expected_mode,
+                        "execution_contract_passed": False, "tool_invoked": False,
+                        "passed": False, "seconds": round(perf_counter() - start, 2),
+                        "evaluation_error_type": type(exc).__name__}
             recognized = result.route == expected_route and set(result.tasks) == set(expected_tasks)
             execution_contract = check_execution_contract(result, expected_route)
             planned = check_contract(question, result)
             return {"question": question, "context": context, "expected_route": expected_route,
                     "expected_tasks": expected_tasks, "actual": result.model_dump(mode="json"), "route": result.route,
                     "recognition_passed": recognized, "plan_contract_passed": planned,
-                    "expected_execution_mode": (expected_route if expected_route in {"agent", "batch", "query", "document"} else "none"),
+                    "expected_execution_mode": expected_mode,
                     "execution_contract_passed": execution_contract,
                     "tool_invoked": False,
                     "passed": recognized and execution_contract and planned is not False,
