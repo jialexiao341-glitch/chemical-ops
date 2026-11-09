@@ -159,6 +159,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 60
     llm_max_retries: int = 2
     llm_stream_usage: bool = False
+    # 仅用于离线成本估算，不参与业务判断；单价按每百万 token 计。
+    llm_price_input_per_million: float = Field(default=0.0, ge=0)
+    llm_price_output_per_million: float = Field(default=0.0, ge=0)
     # 可选 JSON 模型目录；不配置时继续使用以上单模型兼容配置。
     llm_model_profiles_json: str = ""
     llm_default_profile: str = ""

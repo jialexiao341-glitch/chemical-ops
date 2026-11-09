@@ -134,6 +134,41 @@ class RunState:
     run_meta: dict = field(default_factory=dict)
 
 
+def _empty_usage_totals() -> dict[str, int]:
+    """单任务累计用量；calls 含无 usage 的调用，便于成本报告显示覆盖率。"""
+    return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+            "unmetered_calls": 0, "split_unavailable_calls": 0}
+
+
+def _token_count(usage: dict, *names: str) -> int | None:
+    """读取 OpenAI 兼容 usage 的 token 字段，拒绝布尔值和负数。"""
+    for name in names:
+        value = usage.get(name)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
+
+
+def _accumulate_usage(state: RunState, usage: object) -> None:
+    """把每次模型调用的输入/输出 token 累加到 run_meta，供离线成本报告使用。"""
+    totals = state.run_meta.setdefault("usage_totals", _empty_usage_totals())
+    totals["calls"] += 1
+    if not isinstance(usage, dict):
+        totals["unmetered_calls"] += 1
+        return
+    prompt = _token_count(usage, "prompt_tokens", "input_tokens")
+    completion = _token_count(usage, "completion_tokens", "output_tokens")
+    total = _token_count(usage, "total_tokens")
+    if prompt is None and completion is None and total is None:
+        totals["unmetered_calls"] += 1
+        return
+    if prompt is None or completion is None:
+        totals["split_unavailable_calls"] += 1
+    totals["input_tokens"] += prompt or 0
+    totals["output_tokens"] += completion or 0
+    totals["total_tokens"] += total if total is not None else (prompt or 0) + (completion or 0)
+
+
 def _record_model_response(state: RunState, response) -> None:
     """只记录模型响应中可核实的元数据，不保存模型内容。"""
     retries = state.run_meta.setdefault("retries", {"llm": None, "tool": None})
@@ -142,6 +177,7 @@ def _record_model_response(state: RunState, response) -> None:
         retries["llm_incomplete"] = True
         return
     call = getattr(response, "call_meta", None) or {}
+    _accumulate_usage(state, getattr(response, "usage", None))
     state.run_meta["model"] = {
         "provider": getattr(response, "provider", None), "name": getattr(response, "model", None),
         "usage": getattr(response, "usage", None), "requested_model": call.get("requested_model"),
@@ -1025,6 +1061,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
     state.run_meta.setdefault("model", {"provider": None, "name": None, "usage": None})
     state.run_meta.setdefault("context", {"estimated_tokens": None, "max_tokens": None, "truncated_sections": None})
     state.run_meta.setdefault("retries", {"llm": None, "tool": None})
+    state.run_meta.setdefault("usage_totals", _empty_usage_totals())
     try:
         from app.core.telemetry import trace_span
         with trace_span("agent.execute", {"chemicalops.agent.task_id": state.task_id}):
@@ -1306,7 +1343,8 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
                      workflow=Workflow())
     state.run_meta = {"prompt_versions": {}, "model": {"provider": None, "name": None, "usage": None},
         "context": {"estimated_tokens": None, "max_tokens": None, "truncated_sections": None},
-        "retries": {"llm": None, "tool": None}, "error": {"code": None, "class": None, "recovery": None}}
+        "retries": {"llm": None, "tool": None}, "error": {"code": None, "class": None, "recovery": None},
+        "usage_totals": _empty_usage_totals()}
     from app.modules.system.data_scope import department_scope_snapshot, warehouse_scope_snapshot
     state.department_scope = department_scope_snapshot(db, user)
     state.warehouse_scope = warehouse_scope_snapshot(db, user)
