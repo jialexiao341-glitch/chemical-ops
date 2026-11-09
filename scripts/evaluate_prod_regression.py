@@ -15,25 +15,8 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.core.config import get_settings  # noqa: E402
 from app.modules.ai import routing  # noqa: E402
-from app.modules.ai.capabilities import AGENT_TASK_REQUIREMENTS  # noqa: E402
 from app.modules.ai.prompt_registry import prompt_version  # noqa: E402
-from app.modules.ai.schema import CapabilityManifest  # noqa: E402
-from app.modules.ai.agent_tools import TOOLS  # noqa: E402
-
-
-def build_manifest() -> CapabilityManifest:
-    """评测使用全量只读能力；真实账号权限仍由生产路由清单裁剪。"""
-    tools = [{
-        "name": spec.name, "description": spec.description,
-        **spec.governance_metadata(),
-        "input_schema": spec.input_schema.model_json_schema(),
-    } for spec in TOOLS.values()]
-    return CapabilityManifest(
-        contract_version="1", digest="prod-regression-eval",
-        agent_tools=tools, analytics_datasets=[], document_search=False,
-        resource_scopes=[], action_proposals=[],
-        agent_tasks=sorted(AGENT_TASK_REQUIREMENTS),
-    )
+from scripts.evaluation_manifest import build_manifest  # noqa: E402
 
 
 def check_decision(decision, case: dict) -> dict:
@@ -53,7 +36,7 @@ def check_decision(decision, case: dict) -> dict:
 
 
 async def evaluate(cases: list[dict]) -> dict:
-    manifest = build_manifest()
+    manifest = build_manifest("prod-regression-eval")
     results = []
     for case in cases:
         try:

@@ -2,11 +2,47 @@
 
 日期采用中国标准时间当天的相对日期；不连接或修改开发业务库。
 """
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
+
+
+@contextmanager
+def isolated_cache_namespace():
+    """为单个评测用例隔离 Redis 缓存命名空间。
+
+    每个用例使用独立 SQLite 数据库，业务数据（如目录候选数）互不相同；
+    共享缓存键只包含查询参数，跨用例复用会把上一用例的快照当成当前数据，
+    从而把“应澄清”误测成“直接完成”。隔离后仍保留同一用例内的缓存行为。
+    """
+    from app.core import cache as cache_module
+
+    original = cache_module.redis_key
+    namespace = f"eval-{uuid.uuid4().hex[:12]}"
+    cache_module.redis_key = lambda *parts: original(namespace, *parts)
+    try:
+        yield namespace
+    finally:
+        cache_module.redis_key = original
+        _drop_cache_namespace(namespace)
+
+
+def _drop_cache_namespace(namespace: str) -> None:
+    """尽力清理本次用例的缓存键；缓存不可用时不影响评测结果。"""
+    from app.core.redis_client import get_redis
+
+    client = get_redis()
+    if client is None:
+        return
+    try:
+        for key in client.scan_iter(match=f"*{namespace}*"):
+            client.delete(key)
+    except Exception:
+        # 缓存清理是尽力而为；残留键有 TTL，不影响评测结论。
+        pass
 
 
 @contextmanager

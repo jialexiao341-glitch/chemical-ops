@@ -9,13 +9,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.core.config import get_settings
 from app.modules.ai.routing import ROUTING_PROMPT, understand
+from scripts.evaluation_manifest import build_manifest
 
 
 CASES = [
-    ("统计本月采购订单数量和金额", {}, "batch", ["analytics"]),
+    # 同一数据集的多个指标可由一份计划覆盖，现行合并规则要求 query 而不是拆成 batch；
+    # 业务页面提案动作按 2026-10-22 契约给 guidance，不声称系统不支持。
+    ("统计本月采购订单数量和金额", {}, "query", ["analytics"]),
     ("查乙醇和甲醇库存", {}, "batch", ["inventory"]),
     ("查乙醇库存并统计本月订单数量", {}, "batch", ["inventory", "analytics"]),
     ("你好，查乙醇库存", {}, "agent", ["inventory"]),
@@ -31,14 +35,14 @@ CASES = [
     ("查供应商总数", {}, "query", ["analytics"]),
     ("把时间改成上个月", {"query_plan": {"dataset": "purchase_orders"}, "messages": [{"role": "user", "content": "统计本月采购订单金额"}]}, "query", ["analytics"]),
     ("查乙醇闪点并查库存", {}, "batch", ["document", "inventory"]),
-    ("帮我创建采购订单", {}, "unsupported", []),
+    ("帮我创建采购订单", {}, "guidance", []),
     ("查一下它的库存", {"messages": [{"role": "user", "content": "乙醇闪点是多少"}]}, "agent", ["inventory"]),
     ("改查甲醇库存", {"memory": {"goal": {"intent": "inventory_and_quotes_query", "description": "查乙醇库存并比较报价"}}}, "agent", ["inventory"]),
     ("不用查乙醇，只查甲醇库存", {}, "agent", ["inventory"]),
     ("只统计订单数量，不要金额", {}, "query", ["analytics"]),
     ("查乙醇和甲醇库存，不要报价", {}, "batch", ["inventory"]),
     ("查乙醇库存和甲醇报价", {}, "batch", ["inventory", "quotes"]),
-    ("分别统计已付款和待付款的金额", {}, "batch", ["analytics"]),
+    ("分别统计已付款和待付款的金额", {}, "query", ["analytics"]),
     ("分别统计采购申请和采购订单数量", {}, "batch", ["analytics"]),
     ("查它的库存", {"messages": [{"role": "user", "content": "乙醇和甲醇有什么区别"}]}, "clarify", []),
     ("换成上个月", {"memory": {"batch_tasks": [{"id": "t1", "kind": "analytics", "question": "统计订单数量"}, {"id": "t2", "kind": "analytics", "question": "统计付款金额"}]}}, "clarify", []),
@@ -105,6 +109,7 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
     仅校验路由类别和任务集合，不代表工具成功率、检索质量或生产收益。
     """
     settings = get_settings().model_copy(update={"llm_max_retries": 0, "llm_timeout_seconds": 45})
+    manifest = build_manifest("intent-routing-eval")
     semaphore = asyncio.Semaphore(3)
     async def run(case: tuple[str, dict, str, list[str]]) -> dict:
         """评测一条问题及会话上下文，记录期望、实际分类和耗时。"""
@@ -113,7 +118,7 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
         async with semaphore:
             start = perf_counter()
             try:
-                result = await understand(question, context, settings)
+                result = await understand(question, context, settings, manifest=manifest)
             except Exception as exc:
                 # 单条模型格式失败不能中断整批评测；保存失败类型但不保存异常原文或密钥。
                 return {"question": question, "context": context, "expected_route": expected_route,
@@ -140,6 +145,8 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
         results.extend({"round": round_index + 1, **row} for row in current)
     report = {"evaluated_at": datetime.now(timezone.utc).isoformat(), "model": settings.llm_model,
               "prompt_sha256": hashlib.sha256(ROUTING_PROMPT.encode()).hexdigest(),
+              "capability_digest": manifest.digest,
+              "capability_scope": "全量只读工具与统计数据集；真实账号仍按权限裁剪，仅用于让路由看到与生产一致的能力清单",
               "scope": "合成语义路由样本；不衡量工具执行、检索或生产业务效果", "repeats": repeats,
               "sample_count": len(CASES), "total": len(results),
               "passed": sum(row["passed"] for row in results), "cases": results}

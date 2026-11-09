@@ -39,10 +39,10 @@ def detect_kind(report: dict) -> str:
     if rows:
         if any("trial" in row for row in rows):
             return "agent_business"
-        if any("question" in row for row in rows):
-            return "intent_routing"
         if any("id" in row for row in rows):
             return "agent_tasks"
+        if any("question" in row for row in rows):
+            return "intent_routing"
     total, passed = report.get("total"), report.get("passed")
     if isinstance(total, int) and isinstance(passed, int):
         return "summary"

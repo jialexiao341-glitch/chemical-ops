@@ -1,0 +1,67 @@
+[
+  {
+    "id": "PR-f64af9aa",
+    "question": "先核对合成乙醇库存，再比较EVAL-R01报价，提供两类证据和适用范围。",
+    "expected_execution_mode": "agent",
+    "expected_tasks": [
+      "inventory",
+      "quotes"
+    ],
+    "forbidden_tasks": [],
+    "source_task_hash": "d7ba60abb53e",
+    "source_prompt_version": null,
+    "created_at": "2026-11-09",
+    "note": "组合查询（库存+报价）应在同一 Agent 目标连续执行，不得拆批或过度澄清"
+  },
+  {
+    "id": "PR-01167032",
+    "question": "查EVAL-P01库存和EVAL-R01报价；库存明细只返回1条，报价按完整结果比较。",
+    "expected_execution_mode": "agent",
+    "expected_tasks": [
+      "inventory",
+      "quotes"
+    ],
+    "forbidden_tasks": [],
+    "source_task_hash": "5a816ca5679a",
+    "source_prompt_version": null,
+    "created_at": "2026-11-09",
+    "note": "编码定位库存+询价号报价仍属同一产品目标，不得拆批"
+  },
+  {
+    "id": "PR-5900002e",
+    "question": "比较测试乙醇在 RFQ-OWN 的报价，把美元和人民币、升和千克统一排序",
+    "expected_execution_mode": "agent",
+    "expected_tasks": [
+      "quotes"
+    ],
+    "forbidden_tasks": [],
+    "source_task_hash": "374a880812e6",
+    "source_prompt_version": null,
+    "created_at": "2026-11-09",
+    "note": "跨币种/单位统一排序无换算依据时应直接比较并说明，不应转澄清"
+  },
+  {
+    "id": "PR-6f6f3bee",
+    "question": "只统计订单数量，不要金额",
+    "expected_execution_mode": "query",
+    "expected_tasks": [
+      "analytics"
+    ],
+    "forbidden_tasks": [],
+    "source_task_hash": "c1339e1cbf09",
+    "source_prompt_version": null,
+    "created_at": "2026-11-09",
+    "note": "缺省口径可由能力清单推导，不得输出 clarify"
+  },
+  {
+    "id": "PR-2ac3cdfd",
+    "question": "先查乙醇库存，然后创建采购申请",
+    "expected_execution_mode": "none",
+    "expected_tasks": [],
+    "forbidden_tasks": [],
+    "source_task_hash": "303d6151c365",
+    "source_prompt_version": null,
+    "created_at": "2026-11-09",
+    "note": "查询夹带写操作整体 unsupported，不得以 clarify 代替能力缺口"
+  }
+]
