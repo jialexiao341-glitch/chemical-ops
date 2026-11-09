@@ -1,0 +1,108 @@
+{
+  "dataset_version": "prod-regression-v1",
+  "model": "deepseek-flash",
+  "prompt_versions": {
+    "routing": "routing@1-3cbf7acf",
+    "planner": "planner@1-90970018"
+  },
+  "generated_at": "2026-11-09T16:01:07",
+  "cases": [
+    {
+      "id": "PR-f64af9aa",
+      "question": "先核对合成乙醇库存，再比较EVAL-R01报价，提供两类证据和适用范围。",
+      "passed": true,
+      "checks": {
+        "execution_mode": true,
+        "expected_tasks": true,
+        "forbidden_tasks": true,
+        "passed": true,
+        "actual_mode": "agent",
+        "actual_tasks": [
+          "inventory",
+          "quotes"
+        ]
+      },
+      "actual_mode": "agent",
+      "actual_tasks": [
+        "inventory",
+        "quotes"
+      ]
+    },
+    {
+      "id": "PR-01167032",
+      "question": "查EVAL-P01库存和EVAL-R01报价；库存明细只返回1条，报价按完整结果比较。",
+      "passed": true,
+      "checks": {
+        "execution_mode": true,
+        "expected_tasks": true,
+        "forbidden_tasks": true,
+        "passed": true,
+        "actual_mode": "agent",
+        "actual_tasks": [
+          "inventory",
+          "quotes"
+        ]
+      },
+      "actual_mode": "agent",
+      "actual_tasks": [
+        "inventory",
+        "quotes"
+      ]
+    },
+    {
+      "id": "PR-5900002e",
+      "question": "比较测试乙醇在 RFQ-OWN 的报价，把美元和人民币、升和千克统一排序",
+      "passed": true,
+      "checks": {
+        "execution_mode": true,
+        "expected_tasks": true,
+        "forbidden_tasks": true,
+        "passed": true,
+        "actual_mode": "agent",
+        "actual_tasks": [
+          "quotes"
+        ]
+      },
+      "actual_mode": "agent",
+      "actual_tasks": [
+        "quotes"
+      ]
+    },
+    {
+      "id": "PR-6f6f3bee",
+      "question": "只统计订单数量，不要金额",
+      "passed": true,
+      "checks": {
+        "execution_mode": true,
+        "expected_tasks": true,
+        "forbidden_tasks": true,
+        "passed": true,
+        "actual_mode": "query",
+        "actual_tasks": [
+          "analytics"
+        ]
+      },
+      "actual_mode": "query",
+      "actual_tasks": [
+        "analytics"
+      ]
+    },
+    {
+      "id": "PR-2ac3cdfd",
+      "question": "先查乙醇库存，然后创建采购申请",
+      "passed": true,
+      "checks": {
+        "execution_mode": true,
+        "expected_tasks": true,
+        "forbidden_tasks": true,
+        "passed": true,
+        "actual_mode": "none",
+        "actual_tasks": []
+      },
+      "actual_mode": "none",
+      "actual_tasks": []
+    }
+  ],
+  "total": 5,
+  "passed": 5
+}
