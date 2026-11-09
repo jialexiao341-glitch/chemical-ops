@@ -24,7 +24,6 @@
 - [角色职责与三级权限矩阵](角色职责与三级权限矩阵.md)
 - [用户注册与供应商身份管理](用户注册与供应商身份管理.md)
 - [采购 Agent 业务规则与用例](Agent采购MVP业务规则与验收用例.md)
-- [AI 问答图表设计](AI问答图表设计.md)
 - [模拟发票样本](invoice-samples/README.md)、[质量报告样本](quality-reports/README.md)
 
 ## 后续建设与复测
