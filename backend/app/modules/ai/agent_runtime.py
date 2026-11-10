@@ -45,7 +45,7 @@ from app.modules.ai.schema import (
     Understanding,
     Workflow,
 )
-from app.modules.ai import agent_tools as tools, service, routing
+from app.modules.ai import agent_tools as tools, service, routing, prompt_registry
 from app.modules.ai.tool_sql_timeout import (
     ToolExecutionTimeout,
     ToolTimeoutUnsupported,
@@ -192,8 +192,10 @@ def _record_model_response(state: RunState, response) -> None:
 
 
 def _record_prompt(state: RunState, name: str) -> None:
-    from app.modules.ai.prompt_registry import prompt_version
-    state.run_meta.setdefault("prompt_versions", {})[name] = prompt_version(name)
+    release = prompt_registry.release_from_meta(state.run_meta)
+    selected = release.version(name) if release is not None else None
+    state.run_meta.setdefault("prompt_versions", {})[name] = prompt_registry.prompt_version(
+        name, version=selected)
 
 
 class GraphState(TypedDict):
@@ -730,7 +732,7 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
         "llm_max_retries": 0})
     for attempt in range(2):
         reply = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
-            model_settings, response_format={"type": "json_object"}, system_prompt=PLANNER_PROMPT, interpret_only=True)
+            model_settings, response_format={"type": "json_object"}, system_prompt=prompt_registry.get_prompt("planner"), interpret_only=True)
         try:
             return ACTION.validate_json(reply.message.content)
         except ValidationError:
@@ -1067,6 +1069,8 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
         counts = state.run_meta["tool_calls"] = {}
     tool_quota = tools.ToolCallQuota(settings.agent_tool_call_quota_per_tool, counts)
     tool_quota_token = tools.bind_tool_call_quota(tool_quota)
+    release = prompt_registry.release_from_meta(state.run_meta)
+    release_token = prompt_registry.bind_release(release)
     try:
         from app.core.telemetry import trace_span
         with trace_span("agent.execute", {"chemicalops.agent.task_id": state.task_id}):
@@ -1076,6 +1080,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
         reset_task_token_budget(budget_token)
         reset_user(user_token)
         tools.reset_tool_call_quota(tool_quota_token)
+        prompt_registry.reset_release(release_token)
 
 
 async def _drive_impl(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
@@ -1360,6 +1365,19 @@ def prepare_task(db: Session, user: User, data: TaskCreate, *, commit: bool = Tr
         "context": {"estimated_tokens": None, "max_tokens": None, "truncated_sections": None},
         "retries": {"llm": None, "tool": None}, "error": {"code": None, "class": None, "recovery": None},
         "usage_totals": _empty_usage_totals()}
+    try:
+        release = prompt_registry.resolve_release(tools.get_user_role_codes(db, user.id))
+        # 映射可指向尚未登记或已下线的版本；宁可回退到当前版本，也不能让任务静默用错提示词。
+        for name, version in release.versions.items():
+            prompt_registry.get_prompt(name, version=version)
+    except (ValueError, KeyError) as exc:
+        release = prompt_registry.PromptRelease("default", {
+            "routing": prompt_registry.prompt_version("routing"),
+            "planner": prompt_registry.prompt_version("planner")})
+        state.run_meta["prompt_release"] = {**release.as_dict(),
+                                            "config_error": str(exc)[:200]}
+    else:
+        state.run_meta["prompt_release"] = release.as_dict()
     from app.modules.system.data_scope import department_scope_snapshot, warehouse_scope_snapshot
     state.department_scope = department_scope_snapshot(db, user)
     state.warehouse_scope = warehouse_scope_snapshot(db, user)

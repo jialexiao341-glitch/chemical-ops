@@ -204,6 +204,7 @@ async def understand(question: str, context: dict | None = None, settings=None, 
         return Understanding(purpose="capability")
     if normalized in {"你好", "您好", "hello", "hi"}:
         return Understanding(purpose="greeting")
+    from app.modules.ai import prompt_registry
     from app.modules.ai.schema import AIChatRequest, AIChatMessage
     runtime = (settings or get_settings()).model_copy(update={"llm_temperature": 0, "llm_max_tokens": 6000})
     manifest_payload = (manifest.model_dump(mode="json") if hasattr(manifest, "model_dump") else manifest)
@@ -224,7 +225,7 @@ async def understand(question: str, context: dict | None = None, settings=None, 
     for attempt in range(2):
         try:
             response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
-                                          runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=ROUTING_PROMPT + capability_context + repair, interpret_only=True)
+                                          runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=prompt_registry.get_prompt("routing") + capability_context + repair, interpret_only=True)
             return Understanding.model_validate_json(response.message.content, strict=True)
         except ValidationError as exc:
             # 只反馈结构错误位置，不把模型原始输出或用户数据写入日志。

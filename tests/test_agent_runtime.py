@@ -283,6 +283,21 @@ def start(db, question="查询测试乙醇库存"):
     return asyncio.run(runtime.create_task(db, USER, runtime.TaskCreate(question=question)))
 
 
+def test_prepare_task_records_prompt_release(task_db, monkeypatch):
+    """任务启动时解析发布映射并写入 run_meta，续答不重新解析。"""
+    from app.modules.ai import prompt_registry
+    release = prompt_registry.PromptRelease("role:BUYER", {
+        "routing": prompt_registry.prompt_version("routing"),
+        "planner": prompt_registry.prompt_version("planner"),
+    })
+    monkeypatch.setattr(runtime.prompt_registry, "resolve_release", lambda _roles: release)
+
+    state = runtime.prepare_task(task_db, USER,
+                                 runtime.TaskCreate(question="查询测试乙醇库存"))
+
+    assert state.run_meta["prompt_release"] == release.as_dict()
+
+
 def test_routing_technical_failure_stops_instead_of_waiting_for_user(task_db, monkeypatch):
     async def broken(*args, **kwargs):
         raise runtime.routing.IntentRecognitionError("模型接口不可用；本次尚未执行查询", "INTENT_SERVICE_ERROR")
