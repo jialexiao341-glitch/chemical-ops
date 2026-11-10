@@ -5,23 +5,26 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from sqlalchemy import select  # noqa: E402
-
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.ai.failure_report import render_markdown, summarize  # noqa: E402
-from app.modules.ai.model import AIAgentTask, AIFeedback  # noqa: E402
+from app.modules.ai import quality_report  # noqa: E402
+from app.modules.ai.failure_report import render_markdown  # noqa: E402
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=7, help="统计窗口天数")
     parser.add_argument("--limit", type=int, default=10, help="每个分组保留的条目数")
+    parser.add_argument("--prompt-version", type=str, default=None,
+                        help="只统计包含该 prompt 版本的任务（routing/planner 任一匹配）")
+    parser.add_argument("--error-class", type=str, default=None, help="只统计该错误类别")
+    parser.add_argument("--tool", type=str, default=None, help="只统计调用过该工具的任务")
+    parser.add_argument("--rating", choices=("UP", "DOWN"), default=None,
+                        help="只统计该评分反馈对应的任务")
     parser.add_argument("--output", type=Path,
                         default=ROOT / "docs/evaluation/agent-failure-report.json",
                         help="JSON 报告路径")
@@ -31,14 +34,12 @@ def main() -> int:
     if args.days < 1 or args.limit < 1:
         parser.error("days 和 limit 必须为正数")
 
-    since = datetime.now() - timedelta(days=args.days)
     with SessionLocal() as db:
-        tasks = list(db.scalars(select(AIAgentTask).where(
-            AIAgentTask.created_at >= since).order_by(AIAgentTask.created_at.desc())).all())
-        feedbacks = list(db.scalars(select(AIFeedback).where(
-            AIFeedback.created_at >= since)).all())
+        report = quality_report.summarize(
+            db, days=args.days, limit=args.limit,
+            prompt_version=args.prompt_version, error_class=args.error_class,
+            tool=args.tool, rating=args.rating)
 
-    report = summarize(tasks, feedbacks, days=args.days, limit=args.limit)
     output = args.output
     markdown = args.markdown or output.with_suffix(".md")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -47,7 +48,9 @@ def main() -> int:
     markdown.write_text(render_markdown(report) + "\n", encoding="utf-8")
     print(json.dumps({
         "tasks": report["tasks"], "failed_tasks": report["failed_tasks"],
-        "feedback": report["feedback"], "output": str(output), "markdown": str(markdown),
+        "feedback": report["feedback"], "down_rate": report["down_rate"],
+        "filters": report["filters"], "truncated": report["truncated"],
+        "output": str(output), "markdown": str(markdown),
     }, ensure_ascii=False))
     return 0
 

@@ -1329,6 +1329,101 @@ class AIFeedbackAdminSummary(AIFeedbackSummary):
     by_model: dict[str, int] = Field(default_factory=dict)
 
 
+class AIQualityBucket(ToolSchema):
+    key: str
+    count: int
+
+
+class AIQualitySummary(ToolSchema):
+    """管理员质量证据面；只返回计数、版本和任务编号，不含问题原文或用户身份。"""
+
+    generated_at: str
+    days: int
+    filters: dict = Field(default_factory=dict)
+    tasks: int
+    failed_tasks: int
+    feedback: int
+    up: int
+    down: int
+    down_rate: float | None = None
+    by_error_code: list[AIQualityBucket] = Field(default_factory=list)
+    by_error_class: list[AIQualityBucket] = Field(default_factory=list)
+    by_recovery: list[AIQualityBucket] = Field(default_factory=list)
+    by_tool: list[AIQualityBucket] = Field(default_factory=list)
+    by_prompt_version: list[AIQualityBucket] = Field(default_factory=list)
+    by_model: list[AIQualityBucket] = Field(default_factory=list)
+    by_feedback_reason: list[AIQualityBucket] = Field(default_factory=list)
+    failed_task_ids: list[str] = Field(default_factory=list)
+    samples: dict[str, list[str]] = Field(default_factory=dict)
+    available_prompt_versions: list[str] = Field(default_factory=list)
+    available_models: list[str] = Field(default_factory=list)
+    available_tools: list[str] = Field(default_factory=list)
+    available_error_classes: list[str] = Field(default_factory=list)
+    available_error_codes: list[str] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class RegressionTaskOption(ToolSchema):
+    key: str
+    label: str
+
+
+class RegressionCaseOptions(ToolSchema):
+    modes: list[str] = Field(default_factory=list)
+    tasks: list[RegressionTaskOption] = Field(default_factory=list)
+
+
+class RegressionCaseDraft(ToolSchema):
+    source_task_id: str
+    source_task_hash: str
+    source_prompt_version: str | None = None
+    question: str
+    expected_execution_mode: str
+    expected_tasks: list[str] = Field(default_factory=list)
+    forbidden_tasks: list[str] = Field(default_factory=list)
+
+
+class RegressionCaseCreate(ToolSchema):
+    """提交人必须显式确认已脱敏；服务端不保存未确认的任务原文。"""
+
+    source_task_id: str | None = Field(default=None, max_length=32)
+    question: str = Field(min_length=5, max_length=2000)
+    expected_execution_mode: Literal["agent", "batch", "query", "document", "none"]
+    expected_tasks: list[str] = Field(default_factory=list)
+    forbidden_tasks: list[str] = Field(default_factory=list)
+    note: str | None = Field(default=None, max_length=500)
+    redacted_confirmed: bool = False
+
+
+class RegressionCaseRead(ToolSchema):
+    id: int
+    case_key: str
+    source_task_id: str | None = None
+    source_task_hash: str | None = None
+    source_prompt_version: str | None = None
+    question: str
+    expected_execution_mode: str
+    expected_tasks: list[str] = Field(default_factory=list)
+    forbidden_tasks: list[str] = Field(default_factory=list)
+    note: str | None = None
+    status: Literal["DRAFT", "APPROVED", "ARCHIVED"]
+    created_by: int
+    reviewed_by: int | None = None
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
+class RegressionCasePage(ToolSchema):
+    items: list[RegressionCaseRead] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+
+
+class RegressionCaseReview(ToolSchema):
+    action: Literal["APPROVE", "ARCHIVE"]
+
+
 # 多意图批次
 
 class TaskResult(BaseModel):

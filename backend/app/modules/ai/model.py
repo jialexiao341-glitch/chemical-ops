@@ -180,6 +180,34 @@ class AIFeedback(Base):
     updated_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3))
 
 
+class AIRegressionCase(Base):
+    """已审阅的 Agent 回归用例；问题文本需人工脱敏，导出时不带任务原文和用户身份。"""
+
+    __tablename__ = "ai_regression_cases"
+    __table_args__ = (
+        UniqueConstraint("case_key", name="uq_ai_regression_case_key"),
+        Index("ix_ai_regression_case_status_created", "status", "created_at"),
+        Index("ix_ai_regression_case_creator_created", "created_by", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_task_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_task_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_prompt_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_execution_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    expected_tasks: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    forbidden_tasks: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="DRAFT")
+    created_by: Mapped[int] = mapped_column(ForeignKey("sys_users.id"), nullable=False)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("sys_users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
 class AIOperationSuggestion(Base):
     """每个运营异常对应一条共享建议，处理状态由有权限的人员共同维护。"""
 

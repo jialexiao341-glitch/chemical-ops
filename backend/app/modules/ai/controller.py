@@ -26,6 +26,13 @@ from app.modules.ai.schema import (
     AIFeedbackCreate,
     AIFeedbackRead,
     AIFeedbackSummary,
+    AIQualitySummary,
+    RegressionCaseCreate,
+    RegressionCaseDraft,
+    RegressionCaseOptions,
+    RegressionCasePage,
+    RegressionCaseRead,
+    RegressionCaseReview,
     AIConversationPage,
     AIConversationRead,
     AIConversationUpdate,
@@ -359,6 +366,67 @@ def agent_feedback_admin_summary(days: int = Query(default=7, ge=1, le=90),
         raise AuthorizationError("仅管理员可查看跨用户反馈聚合")
     from app.modules.ai import feedback as feedback_service
     return feedback_service.summary_all(db, days=days)
+
+
+@router.get("/regression-cases/options", response_model=RegressionCaseOptions,
+            summary="查询回归用例可选的执行模式与任务类别")
+def regression_case_options():
+    from app.modules.ai import regression_cases as regression_cases_service
+    return regression_cases_service.options()
+
+
+@router.get("/regression-cases/draft", response_model=RegressionCaseDraft,
+            summary="从本人 Agent 任务生成回归用例草稿")
+def regression_case_draft(task_id: str = Query(min_length=1, max_length=32),
+                          db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """只读取本人任务；返回的原文仍需提交人确认脱敏后才能保存。"""
+    from app.modules.ai import regression_cases as regression_cases_service
+    return regression_cases_service.draft_from_task(db, user, task_id)
+
+
+@router.post("/regression-cases", response_model=RegressionCaseRead,
+             summary="提交回归用例草稿")
+def regression_case_create(data: RegressionCaseCreate, db: Session = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    from app.modules.ai import regression_cases as regression_cases_service
+    return regression_cases_service.create_case(db, user, data)
+
+
+@router.get("/regression-cases", response_model=RegressionCasePage,
+            summary="分页查询回归用例草稿与已批准用例")
+def regression_case_list(status: str | None = Query(default=None, pattern="^(DRAFT|APPROVED|ARCHIVED)$"),
+                         page: int = Query(default=1, ge=1),
+                         page_size: int = Query(default=20, ge=1, le=100),
+                         db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.modules.ai import regression_cases as regression_cases_service
+    return regression_cases_service.list_cases(db, user, status=status, page=page, page_size=page_size)
+
+
+@router.post("/regression-cases/{case_id}/review", response_model=RegressionCaseRead,
+             summary="管理员批准或归档回归用例")
+def regression_case_review(case_id: int, data: RegressionCaseReview,
+                           db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.modules.ai import regression_cases as regression_cases_service
+    return regression_cases_service.review_case(db, user, case_id, data.action)
+
+
+@router.get("/quality/summary", response_model=AIQualitySummary,
+            summary="管理员查看 Agent 质量、失败与反馈证据")
+def agent_quality_summary(days: int = Query(default=7, ge=1, le=90),
+                          prompt_version: str | None = Query(default=None, max_length=100),
+                          error_class: str | None = Query(default=None, max_length=32),
+                          tool: str | None = Query(default=None, max_length=100),
+                          rating: str | None = Query(default=None, pattern="^(UP|DOWN)$"),
+                          limit: int = Query(default=10, ge=1, le=50),
+                          db: Session = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    """只返回计数、版本、错误分类和任务编号；不返回问题原文、反馈正文或用户身份。"""
+    if "SYS_ADMIN" not in set(get_user_role_codes(db, user.id)):
+        raise AuthorizationError("仅管理员可查看 Agent 质量聚合")
+    from app.modules.ai import quality_report
+    return quality_report.summarize(
+        db, days=days, limit=limit, prompt_version=prompt_version,
+        error_class=error_class, tool=tool, rating=rating)
 
 
 @router.get("/agent/cost-summary", summary="管理员查看 Agent token 与费用聚合")

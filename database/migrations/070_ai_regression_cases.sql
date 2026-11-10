@@ -1,0 +1,27 @@
+-- Agent 回归用例审核记录：问题文本由提交人显式脱敏，导出脚本不带用户身份和任务原文。
+CREATE TABLE IF NOT EXISTS ai_regression_cases (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    case_key VARCHAR(64) NOT NULL,
+    source_task_id VARCHAR(32) NULL,
+    source_task_hash VARCHAR(64) NULL,
+    source_prompt_version VARCHAR(100) NULL,
+    question TEXT NOT NULL,
+    expected_execution_mode VARCHAR(16) NOT NULL,
+    expected_tasks JSON NOT NULL,
+    forbidden_tasks JSON NOT NULL,
+    note VARCHAR(500) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'DRAFT',
+    created_by BIGINT UNSIGNED NOT NULL,
+    reviewed_by BIGINT UNSIGNED NULL,
+    reviewed_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ai_regression_case_key (case_key),
+    KEY ix_ai_regression_case_status_created (status, created_at),
+    KEY ix_ai_regression_case_creator_created (created_by, created_at),
+    CONSTRAINT fk_ai_regression_case_creator FOREIGN KEY (created_by) REFERENCES sys_users (id),
+    CONSTRAINT fk_ai_regression_case_reviewer FOREIGN KEY (reviewed_by) REFERENCES sys_users (id),
+    CONSTRAINT ck_ai_regression_case_status CHECK (status IN ('DRAFT', 'APPROVED', 'ARCHIVED')),
+    CONSTRAINT ck_ai_regression_case_mode CHECK (expected_execution_mode IN ('agent', 'batch', 'query', 'document', 'none'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Agent 回归用例审核记录';

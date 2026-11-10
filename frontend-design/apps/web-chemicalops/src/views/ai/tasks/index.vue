@@ -20,6 +20,7 @@ import {
 import AgentChatTask from '../workspace/agent-chat-task.vue';
 import { createAgentPoller } from '../workspace/agent-polling';
 import { acceptTask } from '../workspace/task-view';
+import RegressionCaseModal from './RegressionCaseModal.vue';
 import { retryQuestion, taskActionFeedback, taskActions } from './task-actions';
 
 defineOptions({ name: 'AiTaskHistory' });
@@ -32,6 +33,7 @@ const scope = ref<TaskScope>('inbox');
 const status = ref<AgentApi.Task['status']>();
 const selectedTask = ref<AgentApi.Task>();
 const detailOpen = ref(false);
+const regressionOpen = ref(false);
 const selectedLoading = ref(false);
 const busyTaskId = ref<string>();
 const followUpQuestion = ref('');
@@ -297,8 +299,12 @@ async function onActionClick({ code, row }: { code: string; row: AgentApi.Task }
         <div v-else-if="selectedTask.status === 'FAILED' && retryQuestion(selectedTask)" class="mt-4 flex justify-end border-t border-border pt-4">
           <Button :loading="selectedBusy" :disabled="selectedBusy" @click="retryTask(selectedTask)">重新查询</Button>
         </div>
+        <div class="mt-4 flex justify-end border-t border-border pt-4">
+          <Button :disabled="selectedTask.status === 'RUNNING'" @click="regressionOpen = true">转为回归用例</Button>
+        </div>
       </template>
     </Modal>
+    <RegressionCaseModal v-model:open="regressionOpen" :task="selectedTask" />
     <div class="flex h-full flex-col gap-3">
       <section class="rounded bg-card p-4">
         <div class="flex w-full flex-wrap items-center justify-between gap-3">

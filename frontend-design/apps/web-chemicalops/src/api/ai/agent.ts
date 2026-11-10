@@ -162,6 +162,81 @@ export namespace AgentApi {
     users: number;
     by_model: Record<string, number>;
   }
+  export interface QualityBucket {
+    key: string;
+    count: number;
+  }
+  export interface QualitySummary {
+    generated_at: string;
+    days: number;
+    filters: {
+      prompt_version?: null | string;
+      error_class?: null | string;
+      tool?: null | string;
+      rating?: null | string;
+    };
+    tasks: number;
+    failed_tasks: number;
+    feedback: number;
+    up: number;
+    down: number;
+    down_rate: null | number;
+    by_error_code: QualityBucket[];
+    by_error_class: QualityBucket[];
+    by_recovery: QualityBucket[];
+    by_tool: QualityBucket[];
+    by_prompt_version: QualityBucket[];
+    by_model: QualityBucket[];
+    by_feedback_reason: QualityBucket[];
+    failed_task_ids: string[];
+    samples: Record<string, string[]>;
+    available_prompt_versions: string[];
+    available_models: string[];
+    available_tools: string[];
+    available_error_classes: string[];
+    available_error_codes: string[];
+    truncated: boolean;
+  }
+  export interface RegressionTaskOption {
+    key: string;
+    label: string;
+  }
+  export interface RegressionCaseOptions {
+    modes: string[];
+    tasks: RegressionTaskOption[];
+  }
+  export interface RegressionCaseDraft {
+    source_task_id: string;
+    source_task_hash: string;
+    source_prompt_version: null | string;
+    question: string;
+    expected_execution_mode: string;
+    expected_tasks: string[];
+    forbidden_tasks: string[];
+  }
+  export interface RegressionCase {
+    id: number;
+    case_key: string;
+    source_task_id: null | string;
+    source_task_hash: null | string;
+    source_prompt_version: null | string;
+    question: string;
+    expected_execution_mode: string;
+    expected_tasks: string[];
+    forbidden_tasks: string[];
+    note: null | string;
+    status: 'APPROVED' | 'ARCHIVED' | 'DRAFT';
+    created_by: number;
+    reviewed_by: null | number;
+    created_at: string;
+    reviewed_at: null | string;
+  }
+  export interface RegressionCasePage {
+    items: RegressionCase[];
+    total: number;
+    page: number;
+    page_size: number;
+  }
   export interface TaskPage {
     items: Task[];
     total: number;
@@ -276,4 +351,47 @@ export function getAgentFeedbackAdminSummaryApi(days = 7) {
 }
 export function getAgentCostSummaryApi(days = 30) {
   return requestClient.get<AgentApi.CostSummary>('/ai/agent/cost-summary', { params: { days } });
+}
+export function getAgentQualitySummaryApi(params: {
+  days?: number;
+  error_class?: string;
+  limit?: number;
+  prompt_version?: string;
+  rating?: 'DOWN' | 'UP';
+  tool?: string;
+}) {
+  return requestClient.get<AgentApi.QualitySummary>('/ai/quality/summary', { params });
+}
+
+export function getRegressionCaseOptionsApi() {
+  return requestClient.get<AgentApi.RegressionCaseOptions>('/ai/regression-cases/options');
+}
+export function getRegressionCaseDraftApi(taskId: string) {
+  return requestClient.get<AgentApi.RegressionCaseDraft>('/ai/regression-cases/draft', {
+    params: { task_id: taskId },
+  });
+}
+export function createRegressionCaseApi(data: {
+  expected_execution_mode: string;
+  expected_tasks: string[];
+  forbidden_tasks: string[];
+  note?: null | string;
+  question: string;
+  redacted_confirmed: boolean;
+  source_task_id?: null | string;
+}) {
+  return requestClient.post<AgentApi.RegressionCase>('/ai/regression-cases', data);
+}
+export function getRegressionCasePageApi(params: {
+  page?: number;
+  page_size?: number;
+  status?: string;
+}) {
+  return requestClient.get<AgentApi.RegressionCasePage>('/ai/regression-cases', { params });
+}
+export function reviewRegressionCaseApi(caseId: number, action: 'APPROVE' | 'ARCHIVE') {
+  return requestClient.post<AgentApi.RegressionCase>(
+    `/ai/regression-cases/${caseId}/review`,
+    { action },
+  );
 }
