@@ -1,0 +1,72 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "赛璐珞",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 166,
+    "heading": "表1－164 赛璐珞"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：赛璐珞",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：有色及无色透明的片、板、棒状物，性软，富有弹性的热塑性塑料。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：溶于乙醇、丙酮和各种酯类。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：1.25",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：180",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：易燃固体      UN编号： 2000        包装分类：Ⅲ      \n包装方法：坚固木箱，内衬二层坚固的厚纸，箱外捆二道铁腰，每箱净重不超过150kg。\n储运条件：储存期不宜超过一年，应储存于阴凉、干燥、通风的仓间内。库温不宜超过30℃。远离火源及热源。与氧化剂隔离储运。本品进仓时如淋雨、受潮，要开箱凉干，逐片检查。如超过一年时要开箱检查，去除酶点，并通风散热，除去变质部分，防止变质后自燃点降低引起自燃。同时，变质的硝化纤维要及时处理，不得使用产生火花的工具。与酸性物品、氧化剂、自燃物品及爆炸品隔离储运。搬运时轻装轻卸，防止包装破损。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "166-赛璐珞.json"
+}

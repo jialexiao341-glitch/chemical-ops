@@ -1,0 +1,102 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "漂白粉",
+  "cas_candidate": "7778-54-3",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 36,
+    "heading": "表1－037 漂白粉"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：次氯酸钙；漂白粉",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：calcium hypochlorite；Bleaching powder",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：Ca（ClO）2",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：142.99",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：7778－54－3",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：白色粉末，有极强的氯臭。其溶液为黄绿色半透明液体。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：溶于水。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：100（分解）",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：2.35",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（空气＝1）：6.9",
+      "source_row": 7,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：不燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：11    UN编号：1748   包装分类：Ⅰ    \n包装方法：塑料袋、多层牛皮纸袋外全开口钢桶；螺纹口玻璃瓶、铁盖压口玻璃瓶、塑料瓶或金属桶（罐）外木板箱。\n储运条件：储存于阴凉、通风仓间内。远离火种、热源。防止阳光直射。保持容器密封。应与易燃或可燃物、酸类等分开存放。切忌混储混运。不宜大量或久存。搬运时要轻装轻卸，防止包装及容器损坏。禁止震动、撞击和摩擦。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "036-漂白粉.json"
+}

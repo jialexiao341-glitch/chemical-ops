@@ -1,0 +1,144 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "液氨",
+  "cas_candidate": "7664-41-7",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 22,
+    "heading": "表1－023 液氨"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：氨；氨气（液氨）",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：ammonia",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：NH3",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：17.03",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：7664－41－7",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：无色有刺激性恶臭的气体。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：易溶于水、乙醇、乙醚。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：－77.7",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）： －33.5",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：0.82（－79℃）",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "临界温度（℃）：132.5",
+      "source_row": 7,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "临界压力（MPa）：11.40",
+      "source_row": 7,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（空气＝1）：0.6",
+      "source_row": 7,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（KPa）：506.62（4.7℃）",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸下限（％）：15.7",
+      "source_row": 11,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸上限（％）：27.4",
+      "source_row": 12,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：651",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：6，7     UN编号：1005     包装分类：Ⅱ    包装方法：钢质气瓶。\n储运条件：易燃、腐蚀性压缩气体。储存于阴凉、干燥、通风良好的仓间。远离火种、热源。防止阳光直射。应与卤素（氟、氯、溴）、酸类等分开存放。罐储时要有防火防爆技术措施。配备相应品种和数量的消防器材。禁止使用易产生火花的机械设备和工具。验收时要注意品名，注意验瓶日期，先进仓的先发用。槽车运送时要灌装适量，不可超压超量运输。搬运时要轻装轻卸，防止钢瓶和附件损坏。运输按规定路线行驶，中途不得停留。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "022-液氨.json"
+}

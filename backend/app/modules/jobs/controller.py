@@ -8,13 +8,149 @@ from app.core.auth import require_permission
 from app.core.db import get_db
 from app.core.rate_limit import limit_document
 from app.modules.jobs import service
-from app.modules.jobs.schema import SchedulerJobRunRead, TechnicalDocumentPipelineCreate, TechnicalDocumentPreviewRead, TechnicalDocumentRead, TechnicalDocumentSourceRead
+from app.modules.jobs.schema import SchedulerJobRunRead, TechnicalDocumentPipelineCreate, TechnicalDocumentPreviewRead, TechnicalDocumentRead, TechnicalDocumentSourceRead, WikiVersionCreate, WikiSourceUpdate
 from app.modules.jobs import technical_documents
 from app.modules.chemicals.model import Chemical
 from app.modules.system.model import User
 
 
 router = APIRouter(prefix="/jobs", tags=["后台任务"])
+
+
+@router.get('/chemical-wiki', summary='查询化学品百科目录')
+def chemical_wiki_list(db: Session = Depends(get_db), user: User = Depends(require_permission('master.chemicals.read'))):
+    technical_documents.require_technical_or_admin(db, user)
+    from app.modules.jobs import wiki_release
+    try:
+        return wiki_release.list_entries(wiki_release.DATA_ROOT)
+    except (FileNotFoundError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=503, detail='百科资料不可用或配对异常') from exc
+
+
+@router.get('/chemical-wiki/{source_id}', summary='查看化学品百科及原文')
+def chemical_wiki_detail(source_id: int, db: Session = Depends(get_db),
+                         user: User = Depends(require_permission('master.chemicals.read'))):
+    technical_documents.require_technical_or_admin(db, user)
+    from app.modules.jobs import wiki_release, wiki_versions, wiki_source
+    try:
+        baseline = wiki_release.get_entry(wiki_release.DATA_ROOT, source_id)
+        versions = wiki_versions.history(db, source_id)
+        current = versions[0] if versions else None
+        content = current.content if current else baseline
+        return {**content, 'version': current.version if current else 0,
+                'note': current.note if current else '',
+                'source_status': wiki_source.current_source_status(db, content, wiki_release.DATA_ROOT)}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='百科资料不存在') from exc
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=503, detail='百科资料配对异常') from exc
+
+
+@router.get('/chemical-wiki/{source_id}/versions', summary='查询化学品百科维护历史')
+def chemical_wiki_version_history(source_id: int, db: Session = Depends(get_db),
+                                  user: User = Depends(require_permission('master.chemicals.read'))):
+    technical_documents.require_technical_or_admin(db, user)
+    from app.modules.jobs import wiki_release, wiki_versions
+    try:
+        wiki_release.get_entry(wiki_release.DATA_ROOT, source_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='百科资料不存在') from exc
+    versions = wiki_versions.history(db, source_id)
+    return [{'version': item.version, 'note': item.note, 'actor_id': item.actor_id,
+             'created_at': item.created_at} for item in versions if item.version > 0]
+
+
+@router.get('/chemical-wiki/{source_id}/versions/{version}', summary='查看百科历史版本')
+def chemical_wiki_version_detail(source_id: int, version: int, db: Session = Depends(get_db),
+                                 user: User = Depends(require_permission('master.chemicals.read'))):
+    technical_documents.require_technical_or_admin(db, user)
+    from app.modules.jobs import wiki_release, wiki_versions, wiki_source
+    try:
+        baseline = wiki_release.get_entry(wiki_release.DATA_ROOT, source_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='百科资料不存在') from exc
+    item = next((item for item in wiki_versions.history(db, source_id) if item.version == version), None)
+    if version != 0 and item is None:
+        raise HTTPException(status_code=404, detail='百科版本不存在')
+    content = item.content if item else baseline
+    return {**content, 'version': version, 'note': item.note if item else '',
+            'source_status': wiki_source.current_source_status(db, content, wiki_release.DATA_ROOT)}
+
+
+@router.get('/chemical-wiki/{source_id}/sources', summary='查询可用于更新的安全资料')
+def chemical_wiki_sources(source_id: int, db: Session = Depends(get_db),
+                          user: User = Depends(require_permission('master.chemicals.write'))):
+    technical_documents.require_technical_or_admin(db, user)
+    from app.modules.jobs import wiki_release
+    from app.modules.doc_kb.model import AiDocument
+    try:
+        baseline = wiki_release.get_entry(wiki_release.DATA_ROOT, source_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='百科资料不存在') from exc
+    msds = baseline['msds']
+    if msds.get('cas_valid_checksum') is not True:
+        return []
+    rows = db.scalars(select(AiDocument).where(AiDocument.cas_no == msds['cas_candidate'],
+                      AiDocument.doc_type == 'msds', AiDocument.parse_status == 'PARSED').order_by(AiDocument.id)).all()
+    return [{'id': row.id, 'title': row.title, 'cas_no': row.cas_no, 'object_key': row.object_key,
+             'source_url': row.source_url, 'updated_at': row.updated_at} for row in rows]
+
+
+@router.post('/chemical-wiki/{source_id}/source', summary='使用已入库的安全资料更新百科来源')
+def chemical_wiki_update_source(source_id: int, data: WikiSourceUpdate, db: Session = Depends(get_db),
+                                user: User = Depends(require_permission('master.chemicals.write'))):
+    technical_documents.require_technical_or_admin(db, user)
+    from app.modules.jobs import wiki_release, wiki_versions, wiki_source
+    try:
+        baseline = wiki_release.get_entry(wiki_release.DATA_ROOT, source_id)
+        versions = wiki_versions.history(db, source_id)
+        current = versions[0] if versions else None
+        document, sections = wiki_source.load_source(db, data.document_id, lock=True)
+        if document is None:
+            raise HTTPException(status_code=404, detail='原始资料不存在')
+        pair = wiki_source.build_source_pair(current.content if current else baseline, document, sections)
+        result = wiki_versions.create_version(db, source_id, data.expected_version, pair,
+                                               current.note if current else '', actor_id=user.id, baseline=baseline)
+        db.commit()
+        return {'version': result.version}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='百科资料不存在') from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post('/chemical-wiki/{source_id}/versions', summary='保存化学品百科维护说明')
+def chemical_wiki_add_version(source_id: int, data: WikiVersionCreate, db: Session = Depends(get_db),
+                              user: User = Depends(require_permission('master.chemicals.write'))):
+    technical_documents.require_technical_or_admin(db, user)
+    from app.modules.jobs import wiki_release, wiki_versions
+    try:
+        baseline = wiki_release.get_entry(wiki_release.DATA_ROOT, source_id)
+        versions = wiki_versions.history(db, source_id)
+        pair = versions[0].content if versions else baseline
+        if data.items is not None:
+            from copy import deepcopy
+            pair = deepcopy(pair)
+            rows = {row['row']: row['cells'] for row in pair['msds']['rows']}
+            sections = set(pair['technical']['sections'])
+            items = []
+            seen = set()
+            for item in data.items:
+                key = (item.source_row, item.source_cell)
+                cells = rows.get(item.source_row, [])
+                index = item.source_cell - 1
+                if item.section not in sections or key in seen or index >= len(cells) or not cells[index].strip():
+                    raise ValueError('资料字段或来源位置无效')
+                seen.add(key)
+                items.append({'section': item.section, 'text': cells[index], 'source_row': item.source_row, 'source_cell': item.source_cell})
+            pair['technical']['items'] = items
+        version = wiki_versions.create_version(db, source_id, data.expected_version, pair, data.note, actor_id=user.id, baseline=baseline)
+        db.commit()
+        return {'version': version.version, 'note': version.note}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='百科资料不存在') from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/technical-documents", response_model=list[TechnicalDocumentSourceRead], summary="查询 TDS/MSDS 原始资料")

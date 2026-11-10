@@ -1,0 +1,96 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "硝酸钠",
+  "cas_candidate": "7631-99-4",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 130,
+    "heading": "表1－130 硝酸钠"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名： 硝酸钠",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：sodium nitrate",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：NaNO3",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：85.01",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：7631－99－4",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：无色透明或白微带黄色的菱形结晶，味微苦。易潮解。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：易溶于水、液氨，微溶于乙醇、甘油。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：306.8",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：2.26",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：不燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：11       UN编号： 1498    包装分类：Ⅰ       \n包装方法：双层塑料袋、多层牛皮纸袋外钙塑箱；多层塑料袋、多层牛皮纸袋外瓦楞纸箱；塑料袋外塑料编织袋。\n储运条件：储存于阴凉、干燥、通风良好的仓间内。远离火种、热源。应与易燃或可燃物、还原剂、硫、磷等分开存放。切忌混储混运。搬运时要轻装轻卸，防止包装及容器损坏。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "130-硝酸钠.json"
+}

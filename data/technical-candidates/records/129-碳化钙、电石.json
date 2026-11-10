@@ -1,0 +1,102 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "碳化钙、电石",
+  "cas_candidate": "75-20-7",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 129,
+    "heading": "表1－129 碳化钙、电石"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：碳化钙、电石",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：calcium carbide；acetylenogen",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：CaC2",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：64.10",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：75－20－7",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：无色晶体，工业品为灰黑色块状物，断面为紫色或灰色。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：2300",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：2.22",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "最小点火能（mJ）：65",
+      "source_row": 8,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（UPa）：0.13（487℃）",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：遇湿易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：10      UN编号：1402       包装分类：Ⅱ\n包装方法：塑料袋、多层牛皮纸袋外全开口钢桶。\n储运条件：储存在干燥、清洁的仓间内。远离火种、热源。包装必须密封，切勿受潮。室内地面要高于室外自燃地面，以防雨水侵入。应与卤素（氟、氯、溴）、潮湿物品、易燃、可燃物等分开存放。配备相应的灭火器材。要充分通风，并保持干燥。搬运时要轻装轻卸，防止包装及容器损坏。禁止撞击和振荡。雨天不宜运输。",
+      "source_row": 20,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "129-碳化钙、电石.json"
+}

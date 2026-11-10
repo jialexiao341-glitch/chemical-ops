@@ -1,0 +1,108 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "甲胺磷",
+  "cas_candidate": "10265-92-6",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 21,
+    "heading": "表1－022 甲胺磷"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：甲胺磷；多灭灵",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：Methamidophos；O,S-dimethylphosphoramidothioate",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：C2H8ONPS",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：141.14",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：10265－92－6",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状： 纯品为白色针状晶体，工业品为无色粘稠状液体，冷却或放置后能析出针状结晶。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：微溶于水，溶于醇。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：43（纯）\n18～25（工业品）",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（KPa）：0.00004（30℃）",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：可燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸下限（％）：无资料",
+      "source_row": 11,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸上限（％）：无资料",
+      "source_row": 12,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：13      UN编号：2783  包装分类：Ⅰ       包装方法：螺纹口玻璃瓶、铁盖压口玻璃瓶、塑料瓶或金属桶（罐）外木板箱。\n储运条件：储存于阴凉、通风仓间内。远离火种、热源。保持容器密封。防潮、防晒。寒冷季节要注意保持库温在结晶点以上，防止冻裂容器及变质。不能与粮食、食物、种子、饲料、各种日用品混装、混运。专人保管。搬运时要轻装轻卸，防止包装及容器损坏。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "021-甲胺磷.json"
+}

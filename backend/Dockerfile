@@ -7,6 +7,7 @@ RUN python -m pip install --no-cache-dir --require-hashes -r backend/requirement
 COPY backend/app /app/backend/app
 COPY database /app/database
 COPY database /app/backend/database
+COPY data/chemical-wiki /app/data/chemical-wiki
 COPY scripts /app/scripts
 COPY deploy/clamd.conf /etc/clamav/clamd.remote.conf
 RUN useradd --create-home --uid 10001 chemicalops && mkdir -p /app/storage /app/backups/mysql && chown -R chemicalops:chemicalops /app/storage /app/backups

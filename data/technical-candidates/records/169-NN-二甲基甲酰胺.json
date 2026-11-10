@@ -1,0 +1,162 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "NN-二甲基甲酰胺",
+  "cas_candidate": "68-12-2",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 169,
+    "heading": "表1.6.7 NN-二甲基甲酰胺"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：NN-二甲基甲酰胺; 甲酰二甲胺",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名： N,N-dimethylformamide;DMF",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：C3H7NO",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：73.10",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：68－12－2",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：无色液体，有微弱的特殊臭味。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：于水混溶、可混溶于多数有机溶剂。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：－61",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）：152.8",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）： 0.94",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "临界温度（℃）：374",
+      "source_row": 7,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "临界压力（MPa）：4.48",
+      "source_row": 7,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（空气＝1）：2.51",
+      "source_row": 7,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧热（KJ/mol）：1915",
+      "source_row": 8,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "最小点火能（mJ）：无资料",
+      "source_row": 8,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（KPa）：3.34（60℃）",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "闪点（℃）：58",
+      "source_row": 10,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸下限（％）：2.2",
+      "source_row": 11,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸上限（％）：15.2",
+      "source_row": 12,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：445",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：7         UN编号：2265        包装分类：Ⅲ\n包装方法：小开口钢桶,螺纹口玻璃瓶,铁盖压口玻璃瓶、塑料瓶或金属桶外木板箱,安瓿瓶外木板箱。\n储运条件：储存于阴凉、通风的仓间内。远离火种、热源。防止阳光直射。保持容器密封。不可混储混运。仓间内的照明、通风等设施应采用防爆型,开关设在仓外,配备相应品种数量的消防器材。罐储时要有防火防爆技术措施,禁止使用易产生火花的机械设备和工具。充装时应控制流速，防止静电积聚。搬运时轻装轻卸，防止包装及容器损坏。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "169-NN-二甲基甲酰胺.json"
+}

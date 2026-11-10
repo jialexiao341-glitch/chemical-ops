@@ -1,0 +1,66 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "丙烯酸磁漆",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 91,
+    "heading": "表1－092 丙烯酸磁漆"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：丙烯酸磁漆",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：acrylic enamels",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：酯、醇及苯等有机溶剂混合而成。酯类溶剂占50％以上。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "闪点（℃）：≤23",
+      "source_row": 10,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：易燃液体      UN编号：1263      包装分类：Ⅲ \n包装方法：铁听或铁桶。\n储运条件：储存在阴凉、通风的仓间内。远离火种、热源。防止阳光直射；包装应密封。与氧化剂（包括硝酸、过氧化氢）隔离储运，搬运时轻装轻卸，防止包装破损。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "091-丙烯酸磁漆.json"
+}

@@ -1,0 +1,90 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "异噻唑啉酮",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 107,
+    "heading": "表1－108 异噻唑啉酮"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：异噻唑啉酮",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：5-chloro-2-methyl-4-isothiazolin-3-one1",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：C4H4NSOCl和C4H4NSO",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：150.0和115.0",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：浅黄色或澄色透明液体。存品为白色固体，略有气味。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：溶于乙醇、乙二醇等低级醇，浅琥珀色，气味温和。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：48～50",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：1.02",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（kPa）：0.16(20℃)",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：     UN编号：      包装分类：\n包装方法：采用塑料桶包装。\n储运条件：储存于阴凉、通风的仓库内，不可与还原性金属接触，避免导致产品分解。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "107-异噻唑啉酮.json"
+}

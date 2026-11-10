@@ -42,6 +42,16 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        name: 'ChemicalWiki',
+        path: 'chemical-wiki',
+        component: () => import('#/views/master/chemical-wiki/index.vue'),
+        meta: {
+          authority: ['TECHNICAL', 'SYS_ADMIN'],
+          icon: 'lucide:book-open',
+          title: '化学品知识库',
+        },
+      },
+      {
         name: 'ProductList',
         path: 'products',
         component: () => import('#/views/master/products/index.vue'),

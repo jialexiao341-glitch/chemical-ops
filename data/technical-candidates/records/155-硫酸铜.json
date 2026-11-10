@@ -1,0 +1,78 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "硫酸铜",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 155,
+    "heading": "表1－155 硫酸铜"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：硫酸铜",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：Copper sulphate",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：CuSO4·5H2O",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：249.7",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：蓝色透明结晶、颗粒或淡蓝色粉末。无水物为灰白色或绿白色结晶或粉末。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：易溶于水，水溶液呈酸性。溶于甲醇和甘油。微溶于乙醇。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：2.286（15.6℃）",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：毒害品                   包装分类：Ⅲ    \n包装方法：编织袋、木箱内衬塑料袋或玻璃瓶外木箱内衬垫料。\n储运条件：储运于干燥、通风的仓间内。防止受潮、风化和包装受损。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "155-硫酸铜.json"
+}

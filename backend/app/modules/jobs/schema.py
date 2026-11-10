@@ -34,6 +34,26 @@ class TechnicalDocumentPipelineCreate(BaseModel):
         return value
 
 
+class WikiItemReference(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    section: str = Field(min_length=1, max_length=50)
+    source_row: int = Field(ge=1)
+    source_cell: int = Field(ge=2)
+
+
+class WikiVersionCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_version: int = Field(ge=0)
+    note: str = Field(max_length=5000)
+    items: list[WikiItemReference] | None = Field(default=None, max_length=500)
+
+
+class WikiSourceUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_version: int = Field(ge=0)
+    document_id: int = Field(gt=0)
+
+
 class TechnicalDocumentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

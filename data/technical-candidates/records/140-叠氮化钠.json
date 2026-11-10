@@ -1,0 +1,84 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "叠氮化钠",
+  "cas_candidate": "7487-94-7",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 140,
+    "heading": "表1－140 叠氮化钠"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：叠氮化钠；三氮化钠",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：smide，sodium azide",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：NaN3",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：271.50",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：7487－94－7",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：无色至白色六面晶系结晶。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：溶于水。溶于液氨。不易溶于有机溶剂。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）： 1.846",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：毒害品       UN编号：1687       包装分类：Ⅱ      \n包装方法：用内衬塑料袋的金属盒或内放玻璃瓶的塑料盒盛装。严封后再装入坚固严密的木箱，箱内空隙衬垫料。每盒净重100g，每箱净重不超过0.5kg。  \n储运条件：防止容器破损。储存于阴凉、通风的地方。远离容易起火的地方。与酸类、重金属及其盐类，特别是铅、铜、银及其其他化合物隔离储运。较大批量须存放在炸药库内。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "140-叠氮化钠.json"
+}

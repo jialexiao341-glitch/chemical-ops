@@ -1,0 +1,60 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "蓄电池(注有酸液)",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 161,
+    "heading": "表1－159蓄电池（注有酸液）"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：蓄电池",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：batteries",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：在每个玻璃、硬橡胶或塑料容器内，浸在电解溶液里的串联在一起的金属板。通常含酸量在25％左右的液体。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：1.1―1.2",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：腐蚀品      UN编号：2794       包装分类：Ⅲ      \n包装方法：装入每个有内衬的纤维板箱、木箱或木条板箱。  \n储运条件：储存于阴凉、通风的仓间内。与易燃物、可燃物、氰化物、氟化物和碱性物品隔离储运。防止雨淋、受潮。平时把接头绝缘，以防短路。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "161-蓄电池(注有酸液).json"
+}

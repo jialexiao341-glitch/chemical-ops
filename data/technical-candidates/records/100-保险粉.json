@@ -1,0 +1,96 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "保险粉",
+  "cas_candidate": "7775-14-6",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 100,
+    "heading": "表1－101 保险粉"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：连二亚硫酸钠；保险粉",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：sodium hyposulfite ; sodium dithionite",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：Na2S2O4",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：174.11",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：7775－14－6",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：白色砂状结晶或淡黄色粉末。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：不溶于乙醇。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：＞300（分解）",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：250",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：9      UN编号：1384      包装分类：Ⅰ\n包装方法：塑料袋、多层牛皮纸袋外全开口钢桶；螺纹口玻璃瓶、铁盖压口玻璃瓶、塑料瓶或金属桶（罐）外木板箱；薄钢板桶、镀锡薄钢板桶（罐）外花格箱。\n储运条件：储存于阴凉干燥、通风良好的仓间。相对湿度保持在75％以下。防止阳光直射。包装必须密封，切勿受潮。应与氧化剂、酸类分开存放。平时需勤检查，查仓温，查混储。搬运时要轻装轻卸，防止包装及容器损坏。雨天不宜运输。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "100-保险粉.json"
+}

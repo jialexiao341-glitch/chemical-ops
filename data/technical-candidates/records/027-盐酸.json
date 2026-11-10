@@ -1,0 +1,144 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "盐酸",
+  "cas_candidate": "7647-01-0",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 27,
+    "heading": "表1－028 盐酸"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：盐酸；氢氯酸",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：hrdrochloric acid；chlorohydric acid",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：HCI",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：36.46",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：7647－01－0",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状： 无色或微黄色发烟液体、有刺鼻的酸味。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：与水混溶，溶于碱液。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：－114.8（纯）",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）：108.6（20％）",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：1.20",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（空气＝1）：1.26",
+      "source_row": 7,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧热（KJ/mol）：无意义",
+      "source_row": 8,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（KPa）：30.66（21℃）",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：不燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "闪点（℃）：无意义",
+      "source_row": 10,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸下限（％）：无意义",
+      "source_row": 11,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸上限（％）：无意义",
+      "source_row": 12,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：无意义",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：20     UN编号：1789   包装分类：Ⅰ     包装方法：螺纹口玻璃瓶、铁盖压口玻璃瓶、塑料瓶或金属桶（罐）外木板箱；耐酸坛、陶瓷罐外木板箱或半花格箱。\n储运条件：储存于阴凉、干燥，通风良好的仓间。应与碱类、金属粉末、卤素（氟、氯、溴）、易燃或可燃物分开存放。不可混储混运。搬运要轻装轻卸，防止包装及容器损坏。分装和搬运作业要注意个人防护。运输按规定路线行驶。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "027-盐酸.json"
+}

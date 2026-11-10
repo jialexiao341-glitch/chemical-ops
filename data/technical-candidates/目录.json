@@ -1,0 +1,1203 @@
+{
+  "source_type": "msds",
+  "status": "DRAFT",
+  "records": [
+    {
+      "file": "001-乙炔气.json",
+      "name_from_heading": "乙炔气",
+      "cas_candidate": "74-86-2",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "002-氧气.json",
+      "name_from_heading": "氧气",
+      "cas_candidate": "7782-44-7",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "003-二氧化碳.json",
+      "name_from_heading": "二氧化碳",
+      "cas_candidate": "124-38-9",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "004-氢气.json",
+      "name_from_heading": "氢气",
+      "cas_candidate": "133-74-0",
+      "cas_valid_checksum": false,
+      "item_count": 22
+    },
+    {
+      "file": "005-氩气.json",
+      "name_from_heading": "氩气",
+      "cas_candidate": "7440-37-1",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "006-甲烷.json",
+      "name_from_heading": "甲烷",
+      "cas_candidate": "74-82-8",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "007-四氢噻吩.json",
+      "name_from_heading": "四氢噻吩",
+      "cas_candidate": "110-01-0",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "008-三乙胺.json",
+      "name_from_heading": "三乙胺",
+      "cas_candidate": "121-44-8",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "009-硫代磷酰氯.json",
+      "name_from_heading": "硫代磷酰氯",
+      "cas_candidate": "3982-91-0",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "010-硫黄.json",
+      "name_from_heading": "硫黄",
+      "cas_candidate": "7704-34-9",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "011-甲胺磷.json",
+      "name_from_heading": "甲胺磷",
+      "cas_candidate": "10265-92-6",
+      "cas_valid_checksum": true,
+      "item_count": 15
+    },
+    {
+      "file": "012-多聚甲醛.json",
+      "name_from_heading": "多聚甲醛",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 9
+    },
+    {
+      "file": "013-(附表1-3)甲缩醛.json",
+      "name_from_heading": "(附表1-3)甲缩醛",
+      "cas_candidate": "109-87-5",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "014-黄磷.json",
+      "name_from_heading": "黄磷",
+      "cas_candidate": "7723-14-0",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "015-氯.json",
+      "name_from_heading": "氯",
+      "cas_candidate": "7782-50-5",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "016-三氯化磷.json",
+      "name_from_heading": "三氯化磷",
+      "cas_candidate": "7719-12-2",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "017-甲醇.json",
+      "name_from_heading": "甲醇",
+      "cas_candidate": "67-56-1",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "018-液碱.json",
+      "name_from_heading": "液碱",
+      "cas_candidate": "1310-73-2",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "019-氨水.json",
+      "name_from_heading": "氨水",
+      "cas_candidate": "1336-21-6",
+      "cas_valid_checksum": true,
+      "item_count": 16
+    },
+    {
+      "file": "020-硫酸二甲酯.json",
+      "name_from_heading": "硫酸二甲酯",
+      "cas_candidate": "77-78-1",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "021-甲胺磷.json",
+      "name_from_heading": "甲胺磷",
+      "cas_candidate": "10265-92-6",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "022-液氨.json",
+      "name_from_heading": "液氨",
+      "cas_candidate": "7664-41-7",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "023-氯仿.json",
+      "name_from_heading": "氯仿",
+      "cas_candidate": "67-66-3",
+      "cas_valid_checksum": true,
+      "item_count": 16
+    },
+    {
+      "file": "024-二氯乙烷.json",
+      "name_from_heading": "二氯乙烷",
+      "cas_candidate": "75-34-3",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "025-二硫化碳.json",
+      "name_from_heading": "二硫化碳",
+      "cas_candidate": "75-15-0",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "026-甲苯.json",
+      "name_from_heading": "甲苯",
+      "cas_candidate": "108-88-3",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "027-盐酸.json",
+      "name_from_heading": "盐酸",
+      "cas_candidate": "7647-01-0",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "028-氯甲烷.json",
+      "name_from_heading": "氯甲烷",
+      "cas_candidate": "74-87-3",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "029-硫酸.json",
+      "name_from_heading": "硫酸",
+      "cas_candidate": "7664-93-9",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "030-二甲苯.json",
+      "name_from_heading": "二甲苯",
+      "cas_candidate": "108-38-3",
+      "cas_valid_checksum": true,
+      "item_count": 23
+    },
+    {
+      "file": "031-醋酸酐.json",
+      "name_from_heading": "醋酸酐",
+      "cas_candidate": "108-24-7",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "032-多聚甲醛.json",
+      "name_from_heading": "多聚甲醛",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 10
+    },
+    {
+      "file": "033-草甘膦.json",
+      "name_from_heading": "草甘膦",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 10
+    },
+    {
+      "file": "034-稻瘟灵.json",
+      "name_from_heading": "稻瘟灵",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 12
+    },
+    {
+      "file": "035-异丙胺.json",
+      "name_from_heading": "异丙胺",
+      "cas_candidate": "75-31-0",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "036-漂白粉.json",
+      "name_from_heading": "漂白粉",
+      "cas_candidate": "7778-54-3",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "037-氯化氢.json",
+      "name_from_heading": "氯化氢",
+      "cas_candidate": "7647-01-0",
+      "cas_valid_checksum": true,
+      "item_count": 16
+    },
+    {
+      "file": "038-氰化氢.json",
+      "name_from_heading": "氰化氢",
+      "cas_candidate": "74-90-8",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "039-氰化钠.json",
+      "name_from_heading": "氰化钠",
+      "cas_candidate": "143-33-9",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "040-氯乙酸.json",
+      "name_from_heading": "氯乙酸",
+      "cas_candidate": "79-11-8",
+      "cas_valid_checksum": true,
+      "item_count": 16
+    },
+    {
+      "file": "041-甲缩醛.json",
+      "name_from_heading": "甲缩醛",
+      "cas_candidate": "109-87-5",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "042-丙烯腈.json",
+      "name_from_heading": "丙烯腈",
+      "cas_candidate": "107-13-1",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "043-氧化亚铜.json",
+      "name_from_heading": "氧化亚铜",
+      "cas_candidate": "544-92-3",
+      "cas_valid_checksum": true,
+      "item_count": 11
+    },
+    {
+      "file": "044-四氯化锡.json",
+      "name_from_heading": "四氯化锡",
+      "cas_candidate": "7646-78-8",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "045-四氧化三铅.json",
+      "name_from_heading": "四氧化三铅",
+      "cas_candidate": "1314-41-6",
+      "cas_valid_checksum": true,
+      "item_count": 11
+    },
+    {
+      "file": "046-三氯化铝(无水).json",
+      "name_from_heading": "三氯化铝(无水)",
+      "cas_candidate": "7446-70-0",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "047-松香水.json",
+      "name_from_heading": "松香水",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 8
+    },
+    {
+      "file": "048-红丹油性防锈漆.json",
+      "name_from_heading": "红丹油性防锈漆",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 4
+    },
+    {
+      "file": "049-酚醛树脂.json",
+      "name_from_heading": "酚醛树脂",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 6
+    },
+    {
+      "file": "050-硫磺粉(补充).json",
+      "name_from_heading": "硫磺粉(补充)",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 9
+    },
+    {
+      "file": "051-一乙胺.json",
+      "name_from_heading": "一乙胺",
+      "cas_candidate": "74-04-7",
+      "cas_valid_checksum": false,
+      "item_count": 21
+    },
+    {
+      "file": "052-三聚氯氰.json",
+      "name_from_heading": "三聚氯氰",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 11
+    },
+    {
+      "file": "053-三氯乙烯.json",
+      "name_from_heading": "三氯乙烯",
+      "cas_candidate": "79-01-6",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "054-磷酸.json",
+      "name_from_heading": "磷酸",
+      "cas_candidate": "7664-38-2",
+      "cas_valid_checksum": true,
+      "item_count": 14
+    },
+    {
+      "file": "055-四丁基锡.json",
+      "name_from_heading": "四丁基锡",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 11
+    },
+    {
+      "file": "056-柴油.json",
+      "name_from_heading": "柴油",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 13
+    },
+    {
+      "file": "057-对氨基苯酚.json",
+      "name_from_heading": "对氨基苯酚",
+      "cas_candidate": "123-30-8",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "058-醋酸乙酯.json",
+      "name_from_heading": "醋酸乙酯",
+      "cas_candidate": "141-78-6",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "059-对氯硝基苯.json",
+      "name_from_heading": "对氯硝基苯",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 12
+    },
+    {
+      "file": "060-氮气.json",
+      "name_from_heading": "氮气",
+      "cas_candidate": "7727-37-9",
+      "cas_valid_checksum": true,
+      "item_count": 17
+    },
+    {
+      "file": "061-莠去津.json",
+      "name_from_heading": "莠去津",
+      "cas_candidate": "1912-24-9",
+      "cas_valid_checksum": true,
+      "item_count": 10
+    },
+    {
+      "file": "062-扑草净.json",
+      "name_from_heading": "扑草净",
+      "cas_candidate": "7287-19-6",
+      "cas_valid_checksum": true,
+      "item_count": 9
+    },
+    {
+      "file": "063-八氯二丙醚.json",
+      "name_from_heading": "八氯二丙醚",
+      "cas_candidate": "127-90-2",
+      "cas_valid_checksum": true,
+      "item_count": 8
+    },
+    {
+      "file": "064-硫化钠.json",
+      "name_from_heading": "硫化钠",
+      "cas_candidate": "7757-83-7",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "065-异丙醇.json",
+      "name_from_heading": "异丙醇",
+      "cas_candidate": "67-63-0",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "066-丙酮.json",
+      "name_from_heading": "丙酮",
+      "cas_candidate": "67-64-1",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "067-二氯丙烷.json",
+      "name_from_heading": "二氯丙烷",
+      "cas_candidate": "142-28-9",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "068-环己酮.json",
+      "name_from_heading": "环己酮",
+      "cas_candidate": "7740-66-6",
+      "cas_valid_checksum": false,
+      "item_count": 22
+    },
+    {
+      "file": "069-乙酸异戊酯.json",
+      "name_from_heading": "乙酸异戊酯",
+      "cas_candidate": "123-92-2",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "070-锌粉.json",
+      "name_from_heading": "锌粉",
+      "cas_candidate": "7740-66-6",
+      "cas_valid_checksum": false,
+      "item_count": 16
+    },
+    {
+      "file": "071-乙醇.json",
+      "name_from_heading": "乙醇",
+      "cas_candidate": "64-17-5",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "072-次氯酸钠溶液.json",
+      "name_from_heading": "次氯酸钠溶液",
+      "cas_candidate": "7681-52-9",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "073-石脑油.json",
+      "name_from_heading": "石脑油",
+      "cas_candidate": "8030-30-6",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "074-双环戊二烯.json",
+      "name_from_heading": "双环戊二烯",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 12
+    },
+    {
+      "file": "075-乙酸丁酯.json",
+      "name_from_heading": "乙酸丁酯",
+      "cas_candidate": "123-86-4",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "076-双氧水.json",
+      "name_from_heading": "双氧水",
+      "cas_candidate": "7722-84-1",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "077-丙烯酸丁酯.json",
+      "name_from_heading": "丙烯酸丁酯",
+      "cas_candidate": "141-32-2",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "078-丙烯酸.json",
+      "name_from_heading": "丙烯酸",
+      "cas_candidate": "79-10-7",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "079-苯乙烯.json",
+      "name_from_heading": "苯乙烯",
+      "cas_candidate": "100-42-5",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "080-过硫酸铵.json",
+      "name_from_heading": "过硫酸铵",
+      "cas_candidate": "7727-54-0",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "081-过硫酸钾.json",
+      "name_from_heading": "过硫酸钾",
+      "cas_candidate": "7727-21-1",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "082-丙烯酰胺.json",
+      "name_from_heading": "丙烯酰胺",
+      "cas_candidate": "79-06-1",
+      "cas_valid_checksum": true,
+      "item_count": 14
+    },
+    {
+      "file": "083-甲醛.json",
+      "name_from_heading": "甲醛",
+      "cas_candidate": "50-00-0",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "084-甲基丙烯酸甲酯.json",
+      "name_from_heading": "甲基丙烯酸甲酯",
+      "cas_candidate": "80-62-6",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "085-甲基丙烯酸.json",
+      "name_from_heading": "甲基丙烯酸",
+      "cas_candidate": "79-41-4",
+      "cas_valid_checksum": true,
+      "item_count": 15
+    },
+    {
+      "file": "086-汽油.json",
+      "name_from_heading": "汽油",
+      "cas_candidate": "8006-61-9",
+      "cas_valid_checksum": true,
+      "item_count": 15
+    },
+    {
+      "file": "087-乙酸.json",
+      "name_from_heading": "乙酸",
+      "cas_candidate": "64-19-7",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "088-丙烯酸树脂.json",
+      "name_from_heading": "丙烯酸树脂",
+      "cas_candidate": "9011-14-7",
+      "cas_valid_checksum": true,
+      "item_count": 9
+    },
+    {
+      "file": "089-丙烯酸清漆.json",
+      "name_from_heading": "丙烯酸清漆",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 6
+    },
+    {
+      "file": "090-丙烯酸漆稀释剂.json",
+      "name_from_heading": "丙烯酸漆稀释剂",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 7
+    },
+    {
+      "file": "091-丙烯酸磁漆.json",
+      "name_from_heading": "丙烯酸磁漆",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 6
+    },
+    {
+      "file": "092-二乙醇胺.json",
+      "name_from_heading": "二乙醇胺",
+      "cas_candidate": "111-42-2",
+      "cas_valid_checksum": true,
+      "item_count": 17
+    },
+    {
+      "file": "093-煤油.json",
+      "name_from_heading": "煤油",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 12
+    },
+    {
+      "file": "094-漂白粉.json",
+      "name_from_heading": "漂白粉",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 8
+    },
+    {
+      "file": "095-漂粉精.json",
+      "name_from_heading": "漂粉精",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 7
+    },
+    {
+      "file": "096-三氯异氰尿酸.json",
+      "name_from_heading": "三氯异氰尿酸",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 7
+    },
+    {
+      "file": "097-松香.json",
+      "name_from_heading": "松香",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 9
+    },
+    {
+      "file": "098-松节油.json",
+      "name_from_heading": "松节油",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 12
+    },
+    {
+      "file": "099-硫化钠.json",
+      "name_from_heading": "硫化钠",
+      "cas_candidate": "7757-83-7",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "100-保险粉.json",
+      "name_from_heading": "保险粉",
+      "cas_candidate": "7775-14-6",
+      "cas_valid_checksum": true,
+      "item_count": 11
+    },
+    {
+      "file": "101-7385聚氨酯清漆(分装).json",
+      "name_from_heading": "7385聚氨酯清漆(分装)",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 6
+    },
+    {
+      "file": "102-甲酸.json",
+      "name_from_heading": "甲酸",
+      "cas_candidate": "64-18-6",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "103-乙酸乙二醇乙醚.json",
+      "name_from_heading": "乙酸乙二醇乙醚",
+      "cas_candidate": "111-15-9",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "104-H-3聚氨酯漆固化剂.json",
+      "name_from_heading": "H-3聚氨酯漆固化剂",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 5
+    },
+    {
+      "file": "105-聚氨酯漆稀释剂.json",
+      "name_from_heading": "聚氨酯漆稀释剂",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 4
+    },
+    {
+      "file": "106-263醇酸树脂.json",
+      "name_from_heading": "263醇酸树脂",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 6
+    },
+    {
+      "file": "107-异噻唑啉酮.json",
+      "name_from_heading": "异噻唑啉酮",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 10
+    },
+    {
+      "file": "108-N-乙基苯胺.json",
+      "name_from_heading": "N-乙基苯胺",
+      "cas_candidate": "587-54-1",
+      "cas_valid_checksum": false,
+      "item_count": 18
+    },
+    {
+      "file": "109-苯胺.json",
+      "name_from_heading": "苯胺",
+      "cas_candidate": "62-53-3",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "110-乙酰甲胺磷.json",
+      "name_from_heading": "乙酰甲胺磷",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 9
+    },
+    {
+      "file": "111-亚磷酸.json",
+      "name_from_heading": "亚磷酸",
+      "cas_candidate": "13598-36-2",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "112-亚磷酸二甲酯.json",
+      "name_from_heading": "亚磷酸二甲酯",
+      "cas_candidate": "868-85-9",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "113-氯甲烷.json",
+      "name_from_heading": "氯甲烷",
+      "cas_candidate": "74-87-3",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "114-乙醚.json",
+      "name_from_heading": "乙醚",
+      "cas_candidate": "60-29-7",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "115-丙烯酸甲酯.json",
+      "name_from_heading": "丙烯酸甲酯",
+      "cas_candidate": "96-33-3",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "116-一甲胺.json",
+      "name_from_heading": "一甲胺",
+      "cas_candidate": "74-89-5",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "117-硝酸镁.json",
+      "name_from_heading": "硝酸镁",
+      "cas_candidate": "13446-18-9",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "118-硫化氢.json",
+      "name_from_heading": "硫化氢",
+      "cas_candidate": "7783-06-4",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "119-硫化铵.json",
+      "name_from_heading": "硫化铵",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 8
+    },
+    {
+      "file": "120-一甲胺水溶液.json",
+      "name_from_heading": "一甲胺水溶液",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 11
+    },
+    {
+      "file": "121-兔宝宝面漆.json",
+      "name_from_heading": "兔宝宝面漆",
+      "cas_candidate": "822-06-0",
+      "cas_valid_checksum": true,
+      "item_count": 7
+    },
+    {
+      "file": "122-兔宝宝稀释剂.json",
+      "name_from_heading": "兔宝宝稀释剂",
+      "cas_candidate": "103-65-1",
+      "cas_valid_checksum": true,
+      "item_count": 10
+    },
+    {
+      "file": "123-硫氢化钠.json",
+      "name_from_heading": "硫氢化钠",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 10
+    },
+    {
+      "file": "124-丙酸.json",
+      "name_from_heading": "丙酸",
+      "cas_candidate": "79-09-4",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "125-乙酰氯.json",
+      "name_from_heading": "乙酰氯",
+      "cas_candidate": "75-36-5",
+      "cas_valid_checksum": true,
+      "item_count": 15
+    },
+    {
+      "file": "126-丙酰氯.json",
+      "name_from_heading": "丙酰氯",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 14
+    },
+    {
+      "file": "127-丁醇.json",
+      "name_from_heading": "丁醇",
+      "cas_candidate": "71-36-3",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "128-醇酸调合漆(未列名).json",
+      "name_from_heading": "醇酸调合漆(未列名)",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 6
+    },
+    {
+      "file": "129-碳化钙、电石.json",
+      "name_from_heading": "碳化钙、电石",
+      "cas_candidate": "75-20-7",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "130-硝酸钠.json",
+      "name_from_heading": "硝酸钠",
+      "cas_candidate": "7631-99-4",
+      "cas_valid_checksum": true,
+      "item_count": 11
+    },
+    {
+      "file": "131-溴甲烷.json",
+      "name_from_heading": "溴甲烷",
+      "cas_candidate": "74-83-9",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "132-磷化铝.json",
+      "name_from_heading": "磷化铝",
+      "cas_candidate": "20859-73-8",
+      "cas_valid_checksum": true,
+      "item_count": 12
+    },
+    {
+      "file": "133-正丁醇.json",
+      "name_from_heading": "正丁醇",
+      "cas_candidate": "71-36-3",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "134-硝基木器漆.json",
+      "name_from_heading": "硝基木器漆",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 7
+    },
+    {
+      "file": "135-硝化棉(含氮≤12.6%).json",
+      "name_from_heading": "硝化棉(含氮≤12.6%)",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 5
+    },
+    {
+      "file": "136-单丁醚.json",
+      "name_from_heading": "单丁醚",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 18
+    },
+    {
+      "file": "137-砷.json",
+      "name_from_heading": "砷",
+      "cas_candidate": "7440-38-2",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "138-碘化汞.json",
+      "name_from_heading": "碘化汞",
+      "cas_candidate": "7774-29-0",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "139-氯化汞.json",
+      "name_from_heading": "氯化汞",
+      "cas_candidate": "7487-94-7",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "140-叠氮化钠.json",
+      "name_from_heading": "叠氮化钠",
+      "cas_candidate": "7487-94-7",
+      "cas_valid_checksum": true,
+      "item_count": 9
+    },
+    {
+      "file": "141-重铬酸钠.json",
+      "name_from_heading": "重铬酸钠",
+      "cas_candidate": "7789-12-0",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "142-高锰酸钾.json",
+      "name_from_heading": "高锰酸钾",
+      "cas_candidate": "7722-64-7",
+      "cas_valid_checksum": true,
+      "item_count": 10
+    },
+    {
+      "file": "143-氰化金钾.json",
+      "name_from_heading": "氰化金钾",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 12
+    },
+    {
+      "file": "144-丙烯酸.json",
+      "name_from_heading": "丙烯酸",
+      "cas_candidate": "79-10-7",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "145-甲基丙烯酸甲酯.json",
+      "name_from_heading": "甲基丙烯酸甲酯",
+      "cas_candidate": "80-62-6",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "146-苯乙烯.json",
+      "name_from_heading": "苯乙烯",
+      "cas_candidate": "100-42-5",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "147-丙烯酸丁酯.json",
+      "name_from_heading": "丙烯酸丁酯",
+      "cas_candidate": "141-32-2",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "148-丁醇.json",
+      "name_from_heading": "丁醇",
+      "cas_candidate": "71-36-3",
+      "cas_valid_checksum": true,
+      "item_count": 21
+    },
+    {
+      "file": "149-偶氮二异丁腈.json",
+      "name_from_heading": "偶氮二异丁腈",
+      "cas_candidate": "78-67-1",
+      "cas_valid_checksum": true,
+      "item_count": 10
+    },
+    {
+      "file": "150-甲基丙烯酸异丁酯.json",
+      "name_from_heading": "甲基丙烯酸异丁酯",
+      "cas_candidate": "97-86-9",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "151-甲基丙烯酸(正)丁酯.json",
+      "name_from_heading": "甲基丙烯酸(正)丁酯",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 16
+    },
+    {
+      "file": "152-乙酰丙酮.json",
+      "name_from_heading": "乙酰丙酮",
+      "cas_candidate": "123-54-6",
+      "cas_valid_checksum": true,
+      "item_count": 16
+    },
+    {
+      "file": "153-2-丁酮.json",
+      "name_from_heading": "2-丁酮",
+      "cas_candidate": "78-93-3",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "154-生松香.json",
+      "name_from_heading": "生松香",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 9
+    },
+    {
+      "file": "155-硫酸铜.json",
+      "name_from_heading": "硫酸铜",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 8
+    },
+    {
+      "file": "156-硝酸.json",
+      "name_from_heading": "硝酸",
+      "cas_candidate": "7697-37-2",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "157-氰化钾.json",
+      "name_from_heading": "氰化钾",
+      "cas_candidate": "151-50-8",
+      "cas_valid_checksum": true,
+      "item_count": 11
+    },
+    {
+      "file": "158-硝基苯.json",
+      "name_from_heading": "硝基苯",
+      "cas_candidate": "98-95-3",
+      "cas_valid_checksum": true,
+      "item_count": 17
+    },
+    {
+      "file": "159-氟化钠.json",
+      "name_from_heading": "氟化钠",
+      "cas_candidate": "7681-49-4",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "160-氢氟酸.json",
+      "name_from_heading": "氢氟酸",
+      "cas_candidate": "7664-39-3",
+      "cas_valid_checksum": true,
+      "item_count": 13
+    },
+    {
+      "file": "161-蓄电池(注有酸液).json",
+      "name_from_heading": "蓄电池(注有酸液)",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 5
+    },
+    {
+      "file": "162-环氧树脂.json",
+      "name_from_heading": "环氧树脂",
+      "cas_candidate": "24969-06-0",
+      "cas_valid_checksum": true,
+      "item_count": 11
+    },
+    {
+      "file": "163-氯苯.json",
+      "name_from_heading": "氯苯",
+      "cas_candidate": "108-90-7",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "164-乙苯.json",
+      "name_from_heading": "乙苯",
+      "cas_candidate": "100-41-4",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "165-樟脑.json",
+      "name_from_heading": "樟脑",
+      "cas_candidate": "76-22-2",
+      "cas_valid_checksum": true,
+      "item_count": 19
+    },
+    {
+      "file": "166-赛璐珞.json",
+      "name_from_heading": "赛璐珞",
+      "cas_candidate": null,
+      "cas_valid_checksum": null,
+      "item_count": 7
+    },
+    {
+      "file": "167-氢氧化钾.json",
+      "name_from_heading": "氢氧化钾",
+      "cas_candidate": "1310-58-3",
+      "cas_valid_checksum": true,
+      "item_count": 18
+    },
+    {
+      "file": "168-乙酸丁酯.json",
+      "name_from_heading": "乙酸丁酯",
+      "cas_candidate": "123-86-4",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    },
+    {
+      "file": "169-NN-二甲基甲酰胺.json",
+      "name_from_heading": "NN-二甲基甲酰胺",
+      "cas_candidate": "68-12-2",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "170-叔丁胺.json",
+      "name_from_heading": "叔丁胺",
+      "cas_candidate": "75-64-9",
+      "cas_valid_checksum": true,
+      "item_count": 22
+    },
+    {
+      "file": "171-氯化亚砜.json",
+      "name_from_heading": "氯化亚砜",
+      "cas_candidate": "7719-09-7",
+      "cas_valid_checksum": true,
+      "item_count": 20
+    }
+  ]
+}

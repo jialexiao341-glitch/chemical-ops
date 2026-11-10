@@ -1,0 +1,108 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "过硫酸钾",
+  "cas_candidate": "7727-21-1",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 81,
+    "heading": "表1－082  过硫酸钾"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：过硫酸钾；高硫酸钾",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：potassium；persulfate",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：K2S2O8",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：270.32",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：7727－21－1",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：白色结晶，无气味，有潮解性。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：溶于水，不溶于乙醇。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：无资料",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）：无资料",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：2.48",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧热（KJ/mol）：无意义",
+      "source_row": 8,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：不燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：11       UN编号：1492      包装分类：Ⅱ\n包装方法：塑料袋、多层牛皮纸袋外全开口钢桶；塑料袋、多层牛皮纸外木板箱；螺纹口玻璃瓶、铁盖压口玻璃瓶、塑料瓶或金属桶（罐）外木板箱。\n储运条件：储存于阴凉、干燥、通风良好的仓间内。远离火种、热源，防止阳光直射。保持容器密封。应与易燃或可燃物、还原剂、硫、磷等分开存放。切忌混储混运。搬运时要轻装轻卸，防止包装及容器损坏。禁止震动、撞击和摩擦。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "081-过硫酸钾.json"
+}

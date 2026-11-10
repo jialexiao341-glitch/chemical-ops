@@ -1,0 +1,90 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "草甘膦",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 33,
+    "heading": "表1－034 草甘膦"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "商品名：镇草宁；膦酸甘氨酸；甘氨磷；农达；膦甘酸；草甘宁；时拔克；Round-UP；\nMON 0459；MON 0468；MON 0573；MON 1139；MON 2139；Spark",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：Glyphosate",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "化学名：N-（膦酸基甲基）甘氨酸，N-（Phosphonom-ethyl）glycine",
+      "source_row": 3,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：C3H8NO5P",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：169.1",
+      "source_row": 4,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：纯品为不挥发性白色固体。",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：微溶于水。不溶于一般有机溶剂。其异丙胺盐完全溶解于水。",
+      "source_row": 7,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "假相对密度：0.5",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "用途",
+      "text": "农用除草剂。",
+      "source_row": 18,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：毒害品。乳油增加副标志：易燃液体。  \n包装方法：液体用铁桶或玻璃瓶外钙塑箱（纸箱或木箱）内衬瓦楞纸，固体用编织袋装。\n储运条件：现场不得吸烟、喝水、进食。不能与粮食、食品、种子、饲料、各种日用品混装混运。轻装轻卸，防止容器破损。防潮、防高温曝晒、防雨淋。寒冷季节要注意保持温度在结晶点以上，防止冻裂容器及变质。严禁火种。储存于阴凉、干燥、通风的仓间内。专人保管。",
+      "source_row": 22,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "033-草甘膦.json"
+}

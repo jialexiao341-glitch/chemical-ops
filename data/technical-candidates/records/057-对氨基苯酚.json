@@ -1,0 +1,102 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "对氨基苯酚",
+  "cas_candidate": "123-30-8",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 57,
+    "heading": "表1－058 对氨基苯酚"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：对氨基苯酚；4－氨基苯酚",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：4－aminophenol; p-aminophenol",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：C6H7NO",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：109.12",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：123－30－8",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：白色至灰褐色结晶。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：微溶于水、醇、醚。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：184℃",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）：150（0.4kPa）",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（KPa）：0.4（150℃）",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：可燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：14          UN编号：2512          包装分类：Ⅲ\n包装方法：塑料袋、多层牛皮纸袋外全开口钢桶；螺纹口玻璃瓶、铁盖压口玻璃瓶、塑料瓶或金属桶外木板箱；耐酸坛、陶瓷罐外木板箱或半花格箱；塑料瓶、镀锡薄钢板桶外满底花格箱。\n储运条件：储存于阴凉、通风的仓间内。远离火种、热源。防止阳光直射。保持容器密封。应与氧化剂、酸类、食用化学品分开存放。搬运时轻装轻卸，防止包装及容器损坏。分装和搬运作业要注意个人防护。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "057-对氨基苯酚.json"
+}

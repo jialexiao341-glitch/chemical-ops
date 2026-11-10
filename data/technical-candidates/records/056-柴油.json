@@ -1,0 +1,108 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "柴油",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 56,
+    "heading": "表1－057 柴油"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：柴油",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：Diesel oil; Diesel fuel",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：稍有粘性的棕色液体。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：与水混溶，可混溶于乙醇。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：－18",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）：282－338",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：0.87－0.9",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（空气＝1）：3.38",
+      "source_row": 7,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（KPa）：0.67（25℃，纯品）",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：不燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "闪点（℃）：55",
+      "source_row": 10,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：257",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：          UN编号：          包装分类：\n储运条件：储存于阴凉、通风的库房内。远离火种、热源。应与氧化剂、卤素分开存放，切忌混储。采用防爆型照明、通风设施。禁止使用易产生火花的机械设备和工具。储区应备有泄漏应急处理设备工具和合适的收容材料。\n运输前应先检查包装容器是否完整、密封，运输过程中要确保容器不泄漏、不倒塌、不坠落、不损坏。运输时运输车辆配备相应的品种和数量的消防器材及泄漏应急处理设备。夏季最好早晚运输。运输时所用的槽车应有接地链，槽内可设隔板以减少震荡产生静电。严禁与氧化剂、卤素、食用化学品等混装混运。运输途中应防暴晒、雨淋，防高温。中途停留时应远离火种、热源、高温区。装运该物品的车辆排气管必须配备阻火装置，禁止使用易产生火花的机械设备和工具装卸。运输车船必须彻底清洗、消毒，否则不得装运其它物品。船运时，配装位置应远离卧室、厨房，并与机舱、电源、火源等部位隔离。公路运输时要按规定路线行驶。",
+      "source_row": 20,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "056-柴油.json"
+}

@@ -1,0 +1,60 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "硝化棉(含氮≤12.6%)",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 135,
+    "heading": "表１－135 硝化棉（含氮≤12.6％）"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：硝化棉，硝化纤维素",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：白色纤维，与棉纤维一样，但较棉纤维硬和脆。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "最小点火能（mJ）：无资料",
+      "source_row": 8,
+      "source_cell": 3
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：易燃固体       UN编号：2557       包装分类： \n包装方法： 按主管当局的规定。\n储运条件：一般用25％以上的水、乙醇或增塑剂（18％以上）湿润。储存在铁桶内（内层二层塑料袋封口）。搬运时轻装轻卸，防止容器破损液体挥发，不得摩擦铁发热或受热，须使物品永久保持湿润。储存在阴凉、通风的爆炸品专库内。库温不宜超过30℃。须防热、防晒，避免与电灯、蒸气管远或其他热源接触，并严格控制各种明火，远离容易产生火源的地方。与有机胺、酸、碱、还原剂以及其他抵触性物品隔离储运。必须掌握先进先出，经常检查湿润剂干燥情况，必要时增加湿润剂。要定时将包装倒放，以使湿润剂分布均匀。储存期不宜过长，以防硝化棉变质产生事故。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "135-硝化棉(含氮≤12.6%).json"
+}

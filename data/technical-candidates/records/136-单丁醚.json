@@ -1,0 +1,138 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "单丁醚",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 136,
+    "heading": "表１－136 单丁醚"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：单丁醚；乙二醇丁醚",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：ethylene glycol monobutyl ether",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：C4H9OCH2CH2OH",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：118.3",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：无色液体，微有香味。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性： 溶于水、丙酮、苯、乙醚、甲醇、四氯化碳等有机溶剂。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）：170.2",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：0.901",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "临界温度（℃）：370",
+      "source_row": 7,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "临界压力（MPa）：3.9",
+      "source_row": 7,
+      "source_cell": 3
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "最小点火能（mJ）：无资料",
+      "source_row": 8,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（kPa）：6.665(94℃)",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "闪点（℃）：61",
+      "source_row": 10,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸下限（％）：1.1",
+      "source_row": 11,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸上限（％）：12.7",
+      "source_row": 12,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：244",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：毒害品        UN编号：2369       包装分类：Ⅲ\n包装方法：玻璃瓶外木板箱内衬垫料或铁桶。\n储运条件：储存在阴凉、通风仓间内。远离火种、热源，避免阳光直射。与氧化剂、食用原料隔离储运；本品不宜久存，以防变质。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "136-单丁醚.json"
+}

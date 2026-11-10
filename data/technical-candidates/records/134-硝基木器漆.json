@@ -1,0 +1,72 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "硝基木器漆",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 134,
+    "heading": "表１－134 硝基木器漆"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：硝基木器漆",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：Nitrocellulose wooden furniture varnish Q22-3",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：液体。由硝化棉、醇酸树脂、顺酐树脂、增韧剂及稀料组成。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "最小点火能（mJ）：无资料",
+      "source_row": 8,
+      "source_cell": 3
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "闪点（℃）：≤23",
+      "source_row": 10,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：易燃液体         UN编号：1139，1263        包装分类：Ⅱ\n包装方法：铁听或铁桶装。\n储运条件：储存于阴凉通风的仓间内，远离火种及热源，防止阳光直射。与氧化剂（包括硝酸、过氧化氢等）隔离储运。搬运时轻装轻卸，防止包装损坏。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "134-硝基木器漆.json"
+}

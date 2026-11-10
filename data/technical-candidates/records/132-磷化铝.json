@@ -1,0 +1,102 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "磷化铝",
+  "cas_candidate": "20859-73-8",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 132,
+    "heading": "表1－132 磷化铝"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：磷化铝",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：aluminium phosphide；aluminum monophosphide",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：AIP",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：57.95",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：20859－73－8",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：浅黄色或灰绿色粉末，无味，易潮解。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：不溶于冷水、溶于乙醇、乙醚。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：＞1000",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）：升华",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：2.85(15℃)",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：遇湿易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：10，13      UN编号：1397       包装分类：Ⅰ\n包装方法：螺纹口玻璃瓶、铁盖压口玻璃瓶、塑料瓶或金属桶（罐）外木板箱；螺纹口玻璃瓶、塑料瓶或塑料袋再装入金属桶（罐）或塑料桶（罐）外木板箱。\n储运条件：储存在阴凉、干燥、通风良好的仓间内。远离火种、热源。包装要求密封，不可与空气接触。防止受潮和雨淋。相对温度保持在75％以下。应与氧化剂、酸类分开存放。搬运时要轻装轻卸，保持包装完整，防止洒漏。雨天不宜运输。",
+      "source_row": 20,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "132-磷化铝.json"
+}

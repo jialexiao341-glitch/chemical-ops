@@ -1,0 +1,279 @@
+{
+  "msds": {
+    "source": {
+      "filename": "1.常见危化品安全技术说明书.docx",
+      "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+      "format": "docx"
+    },
+    "document_type": "msds",
+    "source_table": 74,
+    "source_heading": "表1－075 双环戊二烯",
+    "name_from_heading": "双环戊二烯",
+    "cas_raw": null,
+    "cas_candidate": null,
+    "cas_valid_checksum": null,
+    "rows": [
+      {
+        "row": 1,
+        "cells": [
+          "标识",
+          "中文名：双环戊二烯",
+          "英文名：Cicyclopentadiene"
+        ]
+      },
+      {
+        "row": 2,
+        "cells": [
+          "标识",
+          "分子式：C10H12",
+          "分子量：132.2",
+          "CAS号："
+        ]
+      },
+      {
+        "row": 3,
+        "cells": [
+          "标识",
+          "危规号：33517"
+        ]
+      },
+      {
+        "row": 4,
+        "cells": [
+          "理化性质",
+          "性状：有类似樟脑气味。"
+        ]
+      },
+      {
+        "row": 5,
+        "cells": [
+          "理化性质",
+          "溶解性：不溶于水，溶于醇。"
+        ]
+      },
+      {
+        "row": 6,
+        "cells": [
+          "理化性质",
+          "熔点（℃）：32.5℃",
+          "沸点（℃）：172℃",
+          "相对密度（水＝1）：0.979(20/20℃)"
+        ]
+      },
+      {
+        "row": 7,
+        "cells": [
+          "理化性质",
+          "临界温度（℃）：",
+          "临界压力（MPa）：",
+          "相对密度（空气＝1）："
+        ]
+      },
+      {
+        "row": 8,
+        "cells": [
+          "理化性质",
+          "燃烧热（KJ/mol）：",
+          "最小点火能（mJ）：",
+          "饱和蒸汽压（Pa）：1333(47.6℃"
+        ]
+      },
+      {
+        "row": 9,
+        "cells": [
+          "燃烧爆炸危险性",
+          "燃烧性：",
+          "燃烧分解产物："
+        ]
+      },
+      {
+        "row": 10,
+        "cells": [
+          "燃烧爆炸危险性",
+          "闪点（℃）：32.2℃",
+          "聚合危害："
+        ]
+      },
+      {
+        "row": 11,
+        "cells": [
+          "燃烧爆炸危险性",
+          "爆炸下限（％）：",
+          "稳定性："
+        ]
+      },
+      {
+        "row": 12,
+        "cells": [
+          "燃烧爆炸危险性",
+          "爆炸上限（％）：",
+          "最大爆炸压力（MPa）："
+        ]
+      },
+      {
+        "row": 13,
+        "cells": [
+          "燃烧爆炸危险性",
+          "引燃温度（℃）：",
+          "禁忌物："
+        ]
+      },
+      {
+        "row": 14,
+        "cells": [
+          "燃烧爆炸危险性",
+          "危险特性：遇高热、明火、强氧化剂有引起燃烧的危险。"
+        ]
+      },
+      {
+        "row": 15,
+        "cells": [
+          "燃烧爆炸危险性",
+          "灭火方法：用泡沫、干粉、雾状水、二氧化碳灭火。"
+        ]
+      },
+      {
+        "row": 16,
+        "cells": [
+          "毒性",
+          "LD50 ：353mg/kg（大鼠经口）； 5080 mg/kg（兔经皮）。"
+        ]
+      },
+      {
+        "row": 17,
+        "cells": [
+          "对人体危害",
+          "侵入途径：吸入、食入、经皮肤吸收。\n健康危害：该药吸入高浓度时，可引发支气管炎、肺炎、肺水肿等肺部疾病及肝、肾功能障碍。"
+        ]
+      },
+      {
+        "row": 18,
+        "cells": [
+          "急救",
+          "应使吸入蒸气的患者脱离污染区，安置休息并保暖；眼镜受刺激用水冲洗并就医诊治；皮肤接触先用水冲洗，再用肥皂彻底洗涤；误服立即漱口，急送医院诊治。"
+        ]
+      },
+      {
+        "row": 19,
+        "cells": [
+          "防护",
+          ""
+        ]
+      },
+      {
+        "row": 20,
+        "cells": [
+          "泄漏处理",
+          "首先切断一切火源，戴好防毒面具与手套；用砂土吸收，倒置空旷地方掩埋；对污染地面用肥皂或洗涤剂刷洗，经稀释的污水放入废水系统。"
+        ]
+      },
+      {
+        "row": 21,
+        "cells": [
+          "贮运",
+          "包装标志：易燃液体      UN编号：2048        包装分类：Ⅲ\n包装方法：铁桶。\n储运条件：储存在阴凉、干燥、通风的仓间内。远离火种、热源，避光保存；与氧化剂隔离储运。"
+        ]
+      }
+    ]
+  },
+  "technical": {
+    "document_type": "technical_information_candidate",
+    "source_type": "msds",
+    "identity_review_required": true,
+    "name_from_heading": "双环戊二烯",
+    "cas_candidate": null,
+    "cas_valid_checksum": null,
+    "source": {
+      "filename": "1.常见危化品安全技术说明书.docx",
+      "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+      "format": "docx",
+      "table": 74,
+      "heading": "表1－075 双环戊二烯"
+    },
+    "sections": [
+      "产品标识",
+      "分子信息",
+      "外观与溶解性",
+      "理化性质",
+      "燃烧相关性质",
+      "储存与包装信息",
+      "用途"
+    ],
+    "items": [
+      {
+        "section": "产品标识",
+        "text": "中文名：双环戊二烯",
+        "source_row": 1,
+        "source_cell": 2
+      },
+      {
+        "section": "产品标识",
+        "text": "英文名：Cicyclopentadiene",
+        "source_row": 1,
+        "source_cell": 3
+      },
+      {
+        "section": "分子信息",
+        "text": "分子式：C10H12",
+        "source_row": 2,
+        "source_cell": 2
+      },
+      {
+        "section": "分子信息",
+        "text": "分子量：132.2",
+        "source_row": 2,
+        "source_cell": 3
+      },
+      {
+        "section": "外观与溶解性",
+        "text": "性状：有类似樟脑气味。",
+        "source_row": 4,
+        "source_cell": 2
+      },
+      {
+        "section": "外观与溶解性",
+        "text": "溶解性：不溶于水，溶于醇。",
+        "source_row": 5,
+        "source_cell": 2
+      },
+      {
+        "section": "理化性质",
+        "text": "熔点（℃）：32.5℃",
+        "source_row": 6,
+        "source_cell": 2
+      },
+      {
+        "section": "理化性质",
+        "text": "沸点（℃）：172℃",
+        "source_row": 6,
+        "source_cell": 3
+      },
+      {
+        "section": "理化性质",
+        "text": "相对密度（水＝1）：0.979(20/20℃)",
+        "source_row": 6,
+        "source_cell": 4
+      },
+      {
+        "section": "理化性质",
+        "text": "饱和蒸汽压（Pa）：1333(47.6℃",
+        "source_row": 8,
+        "source_cell": 4
+      },
+      {
+        "section": "燃烧相关性质",
+        "text": "闪点（℃）：32.2℃",
+        "source_row": 10,
+        "source_cell": 2
+      },
+      {
+        "section": "储存与包装信息",
+        "text": "包装标志：易燃液体      UN编号：2048        包装分类：Ⅲ\n包装方法：铁桶。\n储运条件：储存在阴凉、干燥、通风的仓间内。远离火种、热源，避光保存；与氧化剂隔离储运。",
+        "source_row": 21,
+        "source_cell": 2
+      }
+    ],
+    "specifications": [],
+    "msds_draft_file": "074-双环戊二烯.json"
+  }
+}

@@ -1,0 +1,273 @@
+{
+  "msds": {
+    "source": {
+      "filename": "1.常见危化品安全技术说明书.docx",
+      "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+      "format": "docx"
+    },
+    "document_type": "msds",
+    "source_table": 55,
+    "source_heading": "表1－056 四丁基锡",
+    "name_from_heading": "四丁基锡",
+    "cas_raw": null,
+    "cas_candidate": null,
+    "cas_valid_checksum": null,
+    "rows": [
+      {
+        "row": 1,
+        "cells": [
+          "标识",
+          "中文名：四丁基锡",
+          "英文名：Tetra-n-butyltin"
+        ]
+      },
+      {
+        "row": 2,
+        "cells": [
+          "标识",
+          "分子式：[CH3(CH2)3]4Sn",
+          "分子量：347.1",
+          "CAS号："
+        ]
+      },
+      {
+        "row": 3,
+        "cells": [
+          "标识",
+          "危规号：61857"
+        ]
+      },
+      {
+        "row": 4,
+        "cells": [
+          "理化性质",
+          "性状：无色至黄色油状液体。"
+        ]
+      },
+      {
+        "row": 5,
+        "cells": [
+          "理化性质",
+          "溶解性：不溶于水，溶于有机溶剂。"
+        ]
+      },
+      {
+        "row": 6,
+        "cells": [
+          "理化性质",
+          "熔点（℃）：－97",
+          "沸点（℃）：145℃（1.33kPa）",
+          "相对密度（水＝1）：1.0572"
+        ]
+      },
+      {
+        "row": 7,
+        "cells": [
+          "理化性质",
+          "临界温度（℃）：",
+          "临界压力（MPa）：",
+          "相对密度（空气＝1）："
+        ]
+      },
+      {
+        "row": 8,
+        "cells": [
+          "理化性质",
+          "燃烧热（KJ/mol）：",
+          "最小点火能（mJ）：",
+          "饱和蒸汽压（KPa）："
+        ]
+      },
+      {
+        "row": 9,
+        "cells": [
+          "燃烧爆炸危险性",
+          "燃烧性：可燃",
+          "燃烧分解产物："
+        ]
+      },
+      {
+        "row": 10,
+        "cells": [
+          "燃烧爆炸危险性",
+          "闪点（℃）：",
+          "聚合危害："
+        ]
+      },
+      {
+        "row": 11,
+        "cells": [
+          "燃烧爆炸危险性",
+          "爆炸下限（％）：",
+          "稳定性："
+        ]
+      },
+      {
+        "row": 12,
+        "cells": [
+          "燃烧爆炸危险性",
+          "爆炸上限（％）：",
+          "最大爆炸压力（MPa）："
+        ]
+      },
+      {
+        "row": 13,
+        "cells": [
+          "燃烧爆炸危险性",
+          "引燃温度（℃）：",
+          "禁忌物："
+        ]
+      },
+      {
+        "row": 14,
+        "cells": [
+          "燃烧爆炸危险性",
+          "危险特性：有毒，经口摄入、吸入或皮肤吸收会中毒。"
+        ]
+      },
+      {
+        "row": 15,
+        "cells": [
+          "燃烧爆炸危险性",
+          "灭火方法：用水、二氧化碳、泡沫、砂土灭火。"
+        ]
+      },
+      {
+        "row": 16,
+        "cells": [
+          "毒性",
+          "小鼠静脉LD50  56mg/kg。"
+        ]
+      },
+      {
+        "row": 17,
+        "cells": [
+          "对人体危害",
+          "侵入途径：吸入、食入、经皮肤吸收。"
+        ]
+      },
+      {
+        "row": 18,
+        "cells": [
+          "急救",
+          "皮肤接触先用水冲洗，再用肥皂彻底洗涤。"
+        ]
+      },
+      {
+        "row": 19,
+        "cells": [
+          "防护",
+          ""
+        ]
+      },
+      {
+        "row": 20,
+        "cells": [
+          "泄漏处理",
+          "泄漏物用砂土混合，倒至空旷地方深埋；被污染地面用肥皂或洗涤剂刷洗，往稀释得污水放入废水系统。"
+        ]
+      },
+      {
+        "row": 21,
+        "cells": [
+          "贮运",
+          "包装标志：毒害品       UN编号：         包装分类：Ⅱ\n包装方法：玻璃瓶、塑料瓶木板箱或钙塑箱内衬垫料或镀锌铁桶。\n储运条件：储存于阴凉、通风的仓间内。远离火种、热源。搬运时轻装轻卸，防止容器损坏。"
+        ]
+      }
+    ]
+  },
+  "technical": {
+    "document_type": "technical_information_candidate",
+    "source_type": "msds",
+    "identity_review_required": true,
+    "name_from_heading": "四丁基锡",
+    "cas_candidate": null,
+    "cas_valid_checksum": null,
+    "source": {
+      "filename": "1.常见危化品安全技术说明书.docx",
+      "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+      "format": "docx",
+      "table": 55,
+      "heading": "表1－056 四丁基锡"
+    },
+    "sections": [
+      "产品标识",
+      "分子信息",
+      "外观与溶解性",
+      "理化性质",
+      "燃烧相关性质",
+      "储存与包装信息",
+      "用途"
+    ],
+    "items": [
+      {
+        "section": "产品标识",
+        "text": "中文名：四丁基锡",
+        "source_row": 1,
+        "source_cell": 2
+      },
+      {
+        "section": "产品标识",
+        "text": "英文名：Tetra-n-butyltin",
+        "source_row": 1,
+        "source_cell": 3
+      },
+      {
+        "section": "分子信息",
+        "text": "分子式：[CH3(CH2)3]4Sn",
+        "source_row": 2,
+        "source_cell": 2
+      },
+      {
+        "section": "分子信息",
+        "text": "分子量：347.1",
+        "source_row": 2,
+        "source_cell": 3
+      },
+      {
+        "section": "外观与溶解性",
+        "text": "性状：无色至黄色油状液体。",
+        "source_row": 4,
+        "source_cell": 2
+      },
+      {
+        "section": "外观与溶解性",
+        "text": "溶解性：不溶于水，溶于有机溶剂。",
+        "source_row": 5,
+        "source_cell": 2
+      },
+      {
+        "section": "理化性质",
+        "text": "熔点（℃）：－97",
+        "source_row": 6,
+        "source_cell": 2
+      },
+      {
+        "section": "理化性质",
+        "text": "沸点（℃）：145℃（1.33kPa）",
+        "source_row": 6,
+        "source_cell": 3
+      },
+      {
+        "section": "理化性质",
+        "text": "相对密度（水＝1）：1.0572",
+        "source_row": 6,
+        "source_cell": 4
+      },
+      {
+        "section": "燃烧相关性质",
+        "text": "燃烧性：可燃",
+        "source_row": 9,
+        "source_cell": 2
+      },
+      {
+        "section": "储存与包装信息",
+        "text": "包装标志：毒害品       UN编号：         包装分类：Ⅱ\n包装方法：玻璃瓶、塑料瓶木板箱或钙塑箱内衬垫料或镀锌铁桶。\n储运条件：储存于阴凉、通风的仓间内。远离火种、热源。搬运时轻装轻卸，防止容器损坏。",
+        "source_row": 21,
+        "source_cell": 2
+      }
+    ],
+    "specifications": [],
+    "msds_draft_file": "055-四丁基锡.json"
+  }
+}

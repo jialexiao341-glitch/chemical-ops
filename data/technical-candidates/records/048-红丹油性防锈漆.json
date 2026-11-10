@@ -1,0 +1,54 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "红丹油性防锈漆",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 48,
+    "heading": "表1－049红丹油性防锈漆"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：红丹油性防锈漆",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：Iron red oilbaseantirust paint Y53－32",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状： 铁红色粘稠液体。附着力强，防锈性好。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：易燃液体          UN编号：          包装分类：   \n包装方法：铁听或铁桶。\n储运条件：储存于阴凉通风的仓间内。远离火种、热源，避免阳光直射。与氧化剂（包括硝酸、过氧化氢）隔离储运。搬运时要轻装轻卸，防止容器渗漏。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "048-红丹油性防锈漆.json"
+}

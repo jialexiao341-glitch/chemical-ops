@@ -1,0 +1,150 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "三氯乙烯",
+  "cas_candidate": "79-01-6",
+  "cas_valid_checksum": true,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 53,
+    "heading": "表1－054 三氯乙烯"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：三氯乙烯",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：trichloroethyene",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "分子信息",
+      "text": "分子式：C2HCl3",
+      "source_row": 2,
+      "source_cell": 2
+    },
+    {
+      "section": "分子信息",
+      "text": "分子量：131.39",
+      "source_row": 2,
+      "source_cell": 3
+    },
+    {
+      "section": "产品标识",
+      "text": "CAS号：79－01－6",
+      "source_row": 2,
+      "source_cell": 4
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：无色透明液体。有似氯仿的气味。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：不溶于水，易溶于乙醇、乙醚，可混溶于多种有机溶剂。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "熔点（℃）：－87.1",
+      "source_row": 6,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "沸点（℃）：87.1",
+      "source_row": 6,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（水＝1）：1.46",
+      "source_row": 6,
+      "source_cell": 4
+    },
+    {
+      "section": "理化性质",
+      "text": "临界温度（℃）：271",
+      "source_row": 7,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "临界压力（MPa）：5.02",
+      "source_row": 7,
+      "source_cell": 3
+    },
+    {
+      "section": "理化性质",
+      "text": "相对密度（空气＝1）：4.53",
+      "source_row": 7,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧热（KJ/mol）：961.4",
+      "source_row": 8,
+      "source_cell": 2
+    },
+    {
+      "section": "理化性质",
+      "text": "饱和蒸汽压（KPa）：13.33（32℃）",
+      "source_row": 8,
+      "source_cell": 4
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：可燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸下限（％）：12.5",
+      "source_row": 11,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "爆炸上限（％）：90.0",
+      "source_row": 12,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：420",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志： 14           UN编号：1710        包装分类：Ⅲ\n包装方法：小开口钢桶；螺纹口玻璃瓶、铁盖压口玻璃瓶、塑料瓶或金属桶外木板箱；塑料瓶、镀锡薄钢板桶外满底花格箱。\n储运条件：储存于阴凉、通风的仓间内。远离火种、热源。防止阳光直射。包装要求密封，不可与空气接触。不宜大量或久存。应与氧化剂分开存放。搬运时轻装轻卸，防止包装及容器损害。分装和搬运作业要注意个人防护。运输按规定路线行驶，中途不得停留。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "053-三氯乙烯.json"
+}

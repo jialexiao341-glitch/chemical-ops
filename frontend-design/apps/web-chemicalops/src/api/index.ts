@@ -11,4 +11,5 @@ export * from './ai';
 export * from './insights';
 export * from './supplier-portal';
 export * from './technical-documents';
+export * from './chemical-wiki';
 export * from './delivery-followups';

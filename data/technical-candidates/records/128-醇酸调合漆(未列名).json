@@ -1,0 +1,66 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "醇酸调合漆(未列名)",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 128,
+    "heading": "表1－129 醇酸调合漆（未列名）"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：醇酸调合漆",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：thinner for acrylic resin paint X-5",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：黄色粘稠液体，有特殊芳香味。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "溶解性：可与二甲苯、醇酸漆稀释剂等混溶。",
+      "source_row": 5,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：易燃液体      UN编号：1866       包装分类：Ⅱ \n包装方法：钢桶、钢制提桶。\n储运条件：储存在阴凉、通风的仓间内。远离火种、热源。仓内温度不宜超过35℃。防止阳光暴晒；包装应密封。与氧化剂、食用化学品、隔离储运。采用防爆型照明、通风设备。禁止使用产生火花的机械设备和工具。储区应配备合适的收容材料。仓库应有静电接地装置。搬运时轻装轻卸，防止包装破损。夏季早晚运输，运输按有关规定路线行驶。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "128-醇酸调合漆(未列名).json"
+}

@@ -1,0 +1,66 @@
+{
+  "document_type": "technical_information_candidate",
+  "source_type": "msds",
+  "status": "DRAFT",
+  "published": false,
+  "identity_review_required": true,
+  "name_from_heading": "7385聚氨酯清漆(分装)",
+  "cas_candidate": null,
+  "cas_valid_checksum": null,
+  "source": {
+    "filename": "1.常见危化品安全技术说明书.docx",
+    "sha256": "baf06da746907b47c643ca893752b899f4b3908dea84ab33b5428710bc7ff84a",
+    "format": "docx",
+    "table": 101,
+    "heading": "表1－102 7385聚氨酯清漆（分装）"
+  },
+  "sections": [
+    "产品标识",
+    "分子信息",
+    "外观与溶解性",
+    "理化性质",
+    "燃烧相关性质",
+    "储存与包装信息",
+    "用途"
+  ],
+  "items": [
+    {
+      "section": "产品标识",
+      "text": "中文名：7385聚氨酯清漆",
+      "source_row": 1,
+      "source_cell": 2
+    },
+    {
+      "section": "产品标识",
+      "text": "英文名：Polyurethane varnish(separate package)7385",
+      "source_row": 1,
+      "source_cell": 3
+    },
+    {
+      "section": "外观与溶解性",
+      "text": "性状：易燃液体。",
+      "source_row": 4,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "燃烧性：易燃",
+      "source_row": 9,
+      "source_cell": 2
+    },
+    {
+      "section": "燃烧相关性质",
+      "text": "引燃温度（℃）：250",
+      "source_row": 13,
+      "source_cell": 2
+    },
+    {
+      "section": "储存与包装信息",
+      "text": "包装标志：        UN编号：1263        包装分类：Ⅲ\n包装方法：铁听。\n储运条件：储存于干燥、通风的仓间内。远离火种热源，防止阳光直射，各组分应分别储存。与氧化剂隔离储运。搬运时轻装轻卸，保证包装完整。应与氧化剂、酸类分开存放。平时需勤检查，查仓温，查混储。搬运时要轻装轻卸，防止包装及容器损坏。雨天不宜运输。",
+      "source_row": 21,
+      "source_cell": 2
+    }
+  ],
+  "specifications": [],
+  "msds_draft_file": "101-7385聚氨酯清漆(分装).json"
+}
