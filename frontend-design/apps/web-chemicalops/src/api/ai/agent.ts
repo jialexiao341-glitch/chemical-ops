@@ -176,6 +176,50 @@ export namespace AgentApi {
     product_id?: number;
     rfq_item_id?: number;
   }
+  export interface CostAggregate {
+    tasks: number;
+    terminal_tasks: number;
+    succeeded: number;
+    success_rate: null | number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    estimated_cost: null | number;
+    cost_tasks: number;
+    cost_missing_tasks: number;
+    partial_cost_tasks: number;
+    p50_seconds: null | number;
+    p95_seconds: null | number;
+  }
+  export interface CostGroup extends CostAggregate {
+    scene?: string;
+    model?: string;
+    prompt_version?: string;
+  }
+  export interface CostSummary {
+    generated_at: string;
+    days: number;
+    default_model: string;
+    pricing: { configured: boolean; input_per_million: number; output_per_million: number };
+    scope: string;
+    summary: CostAggregate;
+    by_scene: CostGroup[];
+    by_model: CostGroup[];
+    by_prompt_version: CostGroup[];
+    coverage: {
+      tasks: number;
+      terminal_tasks: number;
+      run_meta_usage: number;
+      token_budget_only: number;
+      unmetered: number;
+      missing: number;
+      calls: number;
+      unmetered_calls: number;
+      split_unavailable_calls: number;
+      tasks_with_duration: number;
+    };
+    notes: string[];
+  }
 }
 
 // 启动/续跑立即返回编号与状态，工作台通过 GET 更新进度。
@@ -229,4 +273,7 @@ export function getAgentFeedbackSummaryApi(days = 7) {
 }
 export function getAgentFeedbackAdminSummaryApi(days = 7) {
   return requestClient.get<AgentApi.FeedbackAdminSummary>('/ai/feedback/summary/all', { params: { days } });
+}
+export function getAgentCostSummaryApi(days = 30) {
+  return requestClient.get<AgentApi.CostSummary>('/ai/agent/cost-summary', { params: { days } });
 }
