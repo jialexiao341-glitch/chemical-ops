@@ -174,6 +174,10 @@ def test_existing_eta_service_can_participate_without_committing(setup,monkeypat
     s.order.events=[]
     monkeypatch.setattr(service.portal_service,'business_today',lambda:date(2026,10,26))
     monkeypatch.setattr(service.portal_service,'add_audit_log',lambda *a,**kw:None)
+    import app.modules.ai.business_events as business_events
+    recorded=[]
+    monkeypatch.setattr(business_events,'record_delivery_change_event',
+        lambda db,order,update,**kw:(recorded.append(update),None)[1])
     s.db.execute(text('CREATE TABLE supplier_delivery_updates (id INTEGER PRIMARY KEY, po_id INTEGER, supplier_id INTEGER, previous_date DATE, expected_date DATE, note TEXT, submitted_by INTEGER, submitted_at DATETIME)'))
     s.db.commit()
     commits=[]
@@ -184,6 +188,7 @@ def test_existing_eta_service_can_participate_without_committing(setup,monkeypat
     assert result.expected_date==date(2026,10,29) and not commits
     assert s.order.items[0].planned_arrival_date==date(2026,10,29)
     assert s.order.events[-1].event_type=='SUPPLIER_ETA_UPDATE'
+    assert len(recorded)==1 and recorded[0].expected_date==date(2026,10,29)
     s.db.rollback()
     assert s.db.scalar(text('SELECT COUNT(*) FROM supplier_delivery_updates'))==0
     monkeypatch.setattr(s.db,'commit',original_commit)

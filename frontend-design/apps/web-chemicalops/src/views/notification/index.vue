@@ -91,6 +91,13 @@ function onOpenOperationTask(row: NotificationApi.Notification) {
   void router.push({ path: '/operations/exceptions', query: { task_notification: String(row.id) } });
 }
 
+function onOpenOrder(row: NotificationApi.Notification) {
+  if (!hasAccessByCodes(['procurement.orders.read'])) { message.warning('当前账号没有查看采购订单的权限'); return; }
+  if (!row.related_id) return;
+  if (canWriteNotifications.value && row.is_read !== 1) void onRead(row).catch(() => {});
+  void router.push({ path: `/procurement/orders/${row.related_id}` });
+}
+
 async function onOpenFollowup(row: NotificationApi.Notification) {
   if (!row.related_id) return;
   const supplierMode = row.notification_type === 'DELIVERY_FOLLOWUP';
@@ -159,7 +166,7 @@ onMounted(load);
               <span class="text-muted-foreground">{{ record.content }}</span>
             </template>
             <template v-else-if="column.key === 'notification_type'">
-              <Tag>{{ record.notification_type === 'OPERATION_SUGGESTION' ? '运营建议' : record.notification_type }}</Tag>
+              <Tag>{{ record.notification_type === 'OPERATION_SUGGESTION' ? '运营建议' : record.notification_type === 'PURCHASE_ORDER_ETA_CHANGED' ? '交期变更' : record.notification_type }}</Tag>
             </template>
             <template v-else-if="column.key === 'created_at'">
               {{ formatDateTime(record.created_at) }}
@@ -173,6 +180,7 @@ onMounted(load);
               <Button v-if="record.notification_type === 'OPERATION_TASK_ASSIGNED' && hasAccessByCodes(['operations.exceptions.read'])" size="small" type="link" @click="onOpenOperationTask(record)">查看任务</Button>
               <Button v-if="record.notification_type === 'AI_PROPOSAL_PENDING' && canUseAiWorkspace" size="small" type="link" @click="onOpenProposal(record)">查看提案</Button>
               <Button v-if="record.related_type === 'DELIVERY_FOLLOWUP'" size="small" type="link" @click="onOpenFollowup(record)">查看催办</Button>
+              <Button v-if="record.notification_type === 'PURCHASE_ORDER_ETA_CHANGED' && record.related_type === 'PURCHASE_ORDER'" size="small" type="link" @click="onOpenOrder(record)">查看订单</Button>
               <Button
                 v-if="record.notification_type === 'OPERATION_SUGGESTION' && hasAccessByCodes(['operations.exceptions.read'])"
                 size="small"

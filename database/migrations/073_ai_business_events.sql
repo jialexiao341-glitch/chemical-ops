@@ -1,0 +1,25 @@
+-- 业务事件记录：与业务变更同事务写入，按确定性规则分派待办与提醒。
+CREATE TABLE IF NOT EXISTS ai_business_events (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_id VARCHAR(32) NOT NULL,
+    event_type VARCHAR(64) NOT NULL,
+    subject_type VARCHAR(32) NOT NULL,
+    subject_id VARCHAR(64) NOT NULL,
+    subject_version INT NOT NULL,
+    dedup_key VARCHAR(128) NOT NULL,
+    source VARCHAR(64) NOT NULL,
+    actor_id BIGINT UNSIGNED NULL,
+    payload JSON NOT NULL,
+    impact JSON NULL,
+    triage_status VARCHAR(16) NOT NULL,
+    triage JSON NULL,
+    task_type VARCHAR(32) NULL,
+    task_id BIGINT UNSIGNED NULL,
+    created_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ai_business_event_id (event_id),
+    UNIQUE KEY uq_ai_business_event_dedup (dedup_key),
+    KEY ix_ai_business_event_subject (subject_type, subject_id, id),
+    KEY ix_ai_business_event_status (triage_status, created_at),
+    CONSTRAINT fk_ai_business_event_actor FOREIGN KEY (actor_id) REFERENCES sys_users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='业务事件记录';

@@ -335,6 +335,8 @@ def update_expected_delivery(db: Session, user: User, order_id: int, data: Suppl
         event_note=f"供应商更新预计交期：{previous or '未设置'} → {data.expected_date}" + (f"；{data.note}" if data.note else ""),
     ))
     add_audit_log(db, actor_id=user.id, action_type="UPDATE_ETA", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary="供应商更新预计交期", result_status="SUCCESS")
+    from app.modules.ai.business_events import record_delivery_change_event
+    record_delivery_change_event(db, order, update, actor_id=user.id)
     if commit:
         db.commit()
     else:
