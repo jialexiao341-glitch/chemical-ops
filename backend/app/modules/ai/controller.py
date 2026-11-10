@@ -355,6 +355,22 @@ def agent_feedback_admin_summary(days: int = Query(default=7, ge=1, le=90),
     return feedback_service.summary_all(db, days=days)
 
 
+@router.get("/agent/cost-summary", summary="管理员查看 Agent token 与费用聚合")
+def agent_cost_summary(days: int = Query(default=30, ge=1, le=90),
+                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """只返回聚合 token、成功率、耗时和估算费用，不返回任务原文或用户身份。"""
+    if "SYS_ADMIN" not in set(get_user_role_codes(db, user.id)):
+        raise AuthorizationError("仅管理员可查看 Agent 成本聚合")
+    from app.core.config import get_settings
+    from app.modules.ai import cost_report
+    settings = get_settings()
+    return cost_report.summary(
+        db, days=days,
+        price_in=settings.llm_price_input_per_million,
+        price_out=settings.llm_price_output_per_million,
+        default_model=settings.llm_model)
+
+
 @router.get("/feedback/summary", response_model=AIFeedbackSummary, summary="汇总本人 Agent 反馈")
 def agent_feedback_summary(days: int = Query(default=7, ge=1, le=90),
                            db: Session = Depends(get_db), user: User = Depends(get_current_user)):
