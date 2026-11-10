@@ -227,7 +227,7 @@ feat(ai): 增加 Agent 运行元数据与提示词版本记录
   - 断言分类和建议正确，不断言队列重试次数。
 - 现有运行时测试通过；不改变现有重试次数和超时配置。
 
-**T3b 已知差异**：现有 `transient()` 将所有 `httpx.TransportError` 视为可重试；`task_max_attempts=3` 时最多重试两次，与上述策略建议不一致，后续单独处理。
+**T3b 已处理**：`transient()` 仅将连接尚未建立的安全错误（ConnectError、ConnectTimeout、PoolTimeout、ConnectionError、OperationalError）和可重试状态码视为可重试；读超时/断流不再自动重放，由错误策略给出核对建议。该约束由 `tests/test_task_queue_retry_classification.py` 覆盖。
 
 **提交信息**
 
@@ -402,6 +402,6 @@ python -m compileall -q backend/app tests
 | --- | --- | --- | --- |
 | T1 Prompt Registry | 已完成 |  | 实现为 prompt_registry.py 与快照测试；真实模型回归尚未重跑 |
 | T2 Trace v2 | 已完成 |  | 已补充路由票据版本记录及错误分类保留回归；真实模型和完整 MySQL 环境尚未验收 |
-| T3 Error Policy | 已完成 |  | 分类和恢复动作仅为建议；队列重试差异留待 T3b |
+| T3 Error Policy | 已完成 |  | 分类和恢复动作仅为建议；队列 transient 已收敛为安全连接错误，读超时/断流不自动重放 |
 | T4 Context Assembler | 已实现（待验收） |  | 已通过离线上下文及 Agent 回归；真实模型 token 估算偏差尚未验证 |
 | T5 Eval Gate | 已实现（待验收） |  | `scripts/compare_eval_reports.py` 支持三类评测报告对比、逐用例回归清单与 `--fail-on-regression`；新增 `scripts/run_eval_suite.py` 与 `scripts/eval_prompt_gate.py`，基线按 routing+planner 版本登记；仅在离线夹具上验证，尚未与真实模型报告交叉验收 |
