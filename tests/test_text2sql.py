@@ -237,7 +237,7 @@ class _FakeDB:
         return _FakeResult()
 
 
-def test_text2sql_runs_the_langgraph_stages(monkeypatch):
+def test_text2sql_runs_the_query_stages(monkeypatch):
     from app.modules.ai import routing, capabilities
     monkeypatch.setattr(capabilities, "build_capability_manifest", lambda *_: {"analytics_datasets": [{"key":"purchase_orders"}]})
     async def understand(*args, **kwargs):

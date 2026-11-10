@@ -116,7 +116,7 @@ class AIMessage(Base):
 
 
 class AIConversationState(Base):
-    """会话级结构化状态；不把 LangGraph 内部 checkpoint 混入用户消息。"""
+    """会话级结构化状态；不把任务执行 checkpoint 混入用户消息。"""
 
     __tablename__ = "ai_conversation_state"
 

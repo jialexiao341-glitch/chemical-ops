@@ -10,7 +10,6 @@ from time import perf_counter
 from typing import TypedDict
 from uuid import uuid4
 
-from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -1084,7 +1083,7 @@ async def _drive(db: Session, user: User, state: RunState, settings: Settings) -
 
 
 async def _drive_impl(db: Session, user: User, state: RunState, settings: Settings) -> TaskRead:
-    """运行 LangGraph 条件循环并逐步留档；超限/异常安全停止，不执行业务写入。"""
+    """运行任务决策循环并逐步留档；超限/异常安全停止，不执行业务写入。"""
     from app.core.observability import metrics
 
     execution_started = perf_counter()
@@ -1284,21 +1283,17 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         await _offload_db_call(_persist, db, user, current)
         return {"data": current}
 
-    def route(graph_state: GraphState) -> str:
-        """仅处于 RUNNING 且动作是调用工具时继续执行，等待/完成/失败均结束。"""
-        return "execute" if graph_state["data"].status == "RUNNING" else END
-
-    graph = StateGraph(GraphState)
-    graph.add_node("plan", plan)
-    graph.add_node("execute", execute)
-    graph.add_edge(START, "plan")
-    graph.add_conditional_edges("plan", route, {"execute": "execute", END: END})
-    graph.add_conditional_edges("execute", lambda value: "plan" if value["data"].status == "RUNNING" else END,
-                                {"plan": "plan", END: END})
     try:
         with agent_task_deadline_context(settings.agent_task_timeout_seconds):
             async with asyncio.timeout(settings.agent_task_timeout_seconds):
-                await graph.compile().ainvoke({"data": state}, config={"recursion_limit": settings.agent_max_steps * 2 + 6})
+                graph_state: GraphState = {"data": state}
+                while True:
+                    graph_state = await plan(graph_state)
+                    if graph_state["data"].status != "RUNNING":
+                        break
+                    graph_state = await execute(graph_state)
+                    if graph_state["data"].status != "RUNNING":
+                        break
     except TaskInterrupted:
         return await _offload_db_call(get_task, db, user, state.task_id)
     except Exception as exc:

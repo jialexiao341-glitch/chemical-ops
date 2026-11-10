@@ -14,10 +14,7 @@ import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, TypedDict
-from uuid import uuid4
 
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph
 from sqlalchemy import Select, and_, case, desc, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.orm import Session, aliased
 from pydantic import ValidationError
@@ -1572,23 +1569,11 @@ async def run_text2sql(
             "stages": [*state.get("stages", []), "execution"],
         }
 
-    graph = StateGraph(Text2SQLState)
-    graph.add_node("query_understanding", understand)
-    graph.add_node("slot_filling", validate_plan_node)
-    graph.add_node("query_planning", generate_sql)
-    graph.add_node("sql_validation", validate_sql_node)
-    graph.add_node("execution", execute)
-    graph.add_edge(START, "query_understanding")
-    graph.add_edge("query_understanding", "slot_filling")
-    graph.add_edge("slot_filling", "query_planning")
-    graph.add_edge("query_planning", "sql_validation")
-    graph.add_edge("sql_validation", "execution")
-    graph.add_edge("execution", END)
-    app = graph.compile(checkpointer=MemorySaver())
-    state = await app.ainvoke(
-        {"question": request.question, "request_limit": request.limit, "previous_plan": previous_plan, "stages": []},
-        config={"configurable": {"thread_id": thread_id or f"text2sql:{user.id}:{uuid4().hex}"}},
-    )
+    state: Text2SQLState = {"question": request.question, "request_limit": request.limit,
+                            "previous_plan": previous_plan, "stages": []}
+    state.update(await understand(state))
+    for stage in (validate_plan_node, generate_sql, validate_sql_node, execute):
+        state.update(await asyncio.to_thread(stage, state))
     return Text2SQLResponse(
         question=request.question,
         plan=state["plan"],
