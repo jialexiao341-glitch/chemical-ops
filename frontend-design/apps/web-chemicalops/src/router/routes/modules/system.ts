@@ -62,6 +62,16 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        name: 'SystemAiOperations',
+        path: 'ai-operations',
+        component: () => import('#/views/system/ai-operations/index.vue'),
+        meta: {
+          authority: ['SYS_ADMIN'],
+          icon: 'lucide:brain-circuit',
+          title: 'AI 运行分析',
+        },
+      },
+      {
         name: 'SystemMonitoring',
         path: 'monitoring',
         component: () => import('#/views/system/monitoring/index.vue'),

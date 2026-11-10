@@ -61,15 +61,15 @@ const [Modal, modalApi] = useVbenModal<null | SelectQuotePayload>({
       modalApi.close();
       ConfirmModal.confirm({
         title: '确认中选报价',
-        content: `询价单 ${data.rfqNo}，比价结果 ${data.comparisonNo}。确认选择 ${data.supplierName}（${data.quoteNo}）？确认后询价单关闭，其他已提交报价会被拒绝。若暂不确认，提案会保留在 Agent Inbox。`,
+        content: `询价单 ${data.rfqNo}，比价结果 ${data.comparisonNo}。确认选择 ${data.supplierName}（${data.quoteNo}）？确认后询价单关闭，其他已提交报价会被拒绝。若暂不确认，提案会保留在「待确认提案」。`,
         okText: '确认中选',
-        cancelText: '稍后在 Inbox 处理',
+        cancelText: '稍后在待确认提案处理',
         onOk: async () => {
           await confirmActionProposalApi(proposal.confirmation_id, proposal.preview_version);
           message.success('已确认中选报价');
           emit('success');
         },
-        onCancel: () => message.info('中选提案已保留在 Agent Inbox'),
+        onCancel: () => message.info('中选提案已保留在「待确认提案」'),
       });
     } catch {
       // 请求层已统一弹出后端返回的中文错误，这里保持弹窗打开，

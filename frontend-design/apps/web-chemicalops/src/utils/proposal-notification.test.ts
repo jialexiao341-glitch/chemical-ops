@@ -3,7 +3,7 @@ import { operationTaskNotificationLink, parseProposalNotificationId, proposalNot
 
 describe('提案通知跳转', () => {
   it('仅为提案通知生成通知编号入口', () => {
-    expect(proposalNotificationLink({ id: 42, notification_type: 'AI_PROPOSAL_PENDING', related_type: 'AI_ACTION_PROPOSAL' })).toBe('/ai/tasks?proposal_notification=42');
+    expect(proposalNotificationLink({ id: 42, notification_type: 'AI_PROPOSAL_PENDING', related_type: 'AI_ACTION_PROPOSAL' })).toBe('/ai/proposals?proposal_notification=42');
     expect(proposalNotificationLink({ id: 42, notification_type: 'OPERATION_SUGGESTION', related_type: 'AI_ACTION_PROPOSAL' })).toBeUndefined();
     expect(proposalNotificationLink({ id: 42, notification_type: 'AI_PROPOSAL_PENDING', related_type: 'OTHER' })).toBeUndefined();
   });

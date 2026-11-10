@@ -1682,7 +1682,8 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
               <Button class="inline-flex items-center gap-2">更多 <IconifyIcon class="size-4 text-slate-500" icon="lucide:chevron-down" /></Button>
               <template #popupRender>
                 <div class="supplier-record-menu">
-                  <button type="button" @click="moreMenuOpen = false; router.push('/ai/tasks')">Agent Inbox</button>
+                  <button type="button" @click="moreMenuOpen = false; router.push('/ai/proposals')">待确认提案</button>
+                  <button type="button" @click="moreMenuOpen = false; router.push('/ai/tasks')">任务记录</button>
                   <button type="button" @click="moreMenuOpen = false; router.push('/ai/documents')">业务文档</button>
                 </div>
               </template>

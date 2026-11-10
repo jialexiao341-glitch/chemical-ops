@@ -200,9 +200,9 @@ async function createBatchFollowups() {
   }
 }
 
-function goToProposalInbox() {
+function goToProposals() {
   batchVisible.value = false;
-  router.push({ name: 'AiTaskHistory' });
+  router.push({ name: 'AiProposals' });
 }
 
 onMounted(async () => {
@@ -283,12 +283,12 @@ watch(
           </p>
         </div>
         <p class="text-muted-foreground">
-          草稿尚未保存；请到任务中心逐条核对并确认。
+          草稿尚未保存；请到待确认提案逐条核对并确认。
         </p>
         <div class="flex justify-end gap-2">
           <Button @click="batchVisible = false">关闭</Button>
-          <Button type="primary" @click="goToProposalInbox">
-            去任务中心逐条确认
+          <Button type="primary" @click="goToProposals">
+            去待确认提案逐条确认
           </Button>
         </div>
       </div>

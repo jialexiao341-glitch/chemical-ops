@@ -2,7 +2,7 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { OperationExceptionApi } from '#/api';
 import { ref } from 'vue';
-import { useVbenDrawer } from '@vben/common-ui';
+import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Button, Select, message } from 'antdv-next';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getExceptionApi, getMyOperationTaskApi, getMyOperationTasksApi } from '#/api';
@@ -10,7 +10,7 @@ import { TASK_STATUS_DICT, PRIORITY_DICT } from '#/constants/dictionary';
 import { formatDateTime } from '#/utils/format';
 import DetailDrawer from '#/views/operations/exceptions/modules/detail.vue';
 
-defineOptions({ name: 'MyOperationTasks' });
+defineOptions({ name: 'OperationMyTasks' });
 const status = ref('ACTIVE');
 const options = [
   { label: '待处理', value: 'ACTIVE' }, { label: '全部状态', value: 'ALL' },
@@ -40,11 +40,13 @@ async function openTask(row: OperationExceptionApi.MyTask) {
 }
 </script>
 <template>
-  <div class="flex h-full flex-col gap-3">
-    <section class="rounded bg-card p-4 flex items-center justify-end gap-3">
-      <div class="flex items-center gap-2"><Select v-model:value="status" :options="options" class="w-40" /><Button type="primary" @click="gridApi.query()">搜索</Button></div>
-    </section>
-    <Detail @success="gridApi.query()" />
-    <Grid table-title="分配给我" />
-  </div>
+  <Page auto-content-height>
+    <div class="flex h-full flex-col gap-3">
+      <section class="rounded bg-card p-4 flex items-center justify-end gap-3">
+        <div class="flex items-center gap-2"><Select v-model:value="status" :options="options" class="w-40" /><Button type="primary" @click="gridApi.query()">搜索</Button></div>
+      </section>
+      <Detail @success="gridApi.query()" />
+      <Grid table-title="我的任务" />
+    </div>
+  </Page>
 </template>

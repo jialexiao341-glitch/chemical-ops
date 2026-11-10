@@ -57,7 +57,7 @@ from app.modules.inventory_cost.controller import router as inventory_cost_route
 from app.modules.jobs.controller import router as jobs_router
 from app.modules.jobs.service import run_scheduled_alert_scan
 from app.modules.dashboard.controller import router as dashboard_router
-from app.modules.ai.controller import router as ai_router
+from app.modules.ai.controller import router as ai_router, suggestion_router as ai_suggestion_router
 from app.modules.ai.lifecycle import cleanup_expired_ai_records
 from app.modules.insights.controller import router as insights_router
 from app.modules.monitoring.controller import router as monitoring_router
@@ -498,6 +498,7 @@ app.include_router(inventory_cost_router, prefix=settings.api_prefix)
 app.include_router(jobs_router, prefix=settings.api_prefix)
 app.include_router(dashboard_router, prefix=settings.api_prefix)
 app.include_router(ai_router, prefix=settings.api_prefix)
+app.include_router(ai_suggestion_router, prefix=settings.api_prefix)
 app.include_router(insights_router, prefix=settings.api_prefix)
 app.include_router(monitoring_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)

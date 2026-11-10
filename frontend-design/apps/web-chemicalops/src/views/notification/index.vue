@@ -72,17 +72,17 @@ function onToggleUnread(value: boolean | string | number) {
 }
 
 function onUseSuggestion() {
-  if (!canUseAiWorkspace.value || !hasAccessByCodes(['operations.exceptions.read'])) {
+  if (!hasAccessByCodes(['operations.exceptions.read'])) {
     message.warning('当前账号没有查看运营建议的权限');
     return;
   }
-  void router.push({ path: '/ai/tasks', query: { inbox: 'suggestions' } });
+  void router.push({ path: '/operations/suggestions' });
 }
 
 function onOpenProposal(row: NotificationApi.Notification) {
-  if (!canUseAiWorkspace.value) { message.warning('当前账号没有 AI 工作台权限'); return; }
+  if (!canUseAiWorkspace.value) { message.warning('当前账号没有 AI 中心权限'); return; }
   if (canWriteNotifications.value && row.is_read !== 1) void onRead(row).catch(() => {});
-  void router.push({ path: '/ai/tasks', query: { proposal_notification: String(row.id) } });
+  void router.push({ path: '/ai/proposals', query: { proposal_notification: String(row.id) } });
 }
 
 function onOpenOperationTask(row: NotificationApi.Notification) {
@@ -174,7 +174,7 @@ onMounted(load);
               <Button v-if="record.notification_type === 'AI_PROPOSAL_PENDING' && canUseAiWorkspace" size="small" type="link" @click="onOpenProposal(record)">查看提案</Button>
               <Button v-if="record.related_type === 'DELIVERY_FOLLOWUP'" size="small" type="link" @click="onOpenFollowup(record)">查看催办</Button>
               <Button
-                v-if="record.notification_type === 'OPERATION_SUGGESTION' && canUseAiWorkspace"
+                v-if="record.notification_type === 'OPERATION_SUGGESTION' && hasAccessByCodes(['operations.exceptions.read'])"
                 size="small"
                 type="link"
                 @click="onUseSuggestion()"

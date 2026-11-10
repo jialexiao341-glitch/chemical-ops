@@ -3,6 +3,7 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { OperationSuggestion } from '#/api/ai';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { Page } from '@vben/common-ui';
 import { useAccess } from '@vben/access';
 import { Button, Modal, Select, message } from 'antdv-next';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
@@ -10,9 +11,10 @@ import { getOperationSuggestionApi, getOperationSuggestionsApi, handleOperationS
 import { requestClient } from '#/api/request';
 import { notifyNotificationChanged } from '#/api/core/notification';
 
-defineOptions({ name: 'OperationSuggestionInbox' });
+defineOptions({ name: 'OperationSuggestions' });
 const { hasAccessByCodes } = useAccess();
 const router = useRouter();
+const canUseAiWorkspace = computed(() => hasAccessByCodes(['ai.workspace.read']));
 const status = ref<string>();
 const selected = ref<OperationSuggestion>();
 const open = ref(false);
@@ -77,19 +79,21 @@ async function handle(action: 'ignore' | 'close' | 'handoff') {
 }
 </script>
 <template>
-  <div class="flex h-full flex-col gap-3">
-    <section class="rounded bg-card p-4 flex flex-wrap items-center justify-between gap-3">
-      <span class="text-sm text-muted-foreground" role="status">{{ statusText }}</span>
-      <div class="ml-auto flex items-center gap-2"><Button v-if="hasAccessByCodes(['operations.exceptions.write'])" :loading="scanning" @click="scanAlerts">立即扫描</Button><Select v-model:value="status" :options="options" allow-clear placeholder="全部状态" class="w-40" /><Button @click="status = undefined; gridApi.query()">重置</Button><Button type="primary" @click="gridApi.query()">搜索</Button></div>
-    </section>
-    <Grid table-title="Agent Inbox · 运营建议" />
-    <Modal v-model:open="open" title="运营建议详情" :footer="null" width="760px">
-      <div v-if="busy && !selected" role="status">正在读取建议…</div>
-      <template v-else-if="selected">
-        <div class="space-y-3"><p>异常编号：<Button type="link" @click="router.push({ path: '/operations/exceptions', query: { exception_id: selected.exception_id } })">{{ selected.exception_no }}</Button></p><p>建议：{{ selected.title }}</p><p>状态：{{ labels[selected.status] }}（异常状态：{{ selected.exception_status }}）</p><p class="whitespace-pre-wrap">{{ selected.content }}</p><p v-if="selected.task_id">人工处理任务编号：{{ selected.task_id }}</p></div>
-        <div v-if="selected.status === 'OPEN'" class="mt-4"><Button @click="router.push({ path: '/ai/workspace', query: { prompt: selected.instruction } })">让 Agent 处理</Button></div>
-        <div v-if="selected.status === 'OPEN' && hasAccessByCodes(['operations.exceptions.write'])" class="mt-4 flex justify-end gap-2 border-t border-border pt-4"><Button :disabled="busy" @click="handle('ignore')">忽略</Button><Button :disabled="busy" @click="handle('close')">关闭</Button><Button v-if="!(['CLOSED', 'CANCELLED'].includes(selected.exception_status))" type="primary" :loading="busy" @click="handle('handoff')">转人工处理</Button></div>
-      </template>
-    </Modal>
-  </div>
+  <Page auto-content-height>
+    <div class="flex h-full flex-col gap-3">
+      <section class="rounded bg-card p-4 flex flex-wrap items-center justify-between gap-3">
+        <span class="text-sm text-muted-foreground" role="status">{{ statusText }}</span>
+        <div class="ml-auto flex items-center gap-2"><Button v-if="hasAccessByCodes(['operations.exceptions.write'])" :loading="scanning" @click="scanAlerts">立即扫描</Button><Select v-model:value="status" :options="options" allow-clear placeholder="全部状态" class="w-40" /><Button @click="status = undefined; gridApi.query()">重置</Button><Button type="primary" @click="gridApi.query()">搜索</Button></div>
+      </section>
+      <Grid table-title="运营建议" />
+      <Modal v-model:open="open" title="运营建议详情" :footer="null" width="760px">
+        <div v-if="busy && !selected" role="status">正在读取建议…</div>
+        <template v-else-if="selected">
+          <div class="space-y-3"><p>异常编号：<Button type="link" @click="router.push({ path: '/operations/exceptions', query: { exception_id: selected.exception_id } })">{{ selected.exception_no }}</Button></p><p>建议：{{ selected.title }}</p><p>状态：{{ labels[selected.status] }}（异常状态：{{ selected.exception_status }}）</p><p class="whitespace-pre-wrap">{{ selected.content }}</p><p v-if="selected.task_id">人工处理任务编号：{{ selected.task_id }}</p></div>
+          <div v-if="selected.status === 'OPEN' && canUseAiWorkspace" class="mt-4"><Button @click="router.push({ path: '/ai/workspace', query: { prompt: selected.instruction } })">让 Agent 处理</Button></div>
+          <div v-if="selected.status === 'OPEN' && hasAccessByCodes(['operations.exceptions.write'])" class="mt-4 flex justify-end gap-2 border-t border-border pt-4"><Button :disabled="busy" @click="handle('ignore')">忽略</Button><Button :disabled="busy" @click="handle('close')">关闭</Button><Button v-if="!(['CLOSED', 'CANCELLED'].includes(selected.exception_status))" type="primary" :loading="busy" @click="handle('handoff')">转人工处理</Button></div>
+        </template>
+      </Modal>
+    </div>
+  </Page>
 </template>
