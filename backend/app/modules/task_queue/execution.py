@@ -105,6 +105,7 @@ def run_documents(execution_id, token):
                 raise PermanentTaskError("DOCUMENT_SOURCE_CHANGED")
             checkpoints[stage] = {"source_hash": current_hash, "result": stage_result}
             execution.checkpoint = {**execution.checkpoint, "stages": checkpoints}
+            execution.updated_at = service.now()
             db.commit()
         service.locked_execution(db, execution_id, token)
         if action == "fetch":

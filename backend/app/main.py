@@ -56,6 +56,8 @@ from app.modules.files.controller import router as files_router
 from app.modules.inventory_cost.controller import router as inventory_cost_router
 from app.modules.jobs.controller import router as jobs_router
 from app.modules.jobs.service import run_scheduled_alert_scan
+from app.modules.task_queue.controller import router as task_queue_router
+from app.modules.task_queue.progress import run_progress_scan
 from app.modules.dashboard.controller import router as dashboard_router
 from app.modules.ai.controller import router as ai_router, suggestion_router as ai_suggestion_router
 from app.modules.ai.lifecycle import cleanup_expired_ai_records
@@ -93,6 +95,18 @@ async def _business_alert_scheduler() -> None:
             await asyncio.to_thread(run_scheduled_alert_scan)
         except Exception:
             LOGGER.exception("定时业务提醒扫描失败")
+
+
+async def _task_progress_scheduler() -> None:
+    """按配置间隔诊断活动任务；只记录指标与日志，不自动取消。"""
+
+    interval = max(30, settings.task_progress_interval_seconds)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(run_progress_scan)
+        except Exception:
+            LOGGER.exception("任务进展诊断扫描失败")
 
 
 def _configure_logging() -> None:
@@ -262,10 +276,21 @@ async def lifespan(app: FastAPI):
         else None
     )
     app.state.business_alert_scheduler_task = scheduler_task
+    progress_task = (
+        asyncio.create_task(_task_progress_scheduler())
+        if database_ready and settings.task_progress_scheduler_enabled
+        else None
+    )
+    app.state.task_progress_scheduler_task = progress_task
     try:
         yield
     finally:
         app.state.business_alert_scheduler_task = None
+        app.state.task_progress_scheduler_task = None
+        if progress_task is not None:
+            progress_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await progress_task
         if cleanup_task is not None:
             cleanup_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -496,6 +521,7 @@ app.include_router(supplier_portal_collaboration_router, prefix=settings.api_pre
 app.include_router(files_router, prefix=settings.api_prefix)
 app.include_router(inventory_cost_router, prefix=settings.api_prefix)
 app.include_router(jobs_router, prefix=settings.api_prefix)
+app.include_router(task_queue_router, prefix=settings.api_prefix)
 app.include_router(dashboard_router, prefix=settings.api_prefix)
 app.include_router(ai_router, prefix=settings.api_prefix)
 app.include_router(ai_suggestion_router, prefix=settings.api_prefix)
