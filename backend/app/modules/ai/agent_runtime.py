@@ -45,6 +45,7 @@ from app.modules.ai.schema import (
     Workflow,
 )
 from app.modules.ai import agent_tools as tools, service, routing, prompt_registry
+from app.modules.ai.evidence_store import make_ref
 from app.modules.ai.tool_sql_timeout import (
     ToolExecutionTimeout,
     ToolTimeoutUnsupported,
@@ -97,6 +98,7 @@ verified_product_id/verified_rfq_item_id 才是本轮已核验对象；必须使
 用户要求同时查库存与报价时，应在同一目标内连续调用库存与报价工具（报价先按需 find_rfq_items），并同时引用两类证据；不可只完成其中一项，也不要拆成多轮或先请用户确认。
 用户明确给出产品名称、编码、化学品名称、已登记别名或 CAS 时直接检索，不因名称含“停用”等文字而跳过目录查询。
 finish 不含自由编写的事实，服务端将从工具证据生成结果，不能编造库存/价格。
+工具结果出现 planner_truncated 或 planner_sources_truncated 时，摘要里会带 spill_ref；需要查看被截断的明细时调用 evidence.read 按页读取。evidence.read 只返回历史快照，不构成完成证据，也不能替代库存/报价的当前查询。
 workflow.rfq_no 是从用户询价语境提取的原始条件，与产品名称/编码分开；它不要求 RFQ 前缀，禁止把它交给 catalog.search_products。
 产品已核验后保持其身份，直接查询库存或定位询价；只有用户明确更换产品才重新搜索其他产品。
 """
@@ -137,6 +139,13 @@ def _empty_usage_totals() -> dict[str, int]:
     """单任务累计用量；calls 含无 usage 的调用，便于成本报告显示覆盖率。"""
     return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
             "unmetered_calls": 0, "split_unavailable_calls": 0}
+
+
+def _timings(state: RunState) -> dict[str, float | int]:
+    """按任务累计模型与工具耗时，供进展诊断区分慢在哪一段。"""
+    return state.run_meta.setdefault("timings", {
+        "llm_seconds": 0.0, "tool_seconds": 0.0, "llm_calls": 0, "tool_calls": 0,
+    })
 
 
 def _token_count(usage: dict, *names: str) -> int | None:
@@ -384,7 +393,9 @@ def _reap_unclaimed_task(db: Session, task: AIAgentTask) -> AIAgentTask:
 def _check_trace_access(db: Session, user: User, trace: list[dict]) -> list[dict]:
     """读取/发送历史证据前重查权限及仓库/询价范围，防授权变化泄漏旧结果。"""
     catalog = tools.list_tools(db, user)
-    names = {item["name"] for item in catalog}
+    # 轨迹可能包含历史 evidence.read 步骤；该工具由运行时按任务上下文注入，
+    # 不出现在通用工具目录里。
+    names = {item["name"] for item in catalog} | {"evidence.read"}
     warehouses = tools.accessible_warehouse_ids(db, user)
     roles = set(tools.get_user_role_codes(db, user.id))
     stage_permissions = {
@@ -604,9 +615,12 @@ def _persist(db: Session, user: User, state: RunState) -> None:
                                 "token_budget": {"limit": state.llm_token_limit or get_settings().agent_max_total_tokens,
                                                  "used_tokens": state.llm_tokens_used,
                                                  "estimated_tokens": state.llm_tokens_estimated,
-                                                 "calls": state.llm_calls}}
+                                                 "calls": state.llm_calls},
+                                "timings": dict(state.run_meta.get("timings") or {})}
+        from app.modules.task_queue import service as queue_service
+        # 检查点推进才算实质进展；心跳本身不刷新该时间，供进展监控区分存活与推进。
+        execution.updated_at = queue_service.now()
         if state.status != "RUNNING":
-            from app.modules.task_queue import service as queue_service
             db.flush()  # Preserve the terminal checkpoint before the fresh locking read.
             queue_service.finish(db, execution.id, execution.fencing_token,
                                  status=state.status, error_code=state.error_code)
@@ -668,7 +682,7 @@ def _ensure_agent_capabilities(decision: Understanding, catalog: set[str]) -> No
         raise AuthorizationError("当前账号没有执行该 Agent 查询所需的读取权限")
 
 
-def _planner_view(entry: dict) -> dict:
+def _planner_view(entry: dict, task_id: str | None = None) -> dict:
     """给规划器一个可解释的工具结果摘要；完整证据仍保留在任务轨迹中。"""
     result = entry.get("result")
     if entry.get("action") != "call_tool" or not isinstance(result, dict):
@@ -677,7 +691,8 @@ def _planner_view(entry: dict) -> dict:
     sources = result.get("sources")
     rows_truncated = isinstance(rows, list) and len(rows) > PLANNER_RESULT_ROW_LIMIT
     sources_truncated = isinstance(sources, list) and len(sources) > PLANNER_RESULT_ROW_LIMIT
-    if not rows_truncated and not sources_truncated:
+    tool_truncated = result.get("truncated") is True
+    if not rows_truncated and not sources_truncated and not tool_truncated:
         return entry
     compact = {
         **entry,
@@ -685,6 +700,10 @@ def _planner_view(entry: dict) -> dict:
             **result,
         },
     }
+    if tool_truncated:
+        compact["result"]["planner_truncated"] = True
+        compact["result"].setdefault(
+            "planner_note", "工具已截断明细；完整内容可按 spill_ref 续读，不要为同一批数据重复调用工具。")
     if rows_truncated:
         compact["result"]["rows"] = rows[:PLANNER_RESULT_ROW_LIMIT]
         compact["result"]["planner_truncated"] = True
@@ -695,6 +714,9 @@ def _planner_view(entry: dict) -> dict:
     if sources_truncated:
         compact["result"]["sources"] = sources[:PLANNER_RESULT_ROW_LIMIT]
         compact["result"]["planner_sources_truncated"] = True
+    if task_id is not None and (rows_truncated or sources_truncated or tool_truncated):
+        compact["result"]["spill_ref"] = make_ref(task_id, entry["step"])
+        compact["result"]["spill_hint"] = "完整结果可按页读取；引用只读且不改变当前权限。"
     return compact
 
 
@@ -708,7 +730,7 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
     """复用模型 HTTP 超时/错误处理，严格解析一种下一步动作，不解析自由文本指令。"""
     payload = {"messages": _decision_messages(state.messages),
         "tools": [{k: item[k] for k in ("name", "description", "input_schema")} for item in catalog],
-        "current_turn_steps": [_planner_view(entry) for entry in state.trace[state.turn_start:]],
+        "current_turn_steps": [_planner_view(entry, state.task_id) for entry in state.trace[state.turn_start:]],
         "recent_task_memory": state.memory_state,
         "workflow": state.workflow.model_dump(mode="json"),
         "selected_product_id": state.selected_product, "selected_rfq_item_id": state.selected_rfq_item,
@@ -729,21 +751,27 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
     context = assemble(payload)
     model_settings = settings.model_copy(update={"llm_max_tokens": min(settings.llm_max_tokens, 2048),
         "llm_max_retries": 0})
-    for attempt in range(2):
-        reply = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
-            model_settings, response_format={"type": "json_object"}, system_prompt=prompt_registry.get_prompt("planner"), interpret_only=True)
-        try:
-            return ACTION.validate_json(reply.message.content)
-        except ValidationError:
-            if attempt:
-                raise
-            # 格式修复发生在执行工具之前，不重试任何业务调用。
-            correction = json.loads(context)
-            correction["format_correction"] = "上一动作未通过严格 JSON schema 校验；请仅输出符合 action schema 的 JSON，不添加身份字段。"
+    timing = _timings(state)
+    started = perf_counter()
+    try:
+        for attempt in range(2):
+            reply = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
+                model_settings, response_format={"type": "json_object"}, system_prompt=prompt_registry.get_prompt("planner"), interpret_only=True)
             try:
-                context = assemble(correction)
-            except BusinessValidationError:
-                raise BusinessValidationError("CONTEXT_LIMIT") from None
+                return ACTION.validate_json(reply.message.content)
+            except ValidationError:
+                if attempt:
+                    raise
+                # 格式修复发生在执行工具之前，不重试任何业务调用。
+                correction = json.loads(context)
+                correction["format_correction"] = "上一动作未通过严格 JSON schema 校验；请仅输出符合 action schema 的 JSON，不添加身份字段。"
+                try:
+                    context = assemble(correction)
+                except BusinessValidationError:
+                    raise BusinessValidationError("CONTEXT_LIMIT") from None
+    finally:
+        timing["llm_seconds"] = round(float(timing["llm_seconds"]) + (perf_counter() - started), 3)
+        timing["llm_calls"] = int(timing["llm_calls"]) + 1
 
 
 def _quality_report_summary(evidence: dict | None) -> list[str]:
@@ -1098,6 +1126,10 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         catalog = await _offload_db_call(_check_trace_access, db, user, current.trace)
         if execution_context.identity() and not catalog:
             raise AuthorizationError("当前没有可用的任务工具权限")
+        planner_catalog = list(catalog)
+        evidence_entry = tools.catalog_entry("evidence.read")
+        if evidence_entry is not None:
+            planner_catalog.append(evidence_entry)
         if current.memory_state.get("route_turn") != len(current.messages):
             context = {"memory": current.memory_state, "messages": current.messages[:-1]}
             from app.modules.ai import capabilities
@@ -1172,7 +1204,7 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             current.action = None
         current.decisions += 1
         metrics.increment("agent_steps", labels={"step": "plan"})
-        current.action = current.action or _resume_action(current) or _constrain_action(current, await _decide(current, catalog, settings))
+        current.action = current.action or _resume_action(current) or _constrain_action(current, await _decide(current, planner_catalog, settings))
         await _offload_db_call(_assert_running, db, user, current)
         if isinstance(current.action, AskAction):
             current.status, current.reply = "WAITING_INPUT", current.action.question
@@ -1182,6 +1214,12 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             _append_memory_context(current.memory_state, "assistant", current.reply)
             await _offload_db_call(_persist, db, user, current)
         elif isinstance(current.action, FinishAction):
+            # 续读只是辅助，不作为完成证据；即使模型误引用也先剔除再校验。
+            current.action.evidence_steps = [
+                step for step in current.action.evidence_steps
+                if not any(item.get("step") == step and item.get("tool") == "evidence.read"
+                           for item in current.trace)
+            ]
             entries = [entry for entry in current.trace[current.turn_start:]
                        if entry["step"] in current.action.evidence_steps and entry.get("status") == "SUCCEEDED"
                        and entry.get("action") == "call_tool"]
@@ -1253,7 +1291,8 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                     tools.execute_tool, db, user, ToolCall(tool=action.tool, arguments=action.arguments))
             if perf_counter() > deadline:
                 raise TimeoutError()
-            entry.update(status="SUCCEEDED", result=result.model_dump(mode="json"))
+            entry.update(status="SUCCEEDED", result=result.model_dump(mode="json"),
+                         captured_at=_now().isoformat())
             current.failures = 0
             await _offload_db_call(_resolve_candidates, current, entry["result"], db)
         except ToolExecutionTimeout:
@@ -1280,6 +1319,9 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                                                              "result": entry["status"].lower()})
             metrics.observe("agent_tool_duration_seconds", perf_counter() - tool_started,
                             labels={"tool": action.tool})
+            timing = _timings(current)
+            timing["tool_seconds"] = round(float(timing["tool_seconds"]) + (perf_counter() - tool_started), 3)
+            timing["tool_calls"] = int(timing["tool_calls"]) + 1
         await _offload_db_call(_persist, db, user, current)
         return {"data": current}
 

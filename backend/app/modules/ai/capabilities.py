@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.modules.ai.agent_tools import TOOLS
+from app.modules.ai.agent_tools import RUNTIME_ONLY_TOOLS, TOOLS
 from app.modules.ai.catalog import CATALOG, DatasetSpec
 from app.modules.ai.schema import CapabilityManifest
 from app.modules.inventory.service import accessible_warehouse_ids
@@ -153,7 +153,8 @@ def build_capability_manifest(db: Session, user: User) -> CapabilityManifest:
                 "input_schema": spec.input_schema.model_json_schema(),
             }
             for spec in TOOLS.values()
-            if admin or {spec.permission, *spec.additional_permissions} <= permissions
+            if spec.name not in RUNTIME_ONLY_TOOLS
+            and (admin or {spec.permission, *spec.additional_permissions} <= permissions)
         ]
 
     datasets = []

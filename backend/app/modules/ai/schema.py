@@ -775,6 +775,32 @@ class QuoteInput(ToolSchema):
     limit: Annotated[int, Field(strict=True, ge=1, le=100)] = 20
 
 
+class EvidenceReadInput(ToolSchema):
+    """按任务轨迹引用分页读取已保存的只读结果；引用不授予任何新权限。"""
+
+    ref: str = Field(min_length=10, max_length=96, pattern=r"^task:[0-9a-f]{32}/step:[0-9]{1,6}$")
+    offset: Annotated[int, Field(strict=True, ge=0, le=100_000)] = 0
+    limit: Annotated[int, Field(strict=True, ge=1, le=50)] = 10
+
+
+class EvidencePage(ToolSchema):
+    """受控续读的一页；始终标明是历史快照，不冒充当前事实。"""
+
+    ref: str
+    tool: str
+    captured_at: str | None = None
+    snapshot_only: bool = True
+    volatile: bool = False
+    note: str
+    list_field: str | None = None
+    total_rows: int | None = None
+    offset: int
+    returned: int
+    next_offset: int | None = None
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    fragment: str | None = None
+
+
 class ToolCall(ToolSchema):
     tool: str = Field(min_length=1, max_length=100)
     arguments: dict[str, object]

@@ -49,7 +49,8 @@ def test_manifest_tool_metadata_is_sourced_from_registered_tool_spec(monkeypatch
         "idempotent": spec.idempotent,
         "cost_class": spec.cost_class,
         "quota_class": spec.quota_class,
-    } for name, spec in capabilities.TOOLS.items()}
+    } for name, spec in capabilities.TOOLS.items()
+        if name not in capabilities.RUNTIME_ONLY_TOOLS}
 
     actual = {item["name"]: {key: item[key] for key in expected[item["name"]]}
               for item in payload["agent_tools"]}

@@ -37,6 +37,7 @@ def _compact_planner_step(step: dict, *, keep_rows: int, text_limit: int) -> dic
         "tool", "product_id", "product_name", "keyword", "rfq_item_id", "rfq_no",
         "total_rows", "truncated", "totals", "planner_truncated", "planner_note",
         "planner_sources_truncated", "scope", "warnings", "rows", "sources",
+        "spill_ref", "spill_hint",
         "request_no", "po_no", "purpose", "status", "items", "answer", "stages",
         "conclusion", "unavailable_stages", "source_records", "recommendation",
     )

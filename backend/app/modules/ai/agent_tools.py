@@ -59,7 +59,10 @@ from app.modules.ai.schema import (
     Source,
     ToolCall,
     ToolSchema,
+    EvidencePage,
+    EvidenceReadInput,
 )
+from app.modules.ai.evidence_store import read_evidence
 from app.modules.ai.formatting import format_decimal
 from app.modules.ai.supplier_profile import supplier_profile_tool
 from app.modules.ai.tool_sql_timeout import (
@@ -834,6 +837,10 @@ class ToolSpec:
         }
 
 
+# 仅在任务轨迹上下文中由运行时注入，不进入路由能力清单和通用工具目录。
+RUNTIME_ONLY_TOOLS = frozenset({"evidence.read"})
+
+
 TOOLS = {
     spec.name: spec for spec in (
         ToolSpec("catalog.search_products", "按产品名称/编码、化学品名称/英文名/登记别名或 CAS 找规格；多候选必须让用户选择",
@@ -894,6 +901,10 @@ TOOLS = {
                  "operations.exceptions.read", ExceptionSearchInput, ExceptionSearchResult, search_exceptions,
                  version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
                  cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
+        ToolSpec("evidence.read", "按任务轨迹引用分页读取已保存的工具结果；返回历史快照并重新校验权限，不替代库存/报价的当前查询",
+                 "ai.workspace.read", EvidenceReadInput, EvidencePage, read_evidence,
+                 version="1.0", risk="READ_ONLY", retry_policy="MANUAL_ONLY", idempotent=True,
+                 cost_class="DATABASE_READ", quota_class=TOOL_QUOTA_PER_TASK_CALLS),
     )
 }
 
@@ -920,12 +931,21 @@ def _permissions(db: Session, user: User) -> tuple[bool, set[str]]:
 def list_tools(db: Session, user: User) -> list[dict[str, object]]:
     """仅向用户公开当前有权执行的只读工具及输入/输出 Schema；不调用模型。"""
     admin, permissions = _permissions(db, user)
-    return [{"name": spec.name, "description": spec.description, **spec.governance_metadata(),
-             "permission": spec.permission,
-             "required_permissions": [spec.permission, *spec.additional_permissions],
-             "input_schema": spec.input_schema.model_json_schema(),
-             "output_schema": spec.output_schema.model_json_schema()}
-            for spec in TOOLS.values() if admin or {spec.permission, *spec.additional_permissions} <= permissions]
+    return [catalog_entry(spec.name) for spec in TOOLS.values()
+            if spec.name not in RUNTIME_ONLY_TOOLS
+            and (admin or {spec.permission, *spec.additional_permissions} <= permissions)]
+
+
+def catalog_entry(name: str) -> dict[str, object] | None:
+    """返回登记工具的目录条目；用于任务轨迹续读等按执行上下文补充的工具。"""
+    spec = TOOLS.get(name)
+    if spec is None:
+        return None
+    return {"name": spec.name, "description": spec.description, **spec.governance_metadata(),
+            "permission": spec.permission,
+            "required_permissions": [spec.permission, *spec.additional_permissions],
+            "input_schema": spec.input_schema.model_json_schema(),
+            "output_schema": spec.output_schema.model_json_schema()}
 
 
 def execute_tool(db: Session, user: User, call: ToolCall) -> ToolSchema:

@@ -223,7 +223,7 @@ def test_missing_permission_blocks_catalog_and_execution(tool_db):
 def test_tool_catalog_exposes_explicit_governance_metadata(tool_db):
     catalog = tools.list_tools(tool_db, SimpleNamespace(id=9))
 
-    assert len(catalog) == len(tools.TOOLS)
+    assert len(catalog) == len(tools.TOOLS) - len(tools.RUNTIME_ONLY_TOOLS)
     for entry in catalog:
         assert entry["version"] == "1.0"
         assert entry["risk"] == "READ_ONLY"

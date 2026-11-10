@@ -129,6 +129,12 @@ class Settings(BaseSettings):
     task_heartbeat_seconds: int = Field(default=10, ge=1)
     task_document_concurrency: int = Field(default=1, ge=1, le=16)
     task_agent_concurrency: int = Field(default=1, ge=1, le=16)
+    # 进展监控：只诊断和告警，取消/恢复仍走既有任务控制接口。
+    task_progress_scheduler_enabled: bool = True
+    task_progress_interval_seconds: int = Field(default=120, ge=30, le=3600)
+    task_progress_wait_warn_seconds: int = Field(default=300, ge=30)
+    task_progress_stall_seconds: int = Field(default=180, ge=30)
+    task_progress_document_stall_seconds: int = Field(default=900, ge=60)
 
     @property
     def task_queue_enabled(self) -> bool:
@@ -138,6 +144,8 @@ class Settings(BaseSettings):
     def validate_task_queue(self):
         if self.task_heartbeat_seconds * 3 > self.task_lease_seconds:
             raise ValueError("TASK_LEASE_SECONDS 必须至少为 TASK_HEARTBEAT_SECONDS 的三倍")
+        if self.task_progress_stall_seconds <= self.task_heartbeat_seconds:
+            raise ValueError("TASK_PROGRESS_STALL_SECONDS 必须大于 TASK_HEARTBEAT_SECONDS")
         return self
 
     jwt_secret_key: str = "CHANGE_ME_TO_A_LONG_RANDOM_SECRET"
@@ -177,6 +185,7 @@ class Settings(BaseSettings):
     agent_prompt_release_json: str = ""
     agent_context_max_chars: int = Field(default=18000, ge=2000, le=18000)
     agent_context_max_tokens: int = Field(default=12000, ge=1, le=1_000_000)
+    agent_evidence_page_chars: int = Field(default=8000, ge=500, le=20_000)
     agent_max_total_tokens: int = Field(default=65536, ge=1024, le=1_000_000)
     agent_allow_write_tools: bool = False
 
