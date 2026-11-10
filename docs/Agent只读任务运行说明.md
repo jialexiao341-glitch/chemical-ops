@@ -155,3 +155,7 @@ LLM_PRICE_OUTPUT_PER_MILLION=0
 的历史任务只统计 `token_budget.used_tokens` 总量，不伪造输入/输出拆分或费用；报告的 `coverage`
 段列出有累计用量、只有预算总量和无用量的任务数。P50/P95 按已终止任务的 `created_at → updated_at`
 墙钟计算，包含排队和等待续答，不是单次模型调用延迟。
+
+管理员可在 AI 任务中心点击“成本看板”，页面复用任务中心的卡片、筛选和表格样式，读取
+`GET /api/v1/ai/agent/cost-summary?days=30`。接口仅 `SYS_ADMIN` 可读，返回与离线脚本相同的聚合结构；
+只读，不新增表、不修改任务，也不返回任务原文或用户身份。
