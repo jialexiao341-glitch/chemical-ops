@@ -15,6 +15,7 @@ import { formatDateTime } from '#/utils/format';
 
 import PreviewDrawerContent from './modules/preview.vue';
 import TaskRunsDrawer from './modules/task-runs-drawer.vue';
+import { filterDirectory } from './directory';
 
 defineOptions({ name: 'TechnicalDocuments' });
 
@@ -22,19 +23,26 @@ type ChemicalRecord = Awaited<ReturnType<typeof getChemicalListApi>>['items'][nu
 
 const chemicals = ref<ChemicalRecord[]>([]);
 const chemicalsLoading = ref(false);
-const selectedChemicalId = ref<number>();
-const selectedChemical = computed(() => chemicals.value.find((chemical) => chemical.id === selectedChemicalId.value));
-const casNo = computed(() => selectedChemical.value?.cas_no?.trim() || '');
-const chemicalOptions = computed(() => chemicals.value.map((chemical) => ({
-  label: [chemical.chemical_name, chemical.english_name, chemical.cas_no || '未维护 CAS 号', chemical.alias_text]
-    .filter(Boolean)
-    .join(' · '),
-  value: chemical.id,
-  disabled: !chemical.cas_no,
-})));
+const selectedCas = ref<string>();
+const casNo = computed(() => selectedCas.value || '');
+const directorySources = ref<TechnicalDocumentSource[]>([]);
+const chemicalOptions = computed(() => {
+  const options = new Map<string, { label: string; value: string }>();
+  for (const chemical of chemicals.value) {
+    const cas = chemical.cas_no?.trim();
+    if (cas) options.set(cas, { label: [chemical.chemical_name, chemical.english_name, cas, chemical.alias_text].filter(Boolean).join(' · '), value: cas });
+  }
+  for (const source of directorySources.value) {
+    const title = source.name_zh || source.title || '';
+    const name = /^(?:material )?safety data sheet$|^technical data sheet$/i.test(title.trim()) ? '' : title;
+    const previous = options.get(source.cas_no);
+    if (!previous || (previous.label === source.cas_no && name)) {
+      options.set(source.cas_no, { label: [name, source.cas_no].filter(Boolean).join(' · '), value: source.cas_no });
+    }
+  }
+  return [...options.values()];
+});
 const docTypes = ref<string[]>(['msds', 'tds']);
-// 列表筛选默认不限定类型，与拉取/写入任务的类型选择保持独立。
-const filterDocTypes = ref<string[]>([]);
 const documentTypeOptions = [
   { label: 'MSDS', value: 'msds' },
   { label: 'TDS', value: 'tds' },
@@ -84,10 +92,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
     proxyConfig: {
       ajax: {
         query: async ({ page }) => {
-          const rows = await getTechnicalDocumentsApi(casNo.value.trim() || undefined);
-          const filteredRows = filterDocTypes.value.length
-            ? rows.filter((row) => filterDocTypes.value.includes(row.doc_type))
-            : rows;
+          const rows = await getTechnicalDocumentsApi();
+          directorySources.value = rows;
+          const filteredRows = filterDirectory(rows, undefined, casNo.value || undefined)
+            .filter((row) => !docTypes.value.length || docTypes.value.includes(row.doc_type));
           const start = (page.currentPage - 1) * page.pageSize;
           return { items: filteredRows.slice(start, start + page.pageSize), total: filteredRows.length };
         },
@@ -103,8 +111,8 @@ function onActionClick({ code, row }: OnActionClickParams<TechnicalDocumentSourc
 }
 
 function resetSearch() {
-  selectedChemicalId.value = undefined;
-  filterDocTypes.value = [];
+  selectedCas.value = undefined;
+  docTypes.value = ['msds', 'tds'];
   void gridApi.query();
 }
 
@@ -114,7 +122,7 @@ function searchDocuments() {
 
 async function startFetch() {
   if (!canWriteTechnicalDocuments) return;
-  if (!/^\d{2,7}-\d{2}-\d$/.test(casNo.value.trim())) {
+  if (!/^\d{2,7}-\d{2}-\d$/.test(casNo.value.trim()) || !chemicals.value.some((item) => item.cas_no?.trim() === casNo.value)) {
     message.warning('请先按名称搜索并选择已维护 CAS 号的化学品');
     return;
   }
@@ -134,7 +142,7 @@ async function startFetch() {
 
 async function startIngest() {
   if (!canWriteTechnicalDocuments) return;
-  if (!/^\d{2,7}-\d{2}-\d$/.test(casNo.value.trim())) {
+  if (!/^\d{2,7}-\d{2}-\d$/.test(casNo.value.trim()) || !chemicals.value.some((item) => item.cas_no?.trim() === casNo.value)) {
     message.warning('请先按名称搜索并选择已维护 CAS 号的化学品');
     return;
   }
@@ -178,43 +186,27 @@ onMounted(() => {
       <section class="rounded bg-card p-4">
         <div class="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
           <div class="flex min-w-0 flex-wrap items-center gap-2">
-            <span class="shrink-0 font-medium">拉取新资料</span>
+            <span class="shrink-0">化学品</span>
             <Select
-              v-model:value="selectedChemicalId"
+              v-model:value="selectedCas"
               :options="chemicalOptions"
               :style="{ width: 'clamp(220px, 22vw, 320px)', maxWidth: '100%' }"
               :loading="chemicalsLoading"
+              allow-clear
               show-search
               option-filter-prop="label"
-              placeholder="搜索并选择化学品名称或 CAS 号"
+              placeholder="搜索化学品名称或 CAS 号"
             />
           </div>
           <div class="flex shrink-0 items-center gap-2">
-            <span class="shrink-0">列表分类</span>
+            <span class="shrink-0">资料类型</span>
             <Select
-              v-model:value="filterDocTypes"
+              v-model:value="docTypes"
               class="w-44"
               mode="multiple"
               :options="documentTypeOptions"
-              allow-clear
               placeholder="全部类型"
             />
-          </div>
-          <div class="flex min-w-0 flex-wrap items-center gap-2">
-            <div class="flex items-center gap-2">
-              <span class="shrink-0">处理类型</span>
-              <Select
-                v-model:value="docTypes"
-                class="w-44"
-                mode="multiple"
-                :options="documentTypeOptions"
-                placeholder="选择资料类型"
-              />
-            </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <Button v-if="canWriteTechnicalDocuments" :loading="busy" @click="startFetch">拉取数据</Button>
-              <Button v-if="canWriteTechnicalDocuments" type="primary" :loading="busy" @click="startIngest">写入知识库</Button>
-            </div>
           </div>
           <div class="ml-auto flex shrink-0 items-center gap-2">
             <Button @click="resetSearch">重置</Button>
@@ -225,6 +217,8 @@ onMounted(() => {
 
       <Grid table-title="技术资料库">
         <template #toolbar-tools>
+          <Button v-if="canWriteTechnicalDocuments" :loading="busy" @click="startFetch">拉取数据</Button>
+          <Button v-if="canWriteTechnicalDocuments" class="ml-2" type="primary" :loading="busy" @click="startIngest">写入知识库</Button>
           <Button v-if="canReadTechnicalDocuments" class="ml-2" @click="taskDrawerApi.open()">处理任务</Button>
         </template>
       </Grid>
