@@ -35,6 +35,7 @@ def test_model_registry_supports_legacy_and_named_profiles() -> None:
                 "temperature": 0.5,
                 "max_tokens": 2048,
                 "stream_usage": True,
+                "reasoning_effort": "medium",
             },
             "backup": {
                 "model": "model-backup",
@@ -49,6 +50,7 @@ def test_model_registry_supports_legacy_and_named_profiles() -> None:
     )
     assert (profile.timeout_seconds, profile.max_retries, profile.max_concurrency) == (9, 1, 3)
     assert (profile.temperature, profile.max_tokens, profile.stream_usage) == (0.5, 2048, True)
+    assert profile.reasoning_effort == "medium"
     assert profile.fallback_profile == "backup"
     assert gateway.resolve_model_profile(configured, "model-fast") == profile
 
@@ -293,3 +295,48 @@ def test_business_write_intent_is_rejected_before_any_model_request(monkeypatch)
             AIChatRequest(messages=[{"role": "user", "content": "请帮我创建采购订单"}]),
             Settings(_env_file=None, openai_api_key="test-key")))
     assert calls == []
+
+def test_database_model_catalog_overrides_environment_profiles(monkeypatch):
+    from app.modules.ai import model_catalog
+
+    snapshot = (
+        {
+            "MaxApi": gateway.ModelProfileConfig(
+                provider="openai_compatible",
+                model="deepseek-v4.1-flash",
+                fallback_profile=None,
+                base_url="https://ai.example/v1",
+                api_key="db-key",
+                timeout_seconds=30.0,
+                max_retries=0,
+                max_concurrency=2,
+                temperature=0.1,
+                max_tokens=1024,
+                stream_usage=False,
+                reasoning_effort="high",
+            )
+        },
+        "MaxApi",
+    )
+    monkeypatch.setattr(model_catalog, "_load_from_database", lambda: snapshot)
+    model_catalog.activate()
+    try:
+        profile = gateway.resolve_model_profile(
+            Settings(_env_file=None, openai_api_key="env-key", llm_model="env-model")
+        )
+        assert (profile.name, profile.model, profile.base_url, profile.api_key) == (
+            "MaxApi", "deepseek-v4.1-flash", "https://ai.example/v1", "db-key"
+        )
+        assert profile.reasoning_effort == "high"
+    finally:
+        model_catalog.deactivate()
+
+    legacy = gateway.resolve_model_profile(
+        Settings(_env_file=None, openai_api_key="env-key", llm_model="env-model")
+    )
+    assert legacy.model == "env-model"
+
+def test_llm_payload_forwards_reasoning_effort():
+    settings = Settings(_env_file=None, openai_api_key="test-key", llm_reasoning_effort="high")
+    payload = llm._build_llm_payload(settings, [{"role": "user", "content": "ping"}])
+    assert payload["reasoning_effort"] == "high"
