@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
 from app.modules.ai.capabilities import AGENT_TASK_REQUIREMENTS
-from app.modules.ai.model import AIAgentTask, AIRegressionCase
+from app.modules.ai.error_policy import failure_stage
+from app.modules.ai.model import AIAgentTask, AIFeedback, AIRegressionCase
 from app.modules.ai.schema import (
+    RegressionCaseCandidate,
+    RegressionCaseCandidatePage,
     RegressionCaseCreate,
     RegressionCaseDraft,
     RegressionCaseOptions,
@@ -110,9 +113,8 @@ def _source_prompt_version(task: AIAgentTask) -> str | None:
     return versions.get("planner") or versions.get("routing")
 
 
-def draft_from_task(db: Session, user: User, task_id: str) -> RegressionCaseDraft:
-    """只对本人任务生成草稿；问题文本仍需提交人逐字确认脱敏后才能保存。"""
-    task = _owned_task(db, user, task_id)
+def _draft(task: AIAgentTask) -> RegressionCaseDraft:
+    """按任务轨迹推导公开契约；问题文本原样返回，脱敏确认仍由提交人完成。"""
     messages = (task.payload or {}).get("messages") or []
     question = str(messages[-1]).strip() if messages else ""
     called = {
@@ -131,6 +133,88 @@ def draft_from_task(db: Session, user: User, task_id: str) -> RegressionCaseDraf
         expected_tasks=expected,
         forbidden_tasks=[],
     )
+
+
+def draft_from_task(db: Session, user: User, task_id: str) -> RegressionCaseDraft:
+    """只对本人任务生成草稿；问题文本仍需提交人逐字确认脱敏后才能保存。"""
+    return _draft(_owned_task(db, user, task_id))
+
+
+def candidate_drafts(db: Session, user: User, *, days: int = 7,
+                     limit: int = 10) -> RegressionCaseCandidatePage:
+    """从近期差评或失败任务确定性生成草稿；不落库、不调用模型，管理员审阅后才成为用例。
+
+    差评与失败都是可复现信号：差评补充主观原因，失败的 error_code 直接给出失败阶段。
+    非管理员只看到本人任务；同一问题已存在用例时仍返回草稿并附可用用例编号，
+    由审阅人决定是否跳过或重新提交，避免静默去重掩盖同类问题。
+    """
+    if not 1 <= days <= 90 or not 1 <= limit <= 50:
+        raise BusinessValidationError("天数需为 1-90，条数需为 1-50")
+    since = datetime.now() - timedelta(days=days)
+    admin = _is_admin(db, user)
+    down_reasons: dict[str, str | None] = {}
+    for feedback in db.scalars(
+        select(AIFeedback)
+        .where(AIFeedback.rating == "DOWN", AIFeedback.created_at >= since)
+        .order_by(AIFeedback.created_at.desc())
+    ).all():
+        down_reasons.setdefault(feedback.task_id, feedback.reason_code)
+
+    tasks = list(db.scalars(
+        select(AIAgentTask)
+        .where(AIAgentTask.created_at >= since)
+        .order_by(AIAgentTask.created_at.desc())
+        .limit(limit * 10)
+    ).all())
+    ordered = [task for task in tasks if task.id in down_reasons]
+    ordered += [task for task in tasks if task.id not in down_reasons and task.error_code]
+
+    collected: list[tuple[RegressionCaseDraft, str, str | None, AIAgentTask, str]] = []
+    seen: set[str] = set()
+    for task in ordered:
+        if not admin and task.user_id != user.id:
+            continue
+        draft = _draft(task)
+        if not draft.question:
+            continue
+        key = _case_key(draft.question, draft.expected_execution_mode, draft.expected_tasks)
+        if key in seen:
+            continue
+        seen.add(key)
+        source = "feedback" if task.id in down_reasons else "failure"
+        collected.append((draft, key, down_reasons.get(task.id), task, source))
+        if len(collected) >= limit:
+            break
+
+    existing_by_key: dict[str, AIRegressionCase] = {}
+    existing_by_source: dict[str, AIRegressionCase] = {}
+    case_keys = {key for _, key, _, _, _ in collected}
+    source_ids = {task.id for _, _, _, task, _ in collected}
+    if case_keys or source_ids:
+        rows = db.scalars(select(AIRegressionCase).where(or_(
+            AIRegressionCase.case_key.in_(case_keys),
+            AIRegressionCase.source_task_id.in_(source_ids)))).all()
+        for row in rows:
+            existing_by_key.setdefault(row.case_key, row)
+            if row.source_task_id:
+                existing_by_source.setdefault(row.source_task_id, row)
+    items = []
+    for draft, key, reason_code, task, source in collected:
+        # 脱敏改写会改变 case_key；同一来源任务仍需看到已入库用例，避免重复提交。
+        case = existing_by_key.get(key) or existing_by_source.get(task.id)
+        visible = case is not None and (admin or case.created_by == user.id)
+        error_code = getattr(task, "error_code", None)
+        items.append(RegressionCaseCandidate(
+            **draft.model_dump(),
+            case_key=key,
+            source=source,
+            task_status=str(getattr(task, "status", "") or ""),
+            error_code=error_code,
+            failure_stage=failure_stage(error_code) if error_code else None,
+            feedback_reason_code=reason_code,
+            existing_case_id=case.id if visible else None,
+        ))
+    return RegressionCaseCandidatePage(days=days, total=len(items), items=items)
 
 
 def options() -> RegressionCaseOptions:

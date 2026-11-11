@@ -1481,6 +1481,24 @@ class RegressionCaseDraft(ToolSchema):
     forbidden_tasks: list[str] = Field(default_factory=list)
 
 
+class RegressionCaseCandidate(RegressionCaseDraft):
+    """差评或失败任务生成的待审草稿；带失败归因，便于管理员判断是否值得入库。"""
+
+    case_key: str
+    source: Literal["feedback", "failure"] = "failure"
+    task_status: str
+    error_code: str | None = None
+    failure_stage: str | None = None
+    feedback_reason_code: str | None = None
+    existing_case_id: int | None = None
+
+
+class RegressionCaseCandidatePage(ToolSchema):
+    days: int
+    total: int
+    items: list[RegressionCaseCandidate] = Field(default_factory=list)
+
+
 class RegressionCaseCreate(ToolSchema):
     """提交人必须显式确认已脱敏；服务端不保存未确认的任务原文。"""
 

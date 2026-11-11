@@ -28,6 +28,7 @@ from app.modules.ai.schema import (
     AIFeedbackSummary,
     AIQualitySummary,
     RegressionCaseCreate,
+    RegressionCaseCandidatePage,
     RegressionCaseDraft,
     RegressionCaseOptions,
     RegressionCasePage,
@@ -388,6 +389,17 @@ def regression_case_draft(task_id: str = Query(min_length=1, max_length=32),
     """只读取本人任务；返回的原文仍需提交人确认脱敏后才能保存。"""
     from app.modules.ai import regression_cases as regression_cases_service
     return regression_cases_service.draft_from_task(db, user, task_id)
+
+
+@router.get("/regression-cases/candidates", response_model=RegressionCaseCandidatePage,
+            summary="从近期差评或失败任务生成待脱敏确认的回归用例草稿")
+def regression_case_candidates(days: int = Query(default=7, ge=1, le=90),
+                               limit: int = Query(default=10, ge=1, le=50),
+                               db: Session = Depends(get_db),
+                               user: User = Depends(get_current_user)):
+    """只读生成草稿，不落库；确认脱敏后仍走现有创建接口保存并进入管理员审阅。"""
+    from app.modules.ai import regression_cases as regression_cases_service
+    return regression_cases_service.candidate_drafts(db, user, days=days, limit=limit)
 
 
 @router.post("/regression-cases", response_model=RegressionCaseRead,
