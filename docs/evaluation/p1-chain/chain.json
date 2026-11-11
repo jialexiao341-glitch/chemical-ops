@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-11-11T15:20:31",
+  "scope": "隔离 SQLite；真实模型未调用，业务库未连接",
+  "stages": {
+    "task": {
+      "id": "task-p1",
+      "status": "FAILED",
+      "error_code": "INTENT_SCHEMA_ERROR",
+      "question_redacted": true
+    },
+    "feedback": {
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER"
+    },
+    "candidate": {
+      "total": 1,
+      "source": "feedback",
+      "case_key": "PR-00b7289b",
+      "failure_stage": "routing",
+      "existing_case_id": null
+    },
+    "create": {
+      "id": 1,
+      "status": "DRAFT"
+    },
+    "approve": {
+      "id": 1,
+      "status": "APPROVED",
+      "reviewed_by": 2
+    },
+    "export": {
+      "id": "PR-1bba9ed0",
+      "has_source_task_id": false,
+      "merged_total": 2,
+      "merged_ids": [
+        "PR-manual",
+        "PR-1bba9ed0"
+      ]
+    },
+    "candidate_after_approve": {
+      "existing_case_id": 1
+    },
+    "gate": {
+      "full": "PASS",
+      "subset": "NOT_RUN",
+      "subset_missing": [
+        "agent_tasks",
+        "agent_business",
+        "prod_regression"
+      ]
+    },
+    "baseline": {
+      "files": [
+        "intent_routing.json",
+        "agent_tasks.json",
+        "agent_business.json",
+        "prod_regression.json"
+      ],
+      "coverage_missing": [],
+      "manifest_prompt_key": "routing@1-5531c235__planner@1-2911a494"
+    }
+  }
+}
