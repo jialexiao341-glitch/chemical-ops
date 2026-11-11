@@ -1632,3 +1632,75 @@ class AIListContextAskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     previous_questions: list[Annotated[str, Field(min_length=1, max_length=2000)]] = Field(default_factory=list, max_length=4)
     filters: AIOrderListFilters = Field(default_factory=AIOrderListFilters)
+
+class AIModelProfileCreate(BaseModel):
+    """新增模型配置；密钥可为空，表示沿用环境变量 OPENAI_API_KEY。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=64)
+    model: str = Field(min_length=1, max_length=128)
+    base_url: str = Field(min_length=1, max_length=255)
+    api_key: str | None = Field(default=None, max_length=512)
+    context_window: int | None = Field(default=None, ge=1, le=10_000_000)
+    max_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
+    reasoning_effort: Literal["low", "medium", "high"] | None = None
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=600)
+    max_retries: int | None = Field(default=None, ge=0, le=5)
+    max_concurrency: int | None = Field(default=None, ge=1, le=256)
+
+
+class AIModelProfileUpdate(BaseModel):
+    """部分更新模型配置；api_key 省略或传空字符串表示保留已保存密钥。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    model: str | None = Field(default=None, min_length=1, max_length=128)
+    base_url: str | None = Field(default=None, min_length=1, max_length=255)
+    api_key: str | None = Field(default=None, max_length=512)
+    context_window: int | None = Field(default=None, ge=1, le=10_000_000)
+    max_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
+    reasoning_effort: Literal["low", "medium", "high"] | None = None
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=600)
+    max_retries: int | None = Field(default=None, ge=0, le=5)
+    max_concurrency: int | None = Field(default=None, ge=1, le=256)
+
+
+class AIModelProfileRead(BaseModel):
+    """模型配置响应；不包含密钥明文。"""
+
+    id: int
+    name: str
+    model: str
+    base_url: str
+    api_key_masked: str | None
+    has_api_key: bool
+    context_window: int | None
+    max_tokens: int | None
+    reasoning_effort: Literal["low", "medium", "high"] | None
+    temperature: float
+    timeout_seconds: int
+    max_retries: int
+    max_concurrency: int
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class AIModelProfilePage(BaseModel):
+    """模型配置列表响应。"""
+
+    items: list[AIModelProfileRead]
+    total: int
+
+
+class AIModelProfileProbe(BaseModel):
+    """模型连通性探测结果。"""
+
+    ok: bool
+    model: str
+    latency_ms: int
+    message: str

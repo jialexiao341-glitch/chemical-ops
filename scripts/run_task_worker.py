@@ -34,6 +34,8 @@ def main():
     factory = sessionmaker(create_engine(settings.resolved_database_url, pool_pre_ping=True,
         hide_parameters=True, connect_args={"connect_timeout": 5, "read_timeout": 5, "write_timeout": 5}), expire_on_commit=False)
     configure(settings)
+    from app.modules.ai import model_catalog
+    model_catalog.activate()
     if args.recover_only:
         print(f"recovered={recover(factory, settings)}")
     else:

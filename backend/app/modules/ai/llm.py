@@ -66,6 +66,8 @@ def _build_llm_payload(runtime: Settings, messages: list[dict[str, object]], *, 
     }
     if runtime.llm_model.lower() == "deepseek-flash":
         payload["thinking"] = {"type": "enabled"}
+    if runtime.llm_reasoning_effort:
+        payload["reasoning_effort"] = runtime.llm_reasoning_effort
     if stream:
         payload["stream"] = True
     if response_format is not None:
@@ -106,6 +108,7 @@ def _effective_settings(settings: Settings, profile) -> Settings:
         "llm_temperature": profile.temperature,
         "llm_max_tokens": profile.max_tokens,
         "llm_stream_usage": profile.stream_usage,
+        "llm_reasoning_effort": profile.reasoning_effort,
     })
 
 

@@ -4,7 +4,7 @@ import logging
 from typing import Annotated
 from time import perf_counter
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -68,12 +68,18 @@ from app.modules.ai.schema import (
     Text2SQLRequest,
     Text2SQLResponse,
     ToolCall,
+    AIModelProfileCreate,
+    AIModelProfilePage,
+    AIModelProfileProbe,
+    AIModelProfileRead,
+    AIModelProfileUpdate,
 )
 from app.modules.ai import briefing as briefing_service
 from app.modules.ai import context as context_service
 from app.modules.ai import drafts as drafts_service
 from app.modules.ai import nl_filters as nl_filters_service
 from app.modules.ai import service, routing, capabilities
+from app.modules.ai import model_profiles as model_profiles_service
 from app.modules.ai import agent_tools
 from app.modules.ai import agent_runtime
 from app.modules.ai import purchase_draft_confirmations
@@ -628,3 +634,45 @@ def clear_query_context(conversation_id: int, db: Session = Depends(get_db), use
 
     conversation_store.clear_query_context(db, user, conversation_id)
     return {"cleared": True, "conversation_id": conversation_id}
+
+
+model_router = APIRouter(prefix="/ai/model-profiles", tags=["AI 模型管理"])
+
+
+@model_router.get("", response_model=AIModelProfilePage, summary="查询模型配置")
+def list_model_profiles(keyword: str | None = Query(default=None, max_length=64),
+                        db: Session = Depends(get_db),
+                        _: User = Depends(require_permission("ai.workspace.read"))) -> AIModelProfilePage:
+    items = model_profiles_service.list_profiles(db, keyword)
+    return AIModelProfilePage(items=items, total=len(items))
+
+
+@model_router.post("", response_model=AIModelProfileRead, status_code=status.HTTP_201_CREATED, summary="新增模型配置")
+def create_model_profile(data: AIModelProfileCreate, db: Session = Depends(get_db),
+                          _: User = Depends(require_permission("ai.models.write"))) -> AIModelProfileRead:
+    return model_profiles_service.create_profile(db, data)
+
+
+@model_router.patch("/{profile_id}", response_model=AIModelProfileRead, summary="更新模型配置")
+def update_model_profile(profile_id: int, data: AIModelProfileUpdate, db: Session = Depends(get_db),
+                         _: User = Depends(require_permission("ai.models.write"))) -> AIModelProfileRead:
+    return model_profiles_service.update_profile(db, profile_id, data)
+
+
+@model_router.delete("/{profile_id}", summary="删除模型配置")
+def delete_model_profile(profile_id: int, db: Session = Depends(get_db),
+                         _: User = Depends(require_permission("ai.models.write"))) -> dict[str, bool]:
+    model_profiles_service.delete_profile(db, profile_id)
+    return {"deleted": True}
+
+
+@model_router.post("/{profile_id}/activate", response_model=AIModelProfileRead, summary="切换当前使用模型")
+def activate_model_profile(profile_id: int, db: Session = Depends(get_db),
+                           _: User = Depends(require_permission("ai.models.write"))) -> AIModelProfileRead:
+    return model_profiles_service.activate_profile(db, profile_id)
+
+
+@model_router.post("/{profile_id}/probe", response_model=AIModelProfileProbe, summary="检查模型连通性")
+def probe_model_profile(profile_id: int, db: Session = Depends(get_db),
+                        _: User = Depends(require_permission("ai.models.write"))) -> AIModelProfileProbe:
+    return model_profiles_service.probe_profile(db, profile_id)

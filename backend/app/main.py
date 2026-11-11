@@ -59,7 +59,7 @@ from app.modules.jobs.service import run_scheduled_alert_scan
 from app.modules.task_queue.controller import router as task_queue_router
 from app.modules.task_queue.progress import run_progress_scan
 from app.modules.dashboard.controller import router as dashboard_router
-from app.modules.ai.controller import router as ai_router, suggestion_router as ai_suggestion_router
+from app.modules.ai.controller import router as ai_router, model_router as ai_model_router, suggestion_router as ai_suggestion_router
 from app.modules.ai.lifecycle import cleanup_expired_ai_records
 from app.modules.insights.controller import router as insights_router
 from app.modules.monitoring.controller import router as monitoring_router
@@ -260,6 +260,9 @@ async def lifespan(app: FastAPI):
     database_ready = _check_database()
     if database_ready and not _check_schema_migrations():
         raise RuntimeError("数据库结构尚未升级到当前代码版本；请先运行 scripts/migrate_database.py upgrade")
+    if database_ready:
+        from app.modules.ai import model_catalog
+        model_catalog.activate()
     minio_ready = _check_minio()
     if database_ready and minio_ready:
         LOGGER.info("ChemicalOps 启动检查完成 状态=就绪")
@@ -524,6 +527,7 @@ app.include_router(jobs_router, prefix=settings.api_prefix)
 app.include_router(task_queue_router, prefix=settings.api_prefix)
 app.include_router(dashboard_router, prefix=settings.api_prefix)
 app.include_router(ai_router, prefix=settings.api_prefix)
+app.include_router(ai_model_router, prefix=settings.api_prefix)
 app.include_router(ai_suggestion_router, prefix=settings.api_prefix)
 app.include_router(insights_router, prefix=settings.api_prefix)
 app.include_router(monitoring_router, prefix=settings.api_prefix)

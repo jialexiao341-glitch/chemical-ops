@@ -150,6 +150,7 @@ class ModelProfileConfig:
     temperature: float | None
     max_tokens: int | None
     stream_usage: bool
+    reasoning_effort: str | None
 
     @classmethod
     def from_mapping(cls, value: object) -> "ModelProfileConfig":
@@ -158,6 +159,7 @@ class ModelProfileConfig:
         allowed = {
             "provider", "model", "fallback_profile", "base_url", "api_key", "timeout_seconds",
             "max_retries", "max_concurrency", "temperature", "max_tokens", "stream_usage",
+            "reasoning_effort",
         }
         if set(value) - allowed:
             raise ValueError("模型 profile 包含未知字段")
@@ -172,6 +174,7 @@ class ModelProfileConfig:
         temperature = value.get("temperature")
         max_tokens = value.get("max_tokens")
         stream_usage = value.get("stream_usage", False)
+        reasoning_effort = value.get("reasoning_effort")
         if not isinstance(provider, str) or not provider.strip():
             raise ValueError("provider 必须是非空字符串")
         if not isinstance(model, str) or not model.strip() or len(model) > 128:
@@ -204,7 +207,9 @@ class ModelProfileConfig:
             raise ValueError("max_tokens 必须在 1 到 1000000 范围内")
         if not isinstance(stream_usage, bool):
             raise ValueError("stream_usage 必须是布尔值")
-        return cls(provider, model, fallback, base_url, api_key, timeout, retries, concurrency, temperature, max_tokens, stream_usage)
+        if reasoning_effort is not None and reasoning_effort not in {"low", "medium", "high"}:
+            raise ValueError("reasoning_effort 必须是 low、medium 或 high")
+        return cls(provider, model, fallback, base_url, api_key, timeout, retries, concurrency, temperature, max_tokens, stream_usage, reasoning_effort)
 
 
 @dataclass(frozen=True)
@@ -221,6 +226,7 @@ class ModelProfile:
     temperature: float
     max_tokens: int
     stream_usage: bool
+    reasoning_effort: str | None
 
     @property
     def key(self) -> str:
@@ -245,15 +251,21 @@ def resolve_model_profile(settings: Settings, model_name: str | None = None) -> 
     """解析命名模型；未配置目录时回退到既有单模型环境变量。"""
 
     profiles = _configured_profiles(settings.llm_model_profiles_json)
-    requested = model_name or settings.llm_default_profile or settings.llm_model
+    default_profile = settings.llm_default_profile
+    from app.modules.ai import model_catalog
+    catalog = model_catalog.overrides()
+    if catalog is not None:
+        profiles, catalog_default = catalog
+        default_profile = catalog_default or default_profile
+    requested = model_name or default_profile or settings.llm_model
     configured = profiles.get(requested)
     profile_name = requested
     if configured is None:
         match = next(((name, profile) for name, profile in profiles.items() if profile.model == requested), None)
         if match is not None:
             profile_name, configured = match
-    if (model_name or settings.llm_default_profile) and configured is None:
-        raise ValueError(f"LLM 模型未配置：{model_name or settings.llm_default_profile}")
+    if (model_name or default_profile) and configured is None:
+        raise ValueError(f"LLM 模型未配置：{model_name or default_profile}")
 
     provider = configured.provider if configured else settings.llm_provider
     if provider != "openai_compatible":
@@ -284,6 +296,7 @@ def resolve_model_profile(settings: Settings, model_name: str | None = None) -> 
         temperature=configured.temperature if configured and configured.temperature is not None else settings.llm_temperature,
         max_tokens=configured.max_tokens if configured and configured.max_tokens is not None else settings.llm_max_tokens,
         stream_usage=configured.stream_usage if configured else settings.llm_stream_usage,
+        reasoning_effort=(configured.reasoning_effort if configured and configured.reasoning_effort else settings.llm_reasoning_effort),
     )
 
 

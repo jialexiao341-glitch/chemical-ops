@@ -164,6 +164,8 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek-flash"
     llm_temperature: float = 0.2
     llm_max_tokens: int = 65536
+    # 思考强度：low / medium / high；为空表示不显式指定，使用服务端默认。
+    llm_reasoning_effort: Literal["low", "medium", "high"] | None = None
     llm_timeout_seconds: int = 60
     llm_max_retries: int = 2
     llm_stream_usage: bool = False

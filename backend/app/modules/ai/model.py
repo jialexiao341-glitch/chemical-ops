@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -224,3 +224,32 @@ class AIOperationSuggestion(Base):
     handled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey('operation_tasks.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+
+
+class AIModelProfile(Base):
+    """可在前端切换的 OpenAI 兼容模型配置；密钥不随响应返回明文。"""
+
+    __tablename__ = "ai_model_profiles"
+    __table_args__ = (
+        UniqueConstraint("profile_name", name="uq_ai_model_profile_name"),
+        Index("ix_ai_model_profile_default", "is_default"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    api_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    context_window: Mapped[int | None] = mapped_column(nullable=True)
+    max_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    temperature: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False, default=0.2)
+    timeout_seconds: Mapped[int] = mapped_column(nullable=False, default=60)
+    max_retries: Mapped[int] = mapped_column(nullable=False, default=2)
+    max_concurrency: Mapped[int] = mapped_column(nullable=False, default=8)
+    stream_usage: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3))
+    updated_at: Mapped[datetime] = mapped_column(
+        DATETIME(fsp=3), nullable=False, server_default=func.current_timestamp(3), onupdate=func.current_timestamp(3)
+    )
