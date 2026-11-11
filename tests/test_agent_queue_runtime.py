@@ -1,8 +1,10 @@
 """Queue-mode Agent control flow; model and role responses are explicit substitutes."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import BackgroundTasks
 from sqlalchemy import select
@@ -44,6 +46,31 @@ def claim(db, execution, monkeypatch):
     monkeypatch.setenv("CHEMICALOPS_EXECUTION_ID", current.id)
     monkeypatch.setenv("CHEMICALOPS_EXECUTION_TOKEN", str(current.fencing_token))
     return current
+
+
+def http_model(monkeypatch):
+    """保留真实 llm.chat 的预算与解析，只替换 HTTP 传输；返回请求记录和待执行动作。"""
+    requests, actions = [], []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        usage = None
+        if (payload.get("response_format") or {}).get("type") == "json_schema":
+            content = json.dumps({"purpose": "query", "execution_mode": "agent",
+                                  "tasks": ["inventory"], "dialogue_action": "new", "slots": {}})
+        else:
+            content = json.dumps(actions.pop(0), ensure_ascii=False)
+            usage = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+        body = {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+        if usage is not None:
+            body["usage"] = usage
+        return httpx.Response(200, json=body)
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(runtime.llm.httpx, "AsyncClient",
+                        lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
+    return requests, actions
 
 
 def test_queue_chat_wait_and_manual_continue_create_a_new_generation(queued_db, model_script, monkeypatch):
@@ -308,3 +335,78 @@ def test_drained_queue_rolls_back_to_background_without_replaying_old_task(queue
     assert new.id != task.id and len(background.tasks) == 1
     assert len(queued_db.scalars(select(TaskExecution)).all()) == 1
     assert service.claim_execution(queued_db, execution.id, 0, "old-message", 60) is None
+
+
+def test_budget_ledger_survives_worker_crash_and_resume(queued_db, monkeypatch):
+    """Worker 在结算后被强杀，恢复运行必须沿用已结算用量而不是从零开始。"""
+    requests, actions = http_model(monkeypatch)
+
+    async def understand(*args, **kwargs):
+        return runtime.routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"])
+    monkeypatch.setattr(runtime.routing, "understand", understand)
+
+    task, execution = accept(queued_db)
+    current = claim(queued_db, execution, monkeypatch)
+    actions.append(tool("catalog.search_products", keyword="测试乙醇"))
+    original_decide = runtime._decide
+    calls = []
+
+    async def crash_after_settlement(state, catalog, settings):
+        calls.append(state.llm_calls)
+        if len(calls) > 1:
+            raise KeyboardInterrupt("simulated worker termination after budget settlement")
+        return await original_decide(state, catalog, settings)
+
+    monkeypatch.setattr(runtime, "_decide", crash_after_settlement)
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
+
+    queued_db.expire_all()
+    budget = queued_db.get(AIAgentTask, task.id).payload["token_budget"]
+    checkpoint = queued_db.get(TaskExecution, execution.id).checkpoint["token_budget"]
+    assert budget["calls"] == 1 and budget["used_tokens"] > 0
+    assert checkpoint["used_tokens"] == budget["used_tokens"]
+    assert len(requests) == 1  # 路由已桩化；仅第一次规划请求，第二次决策前中断
+
+    service.finish(queued_db, execution.id, execution.fencing_token, status="FAILED", retryable=True)
+    execution = queued_db.get(TaskExecution, execution.id)
+    execution.next_attempt_at = None
+    queued_db.commit()
+    current = claim(queued_db, execution, monkeypatch)
+    monkeypatch.setattr(runtime, "_decide", original_decide)
+    actions.extend([tool("inventory.query_available", product_id=1),
+                    {"action": "finish", "evidence_steps": [2]}])
+
+    asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
+    queued_db.expire_all()
+    result = runtime.get_task(queued_db, USER, task.id)
+    assert result.status == "SUCCEEDED", (result.error_code, result.trace)
+    resumed = queued_db.get(AIAgentTask, task.id).payload["token_budget"]
+    assert resumed["calls"] == 3
+    assert resumed["used_tokens"] > budget["used_tokens"]
+
+
+def test_over_budget_resume_fails_without_any_model_request(queued_db, monkeypatch):
+    """从落盘账本恢复时已超限，必须在发出任何模型请求前失败。"""
+    requests, actions = http_model(monkeypatch)
+
+    async def understand(*args, **kwargs):
+        return runtime.routing.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"])
+    monkeypatch.setattr(runtime.routing, "understand", understand)
+
+    task, execution = accept(queued_db)
+    row = queued_db.get(AIAgentTask, task.id)
+    row.payload = {**row.payload,
+                   "token_budget": {"limit": 100, "used_tokens": 100,
+                                    "estimated_tokens": 0, "calls": 1}}
+    queued_db.commit()
+    current = claim(queued_db, execution, monkeypatch)
+
+    asyncio.run(runtime.run_prepared_task(task.id, USER.id, current.business_revision))
+    queued_db.expire_all()
+    result = runtime.get_task(queued_db, USER, task.id)
+    assert result.status == "FAILED" and result.error_code == "TOKEN_BUDGET_EXCEEDED"
+    assert result.trace[-1]["action"] == "stop"
+    assert requests == []
+    assert actions == []
+    assert queued_db.get(AIAgentTask, task.id).payload["token_budget"]["calls"] == 1
