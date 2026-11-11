@@ -141,8 +141,12 @@ async def propose_purchase_request_draft(
     question: str | None = None,
     settings: Settings | None = None,
     *, draft: PurchaseRequestCreate | None = None, conversation_id: int | None = None,
+    idempotency_key: str | None = None,
 ) -> AIPurchaseDraftPreview:
-    """将明确需求转成需用户确认的候选值，不创建或提交采购申请。"""
+    """将明确需求转成需用户确认的候选值，不创建或提交采购申请。
+
+    idempotency_key 由客户端在同一请求重试时复用；相同键与相同参数只返回原预览。
+    """
 
     permissions = set(get_user_permission_codes(db, user.id))
     roles = set(get_user_role_codes(db, user.id))
@@ -350,7 +354,7 @@ async def propose_purchase_request_draft(
 
     snapshot = draft.model_dump(mode="json")
     from app.modules.ai.action_proposals import propose_action
-    confirmation_id = uuid4().hex
+    confirmation_id = idempotency_key or uuid4().hex
     generic_preview = propose_action(
         db, user, "purchase_request.create_draft", snapshot, idempotency_key=confirmation_id, evidence=evidence
     )

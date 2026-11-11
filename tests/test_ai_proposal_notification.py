@@ -46,6 +46,35 @@ def test_proposal_notification_once_owner_only_and_expiry(client, db_session, de
     assert '已过期' in item['title'] and '待确认' not in item['title']
 
 
+def test_purchase_draft_preview_replay_with_same_key_creates_one_proposal_and_notice(
+        client, db_session, demo_password, chain_catalog):
+    """响应丢失后客户端用同一幂等键重试：只保留一份提案、一条提醒。"""
+    unit, _, products = chain_catalog
+    buyer = login(client, 'BuyerUser', demo_password)
+    body = {'idempotency_key': 'draft-retry-key-0001',
+            'draft': {'purpose': '幂等验收', 'items': [{
+                'product_id': products[0].id, 'requested_name': products[0].product_name,
+                'quantity': '10', 'unit_id': unit.id}]}}
+    first = client.post('/api/v1/ai/purchase-request-draft/preview', headers=buyer, json=body)
+    assert first.status_code == 200, first.text
+    second = client.post('/api/v1/ai/purchase-request-draft/preview', headers=buyer, json=body)
+    assert second.status_code == 200, second.text
+    assert first.json()['confirmation_id'] == second.json()['confirmation_id']
+    assert first.json()['preview_version'] == second.json()['preview_version']
+
+    proposals = list(db_session.scalars(select(AIAgentActionProposal).where(
+        AIAgentActionProposal.idempotency_key == 'draft-retry-key-0001')).all())
+    assert len(proposals) == 1
+    notices = list(db_session.scalars(select(Notification).where(
+        Notification.related_type == 'AI_ACTION_PROPOSAL',
+        Notification.related_id == proposals[0].id)).all())
+    assert len(notices) == 1
+
+    changed = {**body, 'draft': {**body['draft'], 'purpose': '换了用途'}}
+    rejected = client.post('/api/v1/ai/purchase-request-draft/preview', headers=buyer, json=changed)
+    assert rejected.status_code == 409
+
+
 def test_cancelled_proposal_notification_shows_current_status(client, db_session, demo_password, chain_catalog):
     unit, _, products = chain_catalog
     buyer = login(client, 'BuyerUser', demo_password)

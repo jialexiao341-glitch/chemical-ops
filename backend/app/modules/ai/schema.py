@@ -245,13 +245,14 @@ class AIPurchaseDraftConfirm(BaseModel):
 
 
 class AIPurchaseDraftRequest(BaseModel):
-    """自然语言或结构化采购申请草稿候选值。"""
+    """自然语言或结构化采购申请草稿候选值；同一幂等键重放只返回原预览。"""
 
     model_config = ConfigDict(extra="forbid")
 
     question: str | None = Field(default=None, min_length=1, max_length=10_000)
     draft: PurchaseRequestCreate | None = None
     conversation_id: int | None = Field(default=None, gt=0)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=100)
 
     @model_validator(mode="after")
     def validate_input_mode(self) -> "AIPurchaseDraftRequest":

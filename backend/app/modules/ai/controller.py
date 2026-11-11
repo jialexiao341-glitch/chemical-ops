@@ -501,7 +501,8 @@ async def purchase_request_draft_preview(
     """只返回候选字段；不写入申请、不提交审批。"""
 
     return await drafts_service.propose_purchase_request_draft(
-        db, user, data.question, draft=data.draft, conversation_id=data.conversation_id
+        db, user, data.question, draft=data.draft, conversation_id=data.conversation_id,
+        idempotency_key=data.idempotency_key,
     )
 
 

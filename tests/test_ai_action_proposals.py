@@ -3,6 +3,8 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
+from app.modules.ai.model import AIAgentActionProposal
+
 
 def test_action_proposal_confirm_requires_literal_true_and_current_version():
     from app.modules.ai.schema import AIActionProposalConfirm
@@ -112,6 +114,45 @@ def test_action_proposal_confirm_executes_once_and_replay_returns_saved_result(m
     second = action_proposals.confirm_action(db, user, request)
     assert first == second == {"request_no": "PR-001", "purpose": "实验"}
     assert db.writes == 1
+
+
+def test_same_key_commit_conflict_returns_existing_preview(monkeypatch):
+    """并发请求同时通过幂等键预检时，唯一约束冲突后返回已落库提案而不是报错。"""
+    _register(monkeypatch)
+    existing = AIAgentActionProposal(
+        confirmation_id="a" * 32, user_id=5, action_type="test.create", preview_version=1,
+        payload={"purpose": "实验"}, payload_hash=action_proposals._hash({"purpose": "实验"}),
+        expected_resource_snapshot={}, department_scope_snapshot=None, warehouse_scope_snapshot=None,
+        diff=[], evidence=[], warnings=[], blockers=[], permission_code="procurement.requests.write",
+        risk_level="LOW", idempotency_key="req-race", expires_at=datetime(2026, 1, 1), status="PENDING",
+    )
+
+    class _InterleavedDB(_DB):
+        def __init__(self):
+            super().__init__()
+            self.existing = existing
+            self.checks = 0
+            self.rollbacks = 0
+
+        def scalar(self, _query):
+            self.checks += 1
+            return self.existing if self.checks > 1 else None
+
+        def commit(self):
+            from sqlalchemy.exc import IntegrityError
+            raise IntegrityError("uq_ai_action_proposal_user_idempotency", None, Exception("duplicate"))
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    db = _InterleavedDB()
+    preview = action_proposals.propose_action(
+        db, SimpleNamespace(id=5, status="ACTIVE"), "test.create", {"purpose": "实验"},
+        idempotency_key="req-race")
+
+    assert preview.confirmation_id == "a" * 32
+    assert db.rollbacks == 1 and db.writes == 0
+    assert db.commits == 0
 
 
 def test_action_proposal_rejects_expired_confirmation(monkeypatch):

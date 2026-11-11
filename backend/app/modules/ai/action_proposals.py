@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
@@ -131,7 +132,21 @@ def propose_action(db: Session, user: User, action_type: str, payload: dict, *, 
         db.add(Notification(recipient_id=user.id, notification_type="AI_PROPOSAL_PENDING",
             title=f"{PROPOSAL_NOTIFICATION_LABELS.get(action_type, '动作')}提案待确认", content="您有一项动作提案待核对，请查看详情。",
             related_type="AI_ACTION_PROPOSAL", related_id=proposal.id))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 并发重放同一幂等键时唯一约束先落库；回滚后返回已存在提案，不重复通知或写入。
+        db.rollback()
+        existing = db.scalar(select(AIAgentActionProposal).where(
+            AIAgentActionProposal.user_id == user.id,
+            AIAgentActionProposal.idempotency_key == idempotency_key,
+        ))
+        if existing is None:
+            raise
+        _require_proposal_department_scope(db, user, existing)
+        if existing.action_type != action_type or existing.payload_hash != _hash(normalized):
+            raise DuplicateResourceError("幂等键已用于其他动作或参数") from None
+        return _preview(existing)
     return _preview(proposal)
 
 
