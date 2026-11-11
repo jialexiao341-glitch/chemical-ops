@@ -131,3 +131,30 @@ def test_changed_date_links_task_and_notification(monkeypatch):
     assert result.triage["verdict"] == "NOTIFY_AND_TASK"
     assert result.triage["model_review_suggested"] is True
     assert result.impact["change_text"] == impact["change_text"]
+
+
+def test_dispatched_event_replay_does_not_notify_or_create_task_again(monkeypatch):
+    """同一事件重投（响应丢失或队列重放）只返回既有分派结果。"""
+    from app.modules.ai import business_events as module
+    from app.modules.purchase_orders import delivery_tasks
+
+    db = _event_db()
+    event = AIBusinessEvent(event_id="e" * 32, event_type="PURCHASE_ORDER_ETA_CHANGED",
+                            subject_type="PURCHASE_ORDER", subject_id="42", subject_version=13,
+                            dedup_key="po-eta:42:13", source="test", payload={})
+    db.add(event)
+    db.flush()
+    order = SimpleNamespace(id=42, po_no="PO1", status="ORDERED", buyer_id=7)
+    update = SimpleNamespace(id=13, previous_date=date(2026, 11, 11),
+                             expected_date=date(2026, 11, 20), note=None)
+    notices, tasks = [], []
+    monkeypatch.setattr(module, "_order_impact", lambda *args, **kwargs: _impact())
+    monkeypatch.setattr(module, "_notify_delivery_change",
+                        lambda *args, **kwargs: notices.append(1) or [object()])
+    monkeypatch.setattr(delivery_tasks, "record_change",
+                        lambda *args, **kwargs: tasks.append(1) or SimpleNamespace(id=9))
+    first = module.dispatch_delivery_change_event(db, event, order, update)
+    replay = module.dispatch_delivery_change_event(db, event, order, update)
+
+    assert replay is first and replay.triage_status == "DISPATCHED"
+    assert len(notices) == 1 and len(tasks) == 1

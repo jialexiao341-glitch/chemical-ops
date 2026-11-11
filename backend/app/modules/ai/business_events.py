@@ -283,6 +283,9 @@ def record_delivery_change_event(db: Session, order, update, *, actor_id: int | 
 
 def dispatch_delivery_change_event(db: Session, event: AIBusinessEvent, order, update) -> AIBusinessEvent:
     """快速路径：类型、状态、变化幅度、权限和去重都由程序判定。"""
+    if event.triage_status != "PENDING":
+        # 同一事件重放（响应丢失后重试、队列重投）只返回既有分派结果，不重复建任务或发通知。
+        return event
     today = date.today()
     if event.event_type not in FAST_PATH_EVENT_TYPES:
         event.triage_status = "SKIPPED"
