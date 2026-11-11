@@ -10,7 +10,11 @@ import {
   getRegressionCaseOptionsApi,
 } from '#/api';
 
-const props = defineProps<{ open: boolean; task?: AgentApi.Task }>();
+const props = defineProps<{
+  draft?: AgentApi.RegressionCaseDraft;
+  open: boolean;
+  task?: AgentApi.Task;
+}>();
 const emit = defineEmits<{ created: [AgentApi.RegressionCase]; 'update:open': [boolean] }>();
 
 const visible = computed({
@@ -42,6 +46,20 @@ const forbiddenOptions = computed(() => (options.value?.tasks ?? [])
 const canSubmit = computed(() => question.value.trim().length >= 5 && redacted.value && !submitting.value);
 
 async function loadDraft() {
+  if (props.draft) {
+    question.value = props.draft.question;
+    mode.value = props.draft.expected_execution_mode;
+    expected.value = [...props.draft.expected_tasks];
+    forbidden.value = [...props.draft.forbidden_tasks];
+    if (!options.value) {
+      try {
+        options.value = await getRegressionCaseOptionsApi();
+      } catch {
+        message.error('读取回归用例选项失败');
+      }
+    }
+    return;
+  }
   if (!props.task) return;
   loading.value = true;
   try {
@@ -62,12 +80,12 @@ async function loadDraft() {
 }
 
 watch(
-  () => [props.open, props.task?.id],
+  () => [props.open, props.task?.id, props.draft?.source_task_id],
   ([open]) => {
     if (!open) return;
     redacted.value = false;
     note.value = '';
-    if (props.task) void loadDraft();
+    if (props.task || props.draft) void loadDraft();
     else question.value = '';
   },
   { immediate: true },
@@ -84,7 +102,7 @@ async function submit() {
       note: note.value.trim() || null,
       question: question.value.trim(),
       redacted_confirmed: redacted.value,
-      source_task_id: props.task?.id ?? null,
+      source_task_id: props.task?.id ?? props.draft?.source_task_id ?? null,
     });
     message.success(`已提交回归用例 ${created.case_key}，等待管理员审阅`);
     emit('created', created);

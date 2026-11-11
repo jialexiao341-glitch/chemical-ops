@@ -183,6 +183,7 @@ export namespace AgentApi {
     down_rate: null | number;
     by_error_code: QualityBucket[];
     by_error_class: QualityBucket[];
+    by_failure_stage: QualityBucket[];
     by_recovery: QualityBucket[];
     by_tool: QualityBucket[];
     by_prompt_version: QualityBucket[];
@@ -195,6 +196,14 @@ export namespace AgentApi {
     available_tools: string[];
     available_error_classes: string[];
     available_error_codes: string[];
+    available_failure_stages: string[];
+    case_conflict: {
+      ambiguous_rating: number;
+      down_on_success: number;
+      note?: string;
+      task_ids: string[];
+      total: number;
+    };
     truncated: boolean;
   }
   export interface RegressionTaskOption {
@@ -236,6 +245,20 @@ export namespace AgentApi {
     total: number;
     page: number;
     page_size: number;
+  }
+  export interface RegressionCaseCandidate extends RegressionCaseDraft {
+    case_key: string;
+    source: 'feedback' | 'failure';
+    task_status: string;
+    error_code: null | string;
+    failure_stage: null | string;
+    feedback_reason_code: null | string;
+    existing_case_id: null | number;
+  }
+  export interface RegressionCaseCandidatePage {
+    days: number;
+    total: number;
+    items: RegressionCaseCandidate[];
   }
   export interface TaskPage {
     items: Task[];
@@ -388,6 +411,12 @@ export function getRegressionCasePageApi(params: {
   status?: string;
 }) {
   return requestClient.get<AgentApi.RegressionCasePage>('/ai/regression-cases', { params });
+}
+export function getRegressionCaseCandidatesApi(params: { days?: number; limit?: number }) {
+  return requestClient.get<AgentApi.RegressionCaseCandidatePage>(
+    '/ai/regression-cases/candidates',
+    { params },
+  );
 }
 export function reviewRegressionCaseApi(caseId: number, action: 'APPROVE' | 'ARCHIVE') {
   return requestClient.post<AgentApi.RegressionCase>(

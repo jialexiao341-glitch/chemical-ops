@@ -34,6 +34,16 @@ const recoveryLabels: Record<string, string> = {
   RETRY: '可重试',
   WAIT: '稍后核对',
 };
+const stageLabels: Record<string, string> = {
+  budget: '预算',
+  confirm: '证据与确认',
+  context: '上下文',
+  infra: '基础设施',
+  planner: '规划生成',
+  routing: '路由识别',
+  tool: '工具调用',
+  unknown: '未归类',
+};
 const reasonLabels: Record<string, string> = {
   FACT_ERROR: '事实错误',
   FORMAT: '格式问题',
@@ -56,6 +66,9 @@ const ratingOptions = [
 const downRate = computed(() => summary.value?.down_rate == null
   ? '—'
   : `${Math.round(summary.value.down_rate * 1000) / 10}%`);
+const conflict = computed(() => summary.value?.case_conflict ?? {
+  ambiguous_rating: 0, down_on_success: 0, task_ids: [], total: 0,
+});
 
 async function load() {
   loading.value = true;
@@ -95,6 +108,10 @@ function recoveryLabel(value: string) {
 
 function reasonLabel(value: string) {
   return reasonLabels[value] ?? value;
+}
+
+function stageLabel(value: string) {
+  return stageLabels[value] ?? value;
 }
 </script>
 
@@ -225,6 +242,51 @@ function reasonLabel(value: string) {
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <div class="rounded border border-border p-3">
+            <h3 class="mb-2 text-sm font-medium">按失败阶段</h3>
+            <table class="w-full text-sm">
+              <tbody>
+                <tr v-for="row in summary.by_failure_stage" :key="`stage-${row.key}`" class="border-t border-border/60">
+                  <td class="py-1.5">{{ stageLabel(row.key) }}</td>
+                  <td class="py-1.5 text-right">{{ row.count }}</td>
+                </tr>
+                <tr v-if="!summary.by_failure_stage?.length">
+                  <td class="text-muted-foreground py-2">暂无数据</td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="text-muted-foreground mt-2 text-xs">
+              只按错误码确定性归因，表示问题先坏在哪一段；不判定业务责任。
+            </p>
+          </div>
+
+          <div class="rounded border border-border p-3">
+            <h3 class="mb-2 text-sm font-medium">评价冲突</h3>
+            <table class="w-full text-sm">
+              <tbody>
+                <tr class="border-t border-border/60">
+                  <td class="py-1.5">同一任务同时有帮助/没帮助</td>
+                  <td class="py-1.5 text-right">{{ conflict.ambiguous_rating }}</td>
+                </tr>
+                <tr class="border-t border-border/60">
+                  <td class="py-1.5">标记没帮助但任务成功</td>
+                  <td class="py-1.5 text-right">{{ conflict.down_on_success }}</td>
+                </tr>
+                <tr class="border-t border-border/60">
+                  <td class="py-1.5">去重合计</td>
+                  <td class="py-1.5 text-right">{{ conflict.total }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <details v-if="conflict.task_ids?.length" class="mt-2 text-xs">
+              <summary class="text-muted-foreground cursor-pointer">冲突任务编号（最多 50 条）</summary>
+              <p class="mt-1 break-all">{{ conflict.task_ids.join('、') }}</p>
+            </details>
+            <p class="text-muted-foreground mt-2 text-xs">
+              只标记评价与状态不一致，供人工复核；不作为自动判定。
+            </p>
           </div>
 
           <div class="rounded border border-border p-3 lg:col-span-2">
