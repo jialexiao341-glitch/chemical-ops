@@ -154,6 +154,7 @@ const draftMode = ref(false);
 const draftPrepared = ref(false);
 const draftMissingFields = ref<string[]>([]);
 const draftFollowups = ref<string[]>([]);
+const draftRetryKey = ref<{ key: string; signature: string }>();
 const draftPurpose = ref('');
 const draftPriority = ref('NORMAL');
 const draftBudget = ref<number>();
@@ -1089,6 +1090,11 @@ async function reloadActiveConversation() {
   if (epoch === chatEpoch) { messages.value = historyMessages(res.items); olderMessagesRemaining.value = Math.max(0, res.total - res.items.length); extraOlderLoaded.value = 0; showOlderMessages.value = false; scrollToBottom(); }
 }
 
+function createDraftIdempotencyKey() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `draft-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 async function previewPurchaseRequestDraft(freeText?: string) {
   if (freeText) await loadDraftFormOptions();
   const payload: import('#/api').PurchaseRequestApi.RequestPayload = {
@@ -1117,13 +1123,22 @@ async function previewPurchaseRequestDraft(freeText?: string) {
   ];
   sending.value = true;
   scrollToBottom();
+  const requestInput = freeText ? [...draftFollowups.value, freeText].join('\n') : payload;
+  // 同一内容的失败重试复用幂等键：响应丢失时服务端只保留一份提案。
+  const signature = JSON.stringify([requestInput, activeConversationId.value ?? null]);
+  const idempotencyKey = draftRetryKey.value?.signature === signature
+    ? draftRetryKey.value.key
+    : createDraftIdempotencyKey();
+  draftRetryKey.value = { key: idempotencyKey, signature };
   try {
     const requestEpoch = chatEpoch;
     const result = await proposePurchaseRequestDraftApi(
-      freeText ? [...draftFollowups.value, freeText].join('\n') : payload,
+      requestInput,
       activeConversationId.value,
+      idempotencyKey,
     );
     if (requestEpoch !== chatEpoch) return;
+    draftRetryKey.value = undefined;
     draftMissingFields.value = result.missing_fields;
     if (result.missing_fields.length > 0) {
       draftPurpose.value = result.draft.purpose ?? '';

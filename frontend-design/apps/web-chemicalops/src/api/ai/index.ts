@@ -232,10 +232,15 @@ export async function parseNaturalFiltersApi(dataset: string, question: string) 
 export async function proposePurchaseRequestDraftApi(
   input: string | import('../procurement/purchase-requests').PurchaseRequestApi.RequestPayload,
   conversationId?: number,
+  idempotencyKey?: string,
 ) {
   const result = await requestClient.post<AiApi.PurchaseDraftPreview>(
     '/ai/purchase-request-draft/preview',
-    { ...(typeof input === 'string' ? { question: input } : { draft: input }), conversation_id: conversationId },
+    {
+      ...(typeof input === 'string' ? { question: input } : { draft: input }),
+      conversation_id: conversationId,
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+    },
   );
   if (result.confirmation_id) notifyNotificationChanged();
   return result;

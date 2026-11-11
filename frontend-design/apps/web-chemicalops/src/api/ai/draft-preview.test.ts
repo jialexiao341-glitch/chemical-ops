@@ -38,4 +38,13 @@ describe('采购申请草稿预览请求', () => {
       conversation_id: undefined,
     });
   });
+
+  it('失败重试复用幂等键，服务端不会重复创建提案', async () => {
+    await proposePurchaseRequestDraftApi('采购乙醇 12 升', 17, 'draft-key-0001');
+    expect(post).toHaveBeenCalledWith('/ai/purchase-request-draft/preview', {
+      question: '采购乙醇 12 升',
+      conversation_id: 17,
+      idempotency_key: 'draft-key-0001',
+    });
+  });
 });
