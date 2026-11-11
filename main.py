@@ -68,25 +68,31 @@ def build_parser() -> argparse.ArgumentParser:
         default="dev",
         help="运行环境，dev 使用本机地址并开启热重载，prod 使用 .env 配置",
     )
+    run_parser.add_argument(
+        "--no-reload",
+        action="store_true",
+        help="关闭热重载但继续在 dev 环境启动任务 Worker；评测/验收期间写文件不会触发重启",
+    )
     return parser
 
 
-def run_server(environment: str) -> None:
+def run_server(environment: str, *, no_reload: bool = False) -> None:
     """根据运行环境启动 FastAPI 服务。"""
 
     is_dev = environment == "dev"
+    reload_enabled = is_dev and not no_reload
     LOGGER.info(
         "启动 ChemicalOps 命令=run 环境=%s 地址=%s 端口=%s 热重载=%s",
         environment,
         "127.0.0.1" if is_dev else "0.0.0.0",
         8888,
-        is_dev,
+        reload_enabled,
     )
     options = dict(
         app_dir=str(PROJECT_ROOT / "backend"),
         host="127.0.0.1" if is_dev else "0.0.0.0",
         port=8888,
-        reload=is_dev,
+        reload=reload_enabled,
         access_log=True,
         log_level="info",
     )
@@ -103,7 +109,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
     args = build_parser().parse_args()
     if args.command == "run":
-        run_server(args.env)
+        run_server(args.env, no_reload=args.no_reload)
 
 
 if __name__ == "__main__":
