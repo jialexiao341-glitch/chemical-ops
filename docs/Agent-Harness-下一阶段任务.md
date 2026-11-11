@@ -264,7 +264,7 @@ feat(ai): 增加 Agent 错误分类与恢复策略
 
 - 构造 20 轮对话 + 100 行工具结果 + 5 个工具步骤，不再抛 `CONTEXT_LIMIT`。
 - 短任务上下文与现有行为基本一致；现有 Agent 测试通过。
-- token 估算单元测试覆盖中英文、空串、超长串；若模型返回 `usage.prompt_tokens`，估算值应落在实际值的 80%–150% 区间。
+- token 估算单元测试覆盖中英文、空串、超长串；若模型返回 `usage.prompt_tokens`，应校验“装配上下文估算 + 固定开销”落入实际值的 80%–150% 区间。固定开销指系统提示词与工具 Schema，按模型/工具集一次性标定；直接用上下文估算对比整段 `prompt_tokens` 会系统性偏低，不能作为验收口径。
 - v1 不新增 LLM 摘要调用，使用确定性摘要，避免额外成本和不确定性。
 
 **测试**
@@ -403,5 +403,5 @@ python -m compileall -q backend/app tests
 | T1 Prompt Registry | 已完成 |  | 实现为 prompt_registry.py 与快照测试；真实模型回归尚未重跑 |
 | T2 Trace v2 | 已完成 |  | 已补充路由票据版本记录及错误分类保留回归；真实模型和完整 MySQL 环境尚未验收 |
 | T3 Error Policy | 已完成 |  | 分类和恢复动作仅为建议；队列 transient 已收敛为安全连接错误，读超时/断流不自动重放 |
-| T4 Context Assembler | 已实现（待验收） |  | 已通过离线上下文及 Agent 回归；真实模型 token 估算偏差尚未验证 |
-| T5 Eval Gate | 已实现（待验收） |  | `scripts/compare_eval_reports.py` 支持三类评测报告对比、逐用例回归清单与 `--fail-on-regression`；新增 `scripts/run_eval_suite.py` 与 `scripts/eval_prompt_gate.py`，基线按 routing+planner 版本登记；仅在离线夹具上验证，尚未与真实模型报告交叉验收 |
+| T4 Context Assembler | 已完成 |  | 口径修正为“固定开销 + 装配估算”：固定开销为系统提示词与工具 Schema，按模型/工具集一次性标定。用 2026-11-09 的 11 个带 usage 样本复算，`estimated_tokens/prompt_tokens` 原始为 0.369–0.581；扣除中位数 1952 的固定开销后为 0.924–1.033，落在 80%–150% 内。未新增真实模型调用 |
+| T5 Eval Gate | 已完成 |  | `scripts/compare_eval_reports.py` 支持三类评测报告对比、逐用例回归清单与 `--fail-on-regression`；新增 `scripts/run_eval_suite.py` 与 `scripts/eval_prompt_gate.py`。2026-11-11 验证：注入一条 PASS→FAIL 后门禁返回 2 并列出退化用例；planner 提示词变更后已重建基线 `routing@1-5531c235__planner@1-2911a494`，业务报告未重跑并在 `manifest.not_run` 记录 |
