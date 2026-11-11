@@ -31,14 +31,18 @@ def prompt_key() -> str:
 
 
 def run_gate(candidate_dir: Path, baseline_root: Path) -> dict:
-    """对比候选目录与当前 prompt 版本基线；返回逐报告结论。"""
+    """对比候选目录与当前 prompt 版本基线；缺报告即 NOT_RUN，不允许子集冒充全量。"""
     key = prompt_key()
     baseline_dir = baseline_root / key
     reports = []
+    present: list[str] = []
+    missing: list[str] = []
     for name, filename in REPORT_FILES.items():
         candidate = candidate_dir / filename
         if not candidate.exists():
+            missing.append(name)
             continue
+        present.append(name)
         baseline = baseline_dir / filename
         if not baseline.exists():
             raise ValueError(
@@ -61,9 +65,18 @@ def run_gate(candidate_dir: Path, baseline_root: Path) -> dict:
         })
     if not reports:
         raise ValueError(f"候选目录 {candidate_dir} 没有可对比的评测报告")
-    verdict = "REGRESSION" if any(row["verdict"] == "REGRESSION" for row in reports) else "PASS"
+    if missing:
+        verdict = "NOT_RUN"
+    elif any(row["verdict"] == "REGRESSION" for row in reports):
+        verdict = "REGRESSION"
+    else:
+        verdict = "PASS"
     return {"prompt_key": key, "baseline_dir": str(baseline_dir),
-            "candidate_dir": str(candidate_dir), "reports": reports, "verdict": verdict}
+            "candidate_dir": str(candidate_dir), "reports": reports,
+            "coverage": {"present": present, "missing": missing,
+                         "required": list(REPORT_FILES),
+                         "note": "四份报告必须全部重跑；缺少任一报告判定 NOT_RUN，不能按已跑部分判 PASS"},
+            "verdict": verdict}
 
 
 def _report_versions(data: dict) -> dict[str, list[str]]:
@@ -108,6 +121,7 @@ def promote_baseline(candidate_dir: Path, baseline_root: Path, *, force: bool = 
     if existing and not force:
         raise ValueError(f"当前 prompt 版本已有基线（{', '.join(existing)}）；覆盖需 --force")
     files = [name for name in REPORT_FILES.values() if (candidate_dir / name).exists()]
+    missing = [name for name in REPORT_FILES.values() if name not in files]
     if not files:
         raise ValueError(f"候选目录 {candidate_dir} 没有可登记报告")
     target.mkdir(parents=True, exist_ok=True)
@@ -131,12 +145,15 @@ def promote_baseline(candidate_dir: Path, baseline_root: Path, *, force: bool = 
         "planner_version": prompt_registry.prompt_version("planner"),
         "registered_at": datetime.now().isoformat(timespec="seconds"),
         "files": files,
+        "coverage": {"files": files, "missing": missing,
+                     "note": "只登记候选目录实际存在的报告；未重跑项在 coverage.missing 中显式留痕"},
         "report_versions": report_versions,
         "carried_forward": carried_forward,
     }
     (target / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"prompt_key": key, "baseline_dir": str(target), "files": files,
+            "coverage": manifest["coverage"],
             "report_versions": report_versions, "carried_forward": carried_forward}
 
 
@@ -152,6 +169,9 @@ def render_text(result: dict) -> str:
         if row["safety_failures"]:
             lines.append("  安全失败：" + "、".join(row["safety_failures"]))
     lines.append(f"判定：{result['verdict']}")
+    coverage = result.get("coverage") or {}
+    if coverage.get("missing"):
+        lines.append("覆盖度：缺少 " + "、".join(coverage["missing"]) + "（未判定 PASS）")
     return "\n".join(lines)
 
 
@@ -162,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline-root", type=Path,
                         default=ROOT / "docs/evaluation/baselines", help="基线根目录")
     parser.add_argument("--fail-on-regression", action="store_true",
-                        help="存在回归或安全失败时返回 2")
+                        help="存在回归、安全失败或覆盖度不足（NOT_RUN）时返回 2")
     parser.add_argument("--promote-baseline", action="store_true",
                         help="把候选报告登记为当前 prompt 版本基线")
     parser.add_argument("--force", action="store_true", help="覆盖已有基线")
@@ -186,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else render_text(result))
-    if args.fail_on_regression and result["verdict"] == "REGRESSION":
+    if args.fail_on_regression and result["verdict"] in {"REGRESSION", "NOT_RUN"}:
         return 2
     return 0
 
