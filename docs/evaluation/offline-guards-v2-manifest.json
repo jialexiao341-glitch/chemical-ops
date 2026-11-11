@@ -18,14 +18,16 @@
       "path": "scripts/agent_business_cases.py"
     },
     {
-      "sha256": "b8a3ff0505cf22c9f5b43f4918df04f37cd099355f0390b284d42557db60be1d",
+      "sha256": "ace987d98ed721a6a26a1994ddc9132211da3d0fae1a144ee07151ff3ffe6294",
       "path": "scripts/agent_evaluation_data.py"
     },
     {
-      "sha256": "bf4e07084a429f9c8eb7f706a1bd8fd24161612b78332a250c5e39e51d9bb0b3",
+      "sha256": "42d1ba837137bda6fbb08aa4e788bcf4e63cb12b673899b61e663f5ad0de2e1c",
       "path": "scripts/evaluate_agent_tasks.py"
     }
   ],
   "hash_mode": "utf8-lf",
-  "rfq_control_case_count": 20
+  "rfq_control_case_count": 20,
+  "refreshed_at": "2026-11-11",
+  "refresh_note": "2026-11-09 评测能力清单与 prompt 门禁改动、2026-11-11 评测记录实际模型后审阅题集并刷新哈希；未改变冻结用例的业务期望"
 }

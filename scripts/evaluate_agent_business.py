@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'backend'))
 
 from app.core.config import get_settings
-from app.modules.ai import agent_runtime as runtime
+from app.modules.ai import agent_runtime as runtime, model_catalog
+from app.modules.ai.gateway import resolve_model_profile
 from scripts import evaluate_agent_tasks as original
 from scripts.agent_business_cases import CASES, RFQ_CONTROLS, CATALOG, INVENTORY, RFQ, COMPARE, business_db, evidence_correct
 
@@ -180,6 +181,7 @@ def write_atomic(path,content):
 
 
 def main():
+    model_catalog.activate()  # 默认使用数据库当前模型；无模型目录时回退 .env 单模型配置。
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT/'docs/evaluation/agent-business-120-20261009.json')
     parser.add_argument('--repetitions', type=int, default=3)
@@ -224,6 +226,7 @@ def main():
         print(f'{len(selected)} 条隔离样本构建通过；未调用模型。')
         return 0
     settings = get_settings()
+    profile = resolve_model_profile(settings)
     if settings.app_env != 'development' or not settings.openai_api_key or not settings.agent_enabled:
         raise SystemExit('需要已配置模型并启用 Agent 的开发环境')
     source_paths = [Path(__file__), ROOT/'scripts/agent_business_cases.py', ROOT/'scripts/agent_evaluation_data.py', Path(original.__file__)]
@@ -233,7 +236,7 @@ def main():
         source_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in source_paths},
         code_revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
         working_tree_dirty=bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip()),
-        model=settings.llm_model, model_config=dict(temperature=settings.llm_temperature, max_steps=settings.agent_max_steps,
+        model=profile.model, model_profile=profile.name, model_config=dict(temperature=settings.llm_temperature, max_steps=settings.agent_max_steps,
             timeout_seconds=settings.agent_task_timeout_seconds, max_tokens=min(settings.llm_max_tokens,2048)),
         planner_sha256=hashlib.sha256(runtime.PLANNER_PROMPT.encode()).hexdigest(),
         runtime_sha256=hashlib.sha256(Path(runtime.__file__).read_bytes()).hexdigest(),
@@ -242,7 +245,7 @@ def main():
         report['scope']='范围：10 组相同产品/数量/价格、两类组合查询对照；一类仅补充“询价单”标记，一类仅采用项目实际 RFQ日期+序号格式。真实模型与隔离 SQLite，不能替代完整 120 场景评测。'
     if args.resume:
         previous=json.loads(args.output.read_text(encoding='utf-8'))
-        if previous['model']!=settings.llm_model or previous['repetitions']!=args.repetitions or previous['unique_cases']!=len(selected):
+        if previous['model']!=profile.model or previous['repetitions']!=args.repetitions or previous['unique_cases']!=len(selected):
             raise SystemExit('恢复配置必须与原报告一致')
         report['previous_execution_metadata']={k:v for k,v in previous.items() if k not in {'cases','metrics'}}
         report['cases']=[score_row(row,next(c for c in selected if c.id==row['id']),row['trial']) for row in previous['cases']]

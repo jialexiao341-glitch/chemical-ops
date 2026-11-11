@@ -12,6 +12,8 @@ from time import perf_counter
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.core.config import get_settings
+from app.modules.ai import model_catalog
+from app.modules.ai.gateway import resolve_model_profile
 from app.modules.ai.routing import ROUTING_PROMPT, understand
 from scripts.evaluation_manifest import build_manifest
 
@@ -109,6 +111,7 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
     仅校验路由类别和任务集合，不代表工具成功率、检索质量或生产收益。
     """
     settings = get_settings().model_copy(update={"llm_max_retries": 0, "llm_timeout_seconds": 45})
+    profile = resolve_model_profile(settings)
     manifest = build_manifest("intent-routing-eval")
     semaphore = asyncio.Semaphore(3)
     async def run(case: tuple[str, dict, str, list[str]]) -> dict:
@@ -143,7 +146,8 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
     for round_index in range(repeats):
         current = await asyncio.gather(*(run(case) for case in CASES))
         results.extend({"round": round_index + 1, **row} for row in current)
-    report = {"evaluated_at": datetime.now(timezone.utc).isoformat(), "model": settings.llm_model,
+    report = {"evaluated_at": datetime.now(timezone.utc).isoformat(), "model": profile.model,
+              "model_profile": profile.name,
               "prompt_sha256": hashlib.sha256(ROUTING_PROMPT.encode()).hexdigest(),
               "capability_digest": manifest.digest,
               "capability_scope": "全量只读工具与统计数据集；真实账号仍按权限裁剪，仅用于让路由看到与生产一致的能力清单",
@@ -165,6 +169,7 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
 
 def main() -> None:
     """解析 --output 参数并运行评测；在项目根目录使用本地 Python 环境执行。"""
+    model_catalog.activate()  # 默认使用数据库当前模型；无模型目录时回退 .env 单模型配置。
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("docs/evaluation/intent-routing.json"))
     parser.add_argument("--repeats", type=int, choices=range(1, 11), default=1)

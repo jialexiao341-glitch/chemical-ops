@@ -35,8 +35,12 @@ def test_build_case_derives_task_and_hashes_source():
 
 def test_build_case_requires_derivable_or_explicit_task():
     task = SimpleNamespace(id="t", payload={"messages": ["你好"], "trace": [], "run_meta": {}})
+    # 不执行任务的场景允许没有预期任务；需要执行时必须能推导出任务或显式给出。
+    case = promote.build_case(task, question="你好", expected_mode="none",
+                              expected_tasks=[], forbidden_tasks=[])
+    assert case["expected_tasks"] == []
     with pytest.raises(ValueError, match="无法从任务轨迹推导"):
-        promote.build_case(task, question="你好", expected_mode="none",
+        promote.build_case(task, question="你好", expected_mode="agent",
                            expected_tasks=[], forbidden_tasks=[])
 
 

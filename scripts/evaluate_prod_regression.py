@@ -14,7 +14,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.core.config import get_settings  # noqa: E402
-from app.modules.ai import routing  # noqa: E402
+from app.modules.ai import model_catalog, routing  # noqa: E402
+from app.modules.ai.gateway import resolve_model_profile  # noqa: E402
 from app.modules.ai.prompt_registry import prompt_version  # noqa: E402
 from scripts.evaluation_manifest import build_manifest  # noqa: E402
 
@@ -56,9 +57,11 @@ async def evaluate(cases: list[dict]) -> dict:
             "actual_tasks": checks["actual_tasks"],
         })
     model_settings = get_settings()
+    model_profile = resolve_model_profile(model_settings)
     return {
         "dataset_version": "prod-regression-v1",
-        "model": model_settings.llm_model,
+        "model": model_profile.model,
+        "model_profile": model_profile.name,
         "prompt_versions": {
             "routing": prompt_version("routing"),
             "planner": prompt_version("planner"),
@@ -71,6 +74,7 @@ async def evaluate(cases: list[dict]) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    model_catalog.activate()  # 默认使用数据库当前模型；无模型目录时回退 .env 单模型配置。
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path,
                         default=ROOT / "docs/evaluation/prod-regression/cases.json")

@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT))
 from sqlalchemy import event, text
 from app.core.config import get_settings
 from app.core.errors import AuthorizationError
-from app.modules.ai import agent_runtime as runtime, agent_tools as tools
+from app.modules.ai import agent_runtime as runtime, agent_tools as tools, model_catalog
+from app.modules.ai.gateway import resolve_model_profile
 from scripts.agent_evaluation_data import evaluation_db, isolated_cache_namespace
 
 
@@ -324,18 +325,23 @@ def save_report(path: Path, report: dict):
 
 
 async def main() -> int:
+    model_catalog.activate()  # 默认使用数据库当前模型；无模型目录时回退 .env 单模型配置。
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'docs/evaluation/Agent只读任务真实模型评估.json')
     parser.add_argument('--cases', nargs='+', help='仅运行指定 T 编号；报告记录实际分母')
     parser.add_argument('--validate', action='store_true', help='只验证样本与权限，不调用模型')
     args = parser.parse_args()
     settings = get_settings()
+    profile = resolve_model_profile(settings)
     selected = [case for case in CASES if not args.cases or case.id in args.cases]
     if not selected or args.cases and set(args.cases) - {c.id for c in CASES}: parser.error('未知用例编号')
     if args.validate:
         with evaluation_db() as db:
             assert [t['name'] for t in tools.list_tools(db, SimpleNamespace(id=20))] == []
-            assert len(tools.list_tools(db, SimpleNamespace(id=7))) == 4
+            # 只要求四个核心只读工具可见；新增工具不应让样本校验失败。
+            names = {t['name'] for t in tools.list_tools(db, SimpleNamespace(id=7))}
+            assert {'catalog.search_products', 'inventory.query_available',
+                    'supplier_quotes.find_rfq_items', 'supplier_quotes.compare'} <= names
         print('固定样本与 RBAC 验证通过；未执行真实模型评估。')
         return 0
     if settings.app_env != 'development' or not settings.openai_api_key or not settings.agent_enabled:
@@ -345,7 +351,8 @@ async def main() -> int:
     report = {'started_at': datetime.now(timezone(timedelta(hours=8))).isoformat(), 'dataset_version': 'agent-read-v1.1',
         'dataset_sha256': hashlib.sha256(dataset).hexdigest(), 'evaluator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), 'code_revision': revision,
         'working_tree_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()),
-        'model': settings.llm_model, 'model_config': {'temperature': settings.llm_temperature, 'max_output_tokens': min(settings.llm_max_tokens, 2048),
+        'model': profile.model, 'model_profile': profile.name,
+        'model_config': {'temperature': settings.llm_temperature, 'max_output_tokens': min(settings.llm_max_tokens, 2048),
             'max_steps': settings.agent_max_steps, 'task_timeout_seconds': settings.agent_task_timeout_seconds, 'context_max_chars': settings.agent_context_max_chars},
         'planner_sha256': hashlib.sha256(runtime.PLANNER_PROMPT.encode()).hexdigest(),
         'runtime_sha256': hashlib.sha256(Path(runtime.__file__).read_bytes()).hexdigest(),
