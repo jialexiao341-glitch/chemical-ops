@@ -1455,6 +1455,9 @@ class AIQualitySummary(ToolSchema):
     available_tools: list[str] = Field(default_factory=list)
     available_error_classes: list[str] = Field(default_factory=list)
     available_error_codes: list[str] = Field(default_factory=list)
+    available_failure_stages: list[str] = Field(default_factory=list)
+    by_failure_stage: list[AIQualityBucket] = Field(default_factory=list)
+    case_conflict: dict = Field(default_factory=dict)
     truncated: bool = False
 
 

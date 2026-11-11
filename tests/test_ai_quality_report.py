@@ -97,6 +97,9 @@ def test_quality_summary_groups_by_error_tool_and_version(quality_db):
     assert report["down_rate"] == 0.5
     assert {row["key"]: row["count"] for row in report["by_error_code"]} == {"TOOL_ERRORS": 1, "CONTEXT_LIMIT": 1}
     assert {row["key"]: row["count"] for row in report["by_error_class"]} == {"BUDGET": 1, "BUSINESS_INVALID": 1}
+    assert {row["key"]: row["count"] for row in report["by_failure_stage"]} == {"tool": 1, "context": 1}
+    assert report["available_failure_stages"] == ["context", "tool"]
+    assert report["case_conflict"]["total"] == 0
     assert {row["key"]: row["count"] for row in report["by_recovery"]} == {"FIX_INPUT": 1, "NARROW_SCOPE": 1}
     assert {row["key"]: row["count"] for row in report["by_tool"]} == {"purchase_orders.search": 2, "inventory.query_available": 1}
     assert report["available_prompt_versions"] == [
