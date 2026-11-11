@@ -24,10 +24,26 @@ def test_extract_json_object_handles_model_output(raw):
     assert llm.extract_json_object(raw) == {"items": [{"name": "乙醇"}]}
 
 
-@pytest.mark.parametrize("raw", ["", "没有结构化结果", "```json\n{invalid}\n```"])
+@pytest.mark.parametrize("raw", ["", "没有结构化结果", "```json\n{invalid}\n```", '{"a": 1, "b":'])
 def test_extract_json_object_rejects_invalid_output(raw):
     with pytest.raises(BusinessValidationError):
         llm.extract_json_object(raw)
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ('{"items": [{"name": "乙醇"}]', {"items": [{"name": "乙醇"}]}),
+    ('{"items": [{"name": "乙醇"},', {"items": [{"name": "乙醇"}]}),
+    ('```json\n{"items": [{"name": "乙', {"items": [{"name": "乙"}]}),
+])
+def test_load_json_object_repairs_truncated_transport_output(raw, expected):
+    payload, shape = llm.load_json_object(raw)
+    assert payload == expected
+    assert shape == "repaired"
+
+
+def test_load_json_object_reports_clean_and_extracted_shapes():
+    assert llm.load_json_object('{"ok": true}') == ({"ok": True}, "clean")
+    assert llm.load_json_object('说明文字\n```json\n{"ok": true}\n```')[1] == "extracted"
 
 
 @pytest.mark.parametrize("failure", ["before_token", "after_token", "empty"])

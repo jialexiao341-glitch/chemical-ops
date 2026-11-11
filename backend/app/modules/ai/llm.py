@@ -568,16 +568,83 @@ async def stream_chat(
             circuit_breakers.abandon_probe(profile.key)
 
 
-def extract_json_object(raw: str) -> dict[str, Any]:
-    """从模型输出中提取第一个合法 JSON 对象，兼容代码块和前置说明。"""
+_JSON_FENCE = re.compile(r"```(?:json)?", re.IGNORECASE)
+_MAX_CANDIDATES = 16
 
-    cleaned = re.sub(r"```(?:json)?", "", raw, flags=re.IGNORECASE).replace("```", "")
+
+def _json_text(raw: str) -> str:
+    """去掉 Markdown 代码围栏；前后说明文字由逐位置解码跳过。"""
+
+    return _JSON_FENCE.sub("", raw).replace("```", "")
+
+
+def _close_truncated(text: str, start: int) -> dict[str, Any] | None:
+    """只补齐被截断的字符串和括号，不猜测缺失字段；结构仍非法时返回 None。
+
+    扫描从 start 处的 `{` 开始，记录未闭合的字符串与括号栈。补齐后交给
+    json.loads 复核；截断在键名或冒号之后无法确定取值，仍然返回 None 交给重生成。
+    """
+
+    closers: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text[start:]:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            closers.append("}" if char == "{" else "]")
+        elif char in "}]":
+            if not closers or closers.pop() != char:
+                return None
+    if not closers and not in_string:
+        return None  # 完整对象由 raw_decode 处理，这里不重写原文
+    body = text[start:]
+    if in_string:
+        body += '"'
+    elif body.rstrip().endswith(","):
+        body = body.rstrip()[:-1]  # 尾逗号无法靠补括号修复
+    body += "".join(reversed(closers))
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def load_json_object(raw: str) -> tuple[dict[str, Any], str]:
+    """解析模型输出中的 JSON 对象，返回 (对象, 形态)。
+
+    形态 clean 表示原文即可解析；extracted 表示去掉代码块或前后说明后解析；
+    repaired 表示对象被截断且已补齐闭合符号。调用方可将形态计入指标，区分
+    真实结构错误与可自动修复的传输截断。
+    """
+
+    text = _json_text(raw)
     decoder = json.JSONDecoder()
-    for match in re.finditer(r"\{", cleaned):
+    for index, match in enumerate(re.finditer(r"\{", text)):
+        if index >= _MAX_CANDIDATES:
+            break
         try:
-            payload, _ = decoder.raw_decode(cleaned, match.start())
+            payload, _ = decoder.raw_decode(text, match.start())
         except json.JSONDecodeError:
+            repaired = _close_truncated(text, match.start())
+            if repaired is not None:
+                return repaired, "repaired"
             continue
         if isinstance(payload, dict):
-            return payload
+            return payload, ("clean" if text.strip() == raw.strip() else "extracted")
     raise BusinessValidationError("AI 未返回有效的查询计划")
+
+
+def extract_json_object(raw: str) -> dict[str, Any]:
+    """从模型输出中提取第一个合法 JSON 对象，兼容代码块、前置说明和截断。"""
+
+    return load_json_object(raw)[0]

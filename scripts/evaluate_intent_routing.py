@@ -5,6 +5,7 @@ import hashlib
 import asyncio
 import json
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -12,7 +13,7 @@ from time import perf_counter
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.core.config import get_settings
-from app.modules.ai import model_catalog
+from app.modules.ai import model_catalog, routing
 from app.modules.ai.gateway import resolve_model_profile
 from app.modules.ai.routing import ROUTING_PROMPT, understand
 from scripts.evaluation_manifest import build_manifest
@@ -123,14 +124,15 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
             try:
                 result = await understand(question, context, settings, manifest=manifest)
             except Exception as exc:
-                # 单条模型格式失败不能中断整批评测；保存失败类型但不保存异常原文或密钥。
+                # 单条模型格式失败不能中断整批评测；保存失败类型、错误码但不保存异常原文或密钥。
                 return {"question": question, "context": context, "expected_route": expected_route,
                         "expected_tasks": expected_tasks, "actual": None, "route": None,
                         "recognition_passed": False, "plan_contract_passed": None,
                         "expected_execution_mode": expected_mode,
                         "execution_contract_passed": False, "tool_invoked": False,
                         "passed": False, "seconds": round(perf_counter() - start, 2),
-                        "evaluation_error_type": type(exc).__name__}
+                        "evaluation_error_type": type(exc).__name__,
+                        "evaluation_error_code": getattr(exc, "code", None)}
             recognized = result.route == expected_route and set(result.tasks) == set(expected_tasks)
             execution_contract = check_execution_contract(result, expected_route)
             planned = check_contract(question, result)
@@ -160,6 +162,19 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
     report["execution_contract"] = {"total": len(results), "passed": sum(row["execution_contract_passed"] for row in results),
                                      "note": "只核对执行模式与任务结构；不调用工具或数据库，也不代表执行成功率"}
     report["tool_execution"] = {"total": 0, "passed": 0, "note": "本脚本不会调用工具"}
+    report["model_config"] = {
+        "temperature": routing.UNDERSTANDING_TEMPERATURE,
+        "max_tokens": routing.UNDERSTANDING_MAX_TOKENS,
+        "max_retries": settings.llm_max_retries,
+        "timeout_seconds": settings.llm_timeout_seconds,
+        "note": "识别阶段固定贪心解码；仅评测进程覆盖，不修改生产 .env 的 LLM_TEMPERATURE",
+    }
+    report["errors"] = {
+        "total": sum(1 for row in results if row.get("evaluation_error_type")),
+        "by_code": dict(Counter(row.get("evaluation_error_code") or "UNKNOWN"
+                                for row in results if row.get("evaluation_error_type"))),
+        "note": "INTENT_SCHEMA_ERROR 计入结构信号；INTENT_SERVICE_ERROR 属于通信层失败，不与业务能力混算",
+    }
     report["stability"] = {"total_samples": len(CASES), "passed_all_rounds": sum(
         all(row["passed"] for row in results if row["question"] == case[0]) for case in CASES)}
     output.parent.mkdir(parents=True, exist_ok=True)

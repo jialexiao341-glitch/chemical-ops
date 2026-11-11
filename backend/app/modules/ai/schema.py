@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
+import re
 from typing import Annotated, Any, Literal
 from typing_extensions import TypedDict
 
@@ -457,6 +458,44 @@ class Slots(BaseModel):
                 return False
         raise ValueError("aggregate_products 必须是明确的布尔值")
 
+    @field_validator("limit", mode="before")
+    @classmethod
+    def coerce_limit(cls, value):
+        """模型偶发把条数写成字符串或带单位；只接受可无损还原的整数。"""
+        if isinstance(value, bool):
+            raise ValueError("limit 必须是 1-100 的整数")
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str):
+            token = value.strip().replace(",", "").removesuffix("条").strip()
+            if token.isdigit():
+                return int(token)
+            raise ValueError("limit 必须是 1-100 的整数")
+        return value
+
+    @field_validator("date_from", "date_to", mode="before")
+    @classmethod
+    def coerce_date_separators(cls, value):
+        """接受 2026/11/11、2026.11.11、2026年11月11日；其余格式原样交给 Pydantic 拒绝。"""
+        if not isinstance(value, str):
+            return value
+        match = re.match(r"^\s*(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?\s*(?:[T ].*)?$", value)
+        if not match:
+            return value
+        try:
+            return date(*map(int, match.groups()))
+        except ValueError:
+            return value  # 日历非法（如 2 月 30 日）仍交给 Pydantic 报错
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def normalize_unit(cls, value):
+        """单位只去掉首尾空白；空字符串视为未提供。"""
+        if isinstance(value, str):
+            token = value.strip()
+            return token or None
+        return value
+
     @model_validator(mode="after")
     def validate_dates(self):
         """拒绝倒置的 ISO 日期范围，防止错误条件进入计划生成阶段。"""
@@ -473,6 +512,12 @@ class SubTask(BaseModel):
     question: str = Field(min_length=2, max_length=1000)
     slots: Slots = Field(default_factory=Slots)
     depends_on: list[str] = Field(default_factory=list, max_length=5)
+
+    @field_validator("slots", mode="before")
+    @classmethod
+    def coerce_absent_slots(cls, value):
+        """无条件的子任务常把 slots 写成 null；null 与缺省等价，其余类型仍拒绝。"""
+        return {} if value is None else value
 
 
 class PurchaseRequestActionFields(TypedDict, total=False):
@@ -529,6 +574,12 @@ class Understanding(BaseModel):
     action_fields: PurchaseRequestActionFields | RfqDraftActionFields | ExceptionTaskActionFields | ReplenishmentActionFields | None = None
     question: str | None = Field(default=None, max_length=1000)
     sub_tasks: list[SubTask] = Field(default_factory=list, max_length=6)
+
+    @field_validator("slots", mode="before")
+    @classmethod
+    def coerce_absent_slots(cls, value):
+        """模型偶发把无条件请求写成 slots:null；null 与缺省等价，字符串或数组仍拒绝。"""
+        return {} if value is None else value
 
     @model_validator(mode="after")
     def normalize(self):

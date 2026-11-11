@@ -88,6 +88,20 @@ def test_routing_strict_json_preserves_date_validation_with_action_union():
                                              'action_fields': {'purpose':'夹带修改'}})
 
 
+def test_fake_routing_output_with_common_type_variants_is_accepted():
+    """回归样本：模型把布尔、条数和日期写成常见变体时仍可进入结构校验。"""
+    content = json.dumps({
+        "purpose": "query", "execution_mode": "query", "tasks": ["analytics"],
+        "slots": {"aggregate_products": "否", "date_from": "2026/11/11", "limit": "20"},
+        "sub_tasks": [{"id": "t1", "kind": "analytics", "question": "统计本月采购订单数量和金额",
+                       "slots": {"aggregate_products": "否", "date_from": "2026/11/11"}}],
+    }, ensure_ascii=False)
+    decision = routing.Understanding.model_validate_json(content, strict=True)
+    assert decision.slots.aggregate_products is False
+    assert decision.slots.limit == 20 and decision.slots.date_from.isoformat() == "2026-11-11"
+    assert decision.sub_tasks[0].slots.date_from.isoformat() == "2026-11-11"
+
+
 def test_strict_schema_rejects_open_maps_before_a_provider_request():
     class OpenMap(BaseModel):
         fields: dict[str, object]

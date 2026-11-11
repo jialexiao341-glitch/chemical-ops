@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
+from app.core.observability import metrics
 from app.modules.ai import llm, routing, service
 from app.modules.ai.catalog import catalog_prompt
 
@@ -28,6 +29,47 @@ def test_slots_coerces_common_boolean_tokens(value, expected):
 def test_slots_rejects_ambiguous_boolean_token():
     with pytest.raises(ValidationError):
         Slots(aggregate_products="可能")
+
+
+def test_understanding_and_sub_tasks_accept_null_slots_but_reject_strings():
+    decision = routing.Understanding.model_validate_json(json.dumps({
+        "purpose": "query", "execution_mode": "query", "tasks": ["analytics"], "slots": None,
+        "sub_tasks": [{"id": "t1", "kind": "analytics", "question": "统计采购订单数量", "slots": None}],
+    }), strict=True)
+    assert decision.slots == Slots() and decision.sub_tasks[0].slots == Slots()
+    with pytest.raises(ValidationError):
+        routing.Understanding.model_validate_json(json.dumps({
+            "purpose": "query", "execution_mode": "agent", "tasks": ["inventory"], "slots": "{}",
+        }), strict=True)
+
+
+@pytest.mark.parametrize("raw,expected_limit,expected_unit", [
+    ('{"limit": "20", "unit": "  吨 "}', 20, "吨"),
+    ('{"limit": 20.0}', 20, None),
+])
+def test_slots_accepts_lossless_limit_and_trimmed_unit(raw, expected_limit, expected_unit):
+    slots = Slots.model_validate_json(raw)
+    assert (slots.limit, slots.unit) == (expected_limit, expected_unit)
+
+
+@pytest.mark.parametrize("raw", ['{"limit": "很多"}', '{"limit": true}', '{"limit": 0}', '{"unit": 5}'])
+def test_slots_rejects_unrecoverable_limit_and_unknown_unit(raw):
+    with pytest.raises(ValidationError):
+        Slots.model_validate_json(raw)
+
+
+@pytest.mark.parametrize("token,expected", [
+    ("2026/11/11", "2026-11-11"), ("2026.11.11", "2026-11-11"),
+    ("2026年11月11日", "2026-11-11"), ("2026-11-11T23:30:00+08:00", "2026-11-11"),
+])
+def test_slots_accepts_common_date_separators(token, expected):
+    assert Slots(date_from=token).date_from.isoformat() == expected
+
+
+@pytest.mark.parametrize("token", ["2026/13/01", "2026-02-30", "下个月", "2026/11"])
+def test_slots_still_rejects_invalid_calendar_dates(token):
+    with pytest.raises(ValidationError):
+        Slots(date_from=token)
 
 
 def _run_immediate(coroutine):
@@ -211,6 +253,31 @@ def test_invalid_model_output_fails_without_keyword_fallback(monkeypatch, value)
     with pytest.raises(routing.IntentRecognitionError) as failure:
         _run_immediate(routing.understand("查乙醇库存"))
     assert failure.value.code == "INTENT_SCHEMA_ERROR"
+
+
+@pytest.mark.parametrize("content", [
+    '说明文字\n```json\n{"purpose":"query","execution_mode":"agent","tasks":["inventory"]}\n```',
+    '{"purpose":"query","execution_mode":"agent","tasks":["inventory"],"slots":{"product_keyword":"乙醇"',
+])
+def test_fenced_or_truncated_model_output_is_repaired_before_validation(monkeypatch, content):
+    calls = []
+    async def model(*args, **kwargs):
+        calls.append(kwargs['system_prompt'])
+        return SimpleNamespace(message=SimpleNamespace(content=content))
+    monkeypatch.setattr(llm, "chat", model)
+    decision = _run_immediate(routing.understand("查乙醇库存"))
+    assert decision.route == "agent" and decision.tasks == ["inventory"]
+    assert len(calls) == 1  # 可修复的输出不额外消耗一次生成
+
+
+def test_schema_error_is_counted_for_monitoring(monkeypatch):
+    async def model(*args, **kwargs):
+        return SimpleNamespace(message=SimpleNamespace(content='{"purpose":"query","tasks":["sql"]}'))
+    monkeypatch.setattr(llm, "chat", model)
+    with pytest.raises(routing.IntentRecognitionError):
+        _run_immediate(routing.understand("查乙醇库存"))
+    rendered = metrics.render_prometheus()
+    assert 'chemicalops_llm_schema_errors_total{kind="schema_violation",stage="routing"}' in rendered
 
 
 def test_model_failure_does_not_become_business_clarification(monkeypatch):

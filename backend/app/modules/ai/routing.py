@@ -15,6 +15,7 @@ from app.modules.ai import llm
 from app.modules.ai import conversation_store
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
+from app.core.observability import metrics
 from app.modules.ai.schema import (
     RouteRequest,
     Slots,
@@ -29,6 +30,9 @@ from app.modules.ai.model import AIMessage
 
 LOGGER = logging.getLogger("chemicalops.ai.routing")
 ROUTE_CONTRACT_VERSION = "1"
+# 识别阶段固定贪心解码与输出上限；评测报告据此记录实际参数，生产配置不随之改变。
+UNDERSTANDING_TEMPERATURE = 0
+UNDERSTANDING_MAX_TOKENS = 6000
 
 
 class IntentRecognitionError(BusinessValidationError):
@@ -206,7 +210,8 @@ async def understand(question: str, context: dict | None = None, settings=None, 
         return Understanding(purpose="greeting")
     from app.modules.ai import prompt_registry
     from app.modules.ai.schema import AIChatRequest, AIChatMessage
-    runtime = (settings or get_settings()).model_copy(update={"llm_temperature": 0, "llm_max_tokens": 6000})
+    runtime = (settings or get_settings()).model_copy(
+        update={"llm_temperature": UNDERSTANDING_TEMPERATURE, "llm_max_tokens": UNDERSTANDING_MAX_TOKENS})
     manifest_payload = (manifest.model_dump(mode="json") if hasattr(manifest, "model_dump") else manifest)
     payload = {"question": question, "context": context or {}, "today": datetime.now().astimezone().date().isoformat()}
     if manifest_payload is not None:
@@ -226,14 +231,6 @@ async def understand(question: str, context: dict | None = None, settings=None, 
         try:
             response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
                                           runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=prompt_registry.get_prompt("routing") + capability_context + repair, interpret_only=True)
-            return Understanding.model_validate_json(response.message.content, strict=True)
-        except ValidationError as exc:
-            # 只反馈结构错误位置，不把模型原始输出或用户数据写入日志。
-            errors = schema_error_details(exc)
-            failure_reason = "请求识别结果未通过任务结构校验"
-            failure_code = "INTENT_SCHEMA_ERROR"
-            LOGGER.warning("AI 意图结构校验失败 attempt=%s errors=%s", attempt + 1, errors)
-            repair = "\n上次输出未通过结构校验，请从原问题重新理解并修正，不改变用户范围。错误位置：" + json.dumps(errors, ensure_ascii=False)
         except Exception as exc:
             failure_code = "INTENT_SERVICE_ERROR"
             if str(exc) == "TOKEN_BUDGET_EXCEEDED":
@@ -251,6 +248,31 @@ async def understand(question: str, context: dict | None = None, settings=None, 
             if attempt == 0 and isinstance(exc, BusinessValidationError) and str(exc) in {"AI 服务返回了无法识别的结果", "AI 服务返回了空答案"}:
                 continue
             break
+        try:
+            # 兼容代码块、前后说明和传输截断；修复只补齐闭合符号，不改写取值。
+            content, shape = llm.load_json_object(response.message.content or "")
+        except BusinessValidationError:
+            failure_reason = "请求识别结果未通过任务结构校验"
+            failure_code = "INTENT_SCHEMA_ERROR"
+            metrics.increment("llm_schema_errors", labels={"stage": "routing", "kind": "invalid_json"})
+            LOGGER.warning("AI 意图输出不是合法 JSON attempt=%s length=%s", attempt + 1, len(response.message.content or ""))
+            repair = ("\n上次输出不是合法 JSON；请只输出一个完整 JSON 对象，不要代码块或说明文字。"
+                      "已截断的字段必须重新从原问题理解。")
+            continue
+        if shape != "clean":
+            metrics.increment("llm_structured_output_repairs", labels={"stage": "routing", "shape": shape})
+        try:
+            return Understanding.model_validate_json(json.dumps(content, ensure_ascii=False), strict=True)
+        except ValidationError as exc:
+            # 只反馈结构错误位置，不把模型原始输出或用户数据写入日志。
+            errors = schema_error_details(exc)
+            failure_reason = "请求识别结果未通过任务结构校验"
+            failure_code = "INTENT_SCHEMA_ERROR"
+            metrics.increment("llm_schema_errors", labels={"stage": "routing", "kind": "schema_violation"})
+            LOGGER.warning("AI 意图结构校验失败 attempt=%s errors=%s field_types=%s", attempt + 1, errors,
+                           {key: type(content[key]).__name__ for key in
+                            ("slots", "tasks", "sub_tasks", "action_fields") if key in content})
+            repair = "\n上次输出未通过结构校验，请从原问题重新理解并修正，不改变用户范围。错误位置：" + json.dumps(errors, ensure_ascii=False)
     # 技术失败不能伪装成用户条件不明确，也不能回退关键词猜测执行工具。
     raise IntentRecognitionError(
         f"{failure_reason}；本次尚未执行查询，无需补充已有的查询条件。", failure_code)
