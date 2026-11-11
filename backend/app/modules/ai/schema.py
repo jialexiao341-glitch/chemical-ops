@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 from typing_extensions import TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 from app.modules.ai.catalog import CATALOG, slot_description
 from app.modules.purchase_requests.schema import PurchaseRequestCreate, PurchaseRequestItemCreate
@@ -438,6 +438,24 @@ class Slots(BaseModel):
     limit: int | None = Field(default=None, strict=True, ge=1, le=100)
     unit: str | None = Field(default=None, max_length=32)
     aggregate_products: bool = False
+
+    @field_validator("aggregate_products", mode="before")
+    @classmethod
+    def coerce_aggregate_flag(cls, value):
+        """模型偶发返回 null、数字或中英文布尔词；只接受明确的真/假表达，其余仍拒绝。"""
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            token = value.strip().lower()
+            if token in {"true", "yes", "y", "1", "是", "对", "需要", "全部", "全选"}:
+                return True
+            if token in {"false", "no", "n", "0", "否", "不是", "不需要", "无", ""}:
+                return False
+        raise ValueError("aggregate_products 必须是明确的布尔值")
 
     @model_validator(mode="after")
     def validate_dates(self):

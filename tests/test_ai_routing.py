@@ -13,6 +13,23 @@ from app.modules.ai import llm, routing, service
 from app.modules.ai.catalog import catalog_prompt
 
 
+from app.modules.ai.schema import Slots
+
+
+@pytest.mark.parametrize("value,expected", [
+    (None, False), (False, False), (True, True), (0, False), (1, True),
+    ("false", False), ("true", True), ("否", False), ("是", True), ("", False),
+])
+def test_slots_coerces_common_boolean_tokens(value, expected):
+    """模型偶发返回 null 或中英文布尔词；明确表达可接受，未知值仍拒绝。"""
+    assert Slots(aggregate_products=value).aggregate_products is expected
+
+
+def test_slots_rejects_ambiguous_boolean_token():
+    with pytest.raises(ValidationError):
+        Slots(aggregate_products="可能")
+
+
 def _run_immediate(coroutine):
     """运行无 I/O 的模型替身协程，避免测试依赖 Windows loop socketpair。"""
     try:
