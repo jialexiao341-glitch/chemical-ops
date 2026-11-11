@@ -25,6 +25,15 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.core.db import engine, get_db  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _restore_model_catalog() -> Generator[None, None, None]:
+    """应用启动会激活数据库模型目录；用例结束后恢复，避免后续用例读到数据库模型配置。"""
+
+    yield
+    from app.modules.ai import model_catalog
+    model_catalog.deactivate()
+
+
 def grant_test_warehouse(db: Session, user_id: int, warehouse_id: int) -> None:
     """在测试事务中为样本账号显式授权仓库。"""
     from app.modules.system.model import UserWarehouseScope, UserWarehouseGrant
