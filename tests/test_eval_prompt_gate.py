@@ -139,3 +139,107 @@ def test_promote_requires_force_to_overwrite(tmp_path):
 
     with pytest.raises(ValueError, match="覆盖需 --force"):
         gate.promote_baseline(candidate, tmp_path / "baselines")
+
+
+def _regressed_gate(tmp_path) -> dict:
+    key = gate.prompt_key()
+    _write_all(tmp_path / "baselines" / key)
+    candidate = tmp_path / "candidate"
+    _write_all(candidate)
+    _write(candidate / "agent_tasks.json", _report(False))
+    return gate.run_gate(candidate, tmp_path / "baselines")
+
+
+def _row(result: dict, name: str) -> dict:
+    return next(row for row in result["reports"] if row["name"] == name)
+
+
+def test_retest_downgrades_sampling_flake_to_flaky(tmp_path):
+    result = _regressed_gate(tmp_path)
+    calls = []
+
+    def runner(command):
+        calls.append(command)
+        return {"cases": [{"id": "T01", "passed": len(calls) != 1}]}
+
+    gate.retest_regressions(tmp_path / "candidate", result, attempts=3, runner=runner)
+
+    assert len(calls) == 3
+    assert _row(result, "agent_tasks")["verdict"] == "FLAKY"
+    assert result["verdict"] == "FLAKY"
+    assert result["retests"][0]["keys"] == [
+        {"key": "T01", "attempts": 3, "passes": 2, "verdict": "FLAKY"}]
+
+
+def test_retest_keeps_stable_regression(tmp_path):
+    result = _regressed_gate(tmp_path)
+
+    def runner(_command):
+        return {"cases": [{"id": "T01", "passed": False}]}
+
+    gate.retest_regressions(tmp_path / "candidate", result, attempts=3, runner=runner)
+
+    assert _row(result, "agent_tasks")["verdict"] == "REGRESSION"
+    assert _row(result, "agent_tasks")["stable_regressions"] == ["T01"]
+    assert result["verdict"] == "REGRESSION"
+
+
+def test_retest_marks_unsupported_suite(tmp_path):
+    result = _regressed_gate(tmp_path)
+    for row in result["reports"]:
+        row["verdict"] = "PASS"
+    result["reports"][0]["name"] = "intent_routing"
+    result["reports"][0]["verdict"] = "REGRESSION"
+    result["verdict"] = "REGRESSION"
+
+    gate.retest_regressions(tmp_path / "candidate", result, attempts=3,
+                            runner=lambda _command: {})
+
+    assert result["retests"][0]["supported"] is False
+    assert result["verdict"] == "REGRESSION"
+
+
+def test_retest_flaky_still_invalid_when_other_cases_hit_infra(tmp_path):
+    key = gate.prompt_key()
+    _write_all(tmp_path / "baselines" / key)
+    candidate = tmp_path / "candidate"
+    _write_all(candidate)
+    _write(candidate / "agent_tasks.json", _report(False))
+    _write(candidate / "agent_business.json", {"cases": [{
+        "id": "B01", "trial": 1, "safety": False, "passed": False, "checks": {"outcome": False},
+        "rounds": [{"run_meta": {"error": {"class": "TRANSIENT_INFRA"}}}]}]})
+
+    result = gate.run_gate(candidate, tmp_path / "baselines")
+    gate.retest_regressions(tmp_path / "candidate", result, attempts=3,
+                            runner=lambda _c: {"cases": [{"id": "T01", "passed": True}]})
+
+    assert _row(result, "agent_tasks")["verdict"] == "FLAKY"
+    assert result["verdict"] == "INVALID_RUN"
+
+
+def test_retest_requires_minimum_attempts(tmp_path):
+    result = _regressed_gate(tmp_path)
+
+    with pytest.raises(ValueError, match="至少为 3"):
+        gate.retest_regressions(tmp_path / "candidate", result, attempts=2, runner=lambda _c: {})
+
+
+def test_gate_reports_invalid_run_for_infra_failures(tmp_path):
+    key = gate.prompt_key()
+    _write_all(tmp_path / "baselines" / key)
+    candidate = tmp_path / "candidate"
+    _write_all(candidate)
+    _write(candidate / "agent_business.json", {"cases": [{
+        "id": "B01", "trial": 1, "safety": False, "passed": False, "checks": {"outcome": False},
+        "rounds": [{"run_meta": {"error": {"class": "TRANSIENT_INFRA"}}}]}]})
+
+    result = gate.run_gate(candidate, tmp_path / "baselines")
+
+    assert result["verdict"] == "INVALID_RUN"
+    business = _row(result, "agent_business")
+    assert business["regressions"] == []
+    assert business["infra_failures"] == ["B01"]
+    code = gate.main(["--candidate-dir", str(candidate),
+                      "--baseline-root", str(tmp_path / "baselines"),
+                      "--fail-on-regression"])
+    assert code == 2

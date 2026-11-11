@@ -11,6 +11,41 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
 
+PREFLIGHT_PROMPT = "回复 OK"
+PREFLIGHT_TIMEOUT = 30.0
+
+
+def preflight_model() -> tuple[bool, str]:
+    """跑评测前用一次最小请求确认模型服务可用，避免跑到一半才因掉线整轮作废。"""
+
+    sys.path.insert(0, str(ROOT / "backend"))
+    import httpx  # noqa: PLC0415
+
+    from app.core.config import get_settings  # noqa: PLC0415
+    from app.modules.ai import model_catalog  # noqa: PLC0415
+    from app.modules.ai.gateway import resolve_model_profile  # noqa: PLC0415
+
+    model_catalog.activate()
+    profile = resolve_model_profile(get_settings())
+    url = f"{profile.base_url.rstrip('/')}/chat/completions"
+    payload = {"model": profile.model, "messages": [{"role": "user", "content": PREFLIGHT_PROMPT}],
+               "temperature": 0, "max_tokens": 16, "stream": False}
+    try:
+        response = httpx.post(url, headers={"Authorization": f"Bearer {profile.api_key}",
+                                            "Content-Type": "application/json"},
+                              json=payload, timeout=PREFLIGHT_TIMEOUT)
+    except httpx.HTTPError as exc:
+        return False, f"{profile.name}（{profile.model}）连接失败：{type(exc).__name__}"
+    if response.status_code != 200:
+        return False, f"{profile.name}（{profile.model}）返回 HTTP {response.status_code}"
+    try:
+        choices = response.json().get("choices")
+    except ValueError:
+        return False, f"{profile.name}（{profile.model}）返回非 JSON 响应"
+    if not isinstance(choices, list) or not choices:
+        return False, f"{profile.name}（{profile.model}）响应缺少 choices"
+    return True, f"{profile.name}（{profile.model}）可用"
+
 
 def build_commands(args) -> list[tuple[str, list[str]]]:
     out = args.output_dir
@@ -53,7 +88,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--business-workers", type=int, default=3)
     parser.add_argument("--gate", action="store_true", help="评测完成后运行 prompt 版本门禁")
     parser.add_argument("--fail-on-regression", action="store_true", help="门禁发现回归时返回 2")
+    parser.add_argument("--retest-attempts", type=int, default=0,
+                        help="门禁判回归时按编号重跑复核（≥3），用于区分采样波动与稳定回归")
     parser.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")
+    parser.add_argument("--preflight", action="store_true",
+                        help="先用一次最小模型请求确认服务可用，不可用时不发起批量评测")
     args = parser.parse_args(argv)
     if args.routing_repeats < 1 or args.business_repetitions < 1 or args.business_workers < 1:
         parser.error("重复次数和并发数必须为正数")
@@ -63,6 +102,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps([{"name": name, "command": command} for name, command in commands],
                          ensure_ascii=False, indent=2))
         return 0
+
+    if args.preflight:
+        ok, detail = preflight_model()
+        print(f"[preflight] {'OK' if ok else 'FAIL'}：{detail}", flush=True)
+        if not ok:
+            print("[preflight] 模型服务不可用，已取消本轮评测", file=sys.stderr)
+            return 1
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     failures = []
@@ -91,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
                 "--candidate-dir", str(args.output_dir)]
         if args.fail_on_regression:
             gate.append("--fail-on-regression")
+        if args.retest_attempts:
+            gate += ["--retest-attempts", str(args.retest_attempts)]
         return subprocess.run(gate, cwd=ROOT).returncode
     return 1 if failures else 0
 

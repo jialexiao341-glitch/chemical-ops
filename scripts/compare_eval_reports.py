@@ -4,8 +4,8 @@
 生成的 JSON 证据；只读取本地文件，不发起任何网络请求，也不改写历史报告。
 同一条用例有多次轮次或重复运行时，全部通过才算该用例通过。
 
-退出码：0 通过；1 输入或格式错误；2 存在回归或安全失败（需配合
---fail-on-regression，否则只报告不拦截）。
+退出码：0 通过；1 输入或格式错误；2 存在回归、安全失败或基础设施失败
+（需配合 --fail-on-regression，否则只报告不拦截）。
 """
 from __future__ import annotations
 
@@ -22,6 +22,30 @@ KIND_NAMES = {
 }
 
 META_KEYS = ("dataset_version", "dataset_sha256", "model", "code_revision")
+
+# 模型服务限流、连接中断等基础设施失败不代表实现退化；单列后由门禁判 INVALID_RUN。
+INFRA_ERROR_CLASSES = {"TRANSIENT_INFRA"}
+
+
+def _error_classes(row: dict) -> set[str]:
+    """收集用例行及其各轮的 error.class，用于区分实现回归与基础设施故障。"""
+    classes: set[str] = set()
+    sources = [row.get("run_meta") or {}]
+    sources += [(round_data.get("run_meta") or {}) for round_data in (row.get("rounds") or [])
+                if isinstance(round_data, dict)]
+    for meta in sources:
+        error = meta.get("error")
+        if isinstance(error, dict) and error.get("class"):
+            classes.add(str(error["class"]))
+    return classes
+
+
+def _infra_failed(row: dict) -> bool:
+    """失败但错误类别全部属于基础设施时，不参与回归与安全失败判定。"""
+    if row.get("passed"):
+        return False
+    classes = _error_classes(row)
+    return bool(classes) and classes <= INFRA_ERROR_CLASSES
 
 
 def load_report(path: Path) -> dict:
@@ -58,6 +82,7 @@ def _new_entry(key: str, label: str, safety: bool) -> dict:
         "passed_runs": 0,
         "failed_runs": [],
         "failed_checks": [],
+        "infra_failed_runs": 0,
     }
 
 
@@ -96,6 +121,8 @@ def normalize(report: dict) -> dict:
             continue
         run_no = row.get("trial", row.get("round"))
         entry["failed_runs"].append(run_no)
+        if _infra_failed(row):
+            entry["infra_failed_runs"] += 1
         checks = row.get("checks") or {}
         for name, value in checks.items():
             if value is False and name not in entry["failed_checks"]:
@@ -104,6 +131,7 @@ def normalize(report: dict) -> dict:
     cases = list(entries.values())
     for entry in cases:
         entry["passed"] = entry["runs"] > 0 and entry["passed_runs"] == entry["runs"]
+        entry["infra_failure"] = (not entry["passed"]) and entry["infra_failed_runs"] > 0
         entry["failed_checks"].sort()
         entry["failed_runs"] = [run for run in entry["failed_runs"] if run is not None]
     total = len(cases)
@@ -143,19 +171,27 @@ def compare(baseline_report: dict, candidate_report: dict) -> dict:
 
     regressions: list[dict] = []
     improvements: list[dict] = []
+    infra_failures: list[dict] = []
     for key, before in baseline_by_key.items():
         after = candidate_by_key.get(key)
         if after is None:
             continue
         if before["passed"] and not after["passed"]:
-            regressions.append({**_case_ref(after), "failed_runs": list(after["failed_runs"])})
+            # 模型服务限流或断连造成的失败不是实现退化；由下面的 infra_failures 统一列出。
+            if not after.get("infra_failure"):
+                regressions.append({**_case_ref(after), "failed_runs": list(after["failed_runs"])})
         elif not before["passed"] and after["passed"]:
             improvements.append(_case_ref(after))
 
     removed = [_case_ref(entry) for key, entry in baseline_by_key.items() if key not in candidate_by_key]
+    infra_failures = [
+        {**_case_ref(entry), "failed_runs": list(entry["failed_runs"])}
+        for entry in candidate["cases"] if entry.get("infra_failure")
+    ]
     added = [_case_ref(entry) for key, entry in candidate_by_key.items() if key not in baseline_by_key]
     safety_failures = [
-        _case_ref(entry) for entry in candidate["cases"] if entry["safety"] and not entry["passed"]
+        _case_ref(entry) for entry in candidate["cases"]
+        if entry["safety"] and not entry["passed"] and not entry.get("infra_failure")
     ]
     safety_missing = [
         _case_ref(entry)
@@ -168,6 +204,13 @@ def compare(baseline_report: dict, candidate_report: dict) -> dict:
         rate = (candidate["pass_rate"] - baseline["pass_rate"]) * 100
 
     blocked = bool(regressions or safety_failures or safety_missing)
+    if blocked:
+        verdict = "REGRESSION"
+    elif infra_failures:
+        # 有实现层之外的失败时整轮不可作为基线证据，但也不等于代码退化。
+        verdict = "INVALID_RUN"
+    else:
+        verdict = "PASS"
     warnings = []
     labels = {
         "dataset_version": "题集版本",
@@ -192,12 +235,13 @@ def compare(baseline_report: dict, candidate_report: dict) -> dict:
         "pass_rate_delta_points": rate,
         "regressions": regressions,
         "improvements": improvements,
+        "infra_failures": infra_failures,
         "safety_failures": safety_failures,
         "safety_missing": safety_missing,
         "removed": removed,
         "added": added,
         "warnings": warnings,
-        "verdict": "REGRESSION" if blocked else "PASS",
+        "verdict": verdict,
     }
 
 
@@ -233,6 +277,7 @@ def render_text(result: dict) -> str:
         "",
     ]
     for label, rows in (("回归（PASS→FAIL）", result["regressions"]),
+                        ("基础设施失败（不计回归）", result.get("infra_failures", [])),
                         ("改善（FAIL→PASS）", result["improvements"]),
                         ("安全失败", result["safety_failures"]),
                         ("缺失的安全用例", result["safety_missing"])):
@@ -243,10 +288,11 @@ def render_text(result: dict) -> str:
     for warning in result["warnings"]:
         lines.append(f"注意：{warning}")
     lines.append("")
-    lines.append(
-        "判定：" + result["verdict"]
-        + ("（存在回归或安全失败；--fail-on-regression 返回 2）" if result["verdict"] == "REGRESSION" else "")
-    )
+    verdict_notes = {
+        "REGRESSION": "（存在回归或安全失败；--fail-on-regression 返回 2）",
+        "INVALID_RUN": "（存在基础设施失败，本轮不可作基线证据；需重跑）",
+    }
+    lines.append("判定：" + result["verdict"] + verdict_notes.get(result["verdict"], ""))
     return "\n".join(lines)
 
 
@@ -271,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    if args.fail_on_regression and result["verdict"] == "REGRESSION":
+    if args.fail_on_regression and result["verdict"] in {"REGRESSION", "INVALID_RUN"}:
         return 2
     return 0
 

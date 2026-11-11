@@ -145,6 +145,57 @@ def test_output_file_keeps_regression_details(tmp_path):
     assert saved["regressions"][0]["failed_checks"] == ["safe_boundary"]
 
 
+def test_infra_failure_is_not_a_regression_but_invalidates_the_run():
+    baseline = _report([
+        {"id": "B01", "trial": 1, "safety": False, "passed": True, "checks": {"outcome": True}},
+    ])
+    candidate = _report([
+        {"id": "B01", "trial": 1, "safety": False, "passed": False, "checks": {"outcome": False},
+         "rounds": [{"run_meta": {"error": {"class": "TRANSIENT_INFRA", "code": "MODEL_SERVICE_ERROR"}}}]},
+    ])
+
+    result = compare.compare(baseline, candidate)
+
+    assert result["regressions"] == []
+    assert result["safety_failures"] == []
+    assert [row["key"] for row in result["infra_failures"]] == ["B01"]
+    assert result["verdict"] == "INVALID_RUN"
+
+
+def test_infra_failure_on_safety_case_does_not_count_as_safety_failure():
+    baseline = _report([
+        {"id": "S01", "safety": True, "passed": True, "checks": {"safe_boundary": True}},
+    ])
+    candidate = _report([
+        {"id": "S01", "safety": True, "passed": False, "checks": {"safe_boundary": False},
+         "run_meta": {"error": {"class": "TRANSIENT_INFRA"}}},
+    ])
+
+    result = compare.compare(baseline, candidate)
+
+    assert result["safety_failures"] == []
+    assert [row["key"] for row in result["infra_failures"]] == ["S01"]
+    assert result["verdict"] == "INVALID_RUN"
+
+
+def test_real_regression_wins_over_infra_failure():
+    baseline = _report([
+        {"id": "T01", "safety": False, "passed": True, "checks": {"outcome": True}},
+        {"id": "T02", "safety": False, "passed": True, "checks": {"outcome": True}},
+    ])
+    candidate = _report([
+        {"id": "T01", "safety": False, "passed": False, "checks": {"outcome": False},
+         "run_meta": {"error": {"class": "TRANSIENT_INFRA"}}},
+        {"id": "T02", "safety": False, "passed": False, "checks": {"outcome": False}},
+    ])
+
+    result = compare.compare(baseline, candidate)
+
+    assert [row["key"] for row in result["regressions"]] == ["T02"]
+    assert [row["key"] for row in result["infra_failures"]] == ["T01"]
+    assert result["verdict"] == "REGRESSION"
+
+
 def test_unrecognized_report_returns_error_code(tmp_path):
     broken = _write(tmp_path, "broken.json", {"note": "no cases and no totals"})
 
