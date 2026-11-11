@@ -936,6 +936,12 @@ def list_tools(db: Session, user: User) -> list[dict[str, object]]:
             and (admin or {spec.permission, *spec.additional_permissions} <= permissions)]
 
 
+def can_read_evidence(db: Session, user: User) -> bool:
+    """运行时注入的续读工具只在具备 AI 工作台权限时开放；否则目录不暴露。"""
+    admin, permissions = _permissions(db, user)
+    return admin or "ai.workspace.read" in permissions
+
+
 def catalog_entry(name: str) -> dict[str, object] | None:
     """返回登记工具的目录条目；用于任务轨迹续读等按执行上下文补充的工具。"""
     spec = TOOLS.get(name)

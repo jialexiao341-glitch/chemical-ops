@@ -210,27 +210,36 @@ def test_batch_uses_shared_prompt_for_unsupported_product_slots(tool_db, task_ki
     assert task.tool_calls == []
 
 
-def test_inventory_sums_all_matching_specifications_and_rechecks_history(tool_db):
+def test_inventory_clarifies_multiple_specifications_and_rechecks_history(tool_db):
     from sqlalchemy import text
     tool_db.execute(text("INSERT INTO md_products VALUES (3, '测试乙醇', 'ACTIVE', 'P-ETH-2', '工业级', '200kg', 1, 1)"))
-    tool_db.execute(text("INSERT INTO inventory_balances VALUES (6, 1, 2, 3, 1, 'AVAILABLE', 40, 10)"))
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
+    task = batch.tasks[0]
+    assert task.status == TaskStatus.WAITING_INPUT
+    assert not any(call['tool']=='inventory.query_available' for call in task.tool_calls)
+
+    tool_db.execute(text("UPDATE md_products SET product_name='工业乙醇' WHERE id=3"))
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
     task = batch.tasks[0]
     assert task.status == TaskStatus.SUCCEEDED
-    assert "110 千克" in task.answer and "5 升" in task.answer and "2 个规格" in task.answer
-    assert [call['arguments']['product_id'] for call in task.tool_calls if call['tool']=='inventory.query_available'] == [1, 3]
     assert multi.history_accessible(tool_db, USER, batch.model_dump(mode='json'))
     tool_db.execute(text("DELETE FROM sys_user_warehouse_grants WHERE user_id=7 AND warehouse_id=1"))
     assert not multi.history_accessible(tool_db, USER, batch.model_dump(mode='json'))
 
 
-def test_similar_names_require_real_chemical_identity(tool_db):
+def test_similar_names_require_single_product_identity(tool_db):
     from sqlalchemy import text
     tool_db.execute(text("INSERT INTO md_products (id,product_name,status,product_code,unit_id,chemical_id) VALUES (3,'其他测试乙醇衍生品','ACTIVE','P-OTHER',1,2)"))
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
     assert batch.tasks[0].status == TaskStatus.WAITING_INPUT
     assert not any(call['tool']=='inventory.query_available' for call in batch.tasks[0].tool_calls)
+
+    # 登记为同一有效化学品也不再构成合计依据，不同产品必须让用户先选择。
     tool_db.execute(text("UPDATE md_products SET chemical_id=1 WHERE id IN (1,3)"))
+    batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
+    assert batch.tasks[0].status == TaskStatus.WAITING_INPUT
+
+    tool_db.execute(text("UPDATE md_products SET product_name='工业乙醇' WHERE id=3"))
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(product_task()), Settings(_env_file=None)))
     assert batch.tasks[0].status == TaskStatus.SUCCEEDED
 

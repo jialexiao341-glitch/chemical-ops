@@ -56,21 +56,25 @@ def test_inventory_aggregation_requires_complete_explicit_or_same_family_candida
     ) is expected
 
 
-def test_inventory_family_accepts_exact_product_name_without_chemical_table(tool_db):
-    assert inventory_family(
-        tool_db,
-        [{"product_id": 1, "product_name": "测试乙醇"}, {"product_id": 3, "product_name": "测试乙醇"}],
-        "测试乙醇",
-    )
+def test_inventory_family_aggregates_only_the_same_product_across_warehouses(tool_db):
+    rows = [{"product_id": 1, "product_name": "测试乙醇"}, {"product_id": 1, "product_name": "测试乙醇"}]
+
+    assert inventory_family(tool_db, rows, "测试乙醇")
 
 
-def test_inventory_family_uses_only_same_active_chemical_identity(tool_db):
+def test_inventory_family_rejects_same_name_with_different_specs(tool_db):
+    """同名不同规格（分析纯/工业级等）不可比，必须让用户先选择。"""
+    rows = [{"product_id": 1, "product_name": "测试乙醇"}, {"product_id": 3, "product_name": "测试乙醇"}]
+
+    assert not inventory_family(tool_db, rows, "测试乙醇")
+
+
+def test_inventory_family_rejects_same_chemical_with_different_products(tool_db):
     tool_db.execute(text("INSERT INTO md_products (id, product_name, status, product_code, unit_id, chemical_id) VALUES (3, '乙醇衍生产品', 'ACTIVE', 'P-DERIVATIVE', 1, 1)"))
     rows = [{"product_id": 1, "product_name": "测试乙醇"}, {"product_id": 3, "product_name": "乙醇衍生产品"}]
 
-    assert inventory_family(tool_db, rows, "测试乙醇")
-    tool_db.execute(text("UPDATE md_chemicals SET status = 'INACTIVE' WHERE id = 1"))
     assert not inventory_family(tool_db, rows, "测试乙醇")
+    assert not inventory_family(tool_db, [{"product_name": "缺少产品编号"}], "测试乙醇")
 
 
 def test_candidate_selection_rejects_stale_revision():

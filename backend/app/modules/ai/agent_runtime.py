@@ -1127,8 +1127,10 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
         if execution_context.identity() and not catalog:
             raise AuthorizationError("当前没有可用的任务工具权限")
         planner_catalog = list(catalog)
+        # 续读工具由运行时注入；无工作台权限的用户不能看到或执行它，
+        # 否则模型会调用一个必然被权限拒绝的工具，把任务打成 PERMISSION_DENIED。
         evidence_entry = tools.catalog_entry("evidence.read")
-        if evidence_entry is not None:
+        if evidence_entry is not None and tools.can_read_evidence(db, user):
             planner_catalog.append(evidence_entry)
         if current.memory_state.get("route_turn") != len(current.messages):
             context = {"memory": current.memory_state, "messages": current.messages[:-1]}

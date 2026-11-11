@@ -29,7 +29,7 @@ def can_aggregate_inventory(
     explicit_aggregate: bool,
     same_product_family: bool,
 ) -> bool:
-    """只允许完整多候选集合按明确全选或已验证的同产品族进行合计。"""
+    """只允许完整多候选集合按明确全选或同一产品（同规格跨仓库）进行合计。"""
     if total_rows <= 1 or truncated:
         return False
     return explicit_aggregate or same_product_family

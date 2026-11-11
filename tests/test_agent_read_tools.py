@@ -220,6 +220,13 @@ def test_missing_permission_blocks_catalog_and_execution(tool_db):
     ]
 
 
+def test_evidence_read_is_injected_only_with_workspace_permission(tool_db):
+    """无 ai.workspace.read 时不注入续读工具，避免模型调用必然被拒的工具。"""
+    assert not tools.can_read_evidence(tool_db, SimpleNamespace(id=7))
+    assert not tools.can_read_evidence(tool_db, SimpleNamespace(id=8))
+    assert tools.can_read_evidence(tool_db, SimpleNamespace(id=9))
+
+
 def test_tool_catalog_exposes_explicit_governance_metadata(tool_db):
     catalog = tools.list_tools(tool_db, SimpleNamespace(id=9))
 
