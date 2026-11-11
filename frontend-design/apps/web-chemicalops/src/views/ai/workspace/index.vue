@@ -35,6 +35,7 @@ import { renderMarkdown } from '#/utils/markdown';
 import QueryEvidence from './query-evidence.vue';
 import AgentChatTask from './agent-chat-task.vue';
 import AgentSourcePopover from './agent-source-popover.vue';
+import ModelPicker from './modules/model-picker.vue';
 import { answerSources } from './answer-sources';
 import { createAgentPoller } from './agent-polling';
 import { canConfirmActionProposal } from './action-proposal-policy';
@@ -1913,11 +1914,14 @@ onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilit
                 <button v-if="agentMode" class="ai-mode-exit" type="button" @click="agentMode = false">退出只读查询</button>
                 <button v-if="draftMode" class="ai-mode-exit" type="button" @click="draftMode = false">退出草稿模式</button>
               </div>
-              <button v-if="canStop" class="ai-send" type="button" :disabled="stopping" aria-label="停止查询" title="停止查询" @click="stopCurrentWork"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg></button>
-              <button v-else class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || (draftMode ? (draftPrepared ? !draftFormReady : !inputText.trim()) : !inputText.trim())" :aria-label="draftMode ? (draftPrepared ? '生成草稿预览' : '识别采购信息') : '发送消息'" :title="draftMode ? (draftPrepared ? '生成草稿预览' : '识别采购信息') : '发送消息'" @click="onSend()">
-                <svg v-if="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
-                <span v-else class="ai-send-loading">···</span>
-              </button>
+              <div class="flex items-center gap-2">
+                <ModelPicker />
+                <button v-if="canStop" class="ai-send" type="button" :disabled="stopping" aria-label="停止查询" title="停止查询" @click="stopCurrentWork"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg></button>
+                <button v-else class="ai-send" type="button" :disabled="sending || historyLoading || currentAgent?.status === 'RUNNING' || (draftMode ? (draftPrepared ? !draftFormReady : !inputText.trim()) : !inputText.trim())" :aria-label="draftMode ? (draftPrepared ? '生成草稿预览' : '识别采购信息') : '发送消息'" :title="draftMode ? (draftPrepared ? '生成草稿预览' : '识别采购信息') : '发送消息'" @click="onSend()">
+                  <svg v-if="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
+                  <span v-else class="ai-send-loading">···</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

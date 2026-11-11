@@ -18,6 +18,7 @@ import type { AiTaskStatus } from './task-status';
 import { createSseParser } from './sse-parser';
 
 export * from './agent';
+export * from './model-profiles';
 export * from './task-status';
 
 export namespace AiApi {
