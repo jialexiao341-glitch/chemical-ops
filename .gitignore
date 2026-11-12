@@ -21,6 +21,7 @@ frontend-legacy/
 
 # Local runtime data
 .tmp/
+.eval-run/
 logs/
 tmp/
 uploads/
