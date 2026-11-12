@@ -195,7 +195,11 @@ def main():
     parser.add_argument('--trial', type=int, default=1, help=argparse.SUPPRESS)
     parser.add_argument('--row-output', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--rfq-controls', action='store_true', help='单独评估明确询价标记/项目编号格式的对照场景')
+    parser.add_argument('--scratch-dir', type=Path, default=None,
+                        help='逐任务原始结果临时目录；默认 .cache/agent-business-evaluation。'
+                             '只读缓存目录（CI、受限沙箱）必须显式指向可写目录')
     args = parser.parse_args()
+    scratch = args.scratch_dir or ROOT/'.cache'/'agent-business-evaluation'
     if args.single_case:
         import faulthandler
         faulthandler.dump_traceback_later(150,repeat=True)
@@ -254,7 +258,7 @@ def main():
             lookup={case.id:case for case in selected}
             known={(row['id'],row['trial']) for row in report['cases']}
             recovered=0
-            for path in (ROOT/'.cache'/'agent-business-evaluation').glob('B*-*.raw.json'):
+            for path in scratch.glob('B*-*.raw.json'):
                 row=json.loads(path.read_text(encoding='utf-8'))
                 case=lookup.get(row['id'])
                 if case is None or not 1<=row['trial']<=args.repetitions: continue
@@ -269,7 +273,6 @@ def main():
             report['execution_note']='报告写入出现 OSError 导致批次不再汇总；已保留已完成报告并恢复逐任务原始日志，仅补跑缺失记录。模型、业务运行时和题集预期未修改。'
     save_report(args.output, report)
     completed={(row['id'],row['trial']) for row in report['cases']}
-    scratch=ROOT/'.cache'/'agent-business-evaluation'
     scratch.mkdir(parents=True,exist_ok=True)
     def isolated(case,trial):
         row_path=scratch/f'{case.id}-{trial}.json'

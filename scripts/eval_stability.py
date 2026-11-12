@@ -4,7 +4,9 @@
     下界 >= 0.7  → STABLE_PASS
     上界 <= 0.3  → STABLE_FAIL
     其余          → UNSTABLE（采样波动，交人工队列，不计回归）
-退出码：0 无 UNSTABLE；2 存在 UNSTABLE。
+失败轮次若错误类别全部属于基础设施（TRANSIENT_INFRA），该轮不计入统计，另记
+`excluded_infra`；全部轮次都被排除时判 NO_EVIDENCE，不能用 0 轮冒充通过。
+退出码：0 无 UNSTABLE / NO_EVIDENCE；2 存在 UNSTABLE 或 NO_EVIDENCE。
 """
 from __future__ import annotations
 
@@ -16,6 +18,10 @@ from pathlib import Path
 
 STABLE_PASS_FLOOR = 0.7
 STABLE_FAIL_CEILING = 0.3
+NO_EVIDENCE = "NO_EVIDENCE"
+
+# 与 compare_eval_reports / eval_harness 保持一致：仅该类失败不计实现退化。
+INFRA_ERROR_CLASSES = {"TRANSIENT_INFRA"}
 
 
 def wilson(passed: int, total: int, z: float = 1.96) -> tuple[float, float]:
@@ -30,6 +36,8 @@ def wilson(passed: int, total: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def classify(passed: int, total: int) -> str:
+    if total <= 0:
+        return NO_EVIDENCE
     if total < 5:
         # 轮次少时 Wilson 下界过保守（3/3 仅约 0.44），按全通过/全失败直接判定。
         if passed == total:
@@ -45,36 +53,65 @@ def classify(passed: int, total: int) -> str:
     return "UNSTABLE"
 
 
+def trial_infra(trial: dict) -> bool:
+    """失败轮次且错误类别全部属于基础设施：本轮不可作为能力证据。"""
+    if trial.get("passed"):
+        return False
+    classes = set(trial.get("error_classes") or [])
+    return bool(classes) and classes <= INFRA_ERROR_CLASSES
+
+
+def case_trials(case: dict) -> tuple[list[dict], int]:
+    """返回（有效轮次，被排除的基础设施轮次）。门禁与稳定性报告共用这一口径。"""
+    trials = [trial for trial in (case.get("trials") or []) if isinstance(trial, dict)]
+    valid = [trial for trial in trials if not trial_infra(trial)]
+    return valid, len(trials) - len(valid)
+
+
+def classify_case(case: dict) -> tuple[int, int, int, str]:
+    """（通过轮次，有效轮次，排除轮次，判定）。"""
+    valid, excluded = case_trials(case)
+    passed = sum(1 for trial in valid if trial.get("passed"))
+    return passed, len(valid), excluded, classify(passed, len(valid))
+
+
 def summarize(envelope: dict) -> list[dict]:
     rows = []
     for entry in envelope.get("cases") or []:
-        trials = entry.get("trials") or []
-        total = len(trials)
-        passed = sum(1 for trial in trials if trial.get("passed"))
+        passed, total, excluded, verdict = classify_case(entry)
         low, high = wilson(passed, total)
         rows.append({
             "key": entry["key"],
             "runs": total,
             "passed": passed,
+            "excluded_infra": excluded,
             "rate": passed / total if total else 0.0,
             "wilson_low": round(low, 3),
             "wilson_high": round(high, 3),
-            "verdict": classify(passed, total),
+            "verdict": verdict,
         })
     return rows
 
 
 def render_markdown(rows: list[dict], suite: str) -> str:
     unstable = [row for row in rows if row["verdict"] == "UNSTABLE"]
+    no_evidence = [row for row in rows if row["verdict"] == NO_EVIDENCE]
     lines = [f"# 稳定性评估：{suite}（{len(rows)} 条用例）", "",
-             "| 用例 | 轮次 | 通过 | 通过率 | Wilson 95% | 判定 |",
-             "| --- | --- | --- | --- | --- | --- |"]
+             "| 用例 | 有效轮次 | 通过 | 排除的基础设施轮次 | 通过率 | Wilson 95% | 判定 |",
+             "| --- | --- | --- | --- | --- | --- | --- |"]
     for row in rows:
         name = row["key"] if len(row["key"]) <= 40 else row["key"][:37] + "…"
-        lines.append(f"| {name} | {row['runs']} | {row['passed']} | {row['rate']:.0%} | "
-                     f"[{row['wilson_low']}, {row['wilson_high']}] | {row['verdict']} |")
+        lines.append(f"| {name} | {row['runs']} | {row['passed']} | {row['excluded_infra']} | "
+                     f"{row['rate']:.0%} | [{row['wilson_low']}, {row['wilson_high']}] | "
+                     f"{row['verdict']} |")
     lines += ["", f"不稳定用例 {len(unstable)} 条"
                   + ("：" + "、".join(row["key"] for row in unstable) if unstable else "")]
+    lines.append(f"无有效轮次用例 {len(no_evidence)} 条"
+                 + ("：" + "、".join(row["key"] for row in no_evidence) if no_evidence else ""))
+    excluded = sum(row["excluded_infra"] for row in rows)
+    if excluded:
+        lines.append(f"被排除的基础设施失败轮次 {excluded} 轮；这些轮次不参与稳定性判定，"
+                     "但说明该批次存在模型服务抖动，仍需重跑取证")
     return "\n".join(lines)
 
 
@@ -111,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text + "\n", encoding="utf-8")
     print(json.dumps(rows, ensure_ascii=False, indent=2) if args.json else text)
-    return 2 if any(row["verdict"] == "UNSTABLE" for row in rows) else 0
+    return 2 if any(row["verdict"] in {"UNSTABLE", NO_EVIDENCE} for row in rows) else 0
 
 
 if __name__ == "__main__":

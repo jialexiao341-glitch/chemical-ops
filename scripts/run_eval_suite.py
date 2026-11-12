@@ -14,6 +14,12 @@ PYTHON = sys.executable
 PREFLIGHT_PROMPT = "回复 OK"
 PREFLIGHT_TIMEOUT = 30.0
 
+# 与 eval_harness / eval_prompt_gate 共用同一命名：envelope 落到候选目录的 envelopes/ 子目录，
+# 与原始报告分开放置，门禁按名直读。
+ENVELOPE_SUBDIR = "envelopes"
+ENVELOPE_FILES = {suite: f"harness-{suite}.json"
+                  for suite in ("routing", "tasks", "business", "prod")}
+
 
 def preflight_model() -> tuple[bool, str]:
     """跑评测前用一次最小请求确认模型服务可用，避免跑到一半才因掉线整轮作废。"""
@@ -67,6 +73,7 @@ def build_commands(args) -> list[tuple[str, list[str]]]:
             "--output", str(out / "agent_business.json"),
             "--repetitions", str(args.business_repetitions),
             "--workers", str(args.business_workers),
+            "--scratch-dir", str(out / "agent_business.scratch"),
         ]))
     cases = ROOT / "docs/evaluation/prod-regression/cases.json"
     if args.suite in {"all", "prod"} and cases.exists():
@@ -76,6 +83,20 @@ def build_commands(args) -> list[tuple[str, list[str]]]:
             "--output", str(out / "prod_regression.json"),
         ]))
     return commands
+
+
+def build_harness_command(args) -> list[str]:
+    """多轮采样走 eval_harness：四套件 × N 轮，输出 envelope 供门禁直连。"""
+    return [PYTHON, str(ROOT / "scripts/eval_harness.py"),
+            "--suite", args.suite,
+            "--out-dir", str(args.output_dir / ENVELOPE_SUBDIR),
+            "--repeat", str(args.repeat), "--workers", str(args.business_workers)]
+
+
+def missing_envelopes(directory: Path, suite: str) -> list[str]:
+    """缺哪套件的 envelope 就报哪套件；不能拿子集进 envelope 门禁。"""
+    suites = tuple(ENVELOPE_FILES) if suite == "all" else (suite,)
+    return [name for name in suites if not (directory / ENVELOPE_FILES[name]).exists()]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,12 +111,47 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fail-on-regression", action="store_true", help="门禁发现回归时返回 2")
     parser.add_argument("--retest-attempts", type=int, default=0,
                         help="门禁判回归时按编号重跑复核（≥3），用于区分采样波动与稳定回归")
+    parser.add_argument("--harness", action="store_true",
+                        help="走 eval_harness 多轮采样，输出 harness-<suite>.json envelope")
+    parser.add_argument("--repeat", type=int, default=1, help="harness 模式下每个套件的采样轮次")
     parser.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")
     parser.add_argument("--preflight", action="store_true",
                         help="先用一次最小模型请求确认服务可用，不可用时不发起批量评测")
     args = parser.parse_args(argv)
     if args.routing_repeats < 1 or args.business_repetitions < 1 or args.business_workers < 1:
         parser.error("重复次数和并发数必须为正数")
+    if args.repeat < 1:
+        parser.error("采样轮次必须为正数")
+
+    if args.harness:
+        command = build_harness_command(args)
+        if args.dry_run:
+            print(json.dumps([{"name": "harness", "command": command}],
+                             ensure_ascii=False, indent=2))
+            return 0
+        if args.preflight:
+            ok, detail = preflight_model()
+            print(f"[preflight] {'OK' if ok else 'FAIL'}：{detail}", flush=True)
+            if not ok:
+                print("[preflight] 模型服务不可用，已取消本轮评测", file=sys.stderr)
+                return 1
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[eval] harness: {' '.join(command)}", flush=True)
+        code = subprocess.run(command, cwd=ROOT).returncode
+        envelope_dir = args.output_dir / ENVELOPE_SUBDIR
+        missing = missing_envelopes(envelope_dir, args.suite)
+        if missing:
+            print("[eval] 未生成 envelope，无法进入门禁：" + "、".join(missing), file=sys.stderr)
+            return 1
+        if not args.gate:
+            return code
+        if args.suite != "all":
+            print("[eval] envelope 门禁要求四套件齐全；只跑单套件会判 NOT_RUN", file=sys.stderr)
+        gate = [PYTHON, str(ROOT / "scripts/eval_prompt_gate.py"),
+                "--candidate-dir", str(envelope_dir), "--mode", "envelope"]
+        if args.fail_on_regression:
+            gate.append("--fail-on-regression")
+        return subprocess.run(gate, cwd=ROOT).returncode
 
     commands = build_commands(args)
     if args.dry_run:

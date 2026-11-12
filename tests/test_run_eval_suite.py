@@ -23,6 +23,7 @@ def test_build_commands_covers_four_reports(tmp_path):
     assert "--repeats" in commands[0][1] and "2" in commands[0][1]
     assert str(tmp_path / "agent_business.json") in commands[2][1]
     assert "--repetitions" in commands[2][1]
+    assert str(tmp_path / "agent_business.scratch") in commands[2][1]
     assert str(tmp_path / "prod_regression.json") in commands[3][1]
 
 
@@ -54,3 +55,50 @@ def test_dry_run_prints_commands_without_execution(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload[0]["name"] == "intent_routing"
     assert payload[0]["command"][1].endswith("evaluate_intent_routing.py")
+
+
+def test_harness_dry_run_prints_envelope_command(tmp_path, capsys):
+    code = run_eval_suite.main(["--dry-run", "--harness", "--suite", "all",
+                                "--repeat", "3", "--output-dir", str(tmp_path)])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    command = payload[0]["command"]
+    assert payload[0]["name"] == "harness"
+    assert command[1].endswith("eval_harness.py")
+    assert command[command.index("--repeat") + 1] == "3"
+    assert command[command.index("--out-dir") + 1] == str(
+        tmp_path / run_eval_suite.ENVELOPE_SUBDIR)
+
+
+def test_harness_mode_runs_gate_on_envelopes(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run(command, cwd):
+        calls.append(command)
+        joined = " ".join(command)
+        if "eval_harness.py" in joined:
+            envelope_dir = tmp_path / run_eval_suite.ENVELOPE_SUBDIR
+            envelope_dir.mkdir(parents=True, exist_ok=True)
+            for name in run_eval_suite.ENVELOPE_FILES.values():
+                (envelope_dir / name).write_text("{}", encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_eval_suite.subprocess, "run", fake_run)
+
+    code = run_eval_suite.main(["--harness", "--gate", "--repeat", "3",
+                                "--output-dir", str(tmp_path)])
+
+    assert code == 0
+    gate_command = calls[1]
+    assert gate_command[1].endswith("eval_prompt_gate.py")
+    assert gate_command[gate_command.index("--mode") + 1] == "envelope"
+
+
+def test_harness_mode_reports_missing_envelopes(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_eval_suite.subprocess, "run",
+                        lambda command, cwd: SimpleNamespace(returncode=0))
+
+    code = run_eval_suite.main(["--harness", "--gate", "--output-dir", str(tmp_path)])
+
+    assert code == 1
