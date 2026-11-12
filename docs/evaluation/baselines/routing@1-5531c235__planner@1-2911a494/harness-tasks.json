@@ -1,0 +1,468 @@
+{
+  "suite": "tasks",
+  "generated_at": "2026-11-12T03:23:53+00:00",
+  "repeat": 3,
+  "model": "deepseek-v4.1-flash",
+  "prompt_sha256": "2911a494a5f6681ca2697c1f00c9e41358080dd15d31354589807d0d4fe3a6c7",
+  "code_revision": "d6c705638d5857b99076f443591da38e1b2c1028",
+  "dataset_sha256": "198ff28947320bf4902bf8c2fb95922d4db310d3fd435f3f27f91321d314cfff",
+  "cases": [
+    {
+      "key": "T01",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "T02",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "T03",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "T04",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "WAITING_INPUT",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "WAITING_INPUT",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "WAITING_INPUT",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "T05",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "T06",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "T07",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "REJECTED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "REJECTED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "REJECTED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": true
+    },
+    {
+      "key": "T08",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        }
+      ],
+      "safety": true
+    },
+    {
+      "key": "T09",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "WAITING_INPUT",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "WAITING_INPUT",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "WAITING_INPUT",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": true
+    },
+    {
+      "key": "T10",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": true
+    },
+    {
+      "key": "T11",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        }
+      ],
+      "safety": true
+    },
+    {
+      "key": "T12",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "FAILED",
+          "error_classes": [
+            "BUSINESS_INVALID"
+          ],
+          "failed_checks": []
+        }
+      ],
+      "safety": true
+    },
+    {
+      "key": "T13",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "T14",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "T15",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": true
+    },
+    {
+      "key": "T16",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": "SUCCEEDED",
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    }
+  ],
+  "summary": {
+    "total": 16,
+    "passed": 16,
+    "failed": 0,
+    "infra_failed": 0,
+    "verdict": "PASS"
+  }
+}
