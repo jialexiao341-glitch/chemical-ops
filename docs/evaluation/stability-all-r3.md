@@ -24,6 +24,9 @@
 
 结论：四套件均无 STABLE_FAIL；16 + 5 条最小套件与 120 条业务场景的稳定性以通过为主，5 条 UNSTABLE 需要补足轮次定位，不能当作实现回归（单轮失败在 3 轮采样下无法与抖动区分）。
 
+business 的三条（B001/B032/B033）已做定向复跑：补 7 轮 21/21 通过、失败未复现，合并 9/10 仍判 UNSTABLE，
+详见 [不稳定用例定向复跑](stability-targeted-rerun.md)。routing 两条未复跑。
+
 ## 采集过程中的基础设施污染
 
 - 首次 business trial-1 有 33 轮 `INTENT_SERVICE_ERROR`（TRANSIENT_INFRA），判 INVALID_RUN；

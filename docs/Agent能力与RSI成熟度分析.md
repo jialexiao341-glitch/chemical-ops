@@ -214,7 +214,9 @@ P0「套件稳定性未知」已完成真实采样（2026-11-12，`deepseek-v4.1
 1. 已完成：envelope 基线登记——`--promote-baseline` 已把四份 `harness-<suite>.json` 写入当前 prompt 版本目录，
    manifest 同时保留原始报告与版本元数据；`--mode envelope` 自比判 PASS。
    未做：CI 切换——`.github/workflows/agent-eval.yml` 仍跑原始报告口径，改为 `--harness --repeat 3 --gate` 后生效。
-2. 未做：5 条 UNSTABLE 共 3 套件用例补足轮次定位；当前暂停全量重采样，等有预算再按用例定向复跑。
+2. 部分完成：business B001/B032/B033 定向补跑 7 轮，21/21 通过、失败未复现；合并后 9/10，
+   Wilson 下界 0.596 仍判 `UNSTABLE`（见 [不稳定用例定向复跑](evaluation/stability-targeted-rerun.md)）。
+   routing 两条因评测器不支持单例筛选、需整轮补到 14–15 轮，本次未跑，保持 `UNSTABLE`。
 3. 已完成：P1 实验框架 `prompt_experiment.py`——配对 2×2 列联表、McNemar 精确检验、改善/退化清单，
    只读 envelope、不提供 promote；9 项单测覆盖改善、退化、无差异、跨模型阻断与无有效轮次。
 4. 已完成：评测失败用例批量转回归用例——`--failed-only/--case-ids` + `--expected-mode auto` + 去重跳过 + `--dry-run`；
