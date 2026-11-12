@@ -29,7 +29,7 @@ routing@<version>-<hash>__planner@<version>-<hash>/
 - 采集：2026-11-11。业务 120×3、Agent 任务 16、生产差评 5、路由 34；已记录用量约 190 万 tokens（业务 1,809,117 + 任务 93,705；路由与生产差评报告未记录 usage）。
 - envelope 基线：2026-11-12 四套件各 3 轮（`harness-<suite>.json`），模型与提示词同上；
   结果 170 STABLE_PASS / 5 UNSTABLE / 0 STABLE_FAIL，0 轮基础设施排除（污染轮次已重跑）。
-  逐用例表见 [四套件三轮稳定性评估](../stability-all-r3.md)，`manifest.envelopes`/`envelope_meta` 已登记；
+  逐用例表见 [四套件三轮稳定性评估](../评测运行与稳定性.md)，`manifest.envelopes`/`envelope_meta` 已登记；
   `--mode envelope` 自比判 PASS。这是在原始报告之外并列登记的第二套口径，原始报告未被覆盖。
 
 | 报告 | 通过 / 总数 | 通过率 | 说明 |
