@@ -106,7 +106,7 @@
 | 连通性预检 | `--preflight`，模型不可用不发起批量 | 自检通过 |
 | 覆盖度约束 | 四份报告缺一即 NOT_RUN | 单元测试 |
 | envelope 直读 | `eval_prompt_gate.py --mode envelope` + `eval_harness.py --suite all` | 离线核对 + 脚本测试（详见第 9 节） |
-| 结果入库与趋势 | `record_eval_run.py` 按文件指纹幂等入库，`eval_trend.py` 出月度稳定通过率 | 7 项单测；迁移 `076` 尚未应用到本地库 |
+| 结果入库与趋势 | `record_eval_run.py` 幂等入库，`eval_trend.py` 出月度稳定通过率 | 迁移 076 已应用，4 份 envelope / 175 条用例入库，2026-11 稳定通过率 97.1% |
 | 变体对照实验 | `scripts/prompt_experiment.py`：配对的 2×2 列联表 + McNemar 精确检验，只读 envelope | 9 项单测（改善/退化/无差异/跨模型/无有效轮次），不写基线 |
 
 用例规模：routing 34、tasks 16、business 120、prod 5，共 175 条；逐用例三轮稳定性见
@@ -120,7 +120,7 @@
 | 3 轮只能区分全过/全败 | 5 条 2/3 用例只能判 UNSTABLE，统计显著性仍需更多轮次 |
 | 模型服务抖动 | 首轮 business 污染 33 轮、tasks 污染 1 轮；需重跑取证，不能直接用污染报告判回归 |
 | 无分片并行 | 全量一轮约 25–30 分钟，阻塞迭代 |
-| 无历史趋势 | 入库与月度趋势脚本已就绪，迁移未应用到本地库，尚无真实月度数据 |
+| 无历史趋势（仅 1 个月数据） | 已入库 2026-11 一个月，跨月对比要等下一次登记后才能回答 |
 
 ## 5 RSI 现状
 
@@ -168,7 +168,7 @@
 | P0 | 旧基线与 CI 未迁移 envelope | 真实多轮结果审阅后登记 envelope 基线，再切 `--harness` | CI 按 envelope 口径出结论，不再回退原始报告 |
 | P1 | 候选靠手工 | 评测失败用例批量转用例 ✔；差评批量生成仍需逐条脱敏 | 转化 ≤1 天（尚未实测） |
 | P1 | ~~无实验框架~~ 已完成 ✔ | `prompt_experiment.py`：变体 × 用例 × N 轮 + McNemar | 逐用例列联表与 p 值已可产出，不写基线 |
-| P2 | ~~无趋势~~ 已完成（代码）✔ | 评测结果入库 + 月度稳定性趋势 | `record_eval_run.py` / `eval_trend.py` + 迁移 076；待应用到真实库后产出首份趋势 |
+| P2 | ~~无趋势~~ 已完成 ✔ | 评测结果入库 + 月度稳定性趋势 | 迁移 076 已应用；2026-11：4 次运行 / 175 条，97.1% 稳定通过 |
 
 ## 8 风险与边界
 
@@ -223,9 +223,11 @@ P0「套件稳定性未知」已完成真实采样（2026-11-12，`deepseek-v4.1
 4. 已完成：评测失败用例批量转回归用例——`--failed-only/--case-ids` + `--expected-mode auto` + 去重跳过 + `--dry-run`；
    真实业务报告 dry-run 得 12 条唯一候选、20 条重复跳过、0 条推导失败。
    未做：差评批量脱敏。
-5. 已完成：P2 结果入库与趋势——`database/migrations/076_ai_eval_runs.sql`、`scripts/record_eval_run.py`
-   （按 envelope 指纹幂等，逐用例写入 `ai_eval_case_results`）、`scripts/eval_trend.py`（月度稳定通过率）；
-   7 项单测覆盖幂等、跨月聚合、按套件过滤与 CLI。迁移尚未应用到本地库，真实月度趋势待入库后产出。
+5. 已完成：P2 结果入库与趋势——`database/migrations/076_ai_eval_runs.sql`、`scripts/apply_migration.py`
+   （PowerShell 无 `<` 重定向，统一用内置执行器）、`scripts/record_eval_run.py`（按 envelope 指纹幂等，
+   逐用例写入 `ai_eval_case_results`）、`scripts/eval_trend.py`（月度稳定通过率）。
+   迁移已应用：4 份 envelope、175 条用例入库，2026-11 稳定通过率 97.1%（170 STABLE_PASS / 5 UNSTABLE）。
+   10 项单测覆盖幂等、跨月聚合、按套件过滤、CLI 与迁移语句拆分。
 
 离线核对仍成立：用历史报告合成 envelope 后自比判 PASS，注入 3 轮全失败用例判 REGRESSION；
 真实采样已验证四套件都能产出 envelope，且污染轮次被重跑后统计为 0 排除。
