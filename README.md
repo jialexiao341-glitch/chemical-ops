@@ -141,11 +141,9 @@ corepack pnpm --dir frontend-design dev:chemicalops
 
 ## 项目文档
 
-- [项目简介与业务流程](docs/项目简介与业务流程.md)
-- [角色职责与权限矩阵](docs/角色职责与三级权限矩阵.md)
-- [数据库设计说明](docs/数据库设计说明.md)
-- [数据库任务队列运行说明](docs/数据库任务队列运行说明.md)
-- [运行体验与测试指南](docs/运行体验与测试指南.md)
+- [Agent 能力与 RSI 成熟度分析](docs/Agent能力与RSI成熟度分析.md)
+
+> 功能开发期间文档暂只保留上述一份；功能完成后再统一生成新文档。
 
 <div align="center">
   <sub>ChemicalOps · 让化学品运营流程更清晰、协作更可追溯</sub>

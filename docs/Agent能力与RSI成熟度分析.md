@@ -110,7 +110,7 @@
 | 变体对照实验 | `scripts/prompt_experiment.py`：配对的 2×2 列联表 + McNemar 精确检验，只读 envelope | 9 项单测（改善/退化/无差异/跨模型/无有效轮次），不写基线 |
 
 用例规模：routing 34、tasks 16、business 120、prod 5，共 175 条；逐用例三轮稳定性见
-[四套件三轮稳定性评估](evaluation/评测运行与稳定性.md)。
+四套件三轮稳定性评估（报告待功能完成后重新生成）。
 
 ### 4.2 缺口
 
@@ -164,7 +164,7 @@
 | 优先级 | 差距 | 动作 | 判据 |
 | --- | --- | --- | --- |
 | P0 | ~~门禁未接 envelope~~ 已完成 ✔ | 门禁改读 harness 输出，稳定性直接出 verdict | 同一 envelope 两处结论一致（见第 9 节） |
-| P0 | ~~套件稳定性未知~~ 已完成 ✔ | tasks/business/prod 各跑 `--repeat 3` | 逐用例表见 [四套件三轮稳定性评估](evaluation/评测运行与稳定性.md) |
+| P0 | ~~套件稳定性未知~~ 已完成 ✔ | tasks/business/prod 各跑 `--repeat 3` | 逐用例表见 四套件三轮稳定性评估（报告待功能完成后重新生成） |
 | P0 | 旧基线与 CI 未迁移 envelope | 真实多轮结果审阅后登记 envelope 基线，再切 `--harness` | CI 按 envelope 口径出结论，不再回退原始报告 |
 | P1 | 候选靠手工 | 评测失败用例批量转用例 ✔；差评批量生成仍需逐条脱敏 | 转化 ≤1 天（尚未实测） |
 | P1 | ~~无实验框架~~ 已完成 ✔ | `prompt_experiment.py`：变体 × 用例 × N 轮 + McNemar | 逐用例列联表与 p 值已可产出，不写基线 |
@@ -201,7 +201,7 @@ P0「套件稳定性未知」已完成真实采样（2026-11-12，`deepseek-v4.1
 | prod | 5 | 15 | 0 | 5 | 0 | 0 |
 
 5 条 UNSTABLE 均为 2/3 通过，无稳定失败；逐用例表与污染处置见
-[四套件三轮稳定性评估](evaluation/评测运行与稳定性.md)。采集期间修掉的三个缺陷：
+四套件三轮稳定性评估（报告待功能完成后重新生成）。采集期间修掉的三个缺陷：
 
 1. `--resume` 原先会静默复用含 `TRANSIENT_INFRA` 的轮次，把模型抖动固化成“2/3 波动”；
    现在默认重跑这类轮次，只有显式 `--reuse-infra` 才复用。
@@ -216,7 +216,7 @@ P0「套件稳定性未知」已完成真实采样（2026-11-12，`deepseek-v4.1
    manifest 同时保留原始报告与版本元数据；`--mode envelope` 自比判 PASS。
    未做：CI 切换——`.github/workflows/agent-eval.yml` 仍跑原始报告口径，改为 `--harness --repeat 3 --gate` 后生效。
 2. 部分完成：business B001/B032/B033 定向补跑 7 轮，21/21 通过、失败未复现；合并后 9/10，
-   Wilson 下界 0.596 仍判 `UNSTABLE`（见 [不稳定用例定向复跑](evaluation/评测运行与稳定性.md)）。
+   Wilson 下界 0.596 仍判 `UNSTABLE`（见 不稳定用例定向复跑（报告待功能完成后重新生成））。
    routing 两条因评测器不支持单例筛选、需整轮补到 14–15 轮，本次未跑，保持 `UNSTABLE`。
 3. 已完成：P1 实验框架 `prompt_experiment.py`——配对 2×2 列联表、McNemar 精确检验、改善/退化清单，
    只读 envelope、不提供 promote；9 项单测覆盖改善、退化、无差异、跨模型阻断与无有效轮次。
