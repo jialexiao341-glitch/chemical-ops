@@ -43,7 +43,3 @@ storage/
 
 # 评测候选报告为本地运行产物；基线目录需显式提交
 docs/evaluation/candidate/
-
-# 全量业务候选报告体积过大，仅本地保留；合并后的基线在 baselines 目录
-docs/evaluation/candidate-20261111/agent_business.json
-docs/evaluation/candidate-20261111/agent_business-prerun.json
