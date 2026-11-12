@@ -34,7 +34,7 @@ routing@<version>-<hash>__planner@<version>-<hash>/
 
 | 报告 | 通过 / 总数 | 通过率 | 说明 |
 | --- | ---: | ---: | --- |
-| 语义路由 | 34 / 34 | 100.0% | 首轮 30/34 为模型偶发非法 JSON，重试后 34/34；首轮报告保留为 `intent_routing-run1.json` |
+| 语义路由 | 34 / 34 | 100.0% | 首轮 30/34 为模型偶发非法 JSON，重试后 34/34；首轮报告为本地运行产物，已清理，未随版本库保留 |
 | Agent 只读任务 | 16 / 16 | 100.0% | T05 FAIL→PASS，0 回归 |
 | 业务场景 | 120 / 120 | 100.0% | 3 次重复全部通过才算；B072 三次由修复后定向重跑替换，其余 357 次为原全量批次 |
 | 生产差评回归 | 5 / 5 | 100.0% | 当前 `planner@1-2911a494` |
@@ -59,7 +59,7 @@ routing@<version>-<hash>__planner@<version>-<hash>/
 - Agent 任务：无。
 - 业务场景：B072 trial=2 原为 `INTENT_SCHEMA_ERROR`。已为 `Slots.aggregate_products` 增加显式布尔兼容，
   定向重跑 B072 三次全部通过，并用这三次结果替换基线中的 B072 行；其余 357 次运行保持原全量批次。
-  原始批次留存为 `candidate-20261111/agent_business-prerun.json`（本地运行产物，未纳入版本库），替换说明写入报告 `evidence_note`。
+  原始批次为本地运行产物，未随版本库保留（已清理）；替换说明写入报告 `evidence_note`。
 - 生产差评回归：无。
 
 模型偶发的结构化输出错误会以 `INTENT_SCHEMA_ERROR` 计入失败，属 harness 稳定性问题，不应直接判定为业务能力回归；

@@ -8,7 +8,7 @@
   "evaluation_notes": [
     "路由首轮 30/34：4 条 INTENT_SCHEMA_ERROR 为模型偶发非法 JSON；结构校验加重试后重跑 34/34，首轮报告保留为 intent_routing-run1.json。",
     "业务全量首轮 119/120：B072 trial=2 INTENT_SCHEMA_ERROR；已为 aggregate_products 增加显式布尔兼容，定向重跑 B072 三次全部通过，并将三次结果替换进基线报告（其余 357 次运行保持原批次）。",
-    "业务基线现为 120/120、0 安全失败；原始首轮批次留存为 candidate-20261111/agent_business-prerun.json（本地运行产物，未纳入版本库），替换说明写入报告 evidence_note。",
+    "原始批次为本地运行产物，未随版本库保留（已清理），替换说明写入报告 evidence_note。",
     "模型偶发非法 JSON 属 harness 稳定性问题，后续排查先看 evaluation_error_type 与失败轮次，再定向重跑确认。"
   ],
   "files": [
