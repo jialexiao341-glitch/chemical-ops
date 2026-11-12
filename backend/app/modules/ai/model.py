@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -206,6 +206,55 @@ class AIRegressionCase(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class AIEvalRun(Base):
+    """一次套件评测的 envelope 摘要；同一 envelope 指纹只登记一次。"""
+
+    __tablename__ = "ai_eval_runs"
+    __table_args__ = (
+        UniqueConstraint("envelope_sha256", name="uq_ai_eval_runs_envelope"),
+        Index("ix_ai_eval_runs_suite_collected", "suite", "collected_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    envelope_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    suite: Mapped[str] = mapped_column(String(16), nullable=False)
+    prompt_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    code_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dataset_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    repeat_count: Mapped[int] = mapped_column(nullable=False, default=1)
+    cases_total: Mapped[int] = mapped_column(nullable=False, default=0)
+    stable_pass: Mapped[int] = mapped_column(nullable=False, default=0)
+    unstable: Mapped[int] = mapped_column(nullable=False, default=0)
+    stable_fail: Mapped[int] = mapped_column(nullable=False, default=0)
+    no_evidence: Mapped[int] = mapped_column(nullable=False, default=0)
+    excluded_infra: Mapped[int] = mapped_column(nullable=False, default=0)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    collected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+
+
+class AIEvalCaseResult(Base):
+    """envelope 中单条用例的稳定性结果，用于月度趋势与 flaky 跟踪。"""
+
+    __tablename__ = "ai_eval_case_results"
+    __table_args__ = (
+        UniqueConstraint("run_id", "case_key", name="uq_ai_eval_case_run_key"),
+        Index("ix_ai_eval_case_verdict", "verdict"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_eval_runs.id", ondelete="CASCADE"), nullable=False)
+    case_key: Mapped[str] = mapped_column(String(191), nullable=False)
+    safety: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    trials: Mapped[int] = mapped_column(nullable=False, default=0)
+    passed: Mapped[int] = mapped_column(nullable=False, default=0)
+    excluded_infra: Mapped[int] = mapped_column(nullable=False, default=0)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    failed_checks: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class AIOperationSuggestion(Base):
