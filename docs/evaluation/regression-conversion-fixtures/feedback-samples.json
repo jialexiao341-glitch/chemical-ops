@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "kind": "synthetic_feedback_fixture",
+  "notice": "合成差评样本，仅用于验证回归用例批量脱敏、批准与导出链路；不是生产数据，不能用于宣称真实转化时长。",
+  "owner_user_id": 1,
+  "window_days": 7,
+  "samples": [
+    {
+      "task_id": "SYN-TASK-0001",
+      "question": "联系人：张三，电话13800138000，查合成乙醇库存，核对可用量",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "FAILED",
+      "error_code": "INTENT_SERVICE_ERROR",
+      "minutes_ago": 3,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0002",
+      "question": "邮箱 zhangsan@example.com 的客户要查合成甲醇报价，比较最近三家供应商",
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 6,
+      "trace_tools": ["catalog.search_products", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"]
+    },
+    {
+      "task_id": "SYN-TASK-0003",
+      "question": "收货人：李四，身份证110101199001011234，查合成丙酮库存",
+      "rating": "DOWN",
+      "reason_code": "WRONG_PRODUCT",
+      "status": "FAILED",
+      "error_code": "TOOL_TIMEOUT",
+      "minutes_ago": 9,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0004",
+      "question": "银行卡6222020202020202 付款的采购申请 PR-2026-0001，读取明细",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 12,
+      "trace_tools": ["purchase_requests.get_by_no"]
+    },
+    {
+      "task_id": "SYN-TASK-0005",
+      "question": "IP 192.168.1.8 的仓库里合成乙醇还有多少库存",
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 15,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0006",
+      "question": "客户名称：上海某某化工有限公司，查合成甲醇库存并比较报价",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "FAILED",
+      "error_code": "INTENT_SCHEMA_ERROR",
+      "minutes_ago": 18,
+      "trace_tools": ["catalog.search_products", "inventory.query_available", "supplier_quotes.compare"]
+    },
+    {
+      "task_id": "SYN-TASK-0007",
+      "question": "座机 021-12345678，查合成乙醇最近报价和交期",
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 21,
+      "trace_tools": ["catalog.search_products", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"]
+    },
+    {
+      "task_id": "SYN-TASK-0008",
+      "question": "电话 13900139000，查测试甲醇库存，核对可用量",
+      "rating": "DOWN",
+      "reason_code": "TOOL_ERROR",
+      "status": "FAILED",
+      "error_code": "TOOL_ERRORS",
+      "minutes_ago": 24,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0009",
+      "question": "邮箱 buyer@example.org 要读取采购申请 PR-2026-0002 的状态和明细",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 27,
+      "trace_tools": ["purchase_requests.get_by_no"]
+    },
+    {
+      "task_id": "SYN-TASK-0010",
+      "question": "联系人：王五，查合成丙酮最近三家报价，要求含交期",
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER",
+      "status": "FAILED",
+      "error_code": "INTENT_SERVICE_ERROR",
+      "minutes_ago": 30,
+      "trace_tools": ["catalog.search_products", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"]
+    },
+    {
+      "task_id": "SYN-TASK-0011",
+      "question": "查合成乙醇库存并统计本月乙醇采购订单金额",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 33,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0012",
+      "question": "查合成甲醇库存，再查合成丙酮库存，两项各看前5条",
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 36,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0013",
+      "question": "读取采购申请 PR-2026-0003 并核对是否已审批",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 39,
+      "trace_tools": ["purchase_requests.get_by_no"]
+    },
+    {
+      "task_id": "SYN-TASK-0014",
+      "question": "身份证110101199001015678 的收货单，查合成乙醇到货状态",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "FAILED",
+      "error_code": "TOOL_TIMEOUT",
+      "minutes_ago": 42,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0015",
+      "question": "查合成丙酮库存 120 千克是否可用",
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 45,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0016",
+      "question": "查测试甲醇报价，按总成本排序并给出最低价",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 48,
+      "trace_tools": ["catalog.search_products", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"]
+    },
+    {
+      "task_id": "SYN-TASK-0017",
+      "question": "读取采购申请 PR-2026-0004 的审批状态和申请明细",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 51,
+      "trace_tools": ["purchase_requests.get_by_no"]
+    },
+    {
+      "task_id": "SYN-TASK-0018",
+      "question": "查合成乙醇库存，仓库按可用量排序",
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 54,
+      "trace_tools": ["catalog.search_products", "inventory.query_available"]
+    },
+    {
+      "task_id": "SYN-TASK-0019",
+      "question": "查合成丙酮报价并比较交期与账期",
+      "rating": "DOWN",
+      "reason_code": "WRONG_ANSWER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 57,
+      "trace_tools": ["catalog.search_products", "supplier_quotes.find_rfq_items", "supplier_quotes.compare"]
+    },
+    {
+      "task_id": "SYN-TASK-0020",
+      "question": "读取采购申请 PR-2026-0005 并核对行项目数量和单位",
+      "rating": "DOWN",
+      "reason_code": "WRONG_NUMBER",
+      "status": "SUCCEEDED",
+      "minutes_ago": 60,
+      "trace_tools": ["purchase_requests.get_by_no"]
+    }
+  ]
+}

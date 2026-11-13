@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "synthetic_approval_fixture",
+  "notice": "合成审批记录，只用于演练批量批准链路；reviewed_offset_minutes 是流程字段样例，不是真实人工操作耗时，不能据此计算生产转化时长。",
+  "reviewer": "synthetic-admin",
+  "records": [
+    {"source_task_id": "SYN-TASK-0001", "decision": "APPROVE", "reviewed_offset_minutes": 8, "note": "路由服务故障复现"},
+    {"source_task_id": "SYN-TASK-0002", "decision": "APPROVE", "reviewed_offset_minutes": 9, "note": "报价数量取错"},
+    {"source_task_id": "SYN-TASK-0003", "decision": "APPROVE", "reviewed_offset_minutes": 11, "note": "产品匹配到错误规格"},
+    {"source_task_id": "SYN-TASK-0004", "decision": "APPROVE", "reviewed_offset_minutes": 12, "note": "申请明细漏行"},
+    {"source_task_id": "SYN-TASK-0005", "decision": "APPROVE", "reviewed_offset_minutes": 14, "note": "仓库范围错误"},
+    {"source_task_id": "SYN-TASK-0006", "decision": "APPROVE", "reviewed_offset_minutes": 15, "note": "库存与报价混合回答"},
+    {"source_task_id": "SYN-TASK-0007", "decision": "APPROVE", "reviewed_offset_minutes": 16, "note": "交期缺失"},
+    {"source_task_id": "SYN-TASK-0008", "decision": "APPROVE", "reviewed_offset_minutes": 18, "note": "工具调用失败"},
+    {"source_task_id": "SYN-TASK-0009", "decision": "APPROVE", "reviewed_offset_minutes": 19, "note": "申请状态读取偏差"},
+    {"source_task_id": "SYN-TASK-0010", "decision": "APPROVE", "reviewed_offset_minutes": 21, "note": "报价比较不完整"},
+    {"source_task_id": "SYN-TASK-0011", "decision": "APPROVE", "reviewed_offset_minutes": 22, "note": "统计口径错误"},
+    {"source_task_id": "SYN-TASK-0012", "decision": "APPROVE", "reviewed_offset_minutes": 24, "note": "多产品查询拆分错误"},
+    {"source_task_id": "SYN-TASK-0013", "decision": "APPROVE", "reviewed_offset_minutes": 25, "note": "审批状态误读"},
+    {"source_task_id": "SYN-TASK-0014", "decision": "APPROVE", "reviewed_offset_minutes": 27, "note": "到货状态未返回"},
+    {"source_task_id": "SYN-TASK-0015", "decision": "APPROVE", "reviewed_offset_minutes": 28, "note": "可用量判断错误"},
+    {"source_task_id": "SYN-TASK-0016", "decision": "APPROVE", "reviewed_offset_minutes": 30, "note": "最低价排序错误"},
+    {"source_task_id": "SYN-TASK-0017", "decision": "APPROVE", "reviewed_offset_minutes": 31, "note": "申请明细不完整"},
+    {"source_task_id": "SYN-TASK-0018", "decision": "APPROVE", "reviewed_offset_minutes": 33, "note": "仓库排序错误"},
+    {"source_task_id": "SYN-TASK-0019", "decision": "ARCHIVE", "reviewed_offset_minutes": 34, "note": "与既有报价用例重复，归档"},
+    {"source_task_id": "SYN-TASK-0020", "decision": "ARCHIVE", "reviewed_offset_minutes": 35, "note": "问题文本不足以复现，归档"}
+  ]
+}
