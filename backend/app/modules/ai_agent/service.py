@@ -37,7 +37,7 @@ from app.modules.ai_agent.model_access.llm import chat, stream_chat
 from app.modules.ai_agent.model_access.gateway import bind_user, reset_user
 from app.modules.files_storage import service as file_service
 from app.modules.files_storage import mineru
-from app.modules.files_storage.parser import parse_file_content
+from app.modules.files_storage.parser import parse_file_content, parse_pdf_routed
 from app.modules.files_storage.scanner import scan_content
 from app.modules.system_management.crud import get_user_role_codes
 from app.modules.system_management.model import User
@@ -219,7 +219,13 @@ async def _prepare_attachments(
                 continue
 
             remote_error: str | None = None
-            if runtime.mineru_enabled and extension in mineru.SUPPORTED_REMOTE_EXTENSIONS:
+            if extension == ".pdf" or value.mime_type == "application/pdf":
+                value.parse_status = "PROCESSING"
+                value.parse_error = None
+                db.flush()
+                db.commit()
+                parsed = await asyncio.to_thread(parse_pdf_routed, value.file_name, content, runtime)
+            elif runtime.mineru_enabled and extension in mineru.SUPPORTED_REMOTE_EXTENSIONS:
                 value.parse_status = "PROCESSING"
                 value.parse_error = None
                 db.flush()

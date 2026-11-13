@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     minio_result_bucket: str = "chemicalops-results"
     document_max_size_mb: int = 50
     document_allowed_extensions: str = "pdf,doc,docx,xls,xlsx,ppt,pptx,csv,txt,png,jpg,jpeg"
-    # MinerU 远程文档解析配置；密钥只从本地环境变量读取，OCR 仍由业务开关关闭。
+    # MinerU 远程文档解析配置；扫描或混合 PDF 可在启用后使用该服务。
     mineru_enabled: bool = False
     mineru_api_key: str = ""
     mineru_base_url: str = "https://mineru.net/api/v4"

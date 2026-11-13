@@ -16,7 +16,7 @@ from app.modules.ai_agent.model_access.llm import chat
 from app.modules.ai_agent.model_access.llm import extract_json_object
 from app.modules.deliveries_receipt.model import DeliveryItem
 from app.modules.files_storage import mineru, service as file_service
-from app.modules.files_storage.parser import parse_file_content
+from app.modules.files_storage.parser import parse_file_content, parse_pdf_routed
 from app.modules.products_master.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance, QualityInspectionStandard, QualityReportReviewRecord, QualityReviewCorrection
 from app.modules.quality_acceptances.schema import QualityCorrectionAction, QualityCorrectionRead, QualityCriterion, QualityReportCheck, QualityReportComparison, QualityReportFile, QualityReportReview, QualityReportSummary, QualityReviewDecision, QualityReviewHistory, QualityReviewTarget
@@ -401,10 +401,14 @@ async def review_report(db: Session, user: User, acceptance_id: int, file_id: in
     value, content = read_report_file(db, user, acceptance_id, file_id)
     settings = get_settings()
     try:
-        parsed = await asyncio.to_thread(parse_file_content, value.file_name, value.mime_type, content)
+        is_pdf = value.file_name.lower().endswith(".pdf") or value.mime_type == "application/pdf"
+        if is_pdf:
+            parsed = await asyncio.to_thread(parse_pdf_routed, value.file_name, content, settings)
+        else:
+            parsed = await asyncio.to_thread(parse_file_content, value.file_name, value.mime_type, content)
     except Exception as exc:
         raise BusinessValidationError("报告解析失败，请检查文件内容或重新上传") from exc
-    if parsed.status != "SUCCEEDED" and settings.mineru_enabled and value.file_name.lower().endswith(tuple(mineru.SUPPORTED_REMOTE_EXTENSIONS)):
+    if not is_pdf and parsed.status != "SUCCEEDED" and settings.mineru_enabled and value.file_name.lower().endswith(tuple(mineru.SUPPORTED_REMOTE_EXTENSIONS)):
         try:
             parsed = await asyncio.to_thread(mineru.parse_bytes, value.file_name, content, settings)
         except mineru.MinerUParseError:

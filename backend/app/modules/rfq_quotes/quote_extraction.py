@@ -14,7 +14,7 @@ from app.core.errors import BusinessValidationError
 from app.modules.ai_agent.model_access.llm import chat, extract_json_object
 from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest, schema_response_format
 from app.modules.files_storage import mineru, service as file_service
-from app.modules.files_storage.parser import parse_file_content
+from app.modules.files_storage.parser import parse_file_content, parse_pdf_routed
 from app.modules.rfq_quotes import service as rfq_service
 from app.modules.rfq_quotes.quote_evidence import normalized, supported
 from app.modules.rfq_quotes.schema import QuoteCandidateEvidence, QuoteCandidateItem, QuoteParseCandidate
@@ -129,11 +129,15 @@ async def parse_quote_file(
     if scan_result.status not in {"SKIPPED", "CLEAN"}:
         raise BusinessValidationError("文件安全扫描服务不可用，暂时无法解析")
     try:
-        parsed = await asyncio.to_thread(parse_file_content, file_name, mime_type, content)
+        is_pdf = Path(file_name).suffix.lower() == ".pdf" or mime_type == "application/pdf"
+        if is_pdf:
+            parsed = await asyncio.to_thread(parse_pdf_routed, file_name, content, get_settings())
+        else:
+            parsed = await asyncio.to_thread(parse_file_content, file_name, mime_type, content)
     except Exception as exc:
         raise BusinessValidationError("报价文件解析失败，请检查文件内容或重新上传") from exc
     settings = get_settings()
-    if parsed.status != "SUCCEEDED" and settings.mineru_enabled and Path(file_name).suffix.lower() in mineru.SUPPORTED_REMOTE_EXTENSIONS:
+    if not is_pdf and parsed.status != "SUCCEEDED" and settings.mineru_enabled and Path(file_name).suffix.lower() in mineru.SUPPORTED_REMOTE_EXTENSIONS:
         try:
             parsed = await asyncio.to_thread(mineru.parse_bytes, file_name, content, settings)
         except mineru.MinerUParseError:

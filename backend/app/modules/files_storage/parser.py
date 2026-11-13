@@ -63,6 +63,49 @@ def _parse_pdf(content: bytes) -> ParsedFile:
     return result
 
 
+def parse_pdf_routed(file_name: str, content: bytes, settings) -> ParsedFile:
+    """逐页检查 PDF，文字页本地解析；疑似扫描或混合内容交给 MinerU。"""
+    from app.modules.files_storage import mineru
+    import pdfplumber
+    import pymupdf
+
+    if len(content) > MAX_PARSE_BYTES:
+        return ParsedFile(status="TOO_LARGE", text="", parser="none", references=[], error="文件超过 AI 单次解析上限")
+
+    chunks: list[str] = []
+    references: list[dict[str, object]] = []
+    needs_ocr = False
+    with pymupdf.open(stream=content, filetype="pdf") as document, pdfplumber.open(BytesIO(content)) as pdf:
+        for index, (page, text_page) in enumerate(zip(document, pdf.pages), start=1):
+            text = (text_page.extract_text() or page.get_text("text") or "").strip()
+            page_area = page.rect.width * page.rect.height
+            images = page.get_image_info()
+            large_image = any(
+                pymupdf.Rect(image["bbox"]).get_area() >= page_area * 0.15
+                for image in images
+            ) if page_area else bool(images)
+            # 真空白页不要求 OCR；无文字但有图像或矢量内容时保守处理。
+            if large_image or (not text and (images or page.get_drawings())):
+                needs_ocr = True
+            if text:
+                chunks.append(f"[第 {index} 页]\n{text}")
+                references.append({"type": "page", "page": index})
+
+    if not chunks:
+        needs_ocr = True
+    if not needs_ocr:
+        return _result("pdfplumber+pymupdf", "\n\n".join(chunks), references)
+    if settings.mineru_enabled:
+        try:
+            remote_name = file_name if Path(file_name).suffix.lower() == ".pdf" else f"{file_name}.pdf"
+            return mineru.parse_bytes(remote_name, content, settings)
+        except mineru.MinerUParseError:
+            return ParsedFile(status="OCR_REQUIRED", text="", parser="mineru", references=[],
+                              error="PDF 包含疑似扫描内容，但远程解析失败，请重试或人工处理")
+    return ParsedFile(status="OCR_REQUIRED", text="", parser="mineru-ocr-required", references=[],
+                      error="PDF 包含疑似扫描内容，需要启用 MinerU 解析")
+
+
 def _parse_docx(content: bytes) -> ParsedFile:
     """解析 DOCX 段落和表格。"""
 

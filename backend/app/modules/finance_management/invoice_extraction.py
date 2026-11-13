@@ -13,7 +13,7 @@ from app.core.errors import AuthorizationError, BusinessValidationError
 from app.modules.ai_agent.model_access.llm import chat, extract_json_object
 from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest, schema_response_format
 from app.modules.files_storage import mineru, service as file_service
-from app.modules.files_storage.parser import parse_file_content
+from app.modules.files_storage.parser import parse_file_content, parse_pdf_routed
 from app.modules.finance_management import service as finance_service
 from app.modules.finance_management.model import FinanceInvoice
 from app.modules.finance_management.schema import InvoiceCandidateEvidence, InvoiceParseCandidate
@@ -96,10 +96,14 @@ async def parse_invoice_file(db: Session, user: User, reconciliation_id: int, *,
     if scan.status not in {'CLEAN', 'SKIPPED'}:
         raise BusinessValidationError('文件未通过安全扫描或扫描服务不可用')
     try:
-        parsed = await asyncio.to_thread(parse_file_content, file_name, mime_type, content)
+        is_pdf = Path(file_name).suffix.lower() == '.pdf' or mime_type == 'application/pdf'
+        if is_pdf:
+            parsed = await asyncio.to_thread(parse_pdf_routed, file_name, content, settings)
+        else:
+            parsed = await asyncio.to_thread(parse_file_content, file_name, mime_type, content)
     except Exception as exc:
         raise BusinessValidationError('发票文件解析失败，请检查文件内容') from exc
-    if parsed.status != 'SUCCEEDED' and settings.mineru_enabled and Path(file_name).suffix.lower() in mineru.SUPPORTED_REMOTE_EXTENSIONS:
+    if not is_pdf and parsed.status != 'SUCCEEDED' and settings.mineru_enabled and Path(file_name).suffix.lower() in mineru.SUPPORTED_REMOTE_EXTENSIONS:
         try:
             parsed = await asyncio.to_thread(mineru.parse_bytes, file_name, content, settings)
         except mineru.MinerUParseError:
