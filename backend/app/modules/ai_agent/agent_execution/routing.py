@@ -34,6 +34,38 @@ ROUTE_CONTRACT_VERSION = "1"
 UNDERSTANDING_TEMPERATURE = 0
 UNDERSTANDING_MAX_TOKENS = 6000
 
+CHAT_WRITE_PURPOSES: frozenset[str] = frozenset({
+    "purchase_draft",
+    "purchase_update",
+    "purchase_submit",
+    "purchase_order_submit",
+    "rfq_draft",
+    "exception_task",
+    "replenishment_draft",
+})
+
+# 页面对象类型与业务状态允许的写入意图；用于上下文消歧及服务端状态兜底校验。
+PAGE_CONTEXT_WRITE_RULES: dict[str, dict[str, tuple[str, frozenset[str], str]]] = {
+    "purchase_request": {
+        "purchase_update": ("request_no", frozenset({"DRAFT", "REJECTED"}), "只有草稿或已驳回的采购申请可以修改"),
+        "purchase_submit": ("request_no", frozenset({"DRAFT", "REJECTED"}), "只有草稿或已驳回的采购申请可以提交审批"),
+        "rfq_draft": ("request_no", frozenset({"APPROVED"}), "只有已审批的采购申请才能创建询价草稿"),
+    },
+    "purchase_order": {
+        "purchase_order_submit": ("po_no", frozenset({"DRAFT"}), "只有草稿状态的采购订单可以提交审批"),
+    },
+}
+
+# 页面对象类型到单据只读 Agent 目标的默认单号槽位映射。
+PAGE_CONTEXT_READ_SLOTS: dict[str, tuple[frozenset[str], str]] = {
+    "purchase_request": (frozenset({"purchase_request"}), "request_no"),
+    "purchase_order": (frozenset({"order_trace"}), "po_no"),
+    "delivery": (frozenset({"delivery"}), "delivery_no"),
+    "quality_acceptance": (frozenset({"quality_acceptance"}), "acceptance_no"),
+    "finance_reconciliation": (frozenset({"finance_reconciliation"}), "reconciliation_no"),
+    "supplier": (frozenset({"supplier", "supplier_profile"}), "supplier_code"),
+}
+
 
 class IntentRecognitionError(BusinessValidationError):
     """识别基础设施失败；不得持久化为业务澄清或等待用户补参。"""
@@ -199,6 +231,152 @@ def with_pending_clarification(db: Session, user: User, conversation_id: int,
     }}
 
 
+def _allowed_chat_purposes(manifest_payload: dict | None) -> set[str] | None:
+    """提取清单中允许通过聊天入口发起的写入意图；未提供完整清单时返回 None。"""
+    if not isinstance(manifest_payload, dict) or "action_proposals" not in manifest_payload:
+        return None
+    return {
+        item["purpose"]
+        for item in (manifest_payload.get("action_proposals") or [])
+        if isinstance(item, dict) and item.get("entrypoint") == "chat" and item.get("purpose")
+    }
+
+
+def _enrich_page_context_for_routing(context: dict | None, manifest_payload: dict | None) -> dict:
+    """在不修改调用方字典的前提下，为页面上下文补充当前状态与权限允许的写入意图列表。"""
+    if not context:
+        return {}
+    page_ctx = context.get("page_context")
+    if not isinstance(page_ctx, dict):
+        return context
+    obj_type = page_ctx.get("object_type")
+    status = page_ctx.get("status")
+    rules = PAGE_CONTEXT_WRITE_RULES.get(obj_type or "")
+    allowed_chat = _allowed_chat_purposes(manifest_payload)
+    valid_purposes: list[str] = []
+    if rules and status:
+        valid_purposes = [
+            purpose
+            for purpose, (_, allowed_statuses, _) in rules.items()
+            if status in allowed_statuses and (allowed_chat is None or purpose in allowed_chat)
+        ]
+    return {
+        **context,
+        "page_context": {**page_ctx, "valid_write_purposes": valid_purposes},
+    }
+
+
+def _bind_page_context_slots(content: object, context: dict | None) -> object:
+    """模型已选中与当前页面对象匹配的意图但省略单号时，从服务端重读的上下文补全槽位。"""
+    if not isinstance(content, dict) or not context:
+        return content
+    page_ctx = context.get("page_context")
+    if not isinstance(page_ctx, dict):
+        return content
+    slots = content.get("slots")
+    if slots is not None and not isinstance(slots, dict):
+        return content
+    obj_type = page_ctx.get("object_type")
+    reference_no = page_ctx.get("reference_no")
+    purpose = content.get("purpose")
+    target_slot: str | None = None
+    target_value: str | None = None
+
+    write_rule = PAGE_CONTEXT_WRITE_RULES.get(obj_type or "", {}).get(purpose or "")
+    if write_rule and reference_no:
+        target_slot, target_value = write_rule[0], reference_no
+    elif (
+        purpose == "query"
+        and content.get("execution_mode") == "agent"
+        and isinstance(content.get("tasks"), list)
+        and len(content["tasks"]) == 1
+    ):
+        task_kind = content["tasks"][0]
+        read_spec = PAGE_CONTEXT_READ_SLOTS.get(obj_type or "")
+        if read_spec and task_kind in read_spec[0] and reference_no:
+            target_slot, target_value = read_spec[1], reference_no
+        elif obj_type == "inventory_balance" and task_kind == "inventory" and page_ctx.get("product_keyword"):
+            target_slot, target_value = "product_keyword", page_ctx["product_keyword"]
+
+    if not target_slot or not target_value:
+        return content
+    merged_slots = dict(slots or {})
+    if merged_slots.get(target_slot):
+        return content
+    merged_slots[target_slot] = target_value
+    return {**content, "slots": merged_slots}
+
+
+def _unsupported_decision(decision: Understanding, message: str) -> Understanding:
+    """将越权或状态不允许的路由收敛为统一的受控不支持响应。"""
+    return Understanding(
+        purpose="unsupported",
+        execution_mode="none",
+        dialogue_action=decision.dialogue_action,
+        question=message,
+    )
+
+
+def _query_capability_error(decision: Understanding, manifest_payload: dict) -> str | None:
+    """对照能力清单核验只读查询模式与任务权限；不足时返回明确提示。"""
+    mode = decision.execution_mode
+    if mode == "document":
+        if "document_search" in manifest_payload and not manifest_payload.get("document_search"):
+            return "当前账号暂未开通化学品资料检索能力，请检查权限或功能开关。"
+        return None
+    if mode == "query":
+        if "analytics_datasets" in manifest_payload and not manifest_payload.get("analytics_datasets"):
+            return "当前账号没有可用的业务统计数据集权限。"
+        return None
+    allowed_tasks = set(manifest_payload.get("agent_tasks") or []) if "agent_tasks" in manifest_payload else None
+    if mode == "agent":
+        if allowed_tasks is not None and not (set(decision.tasks) <= allowed_tasks):
+            return "当前账号缺少执行该查询所需的工具权限或能力尚未开启。"
+        return None
+    if mode == "batch":
+        for sub in decision.sub_tasks:
+            if sub.kind == "document" and "document_search" in manifest_payload and not manifest_payload.get("document_search"):
+                return "当前账号缺少化学品资料检索权限，无法完整执行该复合请求。"
+            if sub.kind == "analytics" and "analytics_datasets" in manifest_payload and not manifest_payload.get("analytics_datasets"):
+                return "当前账号缺少业务统计查询权限，无法完整执行该复合请求。"
+            if sub.kind in {"inventory", "quotes"} and allowed_tasks is not None and sub.kind not in allowed_tasks:
+                return "当前账号缺少执行部分查询所需的工具权限，无法完整执行该复合请求。"
+    return None
+
+
+def _apply_capability_and_context_guards(
+    decision: Understanding,
+    *,
+    context: dict | None,
+    manifest_payload: dict | None,
+) -> Understanding:
+    """在模型结构校验之后执行服务端能力清单、入口边界与页面对象状态硬校验。"""
+    if isinstance(manifest_payload, dict):
+        allowed_chat = _allowed_chat_purposes(manifest_payload)
+        if allowed_chat is not None and decision.purpose in CHAT_WRITE_PURPOSES and decision.purpose not in allowed_chat:
+            return _unsupported_decision(
+                decision,
+                "当前账号没有执行该操作的权限，或当前入口暂不支持该动作提案。",
+            )
+        if decision.purpose == "query" and decision.dialogue_action != "cancel":
+            err = _query_capability_error(decision, manifest_payload)
+            if err is not None:
+                return _unsupported_decision(decision, err)
+
+    page_ctx = (context or {}).get("page_context")
+    if isinstance(page_ctx, dict):
+        obj_type = page_ctx.get("object_type")
+        reference_no = page_ctx.get("reference_no")
+        status = page_ctx.get("status")
+        rule = PAGE_CONTEXT_WRITE_RULES.get(obj_type or "", {}).get(decision.purpose)
+        if rule and reference_no and status:
+            slot_name, allowed_statuses, reason_msg = rule
+            if getattr(decision.slots, slot_name, None) == reference_no and status not in allowed_statuses:
+                label = page_ctx.get("title") or reference_no
+                return _unsupported_decision(decision, f"{label} 当前状态为 {status}，{reason_msg}。")
+    return decision
+
+
 async def understand(question: str, context: dict | None = None, settings=None, *, manifest=None) -> Understanding:
     """只对完整明确的控制命令快速匹配；自然语言交给同一个语义理解器。"""
     normalized = question.strip().lower().rstrip("。！？!?")
@@ -213,16 +391,18 @@ async def understand(question: str, context: dict | None = None, settings=None, 
     runtime = (settings or get_settings()).model_copy(
         update={"llm_temperature": UNDERSTANDING_TEMPERATURE, "llm_max_tokens": UNDERSTANDING_MAX_TOKENS})
     manifest_payload = (manifest.model_dump(mode="json") if hasattr(manifest, "model_dump") else manifest)
-    payload = {"question": question, "context": context or {}, "today": datetime.now().astimezone().date().isoformat()}
+    routing_context = _enrich_page_context_for_routing(context, manifest_payload)
+    payload = {"question": question, "context": routing_context, "today": datetime.now().astimezone().date().isoformat()}
     if manifest_payload is not None:
         payload["capabilities"] = manifest_payload
     from app.modules.ai_agent.business_queries.catalog import catalog_prompt
+    datasets = (manifest_payload.get("analytics_datasets") or []) if isinstance(manifest_payload, dict) else []
     capability_context = ("" if manifest_payload is None else
         "\n# 标准统计可回答范围\n"
         "以下白名单列出标准统计查询可提供的指标、分组和筛选范围。derived_outputs 是服务端依据明细确定性计算并实际展示的派生结果，"
         "可用于判断复合查询是否完整可答；不得要求底层 SQL 直接输出这些派生项，也不得因 metrics 未包含它们而误判为不支持。"
         "执行前必须确认用户要求的每项指标都能由 metrics、outputs 或 derived_outputs 覆盖；不能完整覆盖时，按上方规则先澄清，不得用相近指标代替。\n"
-        + catalog_prompt({item["key"] for item in manifest_payload["analytics_datasets"]})
+        + catalog_prompt({item["key"] for item in datasets})
     )
     repair = ""
     failure_reason = "请求识别服务发生技术故障"
@@ -261,8 +441,14 @@ async def understand(question: str, context: dict | None = None, settings=None, 
             continue
         if shape != "clean":
             metrics.increment("llm_structured_output_repairs", labels={"stage": "routing", "shape": shape})
+        content = _bind_page_context_slots(content, routing_context)
         try:
-            return Understanding.model_validate_json(json.dumps(content, ensure_ascii=False), strict=True)
+            decision = Understanding.model_validate_json(json.dumps(content, ensure_ascii=False), strict=True)
+            return _apply_capability_and_context_guards(
+                decision,
+                context=routing_context,
+                manifest_payload=manifest_payload,
+            )
         except ValidationError as exc:
             # 只反馈结构错误位置，不把模型原始输出或用户数据写入日志。
             errors = schema_error_details(exc)

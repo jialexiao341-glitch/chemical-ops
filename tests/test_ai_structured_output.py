@@ -72,9 +72,19 @@ def test_purchase_draft_discards_model_action_fields():
 def test_routing_strict_action_null_placeholders_do_not_expand_a_proposal():
     decision = routing.Understanding.model_validate({
         "purpose": "rfq_draft", "slots": {"request_no": "PR-001"},
-        "action_fields": {"supplier_codes": ["SUP-001"], "quote_deadline": None, "delivery_requirements": None},
+        "action_fields": {
+            "supplier_codes": ["SUP-001"],
+            "quote_deadline": None,
+            "delivery_date": None,
+            "delivery_requirements": None,
+        },
     })
     assert decision.action_fields == {"supplier_codes": ["SUP-001"]}
+    with pytest.raises(ValidationError):
+        routing.Understanding.model_validate({
+            "purpose": "rfq_draft", "slots": {"request_no": "PR-001"},
+            "action_fields": {"supplier_codes": ["SUP-001"], "delivery_date": "2026-11-20"},
+        })
 
 
 def test_routing_strict_json_preserves_date_validation_with_action_union():

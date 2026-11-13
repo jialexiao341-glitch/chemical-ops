@@ -13,6 +13,7 @@ from app.modules.ai_agent.business_queries.order_trace import format_stage_line,
 from app.modules.ai_agent.schema import (
     AIContextAskRequest,
     AIContextAskResponse,
+    AIContextRef,
     AIContextSnapshot,
 )
 from app.modules.finance_management import service as finance_service
@@ -27,6 +28,7 @@ from app.modules.purchase_orders.scope import order_read_condition
 from app.modules.purchase_requests.service import get_request as get_purchase_request
 from app.modules.purchase_requests.model import Unit
 from app.modules.quality_acceptances import service as quality_acceptance_service
+from app.modules.rfq_quotes import service as rfq_service
 from app.modules.rfq_quotes.model import RFQ
 from app.modules.system_management.crud import get_user_permission_codes, get_user_role_codes
 from app.modules.system_management.model import User
@@ -630,6 +632,75 @@ def _supplier_answer(trace: dict) -> str:
         f"默认交货天数：{supplier.default_lead_days if supplier.default_lead_days is not None else '未登记'}。",
         "本回答仅复述供应商主数据，不包含履约绩效或风险判断。",
     ])
+
+
+PAGE_CONTEXT_PERMISSIONS: dict[str, str] = {
+    "purchase_order": "procurement.orders.read",
+    "purchase_request": "procurement.requests.read",
+    "delivery": "warehouse.deliveries.read",
+    "inventory_balance": "warehouse.inventory.read",
+    "quality_acceptance": "quality.acceptances.read",
+    "finance_reconciliation": "finance.reconciliations.read",
+    "supplier": "master.suppliers.read",
+    "rfq": "procurement.rfqs.read",
+}
+
+
+def check_page_context_permission(db: Session, user: User, object_type: str) -> None:
+    """校验当前账号是否具备页面上下文对象类型的读取权限。"""
+    permission = PAGE_CONTEXT_PERMISSIONS.get(object_type)
+    if permission is None:
+        raise BusinessValidationError("不支持的页面上下文对象类型")
+    if "SYS_ADMIN" not in set(get_user_role_codes(db, user.id)) and permission not in set(get_user_permission_codes(db, user.id)):
+        raise AuthorizationError("当前账号没有该业务对象的读取权限")
+
+
+def _build_inventory_route_context(db: Session, user: User, object_id: int) -> dict[str, str | None]:
+    balance = inventory_service.get_balance_for_user(db, user, object_id)
+    product = db.get(Product, balance.product_id)
+    payload: dict[str, str | None] = {
+        "object_type": "inventory_balance",
+        "reference_no": product.product_code if product else None,
+        "status": balance.status,
+        "title": f"库存余额 #{balance.id}",
+    }
+    if product and product.product_name:
+        payload["product_keyword"] = product.product_name
+    return payload
+
+
+def resolve_route_page_context(db: Session, user: User, ref: AIContextRef) -> dict[str, str | None]:
+    """按当前用户权限重读页面对象最小上下文，仅返回单号、状态与标题供路由消歧。"""
+    check_page_context_permission(db, user, ref.object_type)
+    if ref.object_type == "inventory_balance":
+        return _build_inventory_route_context(db, user, ref.object_id)
+    loaders = {
+        "purchase_order": lambda: get_order(db, user, ref.object_id),
+        "purchase_request": lambda: get_purchase_request(db, user, ref.object_id),
+        "rfq": lambda: rfq_service.get_rfq(db, user, ref.object_id),
+        "delivery": lambda: delivery_service.get_delivery(db, user, ref.object_id),
+        "quality_acceptance": lambda: quality_acceptance_service.get_acceptance(db, user, ref.object_id),
+        "finance_reconciliation": lambda: finance_service.get_reconciliation(db, user, ref.object_id),
+        "supplier": lambda: supplier_service.get_supplier(db, ref.object_id),
+    }
+    specs = {
+        "purchase_order": ("po_no", "采购订单"),
+        "purchase_request": ("request_no", "采购申请"),
+        "rfq": ("rfq_no", "询价单"),
+        "delivery": ("delivery_no", "到货单"),
+        "quality_acceptance": ("acceptance_no", "质量验收"),
+        "finance_reconciliation": ("reconciliation_no", "财务对账"),
+        "supplier": ("supplier_code", "供应商"),
+    }
+    record = loaders[ref.object_type]()
+    no_attr, label = specs[ref.object_type]
+    reference_no = getattr(record, no_attr)
+    return {
+        "object_type": ref.object_type,
+        "reference_no": reference_no,
+        "status": getattr(record, "status", None),
+        "title": f"{label} {reference_no}",
+    }
 
 
 def resolve_context(db: Session, user: User, request: AIContextAskRequest) -> tuple[AIContextSnapshot, dict]:

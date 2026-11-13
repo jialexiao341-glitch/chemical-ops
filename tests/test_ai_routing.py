@@ -397,3 +397,139 @@ def test_route_endpoint_permissions_and_foreign_context(client, db_session, monk
     with as_demo_role(db_session, "SUPPLIER_PORTAL"):
         response = client.post("/api/v1/ai/route", json={"question": "查库存"})
     assert response.status_code == 403 and len(calls) == 1
+
+
+def _sample_manifest(*, chat_purposes=("purchase_draft",), agent_tasks=("inventory",), datasets=None, document_search=True):
+    return {
+        "contract_version": "1",
+        "digest": "test-digest",
+        "agent_tools": [],
+        "analytics_datasets": [{"key": "purchase_orders"}] if datasets is None else datasets,
+        "document_search": document_search,
+        "resource_scopes": [],
+        "action_proposals": [
+            {"action_type": "mock.chat", "label": p, "entrypoint": "chat", "purpose": p, "requires_confirmation": True}
+            for p in chat_purposes
+        ] + [
+            {"action_type": "rfq.send", "label": "发送询价", "entrypoint": "business_page", "purpose": None, "requires_confirmation": True}
+        ],
+        "agent_tasks": list(agent_tasks),
+    }
+
+
+@pytest.mark.parametrize("payload,manifest_kwargs", [
+    (
+        {"purpose": "purchase_submit", "execution_mode": "none", "slots": {"request_no": "PR20261022000001"}},
+        {"chat_purposes": ("purchase_draft",)},
+    ),
+    (
+        {"purpose": "query", "execution_mode": "document", "tasks": ["document"], "sub_tasks": [{"id": "t1", "kind": "document", "question": "乙醇闪点"}]},
+        {"document_search": False},
+    ),
+    (
+        {"purpose": "query", "execution_mode": "query", "tasks": ["analytics"], "sub_tasks": [{"id": "t1", "kind": "analytics", "question": "订单数量"}]},
+        {"datasets": []},
+    ),
+    (
+        {"purpose": "query", "execution_mode": "agent", "tasks": ["inventory"], "slots": {"product_keyword": "乙醇"}},
+        {"agent_tasks": ()},
+    ),
+    (
+        {
+            "purpose": "query", "execution_mode": "batch", "tasks": ["inventory", "analytics"],
+            "sub_tasks": [
+                {"id": "t1", "kind": "inventory", "question": "乙醇库存", "slots": {"product_keyword": "乙醇"}},
+                {"id": "t2", "kind": "analytics", "question": "订单数量"},
+            ],
+        },
+        {"agent_tasks": ()},
+    ),
+])
+def test_manifest_capability_guard_blocks_unauthorized_routes(monkeypatch, payload, manifest_kwargs):
+    async def model(*args, **kwargs):
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))
+    monkeypatch.setattr(llm, "chat", model)
+    decision = _run_immediate(routing.understand("执行请求", manifest=_sample_manifest(**manifest_kwargs)))
+    assert decision.route == "unsupported"
+    assert decision.purpose == "unsupported"
+    assert decision.execution_mode == "none"
+    assert decision.tasks == [] and decision.sub_tasks == []
+
+
+def test_page_context_binds_identifier_and_enforces_status_guard(monkeypatch):
+    seen_payloads = []
+
+    async def model(request, settings, **kwargs):
+        seen_payloads.append(json.loads(request.messages[0].content))
+        if seen_payloads[-1]["context"]["page_context"]["object_type"] == "purchase_order":
+            return SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+                "purpose": "purchase_order_submit", "execution_mode": "none", "slots": None,
+            })))
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "purpose": "rfq_draft", "execution_mode": "none", "action_fields": {"supplier_codes": ["SUP-001"]},
+        })))
+
+    monkeypatch.setattr(llm, "chat", model)
+    manifest = _sample_manifest(chat_purposes=("purchase_order_submit", "purchase_submit", "rfq_draft"))
+
+    draft_order_ctx = {"page_context": {"object_type": "purchase_order", "reference_no": "PO-26001", "status": "DRAFT", "title": "采购订单 PO-26001"}}
+    decision = _run_immediate(routing.understand("提交审批", draft_order_ctx, manifest=manifest))
+    assert decision.route == "purchase_order_submit"
+    assert decision.slots.po_no == "PO-26001"
+    assert seen_payloads[0]["context"]["page_context"]["valid_write_purposes"] == ["purchase_order_submit"]
+
+    approved_order_ctx = {"page_context": {"object_type": "purchase_order", "reference_no": "PO-26001", "status": "APPROVED", "title": "采购订单 PO-26001"}}
+    blocked_order = _run_immediate(routing.understand("提交审批", approved_order_ctx, manifest=manifest))
+    assert blocked_order.route == "unsupported"
+    assert "APPROVED" in (blocked_order.question or "")
+    assert seen_payloads[1]["context"]["page_context"]["valid_write_purposes"] == []
+
+    draft_request_ctx = {"page_context": {"object_type": "purchase_request", "reference_no": "PR-26001", "status": "DRAFT", "title": "采购申请 PR-26001"}}
+    blocked_rfq = _run_immediate(routing.understand("找 SUP-001 询价", draft_request_ctx, manifest=manifest))
+    assert blocked_rfq.route == "unsupported"
+    assert "DRAFT" in (blocked_rfq.question or "")
+    assert seen_payloads[2]["context"]["page_context"]["valid_write_purposes"] == ["purchase_submit"]
+
+
+def test_route_endpoint_resolves_authorized_page_context_and_rejects_unauthorized(client, db_session, monkeypatch):
+    from app.core.auth import get_current_user
+    from app.main import app
+    from app.modules.purchase_orders.model import PurchaseOrder
+    from app.modules.system_management.model import User
+    from sqlalchemy import select
+    from tests.test_rbac_separation import as_demo_role
+
+    admin = db_session.scalar(select(User).where(User.username == "SystemAdmin"))
+    order = db_session.scalar(select(PurchaseOrder).order_by(PurchaseOrder.id.asc()))
+    assert admin is not None and order is not None
+
+    seen = {}
+
+    async def model(request, settings, **kwargs):
+        seen["payload"] = json.loads(request.messages[0].content)
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "purpose": "query", "execution_mode": "agent", "tasks": ["order_trace"], "slots": None,
+        })))
+
+    monkeypatch.setattr(llm, "chat", model)
+    app.dependency_overrides[get_current_user] = lambda: admin
+    try:
+        response = client.post("/api/v1/ai/route", json={
+            "question": "跟踪一下这单进度",
+            "page_context": {"object_type": "purchase_order", "object_id": order.id},
+        })
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route"] == "agent"
+        assert body["understanding"]["slots"]["po_no"] == order.po_no
+        assert seen["payload"]["context"]["page_context"]["reference_no"] == order.po_no
+        assert seen["payload"]["context"]["page_context"]["status"] == order.status
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    with as_demo_role(db_session, "WAREHOUSE"):
+        denied = client.post("/api/v1/ai/route", json={
+            "question": "查这张财务对账单",
+            "page_context": {"object_type": "finance_reconciliation", "object_id": 1},
+        })
+    assert denied.status_code == 403

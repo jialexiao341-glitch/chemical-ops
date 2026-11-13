@@ -582,6 +582,14 @@ class Understanding(BaseModel):
         """模型偶发把无条件请求写成 slots:null；null 与缺省等价，字符串或数组仍拒绝。"""
         return {} if value is None else value
 
+    @field_validator("action_fields", mode="before")
+    @classmethod
+    def drop_null_action_placeholders(cls, value):
+        """移除模型填入的 null 占位键，避免未指定的空字段触发 extra_forbidden；非空未知键仍拒绝。"""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if item is not None}
+        return value
+
     @model_validator(mode="after")
     def normalize(self):
         """校验任务一致性、执行模式和无环依赖，再移除明确排除的类别。"""
@@ -763,13 +771,6 @@ class PendingClarification(BaseModel):
         return self
 
 
-class RouteRequest(BaseModel):
-    """统一路由接口的输入；会话 ID 仍需服务端检查归属。"""
-    model_config = ConfigDict(extra="forbid")
-    question: str = Field(min_length=1, max_length=2000)
-    conversation_id: int | None = Field(default=None, gt=0)
-
-
 ContextObjectType = Literal[
     "purchase_order",
     "purchase_request",
@@ -788,6 +789,14 @@ class AIContextRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
     object_type: ContextObjectType
     object_id: int = Field(strict=True, gt=0)
+
+
+class RouteRequest(BaseModel):
+    """统一路由接口的输入；会话 ID 与页面对象引用仍需服务端检查归属与权限。"""
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=2000)
+    conversation_id: int | None = Field(default=None, gt=0)
+    page_context: AIContextRef | None = None
 
 
 class AIContextAskRequest(BaseModel):

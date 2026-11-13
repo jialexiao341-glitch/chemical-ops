@@ -225,16 +225,7 @@ def order_list_context(data: AIListContextAskRequest, db: Session = Depends(get_
 
 
 def _check_page_context_permission(db, user, object_type):
-    from app.core.errors import AuthorizationError
-    from app.modules.system_management.crud import get_user_permission_codes, get_user_role_codes
-    permission = {
-        'purchase_order': 'procurement.orders.read', 'purchase_request': 'procurement.requests.read',
-        'delivery': 'warehouse.deliveries.read', 'inventory_balance': 'warehouse.inventory.read',
-        'quality_acceptance': 'quality.acceptances.read', 'finance_reconciliation': 'finance.reconciliations.read',
-        'supplier': 'master.suppliers.read', 'rfq': 'procurement.rfqs.read',
-    }[object_type]
-    if 'SYS_ADMIN' not in set(get_user_role_codes(db, user.id)) and permission not in set(get_user_permission_codes(db, user.id)):
-        raise AuthorizationError('当前账号没有该业务对象的读取权限')
+    context_service.check_page_context_permission(db, user, object_type)
 
 
 @router.post("/context/stream", summary="按当前页面对象流式回答")
@@ -270,8 +261,10 @@ def context_ask(data: AIContextAskRequest, db: Session = Depends(get_db),
 @router.post("/route", summary="理解会话请求并生成受约束路由")
 async def route_request(data: RouteRequest, db: Session = Depends(get_db),
                         user: User = Depends(require_permission("ai.workspace.read"))) -> dict:
-    """校验会话归属并理解当前请求，返回短期复用凭据；此接口不执行业务查询。"""
+    """校验会话归属、页面对象权限并理解当前请求，返回短期复用凭据；此接口不执行业务查询。"""
     context = routing.conversation_context(db, user, data.conversation_id)
+    if data.page_context is not None:
+        context = {**context, "page_context": context_service.resolve_route_page_context(db, user, data.page_context)}
     manifest = capabilities.build_capability_manifest(db, user)
     pending = (conversation_store.load_pending_clarification(db, user, data.conversation_id)
                if data.conversation_id is not None else None)
