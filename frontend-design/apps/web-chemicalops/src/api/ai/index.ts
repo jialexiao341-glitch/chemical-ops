@@ -451,12 +451,18 @@ export async function streamChatApi(
 }
 
 /** 所有自然语言入口采用后端统一语义路由；不在浏览器猜业务意图。 */
-export function routeAiRequestApi(question: string, conversationId?: number) {
+export function routeAiRequestApi(
+  question: string,
+  conversationId?: number,
+  pageContext?: { object_id: number; object_type: AiApi.ContextObjectType },
+) {
   return requestClient.post<{ route: string; route_token: string; understanding: {
     action_fields?: Record<string, unknown> | null;
-    slots: { request_no?: string | null };
+    slots: { po_no?: string | null; request_no?: string | null };
   } }>('/ai/route', {
-    question, conversation_id: conversationId,
+    question,
+    conversation_id: conversationId,
+    ...(pageContext ? { page_context: pageContext } : {}),
   });
 }
 export interface OperationSuggestion {

@@ -31,6 +31,7 @@ import {
 import { AI_FILTER_TARGETS } from '#/utils/ai-list-filters';
 import { formatAmount, formatDateTime, formatQuantity } from '#/utils/format';
 import { renderMarkdown } from '#/utils/markdown';
+import { activePageCopilotContext } from '#/utils/page-copilot-context';
 
 import QueryEvidence from './query-evidence.vue';
 import AgentChatTask from './agent-chat-task.vue';
@@ -552,8 +553,11 @@ async function onSend(retryFailed = false) {
   sending.value = true;
   scrollToBottom();
   try {
+    const pageContext = activePageCopilotContext.value
+      ? { object_id: activePageCopilotContext.value.objectId, object_type: activePageCopilotContext.value.objectType }
+      : undefined;
     const decision = retryFailed ? { route: 'batch', route_token: undefined }
-      : await routeAiRequestApi(text, activeConversationId.value);
+      : await routeAiRequestApi(text, activeConversationId.value, pageContext);
     if (epoch !== chatEpoch) return;
     routeToken = decision.route_token;
     if (decision.route === 'purchase_draft') {
