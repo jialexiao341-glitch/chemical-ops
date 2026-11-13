@@ -220,7 +220,7 @@ P0「旧基线与 CI 未迁移 envelope」的 CI 部分已切换（未提交）�
 
 | 变更 | 实现 | 判定口径 |
 | --- | --- | --- |
-| CI 只走 envelope | `.github/workflows/agent-eval.yml` 改为 `run_eval_suite.py --suite all --harness --repeat 3 --workers 3 --preflight --require-baseline --gate --fail-on-regression` | CI 不再消费原始报告；结论由 envelope 门禁四态给出 |
+| CI 只走 envelope | `.github/workflows/agent-eval.yml` 改为 `run_eval_suite.py --suite all --harness --repeat 3 --business-workers 3 --preflight --require-baseline --gate --fail-on-regression` | CI 不再消费原始报告；结论由 envelope 门禁四态给出 |
 | 缺基线快速失败 | `run_eval_suite.py --require-baseline`：按 `eval_prompt_gate.prompt_key()` 校验当前 prompt 版本目录下四份 `harness-<suite>.json` | 缺失即退出 1，不发起 75–90 分钟采样 |
 | 模型口径对齐 | 工作流默认模型改为与基线一致的 `deepseek-v4.1-flash`（`https://ai.max66.xyz/v1`） | 换模型仍由门禁判 `INVALID_RUN`，不能把跨模型差异当回归 |
 | 取证留档 | 门禁输出写 `$GITHUB_STEP_SUMMARY`；`candidate/envelopes`、逐轮 trial 报告与 `eval-gate.log` 上传 artifact，保留 30 天 | 失败时能定位到具体用例与轮次，不必先重跑 |

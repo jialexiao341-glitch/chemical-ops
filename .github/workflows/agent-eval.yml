@@ -37,18 +37,19 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          # 定时任务缺密钥不能静默成功：否则每周“绿色”但零门禁结论，门禁可信度被掏空。
           if [ -z "$OPENAI_API_KEY" ]; then
-            echo "::notice::未配置 OPENAI_API_KEY，跳过真实模型评测，本次不产生门禁结论"
+            echo "::error::未配置 OPENAI_API_KEY，无法产出评测门禁结论"
             {
-              echo "## Agent Eval Gate 未执行"
+              echo "## Agent Eval Gate 未执行——缺少 OPENAI_API_KEY"
               echo
-              echo "未配置 OPENAI_API_KEY，已跳过真实模型评测；本次不产生通过/回归结论。"
+              echo "未配置仓库 Secret \`OPENAI_API_KEY\`，本次运行不产生通过/回归结论，按失败处理。"
             } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            exit 1
           fi
           python scripts/run_eval_suite.py --suite all \
             --output-dir "$EVAL_OUTPUT_DIR" \
-            --harness --repeat 3 --workers 3 \
+            --harness --repeat 3 --business-workers 3 \
             --preflight --require-baseline \
             --gate --fail-on-regression 2>&1 | tee eval-gate.log
       - name: Publish gate summary
