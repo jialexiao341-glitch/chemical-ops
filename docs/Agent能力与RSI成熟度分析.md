@@ -1,6 +1,6 @@
 # Agent 能力与 Harness/RSI 成熟度分析
 
-> 依据当前代码核对（commit `d6c7056` 及未提交的 P0-1 变更），不把“有接口、有测试”等同于“已验收”。量化数据注明来源与口径。
+> 依据当前代码核对（commit `7d83eea` 及未提交的 CI envelope 切换、差评批量脱敏、routing 14 轮补证），不把“有接口、有测试”等同于“已验收”。量化数据注明来源与口径。
 
 ## 1 结论摘要
 
@@ -9,8 +9,8 @@
 | Agent 只读能力 | 15 个工具覆盖主数据、库存、报价、申请、订单、到货、质检、对账、供应商与异常 | 可用 |
 | Agent 写入能力 | 11 个动作处理器，全部经提案预览 + 显式确认 | 可用，边界收紧 |
 | 页面上下文 | 7 类业务对象，服务端按权限重读 | 覆盖首批 |
-| 评测工程 | 四套件各 3 轮：170 STABLE_PASS / 5 UNSTABLE / 0 STABLE_FAIL，门禁四态裁决 | M2 已判定 |
-| 自改进（RSI） | 候选可人工生成；对照实验与配对显著性可用，无自动生成 | M3 中段 |
+| 评测工程 | 四套件各 3 轮：170 STABLE_PASS / 5 UNSTABLE / 0 STABLE_FAIL，门禁四态裁决；routing 补 14 轮 34/34，business 3 条补 14 轮后 16/17 | M2 已判定 |
+| 自改进（RSI） | 候选可人工触发生成并批量脱敏；对照实验与配对显著性可用，无自动生成 | M3 中段 |
 
 一句话：**Agent 已经能干活，评测已经能判定，但还不能系统性地提出并证明自己的改进**。
 
@@ -80,6 +80,7 @@
 ### 2.5 运营与质量
 
 - AI 运行分析：质量聚合（失败阶段、评价冲突、错误码、工具调用、prompt 版本）、反馈看板、成本看板、回归用例管理。
+- 回归用例：差评/失败任务候选可批量生成，服务端按固定规则脱敏（手机号、邮箱、身份证、银行卡、IP、联系人/单位名称）后入库；候选默认排除 `WORKER_UNAVAILABLE` 等基础设施失败，差评来源保留；产品、供应商等业务实体仍需人工核对，管理员可批量批准后才导出评测集。
 - 失败分类：`TRANSIENT_INFRA` / `BUSINESS_INVALID` / `FORMAT` / `AUTHORIZATION` 等，决定是否可重试与是否计入回归。
 
 ## 3 能做什么（按使用者视角）
@@ -90,7 +91,7 @@
 | 仓管 | 查余额、批次、短交、单证状态 | 不推断质检结论 |
 | 质量 | 查验收事实、报告核对、冲突 | 不重新判定合格 |
 | 财务 | 查对账行、发票匹配、付款上限 | 不执行付款 |
-| 管理员 | 看质量/成本/反馈、从差评生成回归用例、批准用例 | 提示词变更需人工 |
+| 管理员 | 看质量/成本/反馈、从差评/失败任务批量生成并脱敏回归用例、批量批准用例 | 产品/供应商等业务实体需人工核对；提示词变更需人工 |
 
 ## 4 Harness 工程现状
 
@@ -100,41 +101,44 @@
 | --- | --- | --- |
 | 多套件编排 | `scripts/eval_harness.py`，`--repeat/--resume/--workers`，统一 envelope；resume 默认重跑含基础设施失败的轮次 | 四套件 3 轮实测（2026-11-12） |
 | 稳定性判定 | `scripts/eval_stability.py`，Wilson 区间；<5 轮按全通过/全失败；基础设施失败轮次不计入分母 | 170 STABLE_PASS / 5 UNSTABLE / 0 STABLE_FAIL（175 条） |
+| routing 长轮次补证 | `eval_harness.py --suite routing --repeat 14`；失败行带 `run_meta.error.class`，污染轮次可自动重跑 | 34/34 STABLE_PASS，476 次请求，0 排除轮次（见 路由评测 14 轮稳定性证据） |
+| business 定向补证 | `evaluate_agent_business.py --cases B001 B032 B033 --repetitions 14 --workers 3` | 42/42 通过；与原 2/3 合并 16/17 STABLE_PASS（见 business 定向补证） |
 | 门禁裁决 | `eval_prompt_gate.py`：PASS / FLAKY / REGRESSION / INVALID_RUN / NOT_RUN | 稳定回归、抖动、基础设施、跨模型均有测试 |
 | 基础设施失败隔离 | `TRANSIENT_INFRA` 单列，不计回归与安全失败；污染轮次重跑后不混入统计 | business trial-1 33 轮污染重跑、tasks trial-1 1 轮污染重跑 |
 | 回归复核 | `--retest-attempts 3`，稳住采样波动 | T04/B044/B052/B115 复跑 |
 | 连通性预检 | `--preflight`，模型不可用不发起批量 | 自检通过 |
 | 覆盖度约束 | 四份报告缺一即 NOT_RUN | 单元测试 |
 | envelope 直读 | `eval_prompt_gate.py --mode envelope` + `eval_harness.py --suite all` | 离线核对 + 脚本测试（详见第 9 节） |
+| CI 自动门禁 | `.github/workflows/agent-eval.yml`：`--harness --repeat 3 --preflight --require-baseline --gate --fail-on-regression`；结论写 Step Summary，envelope 与日志留档 30 天 | 缺基线在采样前退出（单测）；离线自比 PASS |
 | 结果入库与趋势 | `record_eval_run.py` 幂等入库，`eval_trend.py` 出月度稳定通过率 | 迁移 076 已应用，4 份 envelope / 175 条用例入库，2026-11 稳定通过率 97.1% |
 | 变体对照实验 | `scripts/prompt_experiment.py`：配对的 2×2 列联表 + McNemar 精确检验，只读 envelope | 9 项单测（改善/退化/无差异/跨模型/无有效轮次），不写基线 |
 
-用例规模：routing 34、tasks 16、business 120、prod 5，共 175 条；逐用例三轮稳定性见
-四套件三轮稳定性评估（报告待功能完成后重新生成）。
+用例规模：routing 34、tasks 16、business 120、prod 5，共 175 条；逐用例数据见
+`docs/evaluation/baselines/<prompt-key>/harness-<suite>.json`（5 条 UNSTABLE 已定向补证，见第 9 节）。
 
 ### 4.2 缺口
 
 | 缺口 | 影响 |
 | --- | --- |
-| CI 仍走原始报告口径 | 基线已同时含 raw 报告与 envelope，但 CI 未切换，两套口径短期并存 |
-| 3 轮只能区分全过/全败 | 5 条 2/3 用例只能判 UNSTABLE，统计显著性仍需更多轮次 |
+| CI 首轮实跑未发生 | 工作流已按 envelope 口径改写，但定时/手动运行尚未在 GitHub Actions 产生记录；限流、跨模型、基线缺失这些分支只由单测与本地自比覆盖 |
+| 3 轮只能区分全过/全败 | 3 轮采样本身仍只能区分全过/全败；5 条 UNSTABLE 已定向补证（routing 14 轮、business 3 条各 14 轮） |
 | 模型服务抖动 | 首轮 business 污染 33 轮、tasks 污染 1 轮；需重跑取证，不能直接用污染报告判回归 |
-| 无分片并行 | 全量一轮约 25–30 分钟，阻塞迭代 |
+| 无分片并行 | 全量一轮约 25–30 分钟，`--repeat 3` 约 75–90 分钟，阻塞迭代 |
 | 无历史趋势（仅 1 个月数据） | 已入库 2026-11 一个月，跨月对比要等下一次登记后才能回答 |
 
 ## 5 RSI 现状
 
 | 环节 | 状态 | 说明 |
 | --- | --- | --- |
-| 候选来源 | 部分 | 差评与失败任务可生成候选，但需人工点"生成草稿" |
-| 候选批量 | 部分 | 评测失败用例可 `--failed-only` 批量转用例（去重 + dry-run）；差评仍需逐条脱敏 |
+| 候选来源 | 部分 | 差评与失败任务可生成候选，但仍由人触发批量提交；默认排除基础设施失败，可显式包含审计 |
+| 候选批量 | 有（含批量脱敏） | 评测失败用例可 `--failed-only` 批量转用例；差评/失败候选一次确认批量入库，服务端逐条再脱敏，重复项复用或跳过 |
 | 对照实验 | 有（人工发起） | `scripts/prompt_experiment.py` 做配对列联表与 McNemar 精确检验，只读基线、不写基线 |
 | 统计显著性 | 有 | 逐用例配对检验给 p 值与改善/退化清单；轮次不足时只给 INCONCLUSIVE |
 | 采纳闸门 | 有人工 | `--promote-baseline` 需人工确认 |
 | 自动改提示词 | 无（红线） | 设计上不开放 |
 
-结论：RSI 到 **M3 中段**——对照实验与统计显著性已具备，仍缺"自动产出候选、自动跑实验"两环，
-以及候选批量转用例的闭环。
+结论：RSI 到 **M3 中段**——对照实验与统计显著性已具备，候选批量转用例的闭环已补齐，
+仍缺“自动产出候选（无需人工触发）、自动跑实验”两环。
 
 ## 6 最终目标
 
@@ -164,9 +168,11 @@
 | 优先级 | 差距 | 动作 | 判据 |
 | --- | --- | --- | --- |
 | P0 | ~~门禁未接 envelope~~ 已完成 ✔ | 门禁改读 harness 输出，稳定性直接出 verdict | 同一 envelope 两处结论一致（见第 9 节） |
-| P0 | ~~套件稳定性未知~~ 已完成 ✔ | tasks/business/prod 各跑 `--repeat 3` | 逐用例表见 四套件三轮稳定性评估（报告待功能完成后重新生成） |
-| P0 | 旧基线与 CI 未迁移 envelope | 真实多轮结果审阅后登记 envelope 基线，再切 `--harness` | CI 按 envelope 口径出结论，不再回退原始报告 |
-| P1 | 候选靠手工 | 评测失败用例批量转用例 ✔；差评批量生成仍需逐条脱敏 | 转化 ≤1 天（尚未实测） |
+| P0 | ~~套件稳定性未知~~ 已完成 ✔ | tasks/business/prod 各跑 `--repeat 3` | 逐用例数据见基线 `harness-<suite>.json`；5 条 UNSTABLE 已定向补证（见第 9 节） |
+| P0 | ~~旧基线与 CI 未迁移 envelope~~ 已完成 ✔（配置） | envelope 基线已登记；CI 改走 `--harness --repeat 3 --preflight --require-baseline --gate --fail-on-regression` | CI 只读 envelope 出结论，不再回退原始报告；缺基线在采样前失败（真实 Actions 首跑待发生） |
+| P1 | ~~差评批量生成仍需逐条脱敏~~ 已完成 ✔ | 候选批量接口 + 服务端确定性脱敏 + 一次确认 + 管理员批量批准；单条提交同样兜底脱敏 | 候选预览与入库文本一致；重复项复用/跳过、批量审阅状态隔离有单测；合成基准只测机器耗时，生产转化 ≤1 天仍未实测 |
+| P1 | ~~routing 两条 2/3 只能判 UNSTABLE~~ 已完成 ✔ | 整轮补到 14 轮；routing 失败行补 `run_meta.error.class` 供 harness 自动重跑 | 34/34 STABLE_PASS，两条均 14/14，0 基础设施轮次计入分母（见 [14 轮证据](evaluation/routing-14-round-stability.md)） |
+| P1 | ~~business B001/B032/B033 2/3~~ 已完成 ✔ | 定向 14 轮；与 3 轮基线合并 | 42/42 通过；累计 16/17，三条均 STABLE_PASS（见 [定向补证](evaluation/business-unstable-14-round-retest.md)） |
 | P1 | ~~无实验框架~~ 已完成 ✔ | `prompt_experiment.py`：变体 × 用例 × N 轮 + McNemar | 逐用例列联表与 p 值已可产出，不写基线 |
 | P2 | ~~无趋势~~ 已完成 ✔ | 评测结果入库 + 月度稳定性趋势 | 迁移 076 已应用；2026-11：4 次运行 / 175 条，97.1% 稳定通过 |
 
@@ -189,7 +195,7 @@ P0「门禁未接 envelope」已落地，对应判据“同一 envelope 两处�
 | 安全边界 | 安全用例任一轮失败即计入 `safety_failures` | 不按统计区间放宽：19/20 仍被 Wilson 判 `STABLE_PASS`，门禁照样判 REGRESSION |
 | 一条命令跑通 | `run_eval_suite.py --harness --repeat N --gate` | 采样后自动按 envelope 判定 |
 | 基线登记 | `--promote-baseline` 同时复制 envelope | `manifest.envelopes` / `envelope_meta` 记录文件名、模型、代码版本、轮次 |
-| 回归保护 | 评测脚本测试 59 项（含 envelope 门禁 13 项） | 覆盖稳定回归、单轮抖动、基础设施、缺套件、跨模型、安全零容忍、污染轮次重跑、基线合并登记 |
+| 回归保护 | 评测脚本测试 69 项（含 envelope 门禁 13 项、套件编排 9 项） | 覆盖稳定回归、单轮抖动、基础设施、缺套件、跨模型、安全零容忍、污染轮次重跑、基线合并登记、缺基线不采样 |
 
 P0「套件稳定性未知」已完成真实采样（2026-11-12，`deepseek-v4.1-flash`，四套件各 3 轮）：
 
@@ -200,8 +206,8 @@ P0「套件稳定性未知」已完成真实采样（2026-11-12，`deepseek-v4.1
 | business | 120 | 360 | 0 | 117 | 3 | 0 |
 | prod | 5 | 15 | 0 | 5 | 0 | 0 |
 
-5 条 UNSTABLE 均为 2/3 通过，无稳定失败；逐用例表与污染处置见
-四套件三轮稳定性评估（报告待功能完成后重新生成）。采集期间修掉的三个缺陷：
+5 条 UNSTABLE 均为 2/3 通过，无稳定失败；逐用例数据见基线 envelope，
+污染处置见下文。采集期间修掉的三个缺陷：
 
 1. `--resume` 原先会静默复用含 `TRANSIENT_INFRA` 的轮次，把模型抖动固化成“2/3 波动”；
    现在默认重跑这类轮次，只有显式 `--reuse-infra` 才复用。
@@ -210,19 +216,78 @@ P0「套件稳定性未知」已完成真实采样（2026-11-12，`deepseek-v4.1
 3. 基础设施失败的轮次原先计入稳定性分母；现在 `eval_stability` 与 envelope 门禁共用
    `classify_case`，排除该类轮次并单列 `excluded_infra`，全部轮次被排除时判 `NO_EVIDENCE`。
 
+P0「旧基线与 CI 未迁移 envelope」的 CI 部分已切换（未提交）：
+
+| 变更 | 实现 | 判定口径 |
+| --- | --- | --- |
+| CI 只走 envelope | `.github/workflows/agent-eval.yml` 改为 `run_eval_suite.py --suite all --harness --repeat 3 --workers 3 --preflight --require-baseline --gate --fail-on-regression` | CI 不再消费原始报告；结论由 envelope 门禁四态给出 |
+| 缺基线快速失败 | `run_eval_suite.py --require-baseline`：按 `eval_prompt_gate.prompt_key()` 校验当前 prompt 版本目录下四份 `harness-<suite>.json` | 缺失即退出 1，不发起 75–90 分钟采样 |
+| 模型口径对齐 | 工作流默认模型改为与基线一致的 `deepseek-v4.1-flash`（`https://ai.max66.xyz/v1`） | 换模型仍由门禁判 `INVALID_RUN`，不能把跨模型差异当回归 |
+| 取证留档 | 门禁输出写 `$GITHUB_STEP_SUMMARY`；`candidate/envelopes`、逐轮 trial 报告与 `eval-gate.log` 上传 artifact，保留 30 天 | 失败时能定位到具体用例与轮次，不必先重跑 |
+| 串行约束 | `concurrency: agent-eval-gate`，不取消进行中的运行 | 两次全量并发会互相限流，成片污染两轮证据 |
+
+验证：`run_eval_suite` 9 项单测（新增“缺基线不采样”“基线齐全才放行”“非 harness 模式拒绝”3 项）；
+评测相关 69 项单测全部通过；本地以当前基线自比 `--mode envelope --fail-on-regression` 判 PASS
+（routing 32/34、tasks 16/16、business 117/120、prod 5/5）。未做：GitHub Actions 首轮实跑尚未发生，
+限流与 `INVALID_RUN` 的真实处置仍需一次定时运行取证。
+
+P1「差评批量脱敏」已落地（未提交）：
+
+| 变更 | 实现 | 安全边界 |
+| --- | --- | --- |
+| 批量入口 | `POST /ai/regression-cases/batch`（1–50 条）；候选弹窗多选、一次确认，逐条返回 CREATED/REUSED/SKIPPED/FAILED | 单项失败不中断整批；整批仍需 `redacted_confirmed` |
+| 确定性脱敏 | `backend/app/modules/ai/redaction.py`：邮箱、身份证、银行卡、手机号、座机、IP、联系人/单位名称按固定规则遮蔽 | 不调用模型；重复执行结果不变 |
+| 预览即保存 | 候选接口返回 `redacted_question` 与 `redaction_findings`；前端批量提交使用预览文本 | 服务端再次脱敏，客户端漏改也不会把联系方式写进评测集 |
+| 去重与归属 | 批内重复、既有草稿复用、已审阅或同来源任务已有用例跳过；非管理员仅本人任务 | 管理员可跨用户；状态仍走既有审阅流 |
+| 候选过滤 | 候选默认跳过 `TRANSIENT_INFRA` / `AMBIGUOUS_TIMEOUT` 失败；差评来源保留，`include_infra` 可显式审计 | 避免 worker 宕机、模型服务抖动被做成能力回归 |
+| 批量批准 | `POST /ai/regression-cases/batch-review`（1–50 条）；页面多选草稿、一次确认，逐条返回 UPDATED/SKIPPED/FAILED | 仅管理员；仅 DRAFT 可批准，状态不符、重复编号或已删除条目单独说明，不影响其余项 |
+| 单条兜底 | `create_case` 同样先脱敏再计算用例键并入库 | 单条与批量共用一套规则，避免两套口径 |
+| 生产口径 | `scripts/report_regression_conversion.py`：最早 DOWN 反馈（无反馈则任务创建）→ `reviewed_at`，输出 p50/p90 与 24 小时比例 | 当前库 90 天查询 0 条 → `NO_PRODUCTION_SAMPLES`，不把空样本算成 0 小时 |
+
+验证：回归用例与脱敏相关 32 项单测通过（含“候选→批量入库→批量批准→导出”链路）；合成基准 1 项、生产统计 3 项；前端 `vue-tsc --noEmit` 通过。
+合成链路基准：[回归用例转化流水线基准](evaluation/regression-conversion-benchmark.md) 用 20 条合成差评与审批记录跑通
+候选→入库→批准→导出，机器流水线约 31 ms（20 新建 / 18 批准 / 2 归档 / 18 导出）；
+报告显式标注 `production_measured=false`，fixture 审批时间偏移不参与耗时计算，不能替代生产转化时长。
+生产库实测：现有 3 条已批准用例均来自 `WORKER_UNAVAILABLE` 基础设施失败，报告默认排除后仍判
+`NO_PRODUCTION_SAMPLES`（`excluded_infra=3`）；默认候选列表只剩 1 条语义失败（`MODEL_FORMAT_ERROR`），
+只有显式 `include_infra` 才显示全部 5 条。因此“转化 ≤1 天”仍不能判定。
+低成本补数方案：用真实失败任务/差评做小样本 pilot（当前库有 7 条失败任务、2 条草稿），批准后同时看
+“反馈→批准”和“草稿→批准”两段；全过样本的 24h 超限率单侧 95% 上界为 `1-0.05^(1/n)`，
+n=9 时约 28.3%，n=29 全过才约 9.8%——样本不足时只能报观测值与区间，不能宣称 90% 达标。
+未做：生产样本人工时长（当前库无已批准样本）；前端只做了类型检查与代码走查，
+未完成浏览器验收（本机 vitest 启动被沙箱 `spawn EPERM` 阻断）；
+规则只覆盖可判定字段，产品、供应商名等业务实体仍依赖人工核对。
+
+routing 14 轮补证已落地（未提交）：
+
+| 变更 | 实现 | 判定口径 |
+| --- | --- | --- |
+| 长轮次采样 | `eval_harness.py --suite routing --repeat 14`，34 条 × 14 轮 = 476 次真实请求 | envelope `PASS`；34/34 `STABLE_PASS`，0 `UNSTABLE`，0 `STABLE_FAIL` |
+| 污染处置 | 首轮 trial-3/9/10 成片 `INTENT_SERVICE_ERROR`，删除后 `--resume` 定向重跑 | 最终 0 基础设施轮次计入分母；此前两条 2/3 用例均 14/14 |
+| 检测修复 | `evaluate_intent_routing.py` 失败行补 `run_meta.error.class`（复用 `error_policy.classify`） | harness 能自动识别并重跑路由侧基础设施失败；单测覆盖 |
+| 证据 | [路由评测 14 轮稳定性证据](evaluation/routing-14-round-stability.md) | 记录模型、prompt 指纹、请求量、污染重跑与边界 |
+
+business 3 条定向补证已落地（未提交）：
+
+| 变更 | 实现 | 判定口径 |
+| --- | --- | --- |
+| 定向采样 | `evaluate_agent_business.py --cases B001 B032 B033 --repetitions 14 --workers 3` | 42/42 通过；新增 14/14，与原 3 轮 2/3 合并 16/17 `STABLE_PASS` |
+| 范围控制 | 只补原三条 UNSTABLE，不重跑 120 条全量 | 不改变其他 business 场景的既有证据 |
+| 证据 | [business 不稳定用例 14 轮定向补证](evaluation/business-unstable-14-round-retest.md) | 记录模型、命令、合并口径与边界 |
+
 下一步（按顺序）：
 
-1. 已完成：envelope 基线登记——`--promote-baseline` 已把四份 `harness-<suite>.json` 写入当前 prompt 版本目录，
-   manifest 同时保留原始报告与版本元数据；`--mode envelope` 自比判 PASS。
-   未做：CI 切换——`.github/workflows/agent-eval.yml` 仍跑原始报告口径，改为 `--harness --repeat 3 --gate` 后生效。
-2. 部分完成：business B001/B032/B033 定向补跑 7 轮，21/21 通过、失败未复现；合并后 9/10，
-   Wilson 下界 0.596 仍判 `UNSTABLE`（见 不稳定用例定向复跑（报告待功能完成后重新生成））。
-   routing 两条因评测器不支持单例筛选、需整轮补到 14–15 轮，本次未跑，保持 `UNSTABLE`。
+1. 已完成：envelope 基线登记 + CI 切换——四份 `harness-<suite>.json` 已写入当前 prompt 版本目录，
+   `--mode envelope` 自比 PASS；CI 改走 `--harness --repeat 3 --preflight --require-baseline --gate`，
+   缺基线在采样前退出。未做：首轮 Actions 实跑（含限流处置）尚未发生。
+2. 已完成：5 条 UNSTABLE 全部定向补证——business B001/B032/B033 各补 14 轮（42/42 通过，累计 16/17）；
+   routing 两条整轮补到 14 轮（34/34，两条均 14/14）。证据见上述两份报告。
 3. 已完成：P1 实验框架 `prompt_experiment.py`——配对 2×2 列联表、McNemar 精确检验、改善/退化清单，
    只读 envelope、不提供 promote；9 项单测覆盖改善、退化、无差异、跨模型阻断与无有效轮次。
 4. 已完成：评测失败用例批量转回归用例——`--failed-only/--case-ids` + `--expected-mode auto` + 去重跳过 + `--dry-run`；
    真实业务报告 dry-run 得 12 条唯一候选、20 条重复跳过、0 条推导失败。
-   未做：差评批量脱敏。
+   已完成：差评/失败任务批量转用例——候选批量接口 + 服务端确定性脱敏 + 一次确认 + 管理员批量批准，单条提交同样兜底脱敏。
+   已补合成链路基准（仅机器耗时）与生产统计脚本；当前生产库无样本，人工时长仍不能判定。未做：前端浏览器验收。
 5. 已完成：P2 结果入库与趋势——`database/migrations/076_ai_eval_runs.sql`、`scripts/apply_migration.py`
    （PowerShell 无 `<` 重定向，统一用内置执行器）、`scripts/record_eval_run.py`（按 envelope 指纹幂等，
    逐用例写入 `ai_eval_case_results`）、`scripts/eval_trend.py`（月度稳定通过率）。
