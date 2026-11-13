@@ -168,3 +168,14 @@ def test_require_baseline_rejected_outside_harness_mode(tmp_path):
         assert exc.code == 2
     else:  # pragma: no cover - argparse 以 SystemExit 结束
         raise AssertionError("--require-baseline 未配合 --harness 时应拒绝执行")
+
+
+def test_harness_dry_run_forwards_sharding_and_parallel_flags(tmp_path, capsys):
+    code = run_eval_suite.main(["--dry-run", "--harness", "--suite", "all",
+                                "--business-shards", "3", "--parallel-suites",
+                                "--output-dir", str(tmp_path)])
+
+    assert code == 0
+    command = json.loads(capsys.readouterr().out)[0]["command"]
+    assert command[command.index("--business-shards") + 1] == "3"
+    assert "--parallel-suites" in command

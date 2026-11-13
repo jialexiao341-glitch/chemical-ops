@@ -118,10 +118,15 @@ def build_commands(args) -> list[tuple[str, list[str]]]:
 
 def build_harness_command(args) -> list[str]:
     """多轮采样走 eval_harness：四套件 × N 轮，输出 envelope 供门禁直连。"""
-    return [PYTHON, str(ROOT / "scripts/eval_harness.py"),
-            "--suite", args.suite,
-            "--out-dir", str(args.output_dir / ENVELOPE_SUBDIR),
-            "--repeat", str(args.repeat), "--workers", str(args.business_workers)]
+    command = [PYTHON, str(ROOT / "scripts/eval_harness.py"),
+               "--suite", args.suite,
+               "--out-dir", str(args.output_dir / ENVELOPE_SUBDIR),
+               "--repeat", str(args.repeat), "--workers", str(args.business_workers)]
+    if getattr(args, "business_shards", 1) > 1:
+        command += ["--business-shards", str(args.business_shards)]
+    if getattr(args, "parallel_suites", False):
+        command.append("--parallel-suites")
+    return command
 
 
 def missing_envelopes(directory: Path, suite: str) -> list[str]:
@@ -145,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--harness", action="store_true",
                         help="走 eval_harness 多轮采样，输出 harness-<suite>.json envelope")
     parser.add_argument("--repeat", type=int, default=1, help="harness 模式下每个套件的采样轮次")
+    parser.add_argument("--business-shards", type=int, default=1,
+                        help="harness 模式下本地同机拆分的 business 并行分片数（1-4）")
+    parser.add_argument("--parallel-suites", action="store_true",
+                        help="harness 模式下并发执行各套件")
     parser.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")
     parser.add_argument("--preflight", action="store_true",
                         help="先用一次最小模型请求确认服务可用，不可用时不发起批量评测")

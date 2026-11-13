@@ -181,6 +181,17 @@ def write_atomic(path,content):
     replace_with_retry(temporary,path)
 
 
+def select_shard(items: list, shard_index: int | None, shard_count: int | None) -> list:
+    """按步长抽取分片用例；未指定分片或单分片时返回原列表，保证各分片难度均衡。"""
+    if shard_index is None and shard_count is None:
+        return items
+    if shard_index is None or shard_count is None or shard_count < 1 or not 1 <= shard_index <= shard_count:
+        raise ValueError("分片参数无效：需同时指定 --shard-index 与 --shard-count，且满足 1 <= shard_index <= shard_count")
+    if shard_count == 1:
+        return items
+    return [item for idx, item in enumerate(items) if idx % shard_count == shard_index - 1]
+
+
 def main():
     model_catalog.activate()  # 默认使用数据库当前模型；无模型目录时回退 .env 单模型配置。
     parser = argparse.ArgumentParser(description=__doc__)
@@ -188,6 +199,8 @@ def main():
     parser.add_argument('--repetitions', type=int, default=3)
     parser.add_argument('--workers', type=int, default=3)
     parser.add_argument('--cases', nargs='+')
+    parser.add_argument('--shard-index', type=int, default=None, help='当前分片序号（从 1 开始）')
+    parser.add_argument('--shard-count', type=int, default=None, help='总分片数')
     parser.add_argument('--validate', action='store_true')
     parser.add_argument('--rescore', type=Path, help='用保留的真实运行轨迹补充最终回复评分，不重调模型')
     parser.add_argument('--resume', action='store_true', help='保留已完成运行，仅执行缺失的场景/轮次')
@@ -223,6 +236,11 @@ def main():
         parser.error('对照评估必须指定独立 --output，不能覆盖原始 120 场景报告')
     selected = [case for case in dataset if not args.cases or case.id in args.cases]
     if not selected or args.cases and set(args.cases)-{c.id for c in dataset}: parser.error('未知用例')
+    try:
+        selected = select_shard(selected, args.shard_index, args.shard_count)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if not selected: parser.error('当前分片没有分配到用例')
     if args.validate:
         for case in selected:
             with business_db(case) as db:
@@ -246,6 +264,8 @@ def main():
         planner_sha256=hashlib.sha256(runtime.PLANNER_PROMPT.encode()).hexdigest(),
         runtime_sha256=hashlib.sha256(Path(runtime.__file__).read_bytes()).hexdigest(),
         unique_cases=len(selected), repetitions=args.repetitions, planned_runs=len(selected)*args.repetitions, cases=[])
+    if args.shard_count and args.shard_count > 1:
+        report['shard'] = {'index': args.shard_index, 'count': args.shard_count}
     if args.rfq_controls:
         report['scope']='范围：10 组相同产品/数量/价格、两类组合查询对照；一类仅补充“询价单”标记，一类仅采用项目实际 RFQ日期+序号格式。真实模型与隔离 SQLite，不能替代完整 120 场景评测。'
     if args.resume:

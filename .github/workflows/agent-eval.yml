@@ -14,25 +14,26 @@ concurrency:
   group: agent-eval-gate
   cancel-in-progress: false
 
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  # 默认值必须与基线 envelope 的模型一致；换成其他模型会被门禁判 INVALID_RUN，
+  # 需先在同一模型下重跑并登记新基线，不能用跨模型结果判回归。
+  OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://ai.max66.xyz/v1' }}
+  LLM_MODEL: ${{ secrets.LLM_MODEL || 'deepseek-v4.1-flash' }}
+  LLM_REASONING_EFFORT: high
+  EVAL_OUTPUT_DIR: docs/evaluation/candidate
+  # 评测只调用真实模型与隔离 SQLite，不需要数据库；但 prompt 版本指纹要从 Agent 模块里取提示词正文，
+  # 导入链路会构造数据库引擎。这里给一组不可达的占位配置，模型目录读取失败后按设计回退到上面的环境变量。
+  MYSQL_HOST: 127.0.0.1
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: chemicalops_eval
+  MYSQL_USER: eval
+  MYSQL_PASSWORD: eval_only
+
 jobs:
-  eval:
+  preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      # 默认值必须与基线 envelope 的模型一致；换成其他模型会被门禁判 INVALID_RUN，
-      # 需先在同一模型下重跑并登记新基线，不能用跨模型结果判回归。
-      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://ai.max66.xyz/v1' }}
-      LLM_MODEL: ${{ secrets.LLM_MODEL || 'deepseek-v4.1-flash' }}
-      LLM_REASONING_EFFORT: high
-      EVAL_OUTPUT_DIR: docs/evaluation/candidate
-      # 评测只调用真实模型与隔离 SQLite，不需要数据库；但 prompt 版本指纹要从 Agent 模块里取提示词正文，
-      # 导入链路会构造数据库引擎。这里给一组不可达的占位配置，模型目录读取失败后按设计回退到上面的环境变量。
-      MYSQL_HOST: 127.0.0.1
-      MYSQL_PORT: "3306"
-      MYSQL_DATABASE: chemicalops_eval
-      MYSQL_USER: eval
-      MYSQL_PASSWORD: eval_only
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,11 +41,9 @@ jobs:
           python-version: "3.11"
       - name: Install backend dependencies
         run: python -m pip install -r backend/requirements.txt
-      - name: Run eval harness and envelope gate
+      - name: Verify secret, baseline, and model reachability
         shell: bash
         run: |
-          set -o pipefail
-          # 定时任务缺密钥不能静默成功：否则每周“绿色”但零门禁结论，门禁可信度被掏空。
           if [ -z "$OPENAI_API_KEY" ]; then
             echo "::error::未配置 OPENAI_API_KEY，无法产出评测门禁结论"
             {
@@ -54,31 +53,129 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          python scripts/run_eval_suite.py --suite all \
-            --output-dir "$EVAL_OUTPUT_DIR" \
-            --harness --repeat 3 --business-workers 3 \
-            --preflight --require-baseline \
-            --gate --fail-on-regression 2>&1 | tee eval-gate.log
+          python -c "from pathlib import Path; from scripts.run_eval_suite import require_baseline, preflight_model; p = require_baseline(Path('docs/evaluation/baselines'), 'all'); print(p['prompt_key']); ok, detail = preflight_model(); print(detail); raise SystemExit(0 if ok else 1)"
+
+  fast-suites:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Run routing, tasks, and prod suites in parallel
+        shell: bash
+        run: |
+          set -o pipefail
+          # 评测脚本在个别用例失败时也返回 1；只要 envelope 文件完整产出即交由 gate 统一判定回归或波动。
+          python scripts/eval_harness.py \
+            --suites routing tasks prod \
+            --parallel-suites \
+            --out-dir "$EVAL_OUTPUT_DIR/envelopes" \
+            --repeat 3 || code=$?
+          echo "harness_exit=${code:-0}"
+          test -f "$EVAL_OUTPUT_DIR/envelopes/harness-routing.json"
+          test -f "$EVAL_OUTPUT_DIR/envelopes/harness-tasks.json"
+          test -f "$EVAL_OUTPUT_DIR/envelopes/harness-prod.json"
+      - name: Upload fast suite envelopes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-eval-fast
+          path: |
+            docs/evaluation/candidate/envelopes/harness-routing.json
+            docs/evaluation/candidate/envelopes/harness-tasks.json
+            docs/evaluation/candidate/envelopes/harness-prod.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  business-shard:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Run business suite shard ${{ matrix.shard }}/3
+        shell: bash
+        run: |
+          set -o pipefail
+          # 只要分片 envelope 成功落盘即交由 gate 汇总并做稳定性门禁判定。
+          python scripts/eval_harness.py \
+            --suite business \
+            --repeat 3 --workers 2 \
+            --shard-index "${{ matrix.shard }}" --shard-count 3 \
+            --out "$EVAL_OUTPUT_DIR/envelopes/harness-business.shard-${{ matrix.shard }}.json" || code=$?
+          echo "harness_exit=${code:-0}"
+          test -f "$EVAL_OUTPUT_DIR/envelopes/harness-business.shard-${{ matrix.shard }}.json"
+      - name: Upload business shard envelope
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-eval-business-shard-${{ matrix.shard }}
+          path: docs/evaluation/candidate/envelopes/harness-business.shard-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  gate:
+    needs: [fast-suites, business-shard]
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Download suite artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: docs/evaluation/candidate/envelopes
+          merge-multiple: true
+      - name: Merge business shards and run prompt gate
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/eval_harness.py \
+            --merge-shards "$EVAL_OUTPUT_DIR"/envelopes/harness-business.shard-*.json \
+            --out "$EVAL_OUTPUT_DIR/envelopes/harness-business.json"
+          rm -f "$EVAL_OUTPUT_DIR"/envelopes/harness-business.shard-*.json
+          python scripts/eval_prompt_gate.py \
+            --candidate-dir "$EVAL_OUTPUT_DIR/envelopes" \
+            --mode envelope \
+            --fail-on-regression 2>&1 | tee eval-gate.log
       - name: Publish gate summary
         if: always()
         shell: bash
         run: |
           if [ -f eval-gate.log ]; then
             {
-              echo "## Agent Eval Gate（envelope 口径）"
+              echo "## Agent Eval Gate（分片并行 + envelope 口径）"
               echo '```text'
-              # 只取结论段，避免把依赖安装日志贴进摘要。
               tail -n 120 eval-gate.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Upload candidate envelopes
+      - name: Upload unified candidate envelopes
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agent-eval-candidate
           path: |
-            docs/evaluation/candidate
+            docs/evaluation/candidate/envelopes
             eval-gate.log
           if-no-files-found: ignore
           retention-days: 30

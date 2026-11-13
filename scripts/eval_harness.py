@@ -20,6 +20,7 @@ envelope 结构：
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import subprocess
 import sys
@@ -46,8 +47,20 @@ def suite_envelope_path(directory: Path, suite: str) -> Path:
     return directory / f"harness-{suite}.json"
 
 
-def build_command(suite: str, out: Path, *, workers: int) -> list[str]:
+def build_command(
+    suite: str,
+    out: Path,
+    *,
+    workers: int,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
+) -> list[str]:
     """按套件拼评测命令；参数只做最小必要传递，其余沿用脚本默认值。"""
+    if shard_index is not None or shard_count is not None:
+        if shard_index is None or shard_count is None or shard_count < 1 or not 1 <= shard_index <= shard_count:
+            raise ValueError("分片参数无效：需同时提供 --shard-index 与 --shard-count，且 1 <= shard_index <= shard_count")
+        if suite != "business" and shard_count > 1:
+            raise ValueError("目前仅 business 套件支持分片")
     if suite == "routing":
         return [PYTHON, str(ROOT / "scripts/evaluate_intent_routing.py"),
                 "--output", str(out), "--repeats", "1"]
@@ -56,9 +69,12 @@ def build_command(suite: str, out: Path, *, workers: int) -> list[str]:
     if suite == "business":
         # 逐任务原始结果落在输出目录旁，避免依赖只读的 .cache。
         scratch = out.parent / f"{out.stem}.scratch"
-        return [PYTHON, str(ROOT / "scripts/evaluate_agent_business.py"),
-                "--output", str(out), "--repetitions", "1", "--workers", str(workers),
-                "--scratch-dir", str(scratch)]
+        command = [PYTHON, str(ROOT / "scripts/evaluate_agent_business.py"),
+                   "--output", str(out), "--repetitions", "1", "--workers", str(workers),
+                   "--scratch-dir", str(scratch)]
+        if shard_count and shard_count > 1:
+            command += ["--shard-index", str(shard_index), "--shard-count", str(shard_count)]
+        return command
     if suite == "prod":
         return [PYTHON, str(ROOT / "scripts/evaluate_prod_regression.py"),
                 "--cases", str(ROOT / "docs/evaluation/prod-regression/cases.json"),
@@ -95,6 +111,28 @@ def _failed_checks(row: dict) -> list[str]:
     return sorted(str(name) for name, value in checks.items() if value is False)
 
 
+def _summarize_envelope_cases(ordered: list[dict]) -> dict:
+    """按全通过、仅基础设施失败与实现失败统计 envelope 汇总结论。"""
+    passed = [entry for entry in ordered if all(t["passed"] for t in entry["trials"])]
+    failed = [entry for entry in ordered if entry not in passed]
+    infra_only = [entry for entry in failed
+                  if all(set(t["error_classes"]) and set(t["error_classes"]) <= INFRA_ERROR_CLASSES
+                         for t in entry["trials"] if not t["passed"])]
+    if not failed:
+        verdict = "PASS"
+    elif len(infra_only) == len(failed):
+        verdict = "INVALID_RUN"
+    else:
+        verdict = "FAILURES"
+    return {
+        "total": len(ordered),
+        "passed": len(passed),
+        "failed": len(failed),
+        "infra_failed": len(infra_only),
+        "verdict": verdict,
+    }
+
+
 def merge_trials(suite: str, reports: list[dict], repeat: int) -> dict:
     """把多轮原始报告合成 envelope；同一 key 的每轮结果都保留。"""
     cases: dict[str, dict] = {}
@@ -115,17 +153,6 @@ def merge_trials(suite: str, reports: list[dict], repeat: int) -> dict:
     ordered = list(cases.values())
     for entry in ordered:
         entry["safety"] = safety.get(entry["key"], False)
-    passed = [entry for entry in ordered if all(t["passed"] for t in entry["trials"])]
-    failed = [entry for entry in ordered if entry not in passed]
-    infra_only = [entry for entry in failed
-                  if all(set(t["error_classes"]) and set(t["error_classes"]) <= INFRA_ERROR_CLASSES
-                         for t in entry["trials"] if not t["passed"])]
-    if not failed:
-        verdict = "PASS"
-    elif len(infra_only) == len(failed):
-        verdict = "INVALID_RUN"
-    else:
-        verdict = "FAILURES"
     meta_source = next((r for r in reports if r.get("model") or r.get("code_revision")), {})
     return {
         "suite": suite,
@@ -136,13 +163,79 @@ def merge_trials(suite: str, reports: list[dict], repeat: int) -> dict:
         "code_revision": meta_source.get("code_revision"),
         "dataset_sha256": meta_source.get("dataset_sha256"),
         "cases": ordered,
-        "summary": {
-            "total": len(ordered),
-            "passed": len(passed),
-            "failed": len(failed),
-            "infra_failed": len(infra_only),
-            "verdict": verdict,
-        },
+        "summary": _summarize_envelope_cases(ordered),
+    }
+
+
+def merge_trial_shard_reports(reports: list[dict]) -> dict:
+    """合并同一轮内多个互不相交分片的原始报告，生成完整单轮报告以复用 --resume。"""
+    if not reports:
+        raise ValueError("分片报告列表不能为空")
+    first = reports[0]
+    for field in ("model", "planner_sha256", "prompt_sha256", "dataset_sha256", "code_revision"):
+        expected = first.get(field)
+        for report in reports[1:]:
+            if expected is not None and report.get(field) is not None and report.get(field) != expected:
+                raise ValueError(f"分片元数据 {field} 不一致：{expected} != {report.get(field)}")
+    merged_cases: list[dict] = []
+    seen: set[str] = set()
+    for report in reports:
+        for row in (report.get("cases") or []):
+            if not isinstance(row, dict):
+                continue
+            key = _case_key(row)
+            if key in seen:
+                raise ValueError(f"分片包含重复用例：{key}")
+            seen.add(key)
+            merged_cases.append(row)
+    merged_cases.sort(key=_case_key)
+    merged = dict(first)
+    merged.pop("shard", None)
+    merged["cases"] = merged_cases
+    merged["unique_cases"] = len(merged_cases)
+    merged["completed_runs"] = len(merged_cases)
+    merged["planned_runs"] = len(merged_cases)
+    return merged
+
+
+def merge_envelopes(envelopes: list[dict]) -> dict:
+    """把同一套件的多份分片 envelope 合并为单一规范 envelope 并重算汇总结论。"""
+    if not envelopes:
+        raise ValueError("分片 envelope 列表不能为空")
+    first = envelopes[0]
+    suite = first.get("suite")
+    repeat = first.get("repeat")
+    for env in envelopes[1:]:
+        if env.get("suite") != suite:
+            raise ValueError(f"分片套件不一致：{suite} != {env.get('suite')}")
+        if env.get("repeat") != repeat:
+            raise ValueError(f"分片轮次不一致：{repeat} != {env.get('repeat')}")
+        for field in ("model", "prompt_sha256", "dataset_sha256", "code_revision"):
+            expected, current = first.get(field), env.get(field)
+            if expected is not None and current is not None and current != expected:
+                raise ValueError(f"分片元数据 {field} 不一致：{expected} != {current}")
+    merged_cases: list[dict] = []
+    seen: set[str] = set()
+    for env in envelopes:
+        for case in (env.get("cases") or []):
+            if not isinstance(case, dict) or case.get("key") is None:
+                continue
+            key = str(case["key"])
+            if key in seen:
+                raise ValueError(f"分片包含重复用例：{key}")
+            seen.add(key)
+            merged_cases.append(case)
+    merged_cases.sort(key=lambda item: str(item["key"]))
+    return {
+        "suite": suite,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "repeat": repeat,
+        "model": first.get("model"),
+        "prompt_sha256": first.get("prompt_sha256"),
+        "code_revision": first.get("code_revision"),
+        "dataset_sha256": first.get("dataset_sha256"),
+        "cases": merged_cases,
+        "summary": _summarize_envelope_cases(merged_cases),
     }
 
 
@@ -171,11 +264,32 @@ def _default_runner(command: list[str], out: Path) -> dict:
     return json.loads(out.read_text(encoding="utf-8"))
 
 
-def run(suite: str, out: Path, *, repeat: int = 1, workers: int = 2, resume: bool = False,
-        reuse_infra: bool = False, runner=None) -> dict:
+def _shard_trial_path(path: Path, shard_index: int, shard_count: int) -> Path:
+    return path.with_name(f"{path.stem}.shard-{shard_index}of{shard_count}.json")
+
+
+def run(
+    suite: str,
+    out: Path,
+    *,
+    repeat: int = 1,
+    workers: int = 2,
+    resume: bool = False,
+    reuse_infra: bool = False,
+    runner=None,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
+    business_shards: int = 1,
+) -> dict:
     """执行（或在 resume 时复用）每轮报告，再合成 envelope 并落盘。"""
     if repeat < 1:
         raise ValueError("repeat 必须为正数")
+    if business_shards < 1 or business_shards > 4:
+        raise ValueError("business_shards 必须在 1 到 4 之间")
+    if (shard_index is not None or shard_count is not None) and business_shards > 1:
+        raise ValueError("--shard-index/--shard-count 不能与 --business-shards 同时使用")
+    if business_shards > 1 and suite != "business":
+        raise ValueError("只有 business 套件支持本地分片并行")
     runner = runner or _default_runner
     reports: list[dict] = []
     for index in range(1, repeat + 1):
@@ -187,22 +301,95 @@ def run(suite: str, out: Path, *, repeat: int = 1, workers: int = 2, resume: boo
                 continue
             print(f"[harness] 第 {index} 轮含基础设施失败，重跑：{path}", flush=True)
         path.parent.mkdir(parents=True, exist_ok=True)
-        reports.append(runner(build_command(suite, path, workers=workers), path))
+        if suite == "business" and business_shards > 1:
+            with ThreadPoolExecutor(max_workers=business_shards) as pool:
+                futures = [
+                    pool.submit(
+                        runner,
+                        build_command(
+                            suite,
+                            _shard_trial_path(path, idx, business_shards),
+                            workers=workers,
+                            shard_index=idx,
+                            shard_count=business_shards,
+                        ),
+                        _shard_trial_path(path, idx, business_shards),
+                    )
+                    for idx in range(1, business_shards + 1)
+                ]
+                shard_reports = [future.result() for future in futures]
+            trial_report = merge_trial_shard_reports(shard_reports)
+            path.write_text(json.dumps(trial_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            reports.append(trial_report)
+        else:
+            reports.append(
+                runner(
+                    build_command(
+                        suite,
+                        path,
+                        workers=workers,
+                        shard_index=shard_index,
+                        shard_count=shard_count,
+                    ),
+                    path,
+                )
+            )
     envelope = merge_trials(suite, reports, repeat)
+    if shard_count and shard_count > 1:
+        envelope["shard"] = {"index": shard_index, "count": shard_count}
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(envelope, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return envelope
 
 
-def run_all(out_dir: Path, *, suites=SUITES, repeat: int = 1, workers: int = 2,
-            resume: bool = False, reuse_infra: bool = False, runner=None) -> dict[str, dict]:
-    """按套件依次跑完并各写一份 envelope；单套件等价于 run(suite, path)。"""
-    envelopes: dict[str, dict] = {}
-    for suite in suites:
-        envelopes[suite] = run(suite, suite_envelope_path(out_dir, suite),
-                               repeat=repeat, workers=workers, resume=resume,
-                               reuse_infra=reuse_infra, runner=runner)
-    return envelopes
+def run_all(
+    out_dir: Path,
+    *,
+    suites=SUITES,
+    repeat: int = 1,
+    workers: int = 2,
+    resume: bool = False,
+    reuse_infra: bool = False,
+    runner=None,
+    business_shards: int = 1,
+    parallel_suites: bool = False,
+) -> dict[str, dict]:
+    """按套件依次或并发跑完并各写一份 envelope；单套件等价于 run(suite, path)。"""
+    suite_list = list(suites)
+    if not parallel_suites or len(suite_list) <= 1:
+        envelopes: dict[str, dict] = {}
+        for suite in suite_list:
+            shards = business_shards if suite == "business" else 1
+            envelopes[suite] = run(
+                suite,
+                suite_envelope_path(out_dir, suite),
+                repeat=repeat,
+                workers=workers,
+                resume=resume,
+                reuse_infra=reuse_infra,
+                runner=runner,
+                business_shards=shards,
+            )
+        return envelopes
+    results: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=len(suite_list)) as pool:
+        futures = {
+            pool.submit(
+                run,
+                suite,
+                suite_envelope_path(out_dir, suite),
+                repeat=repeat,
+                workers=workers,
+                resume=resume,
+                reuse_infra=reuse_infra,
+                runner=runner,
+                business_shards=business_shards if suite == "business" else 1,
+            ): suite
+            for suite in suite_list
+        }
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+    return {suite: results[suite] for suite in suite_list}
 
 
 def worst_verdict(verdicts) -> str:
@@ -240,12 +427,22 @@ def render_all_text(envelopes: dict[str, dict]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--suite", choices=("all",) + SUITES, default="all")
-    parser.add_argument("--out", type=Path, help="单套件 envelope 输出路径（可省略）")
+    parser.add_argument("--suites", nargs="+", choices=SUITES, default=None,
+                        help="指定要运行的多套件子集（覆盖 --suite）")
+    parser.add_argument("--out", type=Path, help="单套件或合并分片 envelope 输出路径（可省略）")
     parser.add_argument("--out-dir", type=Path,
                         default=ROOT / "docs/evaluation/candidate" / "envelopes",
                         help="多套件输出目录，写入 harness-<suite>.json")
     parser.add_argument("--repeat", type=int, default=1, help="同一套件重复采样次数")
     parser.add_argument("--workers", type=int, default=2, help="business 套件并发数")
+    parser.add_argument("--shard-index", type=int, default=None, help="单套件分片序号（从 1 开始，仅 business）")
+    parser.add_argument("--shard-count", type=int, default=None, help="单套件总分片数（仅 business）")
+    parser.add_argument("--business-shards", type=int, default=1,
+                        help="本地同机每轮拆分的 business 并行分片数（1-4）")
+    parser.add_argument("--parallel-suites", action="store_true",
+                        help="多套件同时执行，缩短全量墙钟耗时")
+    parser.add_argument("--merge-shards", nargs="+", type=Path, default=None,
+                        help="合并多份分片 envelope 为单一规范 envelope")
     parser.add_argument("--resume", action="store_true",
                         help="复用已有 trial 报告，只补缺失轮次；含基础设施失败的轮次默认重跑")
     parser.add_argument("--reuse-infra", action="store_true",
@@ -253,23 +450,63 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="输出 envelope JSON")
     args = parser.parse_args(argv)
     try:
-        if args.suite == "all":
-            envelopes = run_all(args.out_dir, repeat=args.repeat, workers=args.workers,
-                               resume=args.resume, reuse_infra=args.reuse_infra)
+        if args.merge_shards:
+            shards = [json.loads(path.read_text(encoding="utf-8")) for path in args.merge_shards]
+            envelope = merge_envelopes(shards)
+            out = args.out or suite_envelope_path(args.out_dir, str(envelope["suite"]))
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(envelope, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            envelopes = {str(envelope["suite"]): envelope}
+            payload = envelope
+            single_mode = True
+        elif args.suites:
+            envelopes = run_all(
+                args.out_dir,
+                suites=args.suites,
+                repeat=args.repeat,
+                workers=args.workers,
+                resume=args.resume,
+                reuse_infra=args.reuse_infra,
+                business_shards=args.business_shards,
+                parallel_suites=args.parallel_suites,
+            )
             payload = envelopes
+            single_mode = False
+        elif args.suite == "all":
+            envelopes = run_all(
+                args.out_dir,
+                repeat=args.repeat,
+                workers=args.workers,
+                resume=args.resume,
+                reuse_infra=args.reuse_infra,
+                business_shards=args.business_shards,
+                parallel_suites=args.parallel_suites,
+            )
+            payload = envelopes
+            single_mode = False
         else:
             out = args.out or suite_envelope_path(args.out_dir, args.suite)
-            envelope = run(args.suite, out, repeat=args.repeat, workers=args.workers,
-                           resume=args.resume, reuse_infra=args.reuse_infra)
+            envelope = run(
+                args.suite,
+                out,
+                repeat=args.repeat,
+                workers=args.workers,
+                resume=args.resume,
+                reuse_infra=args.reuse_infra,
+                shard_index=args.shard_index,
+                shard_count=args.shard_count,
+                business_shards=args.business_shards,
+            )
             envelopes = {args.suite: envelope}
             payload = envelope
+            single_mode = True
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"评测失败：{exc}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(render_text(payload) if args.suite != "all" else render_all_text(payload))
+        print(render_text(payload) if single_mode else render_all_text(payload))
     verdict = worst_verdict(env["summary"]["verdict"] for env in envelopes.values())
     return 0 if verdict == "PASS" else (2 if verdict == "INVALID_RUN" else 1)
 

@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import pytest
 
 from scripts import eval_harness as harness
 from scripts import eval_stability as stability
+from scripts.evaluate_agent_business import select_shard
 
 
 def _report(cases: list[dict]) -> dict:
@@ -238,3 +240,76 @@ def test_refresh_trial_overwrites_contaminated_report(tmp_path):
 
     assert envelope["summary"]["verdict"] == "PASS"
     assert json.loads(harness.trial_path(out, 1).read_text(encoding="utf-8"))["cases"][0]["passed"]
+
+
+def test_select_shard_splits_disjointly_and_validates_bounds():
+    items = [f"B{i:03d}" for i in range(1, 121)]
+    shards = [select_shard(items, idx, 3) for idx in (1, 2, 3)]
+
+    assert [len(s) for s in shards] == [40, 40, 40]
+    flattened = [item for shard in shards for item in shard]
+    assert len(flattened) == 120 and set(flattened) == set(items)
+    assert select_shard(items, None, None) == items
+    with pytest.raises(ValueError, match="分片参数无效"):
+        select_shard(items, 0, 3)
+
+
+def test_build_command_supports_business_shards_and_rejects_non_business():
+    cmd = harness.build_command("business", Path("b.json"), workers=2, shard_index=2, shard_count=3)
+    assert cmd[cmd.index("--shard-index") + 1] == "2"
+    assert cmd[cmd.index("--shard-count") + 1] == "3"
+    with pytest.raises(ValueError, match="仅 business"):
+        harness.build_command("routing", Path("r.json"), workers=2, shard_index=1, shard_count=3)
+
+
+def test_merge_envelopes_combines_disjoint_shards_and_recomputes_summary(tmp_path):
+    shard1 = harness.merge_trials("business", [_report([{"id": "B001", "passed": True}])], 1)
+    shard2 = harness.merge_trials("business", [_report([{"id": "B002", "passed": False, "safety": True}])], 1)
+    s1 = tmp_path / "harness-business.shard-1.json"
+    s2 = tmp_path / "harness-business.shard-2.json"
+    out = tmp_path / "harness-business.json"
+    s1.write_text(json.dumps(shard1), encoding="utf-8")
+    s2.write_text(json.dumps(shard2), encoding="utf-8")
+
+    code = harness.main(["--merge-shards", str(s1), str(s2), "--out", str(out)])
+
+    assert code == 1
+    merged = json.loads(out.read_text(encoding="utf-8"))
+    assert [c["key"] for c in merged["cases"]] == ["B001", "B002"]
+    assert merged["summary"] == {"total": 2, "passed": 1, "failed": 1, "infra_failed": 0, "verdict": "FAILURES"}
+
+
+def test_merge_envelopes_rejects_duplicate_case_keys():
+    shard = harness.merge_trials("business", [_report([{"id": "B001", "passed": True}])], 1)
+    with pytest.raises(ValueError, match="重复用例"):
+        harness.merge_envelopes([shard, shard])
+
+
+def test_run_business_with_local_shards_and_parallel_suites(tmp_path):
+    seen_commands = []
+
+    def runner(command, path):
+        seen_commands.append(command)
+        if "--shard-index" in command:
+            idx = int(command[command.index("--shard-index") + 1])
+            return {
+                "model": "deepseek-v4.1-flash",
+                "dataset_sha256": "ds-1",
+                "cases": [{"id": f"B00{idx}", "passed": True}],
+            }
+        return _report([{"id": "X01", "passed": True}])
+
+    envelopes = harness.run_all(
+        tmp_path,
+        suites=("routing", "business"),
+        repeat=1,
+        workers=2,
+        business_shards=2,
+        parallel_suites=True,
+        runner=runner,
+    )
+
+    assert set(envelopes) == {"routing", "business"}
+    assert [c["key"] for c in envelopes["business"]["cases"]] == ["B001", "B002"]
+    assert (tmp_path / "harness-business.trial-1.json").exists()
+    assert len(seen_commands) == 3
