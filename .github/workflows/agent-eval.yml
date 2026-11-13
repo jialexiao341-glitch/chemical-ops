@@ -26,6 +26,13 @@ jobs:
       LLM_MODEL: ${{ secrets.LLM_MODEL || 'deepseek-v4.1-flash' }}
       LLM_REASONING_EFFORT: high
       EVAL_OUTPUT_DIR: docs/evaluation/candidate
+      # 评测只调用真实模型与隔离 SQLite，不需要数据库；但 prompt 版本指纹要从 Agent 模块里取提示词正文，
+      # 导入链路会构造数据库引擎。这里给一组不可达的占位配置，模型目录读取失败后按设计回退到上面的环境变量。
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: chemicalops_eval
+      MYSQL_USER: eval
+      MYSQL_PASSWORD: eval_only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
