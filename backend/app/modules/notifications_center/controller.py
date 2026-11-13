@@ -22,7 +22,7 @@ def _proposal_notification_statuses(db: Session, user: User, items):
            and item.related_type == "AI_ACTION_PROPOSAL" and item.related_id is not None}
     if not ids:
         return {}
-    from app.modules.ai_agent.action_proposals import _require_proposal_department_scope
+    from app.modules.ai_agent.action_management.action_proposals import _require_proposal_department_scope
     rows = db.scalars(select(AIAgentActionProposal).where(
         AIAgentActionProposal.id.in_(ids), AIAgentActionProposal.user_id == user.id)).all()
     now = datetime.now(timezone.utc).replace(tzinfo=None)

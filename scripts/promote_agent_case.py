@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import select  # noqa: E402
 
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.ai_agent.capabilities import AGENT_TASK_REQUIREMENTS  # noqa: E402
+from app.modules.ai_agent.agent_execution.capabilities import AGENT_TASK_REQUIREMENTS  # noqa: E402
 from app.modules.ai_agent.model import AIAgentTask  # noqa: E402
 
 

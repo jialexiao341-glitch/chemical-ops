@@ -15,8 +15,8 @@ from sqlalchemy.pool import StaticPool
 from app.core.auth import get_current_user
 from app.core.db import get_db
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
-from app.modules.ai_agent import agent_tools as tools
-from app.modules.ai_agent import capabilities
+from app.modules.ai_agent.agent_execution import agent_tools as tools
+from app.modules.ai_agent.agent_execution import capabilities
 from app.modules.ai_agent.controller import router
 from app.modules.inventory_stock import service as inventory_service
 
@@ -118,7 +118,7 @@ def call(db, name="inventory.query_available", actor_id=7, **arguments):
 
 
 def test_execute_tool_sets_and_resets_database_deadline(tool_db, monkeypatch):
-    from app.modules.ai_agent.tool_sql_timeout import current_tool_deadline
+    from app.modules.ai_agent.agent_execution.tool_sql_timeout import current_tool_deadline
 
     spec = tools.TOOLS["catalog.search_products"]
     observed = []
@@ -140,7 +140,7 @@ def test_execute_tool_sets_and_resets_database_deadline(tool_db, monkeypatch):
 ])
 def test_tool_timeout_metric_has_only_low_cardinality_labels(tool_db, monkeypatch, error_name, result):
     from app.core.observability import metrics
-    from app.modules.ai_agent.tool_sql_timeout import ToolExecutionTimeout, ToolTimeoutUnsupported
+    from app.modules.ai_agent.agent_execution.tool_sql_timeout import ToolExecutionTimeout, ToolTimeoutUnsupported
 
     spec = tools.TOOLS["catalog.search_products"]
     observed = []
@@ -330,7 +330,7 @@ def test_tools_issue_only_reads_and_do_not_create_business_records(tool_db):
 
 
 def test_new_read_tools_use_exact_identifiers_and_registered_permissions(tool_db, monkeypatch):
-    from app.modules.ai_agent import order_trace
+    from app.modules.ai_agent.business_queries import order_trace
     from app.modules.purchase_requests import service as request_service
 
     request = SimpleNamespace(
@@ -459,7 +459,7 @@ def test_delivery_service_lookup_reuses_detail_scope_check(monkeypatch):
 
 def test_finance_reconciliation_tool_returns_status_grouped_amounts(tool_db, monkeypatch):
     from app.modules.finance_management import service as finance_service
-    from app.modules.ai_agent import finance_read_model
+    from app.modules.ai_agent.business_queries import finance_read_model
 
     reconciliation = SimpleNamespace(id=71, reconciliation_no="FR20261022000071",
         status="CONFIRMED", currency_code="CNY", total_amount=100)
@@ -497,7 +497,7 @@ def test_finance_reconciliation_tool_returns_status_grouped_amounts(tool_db, mon
 
 
 def test_finance_read_model_checks_permissions_and_caps_payment(tool_db, monkeypatch):
-    from app.modules.ai_agent import finance_read_model
+    from app.modules.ai_agent.business_queries import finance_read_model
 
     monkeypatch.setattr(finance_read_model, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(finance_read_model, "get_user_permission_codes", lambda *_args: [
@@ -540,7 +540,7 @@ def test_finance_read_model_checks_permissions_and_caps_payment(tool_db, monkeyp
 
 
 def test_finance_read_model_handles_legacy_reconciliation_without_saved_lines(tool_db, monkeypatch):
-    from app.modules.ai_agent import finance_read_model
+    from app.modules.ai_agent.business_queries import finance_read_model
 
     monkeypatch.setattr(finance_read_model, "get_user_role_codes", lambda *_args: ["SYS_ADMIN"])
     monkeypatch.setattr(finance_read_model, "get_user_permission_codes", lambda *_args: [])

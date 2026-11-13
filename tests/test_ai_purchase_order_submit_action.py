@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import action_handlers, schema
+from app.modules.ai_agent.action_management import action_handlers
+from app.modules.ai_agent import schema
 from app.modules.purchase_orders import service as order_service
 
 

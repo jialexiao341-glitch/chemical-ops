@@ -9,7 +9,10 @@ from sqlalchemy import select
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import multi_intent as multi, routing, service, text2sql
+from app.modules.ai_agent.agent_execution import multi_intent as multi
+from app.modules.ai_agent.agent_execution import routing
+from app.modules.ai_agent import service
+from app.modules.ai_agent.business_queries import text2sql
 from app.modules.ai_agent.model import AIConversationState
 from app.modules.ai_agent.schema import BatchStatus, SubTask, TaskStatus
 from app.modules.system_management.model import User
@@ -85,7 +88,7 @@ def test_inventory_quotes_share_product_lookup_and_have_separate_evidence(tool_d
 
 
 def test_product_tool_uses_remaining_batch_deadline(tool_db, monkeypatch):
-    from app.modules.ai_agent.tool_sql_timeout import current_task_deadline
+    from app.modules.ai_agent.agent_execution.tool_sql_timeout import current_task_deadline
 
     observed = []
 
@@ -101,7 +104,7 @@ def test_product_tool_uses_remaining_batch_deadline(tool_db, monkeypatch):
 
 
 def test_tool_timeout_keeps_completed_results_and_runs_independent_items(tool_db, monkeypatch):
-    from app.modules.ai_agent.tool_sql_timeout import ToolExecutionTimeout
+    from app.modules.ai_agent.agent_execution.tool_sql_timeout import ToolExecutionTimeout
 
     original = multi.agent_tools.execute_tool
     calls = []
@@ -198,7 +201,7 @@ def test_missing_product_is_waiting_and_never_invented(tool_db):
     {"unit": "升"},
 ])
 def test_batch_uses_shared_prompt_for_unsupported_product_slots(tool_db, task_kind, unsupported_slots):
-    from app.modules.ai_agent.product_query_policy import unsupported_product_slot_prompt
+    from app.modules.ai_agent.business_queries.product_query import unsupported_product_slot_prompt
 
     batch = asyncio.run(multi.execute_batch(tool_db, USER, decision(
         product_task(kind=task_kind, slots={"product_keyword": "测试乙醇", **unsupported_slots}),

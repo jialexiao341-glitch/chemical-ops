@@ -11,7 +11,7 @@ def test_quality_summary_requires_admin(monkeypatch):
     from app.core.db import get_db
     from app.core.rate_limit import limit_ai
     from app.modules.system_management import crud
-    from app.modules.ai_agent import quality_report
+    from app.modules.ai_agent.quality_operations import quality_report
     from app.modules.ai_agent import controller as ai_controller
 
     user = SimpleNamespace(id=1)

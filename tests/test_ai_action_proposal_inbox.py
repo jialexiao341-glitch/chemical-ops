@@ -6,7 +6,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai_agent import action_handlers, action_proposals, controller as ai_controller
+from app.modules.ai_agent.action_management import action_handlers
+from app.modules.ai_agent.action_management import action_proposals
+from app.modules.ai_agent import controller as ai_controller
 from app.modules.ai_agent.model import AIAgentActionProposal
 
 

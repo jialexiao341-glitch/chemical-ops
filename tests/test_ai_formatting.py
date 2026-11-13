@@ -3,7 +3,7 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
-from app.modules.ai_agent.formatting import format_amount, format_decimal
+from app.modules.ai_agent.shared_utils.formatting import format_amount, format_decimal
 
 
 def test_format_decimal_trims_trailing_scale():
@@ -27,7 +27,7 @@ def test_format_amount_keeps_two_decimals_without_database_scale():
 
 
 def test_finance_context_answer_uses_readable_amounts():
-    from app.modules.ai_agent.context import _finance_reconciliation_answer
+    from app.modules.ai_agent.conversation_context.context import _finance_reconciliation_answer
 
     trace = {
         "reconciliation": SimpleNamespace(

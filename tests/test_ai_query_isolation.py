@@ -8,8 +8,15 @@ from sqlalchemy import select, text
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai_agent import agent_tools, controller, conversation_store, history_access, multi_intent, routing, service, text2sql
-from app.modules.ai_agent.catalog import CATALOG
+from app.modules.ai_agent.agent_execution import agent_tools
+from app.modules.ai_agent import controller
+from app.modules.ai_agent.conversation_context import conversation_store
+from app.modules.ai_agent.conversation_context import history_access
+from app.modules.ai_agent.agent_execution import multi_intent
+from app.modules.ai_agent.agent_execution import routing
+from app.modules.ai_agent import service
+from app.modules.ai_agent.business_queries import text2sql
+from app.modules.ai_agent.business_queries.catalog import CATALOG
 from app.modules.ai_agent.model import AIConversation, AIConversationState, AIMessage
 from app.modules.ai_agent.schema import TaskStatus
 from app.modules.system_management.model import User

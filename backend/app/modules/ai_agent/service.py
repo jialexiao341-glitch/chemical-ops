@@ -12,7 +12,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.modules.ai_agent import conversation_store
+from app.modules.ai_agent.conversation_context import conversation_store
 from app.core.config import Settings, get_settings
 from app.core.errors import BusinessValidationError
 from app.core.observability import get_request_id
@@ -25,7 +25,7 @@ from app.modules.ai_agent.schema import (
     IntentResult,
     Understanding,
 )
-from app.modules.ai_agent.agent_prompt import (
+from app.modules.ai_agent.agent_execution.agent_prompt import (
     GUIDANCE_PROMPT,
     UNSUPPORTED_REPLY,
     build_project_reply,
@@ -33,8 +33,8 @@ from app.modules.ai_agent.agent_prompt import (
     greeting_reply,
     result_rewrite_prompt,
 )
-from app.modules.ai_agent.llm import chat, stream_chat
-from app.modules.ai_agent.gateway import bind_user, reset_user
+from app.modules.ai_agent.model_access.llm import chat, stream_chat
+from app.modules.ai_agent.model_access.gateway import bind_user, reset_user
 from app.modules.files_storage import service as file_service
 from app.modules.files_storage import mineru
 from app.modules.files_storage.parser import parse_file_content
@@ -75,14 +75,15 @@ def _query_log_fields(user: User, query: str) -> dict[str, object]:
 
 async def _classify_chat_intent(db: Session, question: str, *, user: User, data: AIChatRequest) -> IntentResult:
     """聊天与 Agent 使用同一语义结果；客户端只能复用后端签发的短期结果。"""
-    from app.modules.ai_agent import routing, capabilities
+    from app.modules.ai_agent.agent_execution import routing
+    from app.modules.ai_agent.agent_execution import capabilities
     if data.retry_failed or data.batch_choice:
         if data.conversation_id is not None and conversation_store.load_pending_clarification(
                 db, user, data.conversation_id) is not None:
             raise BusinessValidationError("请先回答或取消本轮澄清，再继续批次任务。")
         if data.attachments or data.attachment_file_ids:
             raise BusinessValidationError("重试使用原查询条件；修改附件或条件请重新发起查询。")
-        from app.modules.ai_agent.multi_intent import retry_decision
+        from app.modules.ai_agent.agent_execution.multi_intent import retry_decision
         decision = retry_decision(db, user, data.conversation_id, selecting=data.batch_choice is not None)
         return IntentResult(Intent.MULTI, "retry_failed", decision.model_dump(mode="json"))
     pending = (conversation_store.load_pending_clarification(db, user, data.conversation_id)
@@ -144,7 +145,7 @@ async def _classify_chat_intent(db: Session, question: str, *, user: User, data:
 
 def _resolved_query_question(question: str, intent: IntentResult) -> str:
     """单项续问使用理解器已还原的对象和条件，不能把“第二项”再交给无历史的规划器。"""
-    from app.modules.ai_agent.routing import Understanding
+    from app.modules.ai_agent.agent_execution.routing import Understanding
 
     if intent.understanding:
         decision = Understanding.model_validate(intent.understanding)
@@ -391,12 +392,12 @@ async def _rewrite_text2sql_answer(result: object, dataset_label: str, settings:
         raw = (rewritten.answer or rewritten.message.content or "").strip()
         if not raw:
             return None
-        from app.modules.ai_agent.llm import extract_json_object
+        from app.modules.ai_agent.model_access.llm import extract_json_object
 
         parsed = extract_json_object(raw)
         answer = parsed.get("answer")
         if isinstance(answer, str) and answer.strip():
-            from app.modules.ai_agent.numeric_fidelity import faithful_numbers
+            from app.modules.ai_agent.shared_utils.numeric_fidelity import faithful_numbers
             evidence = {key: value for key, value in json.loads(payload).items() if key not in {"question", "dataset_label"}}
             if faithful_numbers(answer, evidence):
                 return answer.strip()
@@ -410,7 +411,7 @@ async def _rewrite_text2sql_answer(result: object, dataset_label: str, settings:
 async def _reply_capabilities(db: Session, user: User, intent: Intent):
     if intent not in {Intent.PROJECT, Intent.GUIDANCE}:
         return None
-    from app.modules.ai_agent.capabilities import build_capability_manifest
+    from app.modules.ai_agent.agent_execution.capabilities import build_capability_manifest
     return await asyncio.to_thread(build_capability_manifest, db, user)
 
 
@@ -433,7 +434,7 @@ async def _compose_non_query_reply(
         return response.message.content, "guidance"
     if intent is Intent.PROJECT:
         if manifest is not None:
-            from app.modules.ai_agent.capabilities import describe_capabilities
+            from app.modules.ai_agent.agent_execution.capabilities import describe_capabilities
             return describe_capabilities(manifest), "capability-manifest"
         return build_project_reply(question), "rule-based"
     if intent is Intent.GREETING:
@@ -470,8 +471,8 @@ async def _run_text2sql_for_chat(
 ) -> tuple[str, dict[str, object], AIQueryTrace]:
     """聊天入口的业务查询路由；Text2SQL 结果不再经过通用聊天上下文。"""
 
-    from app.modules.ai_agent.order_trace import extract_order_trace_no, trace_purchase_order
-    from app.modules.ai_agent.text2sql import Text2SQLRequest, run_text2sql
+    from app.modules.ai_agent.business_queries.order_trace import extract_order_trace_no, trace_purchase_order
+    from app.modules.ai_agent.business_queries.text2sql import Text2SQLRequest, run_text2sql
 
     query_fields = _query_log_fields(user, question)
     LOGGER.info("AI 查询开始 %s", query_fields)
@@ -529,7 +530,7 @@ async def _run_text2sql_for_chat(
         return result["answer"], citation, trace
 
     result = await run_text2sql(db, user, Text2SQLRequest(question=question, limit=getattr(planned_query, "limit", 20)), settings, previous_plan=previous_plan, thread_id=thread_id, planned_query=planned_query, intent_verified=True)
-    from app.modules.ai_agent.catalog import CATALOG
+    from app.modules.ai_agent.business_queries.catalog import CATALOG
 
     executed_at = datetime.now()
     dataset_spec = CATALOG[result.plan.dataset]
@@ -644,7 +645,8 @@ async def _chat_for_user_impl(db: Session, user: User, data: AIChatRequest) -> A
     _save_clarification_if_bound(db, user, conversation.id, data, user_message.content, intent_result)
     LOGGER.info("AI 意图识别 mode=sync user_id=%s intent=%s reason=%s", user.id, intent_result.intent, intent_result.reason)
     if intent_result.intent is Intent.MULTI and not data.attachment_file_ids:
-        from app.modules.ai_agent import routing, multi_intent
+        from app.modules.ai_agent.agent_execution import routing
+        from app.modules.ai_agent.agent_execution import multi_intent
         return await multi_intent.reply_for_user(db, user, data, conversation,
                                                  Understanding.model_validate(intent_result.understanding))
     if intent_result.intent is Intent.DOC and not data.attachment_file_ids:
@@ -688,7 +690,7 @@ async def _chat_for_user_impl(db: Session, user: User, data: AIChatRequest) -> A
             db, user, _resolved_query_question(user_message.content, intent_result), runtime, previous_plan=previous_plan, thread_id=thread_id
         )
         citations = [citation]
-        from app.modules.ai_agent.text2sql import QueryPlan
+        from app.modules.ai_agent.business_queries.text2sql import QueryPlan
 
         plan_payload = citation.get("query_plan") if isinstance(citation, dict) else None
         if isinstance(plan_payload, dict):
@@ -764,7 +766,8 @@ async def _stream_chat_for_user_impl(db: Session, user: User, data: AIChatReques
         return
     LOGGER.info("AI 意图识别 mode=stream user_id=%s intent=%s reason=%s", user.id, stream_intent_result.intent, stream_intent_result.reason)
     if stream_intent_result.intent is Intent.MULTI and not data.attachment_file_ids:
-        from app.modules.ai_agent import routing, multi_intent
+        from app.modules.ai_agent.agent_execution import routing
+        from app.modules.ai_agent.agent_execution import multi_intent
         # 首次进度即暴露会话 ID；先保存会话，取消后的历史读取才能立即访问。
         db.commit()
         queue = asyncio.Queue()
@@ -867,7 +870,7 @@ async def _stream_chat_for_user_impl(db: Session, user: User, data: AIChatReques
         async for chunk in _stream_text_chunks(content):
             chunk_count += 1
             yield f"event: delta\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
-        from app.modules.ai_agent.text2sql import QueryPlan
+        from app.modules.ai_agent.business_queries.text2sql import QueryPlan
 
         plan_payload = citation.get("query_plan") if isinstance(citation, dict) else None
         if isinstance(plan_payload, dict):

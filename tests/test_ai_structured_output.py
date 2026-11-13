@@ -9,11 +9,14 @@ from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import llm, service, routing, text2sql
+from app.modules.ai_agent.model_access import llm
+from app.modules.ai_agent import service
+from app.modules.ai_agent.agent_execution import routing
+from app.modules.ai_agent.business_queries import text2sql
 from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest
 from app.modules.ai_agent.schema import schema_response_format
-from app.modules.ai_agent.catalog import CATALOG
-from app.modules.ai_agent.agent_prompt import text2sql_plan_prompt
+from app.modules.ai_agent.business_queries.catalog import CATALOG
+from app.modules.ai_agent.agent_execution.agent_prompt import text2sql_plan_prompt
 
 
 @pytest.mark.parametrize("model", [routing.Understanding, text2sql.QueryPlan])

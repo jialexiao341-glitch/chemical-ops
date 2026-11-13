@@ -33,7 +33,7 @@ def test_expired_latest_quotes_generate_one_actionable_suggestion(db_session):
     assert db.scalar(select(OperationException).where(OperationException.source_type == 'SUPPLIER_QUOTE', OperationException.source_id == quotes[1].id)) is None
     service.scan_expired_quotes(db, actor)
     assert len(db.scalars(select(OperationException).where(OperationException.source_type == 'SUPPLIER_QUOTE', OperationException.source_id == quotes[0].id)).all()) == 1
-    from app.modules.ai_agent import proactive
+    from app.modules.ai_agent.quality_operations import proactive
     from app.modules.operation_exceptions.model import OperationTask
     suggestion = proactive.transition_suggestion(db, actor, suggestion.id, 'HANDED_OFF')
     assert suggestion.status == 'HANDED_OFF'

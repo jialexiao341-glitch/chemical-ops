@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy import text
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent.candidate_resolution import inventory_family, validate_selection
-from app.modules.ai_agent.product_query_policy import (
+from app.modules.ai_agent.agent_execution.candidate_resolution import inventory_family, validate_selection
+from app.modules.ai_agent.business_queries.product_query import (
     can_aggregate_inventory,
     unsupported_product_slot_prompt,
     unsupported_product_slots,

@@ -10,8 +10,10 @@ from pydantic import ValidationError
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
 from app.core.observability import metrics
-from app.modules.ai_agent import llm, routing, service
-from app.modules.ai_agent.catalog import catalog_prompt
+from app.modules.ai_agent.model_access import llm
+from app.modules.ai_agent.agent_execution import routing
+from app.modules.ai_agent import service
+from app.modules.ai_agent.business_queries.catalog import catalog_prompt
 
 
 from app.modules.ai_agent.schema import Slots

@@ -7,9 +7,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import text2sql
-from app.modules.ai_agent.catalog import CATALOG
-from app.modules.ai_agent.text2sql import QueryFilter, QueryPlan, Text2SQLRequest, build_statement, run_text2sql, validate_sql
+from app.modules.ai_agent.business_queries import text2sql
+from app.modules.ai_agent.business_queries.catalog import CATALOG
+from app.modules.ai_agent.business_queries.text2sql import QueryFilter, QueryPlan, Text2SQLRequest, build_statement, run_text2sql, validate_sql
 
 
 def test_text2sql_sql_validation_is_select_only_and_table_scoped():
@@ -188,7 +188,7 @@ def test_truncated_overdue_answer_has_one_concise_scope_warning():
 
 
 def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):
-    from app.modules.ai_agent import capabilities
+    from app.modules.ai_agent.agent_execution import capabilities
     monkeypatch.setattr(capabilities, "analytics_catalog", lambda *_: [{"key": "purchase_orders"}])
     async def fake_chat(*_args, **_kwargs):
         content = "规划结果：\n" + "`" * 3 + "json\n" + '{"dataset":"purchase_order","metric":"sum_amount","group_by":"supplier_name","filters":null,"order":"降序","top_n":"10"}' + "\n" + "`" * 3
@@ -204,7 +204,7 @@ def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):
 
 
 def test_text2sql_does_not_replace_invalid_model_plan_with_keyword_fallback(monkeypatch):
-    from app.modules.ai_agent import capabilities
+    from app.modules.ai_agent.agent_execution import capabilities
     monkeypatch.setattr(capabilities, "analytics_catalog", lambda *_: [{"key": "purchase_orders"}])
     async def fake_chat(*_args, **_kwargs):
         return SimpleNamespace(message=SimpleNamespace(content="无法生成计划"))
@@ -238,7 +238,8 @@ class _FakeDB:
 
 
 def test_text2sql_runs_the_query_stages(monkeypatch):
-    from app.modules.ai_agent import routing, capabilities
+    from app.modules.ai_agent.agent_execution import routing
+    from app.modules.ai_agent.agent_execution import capabilities
     monkeypatch.setattr(capabilities, "build_capability_manifest", lambda *_: {"analytics_datasets": [{"key":"purchase_orders"}]})
     async def understand(*args, **kwargs):
         return routing.Understanding(purpose="query", execution_mode="query", tasks=["analytics"], sub_tasks=[

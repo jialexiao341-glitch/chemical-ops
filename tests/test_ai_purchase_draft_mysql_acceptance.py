@@ -19,7 +19,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.modules.ai_agent import purchase_draft_confirmations as confirmations
+from app.modules.ai_agent.action_management import purchase_draft_confirmations as confirmations
 from app.modules.ai_agent.model import AIAgentActionProposal, AIPurchaseDraftConfirmation
 from app.modules.ai_agent.schema import AIPurchaseDraftConfirm
 from app.modules.purchase_requests.model import (

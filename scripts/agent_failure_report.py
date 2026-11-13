@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.ai_agent import quality_report  # noqa: E402
-from app.modules.ai_agent.failure_report import render_markdown  # noqa: E402
+from app.modules.ai_agent.quality_operations import quality_report  # noqa: E402
+from app.modules.ai_agent.quality_operations.quality_report import render_markdown  # noqa: E402
 
 
 def main() -> int:

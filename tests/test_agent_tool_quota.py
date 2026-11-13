@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.modules.ai_agent import agent_tools as tools
+from app.modules.ai_agent.agent_execution import agent_tools as tools
 from app.modules.ai_agent.schema import ToolCall, ToolSchema
 
 

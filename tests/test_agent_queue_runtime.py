@@ -10,7 +10,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy import select
 
 from app.core.config import Settings
-from app.modules.ai_agent import agent_runtime as runtime
+from app.modules.ai_agent.agent_execution import agent_runtime as runtime
 from app.modules.ai_agent.model import AIAgentTask, AIConversation, AIMessage
 from app.modules.task_queue import service
 from app.modules.task_queue.model import TaskExecution, TaskOutbox, TaskResourceLock
@@ -274,7 +274,7 @@ def test_transport_error_preserves_checkpoint_for_queue_retry(queued_db, monkeyp
 
 
 def test_token_budget_is_persisted_to_task_and_queue_checkpoint(queued_db, monkeypatch):
-    from app.modules.ai_agent import gateway
+    from app.modules.ai_agent.model_access import gateway
 
     task, execution = accept(queued_db)
     current = claim(queued_db, execution, monkeypatch)

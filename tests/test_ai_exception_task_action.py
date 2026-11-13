@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import action_handlers
+from app.modules.ai_agent.action_management import action_handlers
 from app.modules.operation_exceptions import service as exception_service
 from app.modules.operation_exceptions.schema import OperationTaskRead
 

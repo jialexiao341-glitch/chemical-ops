@@ -30,7 +30,7 @@ def _restore_model_catalog() -> Generator[None, None, None]:
     """应用启动会激活数据库模型目录；用例结束后恢复，避免后续用例读到数据库模型配置。"""
 
     yield
-    from app.modules.ai_agent import model_catalog
+    from app.modules.ai_agent.model_access import model_catalog
     model_catalog.deactivate()
 
 

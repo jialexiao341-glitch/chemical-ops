@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent.llm import chat, extract_json_object
+from app.modules.ai_agent.model_access.llm import chat, extract_json_object
 from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest, schema_response_format
 from app.modules.files_storage import mineru, service as file_service
 from app.modules.files_storage.parser import parse_file_content

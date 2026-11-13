@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from app.modules.ai_agent import proactive
+from app.modules.ai_agent.quality_operations import proactive
 from app.modules.jobs_scheduler import service
 
 

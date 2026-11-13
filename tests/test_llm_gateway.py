@@ -9,8 +9,8 @@ import httpx
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import gateway
-from app.modules.ai_agent import llm
+from app.modules.ai_agent.model_access import gateway
+from app.modules.ai_agent.model_access import llm
 from app.modules.ai_agent.schema import AIChatRequest
 
 
@@ -297,7 +297,7 @@ def test_business_write_intent_is_rejected_before_any_model_request(monkeypatch)
     assert calls == []
 
 def test_database_model_catalog_overrides_environment_profiles(monkeypatch):
-    from app.modules.ai_agent import model_catalog
+    from app.modules.ai_agent.model_access import model_catalog
 
     snapshot = (
         {

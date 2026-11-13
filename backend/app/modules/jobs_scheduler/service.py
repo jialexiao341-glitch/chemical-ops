@@ -37,7 +37,7 @@ def _publish_suggestion(db: Session, exception: OperationException) -> None:
     """事件建议属于附加能力，失败不能影响业务提醒和扫描结果。"""
 
     try:
-        from app.modules.ai_agent.proactive import publish_exception_suggestion
+        from app.modules.ai_agent.quality_operations.proactive import publish_exception_suggestion
 
         with db.begin_nested():
             publish_exception_suggestion(db, exception)

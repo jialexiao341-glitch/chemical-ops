@@ -15,7 +15,7 @@ from typing_extensions import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
-from app.modules.ai_agent.catalog import CATALOG, slot_description
+from app.modules.ai_agent.business_queries.catalog import CATALOG, slot_description
 from app.modules.purchase_requests.schema import PurchaseRequestCreate, PurchaseRequestItemCreate
 
 

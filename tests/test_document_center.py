@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.core.errors import ResourceNotFoundError
-from app.modules.ai_agent import document_center
+from app.modules.ai_agent.business_queries import document_center
 import pytest
 
 

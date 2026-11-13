@@ -60,7 +60,7 @@ from app.modules.task_queue.controller import router as task_queue_router
 from app.modules.task_queue.progress import run_progress_scan
 from app.modules.dashboard_overview.controller import router as dashboard_router
 from app.modules.ai_agent.controller import router as ai_router, model_router as ai_model_router, suggestion_router as ai_suggestion_router
-from app.modules.ai_agent.lifecycle import cleanup_expired_ai_records
+from app.modules.ai_agent.quality_operations.lifecycle import cleanup_expired_ai_records
 from app.modules.insights_analytics.controller import router as insights_router
 from app.modules.monitoring_health.controller import router as monitoring_router
 from app.modules.system_management.controller import auth_router, router as system_router
@@ -261,7 +261,7 @@ async def lifespan(app: FastAPI):
     if database_ready and not _check_schema_migrations():
         raise RuntimeError("数据库结构尚未升级到当前代码版本；请先运行 scripts/migrate_database.py upgrade")
     if database_ready:
-        from app.modules.ai_agent import model_catalog
+        from app.modules.ai_agent.model_access import model_catalog
         model_catalog.activate()
     minio_ready = _check_minio()
     if database_ready and minio_ready:

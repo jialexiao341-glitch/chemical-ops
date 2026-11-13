@@ -7,12 +7,12 @@ import pytest
 
 from app.core.errors import BusinessValidationError
 from app.core.config import get_settings
-from app.modules.ai_agent import multi_intent
+from app.modules.ai_agent.agent_execution import multi_intent
 from app.modules.ai_agent.schema import PendingChoice, SubTask, TaskResult, TaskStatus, Understanding
 
 
 def test_choice_rejects_stale_or_foreign_candidate():
-    from app.modules.ai_agent.candidate_resolution import validate_selection
+    from app.modules.ai_agent.agent_execution.candidate_resolution import validate_selection
     pending = PendingChoice(entity='product', lookup_arguments={'keyword': '试剂'},
                             candidates=[{'product_id': 7}], revision=2)
     assert validate_selection(pending, entity='product', selected_id=7, revision=2) == 7

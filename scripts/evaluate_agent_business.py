@@ -21,8 +21,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'backend'))
 
 from app.core.config import get_settings
-from app.modules.ai_agent import agent_runtime as runtime, model_catalog
-from app.modules.ai_agent.gateway import resolve_model_profile
+from app.modules.ai_agent.agent_execution import agent_runtime as runtime
+from app.modules.ai_agent.model_access import model_catalog
+from app.modules.ai_agent.model_access.gateway import resolve_model_profile
 from scripts import evaluate_agent_tasks as original
 from scripts.agent_business_cases import CASES, RFQ_CONTROLS, CATALOG, INVENTORY, RFQ, COMPARE, business_db, evidence_correct
 

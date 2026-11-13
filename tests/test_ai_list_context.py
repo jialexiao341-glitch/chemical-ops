@@ -4,7 +4,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 from app.core.errors import AuthorizationError
-from app.modules.ai_agent import context
+from app.modules.ai_agent.conversation_context import context
 from app.modules.ai_agent.schema import AIListContextAskRequest
 
 

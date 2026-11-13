@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from app.modules.ai_agent.error_policy import ErrorClass, RecoveryAction, classify
+from app.modules.ai_agent.shared_utils.error_policy import ErrorClass, RecoveryAction, classify
 
 
 @pytest.mark.parametrize(("code", "category", "action"), [

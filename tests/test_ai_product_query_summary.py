@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.modules.ai_agent.product_query_summary import inventory_totals, summarize_product_evidence
+from app.modules.ai_agent.business_queries.product_query import inventory_totals, summarize_product_evidence
 
 
 def test_inventory_totals_group_by_unit_and_use_complete_tool_totals():

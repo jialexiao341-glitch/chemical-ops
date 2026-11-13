@@ -3,8 +3,8 @@
 import json
 from types import SimpleNamespace
 
-from app.modules.ai_agent import capabilities
-from app.modules.ai_agent.catalog import catalog_prompt
+from app.modules.ai_agent.agent_execution import capabilities
+from app.modules.ai_agent.business_queries.catalog import catalog_prompt
 
 
 def test_manifest_exposes_only_current_tools_datasets_and_non_identifying_scopes(monkeypatch):

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import action_handlers
+from app.modules.ai_agent.action_management import action_handlers
 from app.modules.rfq_quotes import crud as rfq_crud
 from app.modules.rfq_quotes import service as rfq_service
 
@@ -143,7 +143,7 @@ def test_select_quote_domain_service_can_flush_without_committing(monkeypatch):
 def test_select_quote_proposal_revision_preserves_resource_ids_and_updates_reason(monkeypatch):
     from datetime import timedelta
 
-    from app.modules.ai_agent import action_proposals
+    from app.modules.ai_agent.action_management import action_proposals
 
     rfq, comparison, quote = _data()
     handler = _handler(monkeypatch, rfq, comparison, quote)

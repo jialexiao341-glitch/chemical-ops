@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.config import get_settings
-from app.modules.ai_agent.numeric_fidelity import faithful_numbers
-from app.modules.ai_agent import service, briefing
+from app.modules.ai_agent.shared_utils.numeric_fidelity import faithful_numbers
+from app.modules.ai_agent import service
+from app.modules.ai_agent.quality_operations import briefing
 from app.modules.ai_agent.schema import BriefingRequest
 
 

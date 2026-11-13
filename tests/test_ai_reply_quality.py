@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import agent_prompt, service
+from app.modules.ai_agent.agent_execution import agent_prompt
+from app.modules.ai_agent import service
 from app.modules.ai_agent.schema import Intent
 from app.modules.ai_agent.schema import AIChatMessage, AIChatResponse
 

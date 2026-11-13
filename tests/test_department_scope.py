@@ -9,7 +9,7 @@ from sqlalchemy import select
 def test_agent_statistics_respect_department_grants(db_session):
     import asyncio
     from sqlalchemy import func
-    from app.modules.ai_agent import text2sql
+    from app.modules.ai_agent.business_queries import text2sql
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system_management.model import User, UserDepartmentScope, UserDepartmentGrant
 
@@ -32,8 +32,8 @@ def test_agent_statistics_respect_department_grants(db_session):
 @pytest.mark.parametrize('dataset', ('purchase_orders', 'purchase_requests', 'deliveries', 'quality_acceptances',
     'supplier_quotes', 'exceptions', 'finance_invoices', 'finance_payments'))
 def test_agent_dataset_guards_accept_server_department_filters(db_session, dataset):
-    from app.modules.ai_agent import text2sql
-    from app.modules.ai_agent.catalog import CATALOG
+    from app.modules.ai_agent.business_queries import text2sql
+    from app.modules.ai_agent.business_queries.catalog import CATALOG
     from app.modules.system_management.model import User
 
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
@@ -45,8 +45,8 @@ def test_agent_dataset_guards_accept_server_department_filters(db_session, datas
 @pytest.mark.parametrize('dataset', ('approved_requests_without_rfq', 'weekly_order_risks',
     'accepted_orders_finance_gaps', 'supplier_quote_delivery_profile'))
 def test_agent_association_guards_accept_server_department_filters(db_session, dataset):
-    from app.modules.ai_agent import text2sql
-    from app.modules.ai_agent.catalog import CATALOG
+    from app.modules.ai_agent.business_queries import text2sql
+    from app.modules.ai_agent.business_queries.catalog import CATALOG
     from app.modules.system_management.model import User
 
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
@@ -339,7 +339,7 @@ def test_scope_change_hides_previously_created_ai_conversation(client, db_sessio
 def test_new_scoped_conversation_invalidated_when_departments_change(db_session):
     import pytest
     from app.core.errors import BusinessValidationError
-    from app.modules.ai_agent import conversation_store
+    from app.modules.ai_agent.conversation_context import conversation_store
     from app.modules.ai_agent.model import AIConversation
     from app.modules.purchase_orders.model import PurchaseOrder
     from app.modules.system_management.model import User, UserDepartmentScope, UserDepartmentGrant
@@ -364,7 +364,7 @@ def test_scoped_user_cannot_read_or_export_old_agent_task(db_session):
     import pytest
     from datetime import datetime
     from app.core.errors import ResourceNotFoundError
-    from app.modules.ai_agent import agent_runtime
+    from app.modules.ai_agent.agent_execution import agent_runtime
     from app.modules.ai_agent.model import AIAgentTask
     from app.modules.system_management.model import User, UserDepartmentScope
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
@@ -383,7 +383,7 @@ def test_scoped_user_cannot_read_or_export_old_agent_task(db_session):
 
 
 def test_scoped_briefing_snapshot_uses_department_data(db_session):
-    from app.modules.ai_agent import briefing
+    from app.modules.ai_agent.quality_operations import briefing
     from app.modules.dashboard_overview.service import get_department_overview
     from app.modules.system_management.model import User, UserDepartmentScope
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
@@ -397,7 +397,7 @@ def test_scoped_briefing_snapshot_uses_department_data(db_session):
 def test_old_action_proposal_is_unavailable_after_department_scope_change(db_session):
     import pytest
     from app.core.errors import ResourceNotFoundError
-    from app.modules.ai_agent import action_proposals
+    from app.modules.ai_agent.action_management import action_proposals
     from app.modules.system_management.model import User, UserDepartmentScope
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     db_session.add(UserDepartmentScope(user_id=user.id))

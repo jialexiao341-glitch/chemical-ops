@@ -9,7 +9,10 @@ from sqlalchemy import select, text
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import multi_intent as multi, routing, service, text2sql
+from app.modules.ai_agent.agent_execution import multi_intent as multi
+from app.modules.ai_agent.agent_execution import routing
+from app.modules.ai_agent import service
+from app.modules.ai_agent.business_queries import text2sql
 from app.modules.ai_agent.model import AIMessage
 from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest
 from app.modules.ai_agent.schema import BatchStatus, TaskStatus

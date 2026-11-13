@@ -88,7 +88,8 @@ def test_disabled_warehouse_is_removed_from_scope_snapshot(db_session):
 
 def test_warehouse_scope_change_invalidates_old_agent_task_and_proposal(monkeypatch):
     from app.core.errors import ResourceNotFoundError
-    from app.modules.ai_agent import agent_runtime, action_proposals
+    from app.modules.ai_agent.agent_execution import agent_runtime
+    from app.modules.ai_agent.action_management import action_proposals
     from app.modules.system_management import data_scope
 
     monkeypatch.setattr(data_scope, 'department_scope_snapshot', lambda *_: None)
@@ -107,7 +108,7 @@ def test_warehouse_scope_change_invalidates_old_agent_task_and_proposal(monkeypa
 
 def test_warehouse_scope_change_invalidates_old_conversation(monkeypatch):
     from app.core.errors import BusinessValidationError
-    from app.modules.ai_agent import conversation_store
+    from app.modules.ai_agent.conversation_context import conversation_store
     from app.modules.system_management import data_scope
 
     monkeypatch.setattr(data_scope, 'department_scope_snapshot', lambda *_: None)
@@ -138,8 +139,8 @@ def test_exception_owner_cannot_bypass_empty_warehouse_scope(db_session):
 
 
 def test_agent_association_sql_accepts_warehouse_scoped_exception_filter(db_session):
-    from app.modules.ai_agent import text2sql
-    from app.modules.ai_agent.catalog import CATALOG
+    from app.modules.ai_agent.business_queries import text2sql
+    from app.modules.ai_agent.business_queries.catalog import CATALOG
     from app.modules.system_management.model import User, UserWarehouseScope
 
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))

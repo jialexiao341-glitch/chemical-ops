@@ -139,7 +139,7 @@ async def run():
         if task_type.startswith("documents."):
             run_documents(execution_id, token)
         elif task_type == "agent.run":
-            from app.modules.ai_agent.agent_runtime import run_prepared_task
+            from app.modules.ai_agent.agent_execution.agent_runtime import run_prepared_task
             await run_prepared_task(business_id, actor_id, revision)
         else:
             raise PermanentTaskError("UNKNOWN_TASK_TYPE")

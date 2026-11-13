@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import AuthorizationError, BusinessValidationError
-from app.modules.ai_agent import agent_tools
+from app.modules.ai_agent.agent_execution import agent_tools
 from app.modules.ai_agent.schema import ExceptionSearchInput, PurchaseOrderSearchInput
 
 

@@ -21,8 +21,10 @@ sys.path.insert(0, str(ROOT))
 from sqlalchemy import event, text
 from app.core.config import get_settings
 from app.core.errors import AuthorizationError
-from app.modules.ai_agent import agent_runtime as runtime, agent_tools as tools, model_catalog
-from app.modules.ai_agent.gateway import resolve_model_profile
+from app.modules.ai_agent.agent_execution import agent_runtime as runtime
+from app.modules.ai_agent.agent_execution import agent_tools as tools
+from app.modules.ai_agent.model_access import model_catalog
+from app.modules.ai_agent.model_access.gateway import resolve_model_profile
 from scripts.agent_evaluation_data import evaluation_db, isolated_cache_namespace
 
 

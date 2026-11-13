@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import drafts
+from app.modules.ai_agent.action_management import drafts
 
 
 def _run_immediate(coroutine):
@@ -68,7 +68,8 @@ class _Database:
 
 
 def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monkeypatch) -> None:
-    from app.modules.ai_agent import conversation_store, purchase_draft_bridge as bridge_module
+    from app.modules.ai_agent.conversation_context import conversation_store
+    from app.modules.ai_agent.action_management import purchase_draft_bridge as bridge_module
     monkeypatch.setattr(conversation_store, 'get_owned_conversation', lambda *_args: object())
     monkeypatch.setattr(conversation_store, 'load_purchase_draft_bridge', lambda *_args, **_kwargs: None)
     monkeypatch.setattr(bridge_module, 'resolve_draft_source',
@@ -92,7 +93,7 @@ def test_proposal_uses_authorized_tools_and_persists_versioned_confirmation(monk
     monkeypatch.setattr(drafts, "get_user_permission_codes", lambda *_args: ["procurement.requests.write", "master.products.read", "warehouse.inventory.read", "procurement.rfqs.read"])
     monkeypatch.setattr(drafts, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(drafts, "chat", fake_chat)
-    from app.modules.ai_agent import action_proposals
+    from app.modules.ai_agent.action_management import action_proposals
     from datetime import datetime, timezone
     proposed_actions = []
     def fake_propose(_db, _user, action_type, payload, *, idempotency_key, evidence=None):
@@ -160,7 +161,8 @@ def _source_database():
 
 
 def _patch_draft_source(monkeypatch, *, source=None, saved=None, cleared=None, facts=None):
-    from app.modules.ai_agent import conversation_store, purchase_draft_bridge as bridge_module
+    from app.modules.ai_agent.conversation_context import conversation_store
+    from app.modules.ai_agent.action_management import purchase_draft_bridge as bridge_module
 
     monkeypatch.setattr(conversation_store, "get_owned_conversation", lambda *_args: object())
     monkeypatch.setattr(conversation_store, "load_purchase_draft_bridge",
@@ -197,9 +199,9 @@ def test_query_source_draft_asks_for_missing_quantity_and_persists_anchor(monkey
     source = DraftSource(kind="agent", message_id=5, task_id="t1", revision=2,
                          product_id=9, unit_id=3, product_name="乙醇", rfq_item_id=11)
 
-    from app.modules.ai_agent import conversation_store
+    from app.modules.ai_agent.conversation_context import conversation_store
     monkeypatch.setattr(conversation_store, "load_purchase_draft_bridge", lambda *_args, **_kwargs: None)
-    from app.modules.ai_agent import purchase_draft_bridge as bridge_module
+    from app.modules.ai_agent.action_management import purchase_draft_bridge as bridge_module
     monkeypatch.setattr(bridge_module, "resolve_draft_source",
                         lambda *_args, **_kwargs: bridge_module.SourceResolution(source=source))
 
@@ -224,12 +226,12 @@ def test_query_source_draft_asks_for_missing_quantity_and_persists_anchor(monkey
 
 
 def test_follow_up_uses_pinned_source_and_clears_bridge(monkeypatch) -> None:
-    from app.modules.ai_agent.purchase_draft_bridge import DraftSource
+    from app.modules.ai_agent.action_management.purchase_draft_bridge import DraftSource
     cleared = []
     source = DraftSource(kind="agent", message_id=5, task_id="t1", revision=2,
                          product_id=9, unit_id=3, product_name="乙醇", rfq_item_id=11)
     _patch_draft_source(monkeypatch, source=source, saved=[], cleared=cleared)
-    from app.modules.ai_agent import conversation_store
+    from app.modules.ai_agent.conversation_context import conversation_store
     bridge = {"state_version": 4, "contract_version": "1",
               "source": source.reference(),
               "requirements": {"purpose": "实验", "priority": "NORMAL", "currency_code": "CNY",
@@ -245,7 +247,7 @@ def test_follow_up_uses_pinned_source_and_clears_bridge(monkeypatch) -> None:
         }, ensure_ascii=False))
 
     monkeypatch.setattr(drafts, "chat", fake_chat)
-    from app.modules.ai_agent import action_proposals
+    from app.modules.ai_agent.action_management import action_proposals
     from datetime import datetime, timezone
     proposed = []
     monkeypatch.setattr(action_proposals, "propose_action",
@@ -270,9 +272,9 @@ def test_structured_form_keeps_matching_source_evidence(monkeypatch) -> None:
     DraftSource = _patch_draft_source(monkeypatch)
     source = DraftSource(kind="agent", message_id=5, task_id="t1", revision=2,
                          product_id=9, unit_id=3, product_name="乙醇", rfq_item_id=11)
-    from app.modules.ai_agent import conversation_store
+    from app.modules.ai_agent.conversation_context import conversation_store
     monkeypatch.setattr(conversation_store, "load_purchase_draft_bridge", lambda *_args, **_kwargs: None)
-    from app.modules.ai_agent import purchase_draft_bridge as bridge_module
+    from app.modules.ai_agent.action_management import purchase_draft_bridge as bridge_module
     monkeypatch.setattr(bridge_module, "resolve_draft_source",
                         lambda *_args, **_kwargs: bridge_module.SourceResolution(source=source))
     from app.modules.purchase_requests.schema import PurchaseRequestCreate
@@ -280,7 +282,7 @@ def test_structured_form_keeps_matching_source_evidence(monkeypatch) -> None:
         "department_id": 2, "purpose": "实验",
         "items": [{"requested_name": "乙醇", "product_id": 9, "quantity": "50", "unit_id": 3}],
     })
-    from app.modules.ai_agent import action_proposals
+    from app.modules.ai_agent.action_management import action_proposals
     from datetime import datetime, timezone
     proposed = []
     monkeypatch.setattr(action_proposals, "propose_action",
@@ -298,7 +300,8 @@ def test_structured_form_keeps_matching_source_evidence(monkeypatch) -> None:
 
 
 def test_ambiguous_query_returns_clarification_without_calling_model(monkeypatch) -> None:
-    from app.modules.ai_agent import conversation_store, purchase_draft_bridge as bridge_module
+    from app.modules.ai_agent.conversation_context import conversation_store
+    from app.modules.ai_agent.action_management import purchase_draft_bridge as bridge_module
     monkeypatch.setattr(conversation_store, "get_owned_conversation", lambda *_args: object())
     monkeypatch.setattr(conversation_store, "load_purchase_draft_bridge", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(bridge_module, "resolve_draft_source",

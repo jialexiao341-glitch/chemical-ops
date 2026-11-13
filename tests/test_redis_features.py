@@ -25,7 +25,10 @@ from app.core import cache, config, rate_limit, redis_client
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
 from app.core.auth import get_current_user
-from app.modules.ai_agent import agent_tools, controller, conversation_store, history_access
+from app.modules.ai_agent.agent_execution import agent_tools
+from app.modules.ai_agent import controller
+from app.modules.ai_agent.conversation_context import conversation_store
+from app.modules.ai_agent.conversation_context import history_access
 from app.modules.ai_agent.model import AIConversation, AIMessage
 from app.modules.ai_agent.schema import ProductSearchInput
 from app.modules.chemicals_master.model import Chemical

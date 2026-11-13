@@ -37,7 +37,7 @@ def check_fixtures(root: Path, manifest_path: str = MANIFEST) -> dict:
     cases = json.loads((root / manifest["numeric_cases"]).read_text(encoding="utf-8"))
     if len({case["id"] for case in cases}) != len(cases) or len(cases) != manifest["numeric_case_count"]:
         raise ValueError("numeric case count or unique ids mismatch")
-    from app.modules.ai_agent.numeric_fidelity import faithful_numbers
+    from app.modules.ai_agent.shared_utils.numeric_fidelity import faithful_numbers
     failures = [case["id"] for case in cases if faithful_numbers(case["answer"], case["evidence"]) is not case["expected"]]
     if failures:
         raise ValueError(f"numeric oracle mismatch: {', '.join(failures)}")

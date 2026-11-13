@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import action_proposals
+from app.modules.ai_agent.action_management import action_proposals
 from app.modules.ai_agent.schema import (
     AIActionProposalBatchCreate,
     AIActionProposalCreate,

@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 from scripts import evaluate_agent_tasks as evaluation
 from scripts.agent_evaluation_data import evaluation_db
-from app.modules.ai_agent import agent_runtime as runtime, agent_tools as tools
+from app.modules.ai_agent.agent_execution import agent_runtime as runtime
+from app.modules.ai_agent.agent_execution import agent_tools as tools
 
 
 def _task_with_trace(trace):

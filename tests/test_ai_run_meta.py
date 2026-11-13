@@ -1,6 +1,6 @@
 """Agent 运行元数据的兼容性和脱敏回归。"""
 
-from app.modules.ai_agent import agent_runtime as runtime
+from app.modules.ai_agent.agent_execution import agent_runtime as runtime
 from app.modules.ai_agent.schema import AIChatMessage, AIChatResponse, TaskRead
 from types import SimpleNamespace
 

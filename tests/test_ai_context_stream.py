@@ -2,7 +2,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from app.modules.ai_agent import context_stream
+from app.modules.ai_agent.conversation_context import context_stream
 
 
 def test_stream_uses_authorized_facts_and_preserves_evidence(monkeypatch):
@@ -75,7 +75,7 @@ def test_stream_endpoint_authorizes_and_returns_incremental_evidence(client, db_
 def test_floating_conversation_is_separate_from_workspace(db_session, demo_password, client):
     from sqlalchemy import select
     from app.core.errors import BusinessValidationError
-    from app.modules.ai_agent import conversation_store
+    from app.modules.ai_agent.conversation_context import conversation_store
     from app.modules.ai_agent.schema import AIChatRequest, AIChatMessage
     from app.modules.system_management.model import User
     from tests.conftest import login

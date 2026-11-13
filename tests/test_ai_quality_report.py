@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from app.modules.ai_agent import quality_report
+from app.modules.ai_agent.quality_operations import quality_report
 from app.modules.ai_agent.model import AIAgentTask, AIFeedback
 
 

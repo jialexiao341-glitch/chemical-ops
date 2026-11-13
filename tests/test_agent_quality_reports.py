@@ -2,7 +2,8 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from app.core.errors import ResourceNotFoundError
-from app.modules.ai_agent import agent_tools, agent_runtime
+from app.modules.ai_agent.agent_execution import agent_tools
+from app.modules.ai_agent.agent_execution import agent_runtime
 from app.modules.quality_acceptances import report_review
 from app.modules.quality_acceptances.schema import QualityReportCheck, QualityReportReview
 
@@ -126,7 +127,7 @@ def test_historical_successful_task_is_reformatted_from_original_evidence():
 
 
 def test_history_keeps_earlier_turn_when_same_task_has_continued(monkeypatch):
-    from app.modules.ai_agent.history_access import visible_message
+    from app.modules.ai_agent.conversation_context.history_access import visible_message
     task = SimpleNamespace(status='SUCCEEDED', reply='新排版')
     monkeypatch.setattr(agent_runtime, 'get_task', lambda *args: task)
     monkeypatch.setattr(agent_runtime, '_load', lambda *args: SimpleNamespace(reply='原始最终答案'))

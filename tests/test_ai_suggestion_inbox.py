@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 import pytest
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import proactive
+from app.modules.ai_agent.quality_operations import proactive
 
 
 def test_terminal_suggestion_cannot_be_changed(monkeypatch):
@@ -181,7 +181,7 @@ def test_scan_reconciles_missing_active_suggestions(db_session, monkeypatch):
     monkeypatch.setattr(service, 'scan_pending_quality_acceptances', lambda *a, **k: {'scanned_count': 0, 'created_count': 0})
     monkeypatch.setattr(service, 'scan_low_inventory', lambda *a, **k: {'scanned_count': 0, 'created_count': 0, 'recovered_count': 0, 'skipped_unit_mismatch_count': 0})
     # 只测试本条记录，避免本地开发库中已有异常影响样本。
-    from app.modules.ai_agent import proactive
+    from app.modules.ai_agent.quality_operations import proactive
     monkeypatch.setattr(proactive, 'notify_users', lambda *a, **k: [])
     service.scan_active_alerts(db_session, SimpleNamespace(id=1))
     service.scan_active_alerts(db_session, SimpleNamespace(id=1))

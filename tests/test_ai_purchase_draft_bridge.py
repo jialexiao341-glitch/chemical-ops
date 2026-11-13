@@ -10,7 +10,8 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import conversation_store, purchase_draft_bridge as bridge
+from app.modules.ai_agent.conversation_context import conversation_store
+from app.modules.ai_agent.action_management import purchase_draft_bridge as bridge
 from app.modules.ai_agent.model import AIAgentTask, AIConversation, AIConversationState, AIMessage
 
 

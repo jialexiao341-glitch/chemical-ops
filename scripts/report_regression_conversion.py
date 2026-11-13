@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import func, select  # noqa: E402
 
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.ai_agent.error_policy import ErrorClass, classify  # noqa: E402
+from app.modules.ai_agent.shared_utils.error_policy import ErrorClass, classify  # noqa: E402
 from app.modules.ai_agent.model import AIAgentTask, AIFeedback, AIRegressionCase  # noqa: E402
 
 SYNTHETIC_PREFIX = "SYN-"

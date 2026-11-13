@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
-from app.modules.ai_agent import regression_cases
+from app.modules.ai_agent.quality_operations import regression_cases
 from app.modules.ai_agent.model import AIAgentTask, AIFeedback, AIRegressionCase
 from app.modules.ai_agent.schema import (
     RegressionCaseBatchCreate,

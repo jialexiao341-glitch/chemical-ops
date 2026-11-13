@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from app.core.config import Settings
 from app.modules.ai_agent.schema import Intent
-from app.modules.ai_agent.evaluation import classify_intent
-from app.modules.ai_agent.order_trace import _amount, _can_read, _stage, extract_order_trace_no
+from app.modules.ai_agent.quality_operations.evaluation import classify_intent
+from app.modules.ai_agent.business_queries.order_trace import _amount, _can_read, _stage, extract_order_trace_no
 
 
 def test_order_trace_requires_order_number_and_trace_question() -> None:
@@ -48,7 +48,8 @@ def test_denied_stage_does_not_expose_records_or_counts() -> None:
 
 
 def test_order_trace_route_returns_deterministic_citation_without_text2sql(monkeypatch) -> None:
-    from app.modules.ai_agent import order_trace, service
+    from app.modules.ai_agent.business_queries import order_trace
+    from app.modules.ai_agent import service
 
     expected = {
         "po_no": "PO-26001",
@@ -68,7 +69,7 @@ def test_order_trace_route_returns_deterministic_citation_without_text2sql(monke
     async def unexpected_text2sql(*_args, **_kwargs):
         raise AssertionError("订单追溯不应调用模型生成查询计划")
 
-    monkeypatch.setattr("app.modules.ai_agent.text2sql.run_text2sql", unexpected_text2sql)
+    monkeypatch.setattr("app.modules.ai_agent.business_queries.text2sql.run_text2sql", unexpected_text2sql)
 
     answer, citation, trace = asyncio.run(
         service._run_text2sql_for_chat(
@@ -92,7 +93,7 @@ def test_order_trace_route_returns_deterministic_citation_without_text2sql(monke
 def test_trace_uses_same_order_read_policy_as_detail(monkeypatch) -> None:
     import pytest
     from app.core.errors import ResourceNotFoundError
-    from app.modules.ai_agent import order_trace
+    from app.modules.ai_agent.business_queries import order_trace
     from app.modules.purchase_orders import service as orders
     order = SimpleNamespace(id=4, po_no='PO-4', department_id=7, buyer_id=1)
     user = SimpleNamespace(id=1, department_id=7)

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.core.errors import BusinessValidationError
 from app.core.errors import AuthorizationError
 from app.core.errors import ResourceNotFoundError
-from app.modules.ai_agent import context
+from app.modules.ai_agent.conversation_context import context
 from app.modules.ai_agent.schema import AIContextAskRequest
 from app.modules.deliveries_receipt import service as delivery_service
 from app.modules.inventory_stock import service as inventory_service
@@ -128,7 +128,7 @@ def test_purchase_request_context_reads_authorized_request_and_returns_lines(mon
 
 
 def test_finance_reconciliation_context_shows_line_matching_and_payment_cap(monkeypatch) -> None:
-    from app.modules.ai_agent import finance_read_model
+    from app.modules.ai_agent.business_queries import finance_read_model
 
     reconciliation = SimpleNamespace(
         id=71, reconciliation_no="FR-71", status="CONFIRMED", total_amount=Decimal("100.00"),

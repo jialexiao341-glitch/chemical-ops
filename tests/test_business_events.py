@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
-from app.modules.ai_agent.business_events import (
+from app.modules.ai_agent.quality_operations.business_events import (
     AIBusinessEvent,
     build_delivery_change_impact,
     record_delivery_change_event,
@@ -107,7 +107,7 @@ def test_inactive_order_is_skipped_before_impact_summary():
 
 
 def test_changed_date_links_task_and_notification(monkeypatch):
-    from app.modules.ai_agent import business_events as module
+    from app.modules.ai_agent.quality_operations import business_events as module
     from app.modules.purchase_orders import delivery_tasks
 
     db = _event_db()
@@ -135,7 +135,7 @@ def test_changed_date_links_task_and_notification(monkeypatch):
 
 def test_dispatched_event_replay_does_not_notify_or_create_task_again(monkeypatch):
     """同一事件重投（响应丢失或队列重放）只返回既有分派结果。"""
-    from app.modules.ai_agent import business_events as module
+    from app.modules.ai_agent.quality_operations import business_events as module
     from app.modules.purchase_orders import delivery_tasks
 
     db = _event_db()

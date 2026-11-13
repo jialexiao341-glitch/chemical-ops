@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.modules.ai_agent import agent_runtime, agent_tools
+from app.modules.ai_agent.agent_execution import agent_runtime
+from app.modules.ai_agent.agent_execution import agent_tools
 from scripts.agent_business_cases import CASES, COMPARE, business_db, evidence_correct
 from scripts.agent_evaluation_data import evaluation_db
 from scripts.evaluate_agent_tasks import check_evidence

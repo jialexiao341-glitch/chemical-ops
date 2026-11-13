@@ -9,9 +9,9 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai_agent.text2sql import QueryPlan, build_statement, _validate_scoped_statement
-from app.modules.ai_agent.catalog import CATALOG
-from app.modules.ai_agent.formatting import format_decimal
+from app.modules.ai_agent.business_queries.text2sql import QueryPlan, build_statement, _validate_scoped_statement
+from app.modules.ai_agent.business_queries.catalog import CATALOG
+from app.modules.ai_agent.shared_utils.formatting import format_decimal
 from app.modules.deliveries_receipt.model import Delivery
 from app.modules.doc_kb.retrieve import resolve_doc_targets
 from app.modules.finance_management import service as finance

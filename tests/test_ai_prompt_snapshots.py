@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.modules.ai_agent import prompt_registry
+from app.modules.ai_agent.model_access import prompt_registry
 
 
 HASHES = json.loads((Path(__file__).parent / "fixtures/prompt_hashes.json").read_text(encoding="utf-8"))
@@ -25,7 +25,7 @@ def test_registry_contains_all_expected_prompts():
 
 
 def test_version_tracks_prompt_changes(monkeypatch):
-    from app.modules.ai_agent import context_stream
+    from app.modules.ai_agent.conversation_context import context_stream
 
     original = prompt_registry.prompt_version("context_stream")
     assert prompt_registry.prompt_version("context_stream") == original

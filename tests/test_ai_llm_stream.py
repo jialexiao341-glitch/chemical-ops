@@ -8,7 +8,7 @@ import pytest
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai_agent import llm
+from app.modules.ai_agent.model_access import llm
 from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest
 
 

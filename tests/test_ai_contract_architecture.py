@@ -17,7 +17,7 @@ def test_pydantic_contracts_are_declared_only_in_schema():
         name for name, value in vars(schema).items()
         if isinstance(value, type) and issubclass(value, BaseModel)
     }
-    for path in AI_ROOT.glob("*.py"):
+    for path in AI_ROOT.rglob("*.py"):
         if path.name == "schema.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -33,12 +33,12 @@ def test_pydantic_contracts_are_declared_only_in_schema():
 def test_schema_and_llm_do_not_depend_on_business_execution():
     """基础契约与模型客户端不能反向依赖会话或 Agent 业务执行。"""
     allowed = {
-        "app.modules.ai_agent.catalog",
-        "app.modules.ai_agent.agent_prompt",
-        "app.modules.ai_agent.gateway",
+        "app.modules.ai_agent.business_queries.catalog",
+        "app.modules.ai_agent.agent_execution.agent_prompt",
+        "app.modules.ai_agent.model_access.gateway",
         "app.modules.ai_agent.schema",
     }
-    for name in ("schema.py", "llm.py"):
+    for name in ("schema.py", "model_access/llm.py"):
         tree = ast.parse((AI_ROOT / name).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.modules.ai_agent"):
@@ -46,7 +46,7 @@ def test_schema_and_llm_do_not_depend_on_business_execution():
 
 
 def test_conversation_store_does_not_depend_on_execution():
-    tree = ast.parse((AI_ROOT / "conversation_store.py").read_text(encoding="utf-8"))
+    tree = ast.parse((AI_ROOT / "conversation_context/conversation_store.py").read_text(encoding="utf-8"))
     allowed = {"app.modules.ai_agent.model", "app.modules.ai_agent.schema"}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.modules.ai_agent"):
@@ -54,9 +54,9 @@ def test_conversation_store_does_not_depend_on_execution():
 
 
 def test_history_access_does_not_depend_on_batch_executor():
-    tree = ast.parse((AI_ROOT / "history_access.py").read_text(encoding="utf-8"))
+    tree = ast.parse((AI_ROOT / "conversation_context/history_access.py").read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            assert node.module != "app.modules.ai_agent.multi_intent"
+            assert node.module != "app.modules.ai_agent.agent_execution.multi_intent"
             if node.module == "app.modules.ai_agent":
                 assert "multi_intent" not in {alias.name for alias in node.names}

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError
-from app.modules.ai_agent import conversation_store
+from app.modules.ai_agent.conversation_context import conversation_store
 from app.modules.system_management.crud import get_user_role_codes
 from app.core.auth import get_current_user, require_permission
 from app.core.db import get_db
@@ -79,17 +79,19 @@ from app.modules.ai_agent.schema import (
     AIModelProfileRead,
     AIModelProfileUpdate,
 )
-from app.modules.ai_agent import briefing as briefing_service
-from app.modules.ai_agent import context as context_service
-from app.modules.ai_agent import drafts as drafts_service
-from app.modules.ai_agent import nl_filters as nl_filters_service
-from app.modules.ai_agent import service, routing, capabilities
-from app.modules.ai_agent import model_profiles as model_profiles_service
-from app.modules.ai_agent import agent_tools
-from app.modules.ai_agent import agent_runtime
-from app.modules.ai_agent import purchase_draft_confirmations
-from app.modules.ai_agent import action_proposals
-from app.modules.ai_agent import text2sql as text2sql_service
+from app.modules.ai_agent.quality_operations import briefing as briefing_service
+from app.modules.ai_agent.conversation_context import context as context_service
+from app.modules.ai_agent.action_management import drafts as drafts_service
+from app.modules.ai_agent.business_queries import nl_filters as nl_filters_service
+from app.modules.ai_agent import service
+from app.modules.ai_agent.agent_execution import routing
+from app.modules.ai_agent.agent_execution import capabilities
+from app.modules.ai_agent.model_access import model_profiles as model_profiles_service
+from app.modules.ai_agent.agent_execution import agent_tools
+from app.modules.ai_agent.agent_execution import agent_runtime
+from app.modules.ai_agent.action_management import purchase_draft_confirmations
+from app.modules.ai_agent.action_management import action_proposals
+from app.modules.ai_agent.business_queries import text2sql as text2sql_service
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection
 from app.modules.purchase_requests.schema import PurchaseRequestRead
 from app.modules.system_management.model import User
@@ -114,14 +116,14 @@ def document_list(kind: str | None = Query(default=None, pattern='^(quote|qualit
                   keyword: str | None = Query(default=None, max_length=255),
                   page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100),
                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    from app.modules.ai_agent import document_center
+    from app.modules.ai_agent.business_queries import document_center
     return document_center.list_documents(db, user, kind=kind, keyword=keyword, page=page, page_size=page_size)
 
 
 @router.get('/documents/{kind}/{object_id}/{file_id}/references', summary='查询文档引用')
 def document_references(kind: str, object_id: int, file_id: int,
                         db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    from app.modules.ai_agent import document_center
+    from app.modules.ai_agent.business_queries import document_center
     return document_center.references(db, user, kind, object_id, file_id)
 
 
@@ -129,7 +131,7 @@ def document_references(kind: str, object_id: int, file_id: int,
 def operation_suggestions(status: str | None = Query(default=None, pattern="^(OPEN|IGNORED|CLOSED|HANDED_OFF)$"),
                           page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100),
                           db: Session = Depends(get_db), user: User = Depends(require_permission("operations.exceptions.read"))):
-    from app.modules.ai_agent import proactive
+    from app.modules.ai_agent.quality_operations import proactive
     rows, total = proactive.list_suggestions(db, user, status=status, page=page, page_size=page_size)
     return {"items": [proactive.suggestion_payload(db, row) for row in rows], "total": total, "page": page, "page_size": page_size}
 
@@ -137,7 +139,7 @@ def operation_suggestions(status: str | None = Query(default=None, pattern="^(OP
 @suggestion_router.get("/operation-suggestions/{suggestion_id}", summary="查询运营建议详情")
 def operation_suggestion(suggestion_id: int, db: Session = Depends(get_db),
                          user: User = Depends(require_permission("operations.exceptions.read"))):
-    from app.modules.ai_agent import proactive
+    from app.modules.ai_agent.quality_operations import proactive
     return proactive.suggestion_payload(db, proactive.get_suggestion(db, user, suggestion_id))
 
 
@@ -145,7 +147,7 @@ def operation_suggestion(suggestion_id: int, db: Session = Depends(get_db),
                         dependencies=[Depends(require_permission("operations.exceptions.read"))])
 def handle_operation_suggestion(suggestion_id: int, action: str, db: Session = Depends(get_db),
                                 user: User = Depends(require_permission("operations.exceptions.write"))):
-    from app.modules.ai_agent import proactive
+    from app.modules.ai_agent.quality_operations import proactive
     status = {"ignore": "IGNORED", "close": "CLOSED", "handoff": "HANDED_OFF"}.get(action)
     if status is None:
         raise BusinessValidationError("无效的建议操作")
@@ -237,7 +239,7 @@ def _check_page_context_permission(db, user, object_type):
 
 @router.post("/context/stream", summary="按当前页面对象流式回答")
 def stream_page_context(data: AIContextAskRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    from app.modules.ai_agent import context_stream
+    from app.modules.ai_agent.conversation_context import context_stream
     _check_page_context_permission(db, user, data.context.object_type)
     # 完整上下文始终由服务端重新授权；问题不影响可读取范围。
     full = data.model_copy(update={"question": "请展示当前业务对象的完整情况。"})
@@ -250,7 +252,7 @@ def stream_page_context(data: AIContextAskRequest, db: Session = Depends(get_db)
 @router.post("/context/purchase-orders/stream", summary="按订单列表上下文流式回答")
 def stream_order_list_context(data: AIListContextAskRequest, db: Session = Depends(get_db),
                               user: User = Depends(require_permission("procurement.orders.read"))):
-    from app.modules.ai_agent import context_stream
+    from app.modules.ai_agent.conversation_context import context_stream
     result = context_service.ask_order_list(db, user, data)
     db.commit()
     return StreamingResponse(context_stream.stream_answer(user, data.question, result, data.previous_questions), media_type="text/event-stream",
@@ -364,7 +366,7 @@ def agent_task_cancel(task_id: str, db: Session = Depends(get_db), user: User = 
 def submit_agent_feedback(data: AIFeedbackCreate, db: Session = Depends(get_db),
                           user: User = Depends(get_current_user)):
     """评分与纠错文本只落在本人任务；prompt/模型版本由服务端 run_meta 补齐。"""
-    from app.modules.ai_agent import feedback as feedback_service
+    from app.modules.ai_agent.quality_operations import feedback as feedback_service
     return feedback_service.submit_feedback(db, user, data)
 
 
@@ -375,14 +377,14 @@ def agent_feedback_admin_summary(days: int = Query(default=7, ge=1, le=90),
     """只返回评分、原因码、prompt 版本和模型计数，不返回用户身份或反馈原文。"""
     if "SYS_ADMIN" not in set(get_user_role_codes(db, user.id)):
         raise AuthorizationError("仅管理员可查看跨用户反馈聚合")
-    from app.modules.ai_agent import feedback as feedback_service
+    from app.modules.ai_agent.quality_operations import feedback as feedback_service
     return feedback_service.summary_all(db, days=days)
 
 
 @router.get("/regression-cases/options", response_model=RegressionCaseOptions,
             summary="查询回归用例可选的执行模式与任务类别")
 def regression_case_options():
-    from app.modules.ai_agent import regression_cases as regression_cases_service
+    from app.modules.ai_agent.quality_operations import regression_cases as regression_cases_service
     return regression_cases_service.options()
 
 
@@ -391,7 +393,7 @@ def regression_case_options():
 def regression_case_draft(task_id: str = Query(min_length=1, max_length=32),
                           db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """只读取本人任务；返回的原文仍需提交人确认脱敏后才能保存。"""
-    from app.modules.ai_agent import regression_cases as regression_cases_service
+    from app.modules.ai_agent.quality_operations import regression_cases as regression_cases_service
     return regression_cases_service.draft_from_task(db, user, task_id)
 
 
@@ -403,7 +405,7 @@ def regression_case_candidates(days: int = Query(default=7, ge=1, le=90),
                                db: Session = Depends(get_db),
                                user: User = Depends(get_current_user)):
     """只读生成草稿，不落库；默认排除基础设施失败，避免服务抖动进入回归集。"""
-    from app.modules.ai_agent import regression_cases as regression_cases_service
+    from app.modules.ai_agent.quality_operations import regression_cases as regression_cases_service
     return regression_cases_service.candidate_drafts(
         db, user, days=days, limit=limit, include_infra=include_infra)
 
@@ -412,7 +414,7 @@ def regression_case_candidates(days: int = Query(default=7, ge=1, le=90),
              summary="提交回归用例草稿")
 def regression_case_create(data: RegressionCaseCreate, db: Session = Depends(get_db),
                            user: User = Depends(get_current_user)):
-    from app.modules.ai_agent import regression_cases as regression_cases_service
+    from app.modules.ai_agent.quality_operations import regression_cases as regression_cases_service
     return regression_cases_service.create_case(db, user, data)
 
 
@@ -422,7 +424,7 @@ def regression_case_batch_create(data: RegressionCaseBatchCreate,
                                  db: Session = Depends(get_db),
                                  user: User = Depends(get_current_user)):
     """单项失败不中断整批；服务端逐条重新脱敏，保存的始终是脱敏后文本。"""
-    from app.modules.ai_agent import regression_cases as regression_cases_service
+    from app.modules.ai_agent.quality_operations import regression_cases as regression_cases_service
     return regression_cases_service.create_cases_batch(db, user, data)
 
 
@@ -432,7 +434,7 @@ def regression_case_list(status: str | None = Query(default=None, pattern="^(DRA
                          page: int = Query(default=1, ge=1),
                          page_size: int = Query(default=20, ge=1, le=100),
                          db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    from app.modules.ai_agent import regression_cases as regression_cases_service
+    from app.modules.ai_agent.quality_operations import regression_cases as regression_cases_service
     return regression_cases_service.list_cases(db, user, status=status, page=page, page_size=page_size)
 
 
@@ -440,7 +442,7 @@ def regression_case_list(status: str | None = Query(default=None, pattern="^(DRA
              summary="管理员批准或归档回归用例")
 def regression_case_review(case_id: int, data: RegressionCaseReview,
                            db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    from app.modules.ai_agent import regression_cases as regression_cases_service
+    from app.modules.ai_agent.quality_operations import regression_cases as regression_cases_service
     return regression_cases_service.review_case(db, user, case_id, data.action)
 
 
@@ -450,7 +452,7 @@ def regression_case_batch_review(data: RegressionCaseBatchReview,
                                  db: Session = Depends(get_db),
                                  user: User = Depends(get_current_user)):
     """状态不允许或已处理的条目跳过并说明原因，其余条目照常推进。"""
-    from app.modules.ai_agent import regression_cases as regression_cases_service
+    from app.modules.ai_agent.quality_operations import regression_cases as regression_cases_service
     return regression_cases_service.review_cases_batch(db, user, data)
 
 
@@ -467,7 +469,7 @@ def agent_quality_summary(days: int = Query(default=7, ge=1, le=90),
     """只返回计数、版本、错误分类和任务编号；不返回问题原文、反馈正文或用户身份。"""
     if "SYS_ADMIN" not in set(get_user_role_codes(db, user.id)):
         raise AuthorizationError("仅管理员可查看 Agent 质量聚合")
-    from app.modules.ai_agent import quality_report
+    from app.modules.ai_agent.quality_operations import quality_report
     return quality_report.summarize(
         db, days=days, limit=limit, prompt_version=prompt_version,
         error_class=error_class, tool=tool, rating=rating)
@@ -480,7 +482,7 @@ def agent_cost_summary(days: int = Query(default=30, ge=1, le=90),
     if "SYS_ADMIN" not in set(get_user_role_codes(db, user.id)):
         raise AuthorizationError("仅管理员可查看 Agent 成本聚合")
     from app.core.config import get_settings
-    from app.modules.ai_agent import cost_report
+    from app.modules.ai_agent.quality_operations import cost_report
     settings = get_settings()
     return cost_report.summary(
         db, days=days,
@@ -493,14 +495,14 @@ def agent_cost_summary(days: int = Query(default=30, ge=1, le=90),
 def agent_feedback_summary(days: int = Query(default=7, ge=1, le=90),
                            db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """按时间窗口聚合评分、原因码和 prompt 版本，不输出反馈原文。"""
-    from app.modules.ai_agent import feedback as feedback_service
+    from app.modules.ai_agent.quality_operations import feedback as feedback_service
     return feedback_service.summary(db, user, days=days)
 
 
 @router.get("/feedback/task/{task_id}", response_model=AIFeedbackRead | None, summary="读取本人任务反馈")
 def agent_feedback_read(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """返回本人当前反馈，供任务详情回显；无反馈返回 null。"""
-    from app.modules.ai_agent import feedback as feedback_service
+    from app.modules.ai_agent.quality_operations import feedback as feedback_service
     return feedback_service.get_feedback(db, user, task_id)
 
 
@@ -620,7 +622,7 @@ def messages(conversation_id: int, limit: int = Query(default=100, ge=1, le=200)
     LOGGER.info("AI HTTP 历史消息 user_id=%s conversation_id=%s count=%s", user.id, conversation_id, total)
     result = []
     for item in items:
-        from app.modules.ai_agent.history_access import visible_message
+        from app.modules.ai_agent.conversation_context.history_access import visible_message
         content, citations = visible_message(db, user, item, allow_stale_snapshot=True)
         if isinstance(citations, list):
             normalized = []

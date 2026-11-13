@@ -9,7 +9,7 @@ import pytest
 from app.core.errors import BusinessValidationError
 from app.modules.ai_agent import service as ai_service
 from app.modules.ai_agent.schema import Intent
-from app.modules.ai_agent.evaluation import classify_intent
+from app.modules.ai_agent.quality_operations.evaluation import classify_intent
 from app.modules.chemicals_master.cas import extract_valid_cas, valid_cas_checksum
 from app.modules.ai_agent.schema import AIChatMessage, AIChatResponse
 from app.modules.doc_kb import retrieve as retrieve_module
@@ -511,7 +511,7 @@ def _fake_hits():
 
 
 def test_chat_doc_path_injects_context_and_citations(client, demo_password, monkeypatch):
-    from app.modules.ai_agent import routing
+    from app.modules.ai_agent.agent_execution import routing
     async def understand(*args, **kwargs):
         return routing.Understanding(purpose='query', execution_mode='document', tasks=['document'], sub_tasks=[
             routing.SubTask(id='t1', kind='document', question='检索化学品资料')])
@@ -550,7 +550,7 @@ def test_chat_doc_path_injects_context_and_citations(client, demo_password, monk
 
 
 def test_chat_doc_path_empty_hits_gives_guidance(client, demo_password, monkeypatch):
-    from app.modules.ai_agent import routing
+    from app.modules.ai_agent.agent_execution import routing
     async def understand(*args, **kwargs):
         return routing.Understanding(purpose='query', execution_mode='document', tasks=['document'], sub_tasks=[
             routing.SubTask(id='t1', kind='document', question='检索化学品资料')])
@@ -581,7 +581,7 @@ def test_chat_doc_path_empty_hits_gives_guidance(client, demo_password, monkeypa
 
 
 def test_stream_doc_path_emits_deltas_and_citations(client, demo_password, monkeypatch):
-    from app.modules.ai_agent import routing
+    from app.modules.ai_agent.agent_execution import routing
     async def understand(*args, **kwargs):
         return routing.Understanding(purpose='query', execution_mode='document', tasks=['document'], sub_tasks=[
             routing.SubTask(id='t1', kind='document', question='检索化学品资料')])

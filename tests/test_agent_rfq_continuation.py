@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.core.errors import AuthorizationError, BusinessValidationError
-from app.modules.ai_agent import agent_runtime as runtime
+from app.modules.ai_agent.agent_execution import agent_runtime as runtime
 from app.modules.ai_agent.model import AIAgentTask
 from tests.test_agent_runtime import USER, model_script, task_db as base_task_db, start, tool
 from tests.test_agent_read_tools import tool_db

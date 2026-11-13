@@ -6,8 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.modules.ai_agent import agent_runtime as runtime, prompt_registry, routing
-from app.modules.ai_agent.prompt_registry import PromptRelease
+from app.modules.ai_agent.agent_execution import agent_runtime as runtime
+from app.modules.ai_agent.model_access import prompt_registry
+from app.modules.ai_agent.agent_execution import routing
+from app.modules.ai_agent.model_access.prompt_registry import PromptRelease
 
 
 @pytest.fixture(autouse=True)

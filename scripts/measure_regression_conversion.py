@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
-from app.modules.ai_agent import regression_cases  # noqa: E402
+from app.modules.ai_agent.quality_operations import regression_cases  # noqa: E402
 from app.modules.ai_agent.model import AIAgentTask, AIFeedback  # noqa: E402
 from app.modules.ai_agent.schema import RegressionCaseBatchCreate, RegressionCaseBatchReview  # noqa: E402
 from app.modules.system_management.model import User  # noqa: E402

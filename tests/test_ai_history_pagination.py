@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from app.modules.ai_agent.conversation_store import _load_messages
+from app.modules.ai_agent.conversation_context.conversation_store import _load_messages
 
 
 def test_history_paginates_backwards_without_losing_chronological_order():

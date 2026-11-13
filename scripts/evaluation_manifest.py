@@ -7,10 +7,10 @@
 
 from __future__ import annotations
 
-from app.modules.ai_agent import action_handlers
-from app.modules.ai_agent.agent_tools import TOOLS
-from app.modules.ai_agent.capabilities import ACTION_ENTRIES, AGENT_TASK_REQUIREMENTS, _dataset_description
-from app.modules.ai_agent.catalog import CATALOG
+from app.modules.ai_agent.action_management import action_handlers
+from app.modules.ai_agent.agent_execution.agent_tools import TOOLS
+from app.modules.ai_agent.agent_execution.capabilities import ACTION_ENTRIES, AGENT_TASK_REQUIREMENTS, _dataset_description
+from app.modules.ai_agent.business_queries.catalog import CATALOG
 from app.modules.ai_agent.schema import CapabilityManifest
 
 

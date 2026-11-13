@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
 from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest
-from app.modules.ai_agent.llm import chat
-from app.modules.ai_agent.llm import extract_json_object
+from app.modules.ai_agent.model_access.llm import chat
+from app.modules.ai_agent.model_access.llm import extract_json_object
 from app.modules.deliveries_receipt.model import DeliveryItem
 from app.modules.files_storage import mineru, service as file_service
 from app.modules.files_storage.parser import parse_file_content

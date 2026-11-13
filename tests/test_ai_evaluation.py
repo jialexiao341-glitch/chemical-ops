@@ -1,7 +1,7 @@
 """固定 AI 离线评测门槛。"""
 
-from app.modules.ai_agent.evaluation import run_offline_evaluation
-from app.modules.ai_agent.routing import IntentRecognitionError
+from app.modules.ai_agent.quality_operations.evaluation import run_offline_evaluation
+from app.modules.ai_agent.agent_execution.routing import IntentRecognitionError
 from app.modules.ai_agent.schema import Understanding, SubTask
 from scripts.evaluate_intent_routing import check_execution_contract, failure_meta
 
