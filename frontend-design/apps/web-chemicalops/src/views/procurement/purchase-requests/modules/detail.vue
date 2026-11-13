@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { PurchaseRequestApi } from '#/api';
 
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
@@ -30,6 +30,7 @@ import {
 import { formatAmount, formatDate, formatDateTime, formatQuantity } from '#/utils/format';
 import { getUnitNameMap } from '#/utils/lookup';
 
+const emit = defineEmits<{ success: [] }>();
 const detail = ref<PurchaseRequestApi.PurchaseRequest>();
 const { hasAccessByCodes } = useAccess();
 const canSubmit = computed(() => hasAccessByCodes(['procurement.requests.write']) && ['DRAFT', 'REJECTED'].includes(detail.value?.status ?? ''));
@@ -117,10 +118,22 @@ async function proposeSubmit() {
     onOk: async () => {
       await confirmActionProposalApi<PurchaseRequestApi.PurchaseRequest>(proposal.confirmation_id, proposal.preview_version);
       detail.value = await getPurchaseRequestApi(request.id);
+      emit('success');
       message.success('采购申请已提交审批');
     },
   });
 }
+
+async function onProposalExecuted(event: Event) {
+  const payload = (event as CustomEvent<{ objectId?: number; objectType?: string }>).detail;
+  const currentId = detail.value?.id;
+  if (payload?.objectType !== 'purchase_request' || !currentId || payload.objectId !== currentId) return;
+  detail.value = await getPurchaseRequestApi(currentId);
+  emit('success');
+}
+
+onMounted(() => window.addEventListener('chemicalops:proposal-executed', onProposalExecuted));
+onBeforeUnmount(() => window.removeEventListener('chemicalops:proposal-executed', onProposalExecuted));
 
 function makeIdempotencyKey() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;

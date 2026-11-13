@@ -164,7 +164,7 @@ watch(
 <template>
   <Page auto-content-height>
     <FormDrawer @success="gridApi.query()" />
-    <Detail />
+    <Detail @success="gridApi.query()" />
     <Approve @success="gridApi.query()" />
     <Cancel @success="gridApi.query()" />
     <Grid table-title="采购申请">
