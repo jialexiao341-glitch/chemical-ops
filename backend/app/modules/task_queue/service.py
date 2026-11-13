@@ -14,6 +14,7 @@ TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "WAITING_INPUT"}
 
 
 def now() -> datetime:
+    """返回无时区标记的 UTC 时间，精度与数据库的毫秒精度一致。"""
     value = datetime.now(timezone.utc).replace(tzinfo=None)
     # Match MySQL DATETIME(3) precision so a freshly accepted intent is due immediately.
     return value.replace(microsecond=(value.microsecond // 1000) * 1000)
@@ -59,6 +60,7 @@ def claim_next(db: Session, queue: str, owner: str, lease_seconds: int) -> TaskE
 
 def claim_execution(db: Session, execution_id: str, delivery_generation: int,
                     owner: str, lease_seconds: int) -> TaskExecution | None:
+    """按投递代次原子领取可执行任务，领取成功时更新租约和隔离令牌。"""
     timestamp = now()
     count = db.execute(update(TaskExecution).where(TaskExecution.id == execution_id,
         TaskExecution.delivery_generation == delivery_generation,
@@ -81,6 +83,7 @@ class ExecutionLost(RuntimeError):
 
 
 def locked_execution(db: Session, execution_id: str, token: int) -> TaskExecution:
+    """加锁并校验运行状态、隔离令牌和租约；失去执行权时抛出异常。"""
     execution = db.scalar(select(TaskExecution).where(TaskExecution.id == execution_id)
         .with_for_update().execution_options(populate_existing=True))
     if execution is None or execution.status != "RUNNING" or execution.fencing_token != token \
@@ -90,6 +93,7 @@ def locked_execution(db: Session, execution_id: str, token: int) -> TaskExecutio
 
 
 def heartbeat(db: Session, execution_id: str, token: int, seconds: int) -> bool:
+    """为仍持有有效租约的任务续期，返回续期是否成功。"""
     timestamp = now()
     count = db.execute(update(TaskExecution).where(TaskExecution.id == execution_id,
         TaskExecution.fencing_token == token, TaskExecution.status == "RUNNING",
@@ -101,6 +105,7 @@ def heartbeat(db: Session, execution_id: str, token: int, seconds: int) -> bool:
 
 def finish(db: Session, execution_id: str, token: int, *, status: str,
            retryable: bool = False, max_attempts: int = 3, error_code: str | None = None) -> TaskExecution:
+    """结束执行或安排重试；由调用方将任务状态与业务结果一并提交。"""
     execution = locked_execution(db, execution_id, token)
     execution.error_code = error_code
     if status == "FAILED" and retryable and execution.attempt_count < max_attempts:

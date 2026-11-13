@@ -6,6 +6,7 @@ from app.core.errors import AuthorizationError
 
 
 def department_scope_condition(user, roles, department_column):
+    """生成部门范围查询条件；管理员及未配置部门范围的用户不受限制。"""
     if 'SYS_ADMIN' in roles:
         return true()
     configured = exists(select(UserDepartmentScope.user_id).where(UserDepartmentScope.user_id == user.id))
@@ -15,17 +16,20 @@ def department_scope_condition(user, roles, department_column):
 
 
 def is_department_restricted(db, user):
+    """判断非管理员用户是否配置了部门数据范围。"""
     if 'SYS_ADMIN' in get_user_role_codes(db, user.id):
         return False
     return db.get(UserDepartmentScope, user.id) is not None
 
 
 def is_warehouse_restricted(db, user):
+    """判断用户是否需要按仓库授权范围过滤数据。"""
     roles = set(get_user_role_codes(db, user.id))
     return 'SYS_ADMIN' not in roles and roles != {'SUPPLIER_PORTAL'}
 
 
 def warehouse_scope_snapshot(db, user):
+    """返回当前启用且获授权的仓库 ID；无需限制时返回 None。"""
     from app.modules.system_management.model import UserWarehouseGrant
     from app.modules.inventory_stock.model import Warehouse
     if not is_warehouse_restricted(db, user):

@@ -48,12 +48,14 @@ class WindowsJob:
                 kernel.CloseHandle(process)
 
     def close(self):
+        """关闭 Windows 作业句柄，由系统终止其关联的任务进程。"""
         if self.handle:
             self.kernel.CloseHandle(self.handle)
             self.handle = None
 
 
 def process_alive(pid: int) -> bool:
+    """检查进程是否仍在运行；无权访问时保守地视为仍存活。"""
     if os.name == "nt":
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.OpenProcess.restype = wintypes.HANDLE
@@ -78,6 +80,7 @@ def process_alive(pid: int) -> bool:
 
 
 def supervise_linux_parent():
+    """在非 Windows 环境下监听父进程退出并终止任务进程组。"""
     if os.name == "nt":
         return
     expected = int(os.environ["CHEMICALOPS_WORKER_PID"])
@@ -92,6 +95,7 @@ def supervise_linux_parent():
 
 
 async def stop_process(process, job):
+    """停止受监管的任务进程树，并等待子进程退出。"""
     if job:
         job.close()
     elif process.returncode is None:
