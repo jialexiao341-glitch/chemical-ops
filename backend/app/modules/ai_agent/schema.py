@@ -7,13 +7,14 @@
 from dataclasses import dataclass
 from copy import deepcopy
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
+import math
 import re
 from typing import Annotated, Any, Literal
 from typing_extensions import TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 from app.modules.ai_agent.business_queries.catalog import CATALOG, slot_description
 from app.modules.purchase_requests.schema import PurchaseRequestCreate, PurchaseRequestItemCreate
@@ -521,15 +522,53 @@ class SubTask(BaseModel):
         return {} if value is None else value
 
 
+def _parse_strict_json_decimal(value: Any) -> Any:
+    """在 strict=True 校验中将有限 JSON 数值或数字字符串转为 Decimal，拒绝布尔与非有限值。"""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("数值必须是有限实数")
+        return value
+    if isinstance(value, bool):
+        raise ValueError("布尔值不能作为十进制数值")
+    if isinstance(value, (int, float)):
+        if not math.isfinite(value):
+            raise ValueError("数值必须是有限实数")
+        return Decimal(str(value))
+    if isinstance(value, str):
+        token = value.strip()
+        if not token:
+            raise ValueError("空字符串不能作为十进制数值")
+        try:
+            parsed = Decimal(token)
+        except InvalidOperation:
+            raise ValueError("无效的十进制数值") from None
+        if not parsed.is_finite():
+            raise ValueError("数值必须是有限实数")
+        return parsed
+    raise ValueError("数值必须是数字或数字字符串")
+
+
+StrictJsonDecimal = Annotated[Decimal, BeforeValidator(_parse_strict_json_decimal)]
+
+
+class PurchaseRequestActionItem(PurchaseRequestItemCreate):
+    """动作候选明细模型；沿用申请明细字段定义，兼容 strict=True JSON 数值解析。"""
+
+    quantity: StrictJsonDecimal = Field(gt=0)
+    budget_price: StrictJsonDecimal | None = Field(default=None, ge=0)
+
+
 class PurchaseRequestActionFields(TypedDict, total=False):
     """采购申请修改候选；不与询价字段混用。"""
     purpose: str | None
     priority: str | None
-    budget_amount: Decimal | None
+    budget_amount: StrictJsonDecimal | None
     currency_code: str | None
     expected_date: str | None
     department_id: int | None
-    items: list[PurchaseRequestItemCreate] | None
+    items: list[PurchaseRequestActionItem] | None
 
 
 class RfqDraftActionFields(TypedDict, total=False):
@@ -549,7 +588,7 @@ class ExceptionTaskActionFields(TypedDict, total=False):
 
 class ReplenishmentActionFields(TypedDict, total=False):
     """补货申请候选；供应商和产品由槽位解析，不接受模型指定 ID。"""
-    quantity: Decimal | None
+    quantity: StrictJsonDecimal | None
     reason: str | None
     expected_date: str | None
     note: str | None

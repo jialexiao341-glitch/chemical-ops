@@ -1,6 +1,7 @@
 """模型侧 Schema 与服务端 Pydantic 校验同源，非法结构不能进入执行阶段。"""
 
 import asyncio
+from decimal import Decimal
 import json
 
 import httpx
@@ -223,3 +224,44 @@ def test_truncated_structured_output_is_rejected_before_plan_validation(monkeypa
         asyncio.run(service.chat(AIChatRequest(messages=[AIChatMessage(role="user", content="合成问题")]),
             Settings(_env_file=None, openai_api_key="test-key", llm_max_retries=0),
             response_format=schema_response_format(text2sql.QueryPlan, "query_plan"), interpret_only=True))
+
+
+@pytest.mark.parametrize("raw_budget,expected", [
+    (5000, Decimal("5000")),
+    (5000.25, Decimal("5000.25")),
+    ("5000.50", Decimal("5000.50")),
+])
+def test_routing_strict_json_accepts_action_decimal_values(raw_budget, expected):
+    """strict=True JSON 解析需接受有限数字与数字字符串并规范为 Decimal。"""
+    update_decision = routing.Understanding.model_validate_json(json.dumps({
+        "purpose": "purchase_update",
+        "execution_mode": "none",
+        "slots": {"request_no": "PR-26001"},
+        "action_fields": {
+            "budget_amount": raw_budget,
+            "items": [{"requested_name": "无水乙醇", "quantity": 10, "unit_id": 1, "budget_price": "25.5"}],
+        },
+    }), strict=True)
+    assert update_decision.action_fields["budget_amount"] == expected
+    assert update_decision.action_fields["items"][0].quantity == Decimal("10")
+    assert update_decision.action_fields["items"][0].budget_price == Decimal("25.5")
+
+    replenish_decision = routing.Understanding.model_validate_json(json.dumps({
+        "purpose": "replenishment_draft",
+        "execution_mode": "none",
+        "slots": {"supplier_code": "SUP-001", "product_keyword": "无水乙醇"},
+        "action_fields": {"quantity": raw_budget, "reason": "低于安全库存"},
+    }), strict=True)
+    assert replenish_decision.action_fields["quantity"] == expected
+
+
+@pytest.mark.parametrize("bad_budget", [True, False, "", "NaN", "Infinity", "五千"])
+def test_routing_strict_json_rejects_invalid_action_decimal_values(bad_budget):
+    with pytest.raises(ValidationError):
+        routing.Understanding.model_validate_json(json.dumps({
+            "purpose": "purchase_update",
+            "execution_mode": "none",
+            "slots": {"request_no": "PR-26001"},
+            "action_fields": {"budget_amount": bad_budget},
+        }), strict=True)
+
