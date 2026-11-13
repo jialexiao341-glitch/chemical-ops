@@ -129,7 +129,8 @@ async function submit() {
     <div v-if="loading" role="status" class="py-6 text-center text-muted-foreground">正在读取任务与可选任务类别…</div>
     <div v-else class="space-y-4">
       <div class="rounded border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        回归用例会进入评测集。提交前请手动删除客户名称、联系人、联系方式、真实单号等敏感信息；系统不会自动脱敏。
+        回归用例会进入评测集。提交前请手动删除客户名称、联系人、真实单号等敏感信息；
+        服务端会再按固定规则遮蔽手机号、邮箱、身份证、银行卡、IP 与联系人/单位名称，但不能替代人工核对。
       </div>
       <div>
         <label class="mb-1 block text-sm font-medium" for="regression-question">脱敏后的问题</label>

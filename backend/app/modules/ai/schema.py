@@ -1492,6 +1492,9 @@ class RegressionCaseCandidate(RegressionCaseDraft):
     failure_stage: str | None = None
     feedback_reason_code: str | None = None
     existing_case_id: int | None = None
+    # 候选列表直接给出服务端确定性脱敏预览，批量提交时保存的就是这段文本。
+    redacted_question: str = ""
+    redaction_findings: dict[str, int] = Field(default_factory=dict)
 
 
 class RegressionCaseCandidatePage(ToolSchema):
@@ -1528,6 +1531,66 @@ class RegressionCaseRead(ToolSchema):
     reviewed_by: int | None = None
     created_at: datetime
     reviewed_at: datetime | None = None
+
+
+class RegressionCaseBatchItem(ToolSchema):
+    """批量提交的一项；问题先经服务端确定性脱敏，再按用例键去重。"""
+
+    source_task_id: str | None = Field(default=None, max_length=32)
+    question: str = Field(min_length=1, max_length=2000)
+    expected_execution_mode: Literal["agent", "batch", "query", "document", "none"] = "agent"
+    expected_tasks: list[str] = Field(default_factory=list)
+    forbidden_tasks: list[str] = Field(default_factory=list)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class RegressionCaseBatchCreate(ToolSchema):
+    """一次确认覆盖整批；服务端仍逐条脱敏与校验，不保存客户端原文。"""
+
+    items: list[RegressionCaseBatchItem] = Field(min_length=1, max_length=50)
+    redacted_confirmed: bool = False
+
+
+class RegressionCaseBatchItemResult(ToolSchema):
+    source_task_id: str | None = None
+    case_key: str | None = None
+    case_id: int | None = None
+    status: Literal["CREATED", "REUSED", "SKIPPED", "FAILED"]
+    reason: str | None = None
+    question: str
+    redaction_findings: dict[str, int] = Field(default_factory=dict)
+
+
+class RegressionCaseBatchResult(ToolSchema):
+    items: list[RegressionCaseBatchItemResult] = Field(default_factory=list)
+    created: int = 0
+    reused: int = 0
+    skipped: int = 0
+    failed: int = 0
+    total: int = 0
+
+
+class RegressionCaseBatchReview(ToolSchema):
+    """管理员一次批准/归档多条草稿；状态不合法的条目跳过并说明原因。"""
+
+    case_ids: list[int] = Field(min_length=1, max_length=50)
+    action: Literal["APPROVE", "ARCHIVE"]
+
+
+class RegressionCaseBatchReviewItem(ToolSchema):
+    case_id: int
+    case_key: str | None = None
+    result: Literal["UPDATED", "SKIPPED", "FAILED"]
+    case_status: Literal["DRAFT", "APPROVED", "ARCHIVED"] | None = None
+    reason: str | None = None
+
+
+class RegressionCaseBatchReviewResult(ToolSchema):
+    items: list[RegressionCaseBatchReviewItem] = Field(default_factory=list)
+    updated: int = 0
+    skipped: int = 0
+    failed: int = 0
+    total: int = 0
 
 
 class RegressionCasePage(ToolSchema):

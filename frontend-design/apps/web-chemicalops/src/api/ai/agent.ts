@@ -254,11 +254,52 @@ export namespace AgentApi {
     failure_stage: null | string;
     feedback_reason_code: null | string;
     existing_case_id: null | number;
+    redacted_question: string;
+    redaction_findings: Record<string, number>;
   }
   export interface RegressionCaseCandidatePage {
     days: number;
     total: number;
     items: RegressionCaseCandidate[];
+  }
+  export interface RegressionCaseBatchItem {
+    expected_execution_mode: string;
+    expected_tasks: string[];
+    forbidden_tasks: string[];
+    note?: null | string;
+    question: string;
+    source_task_id?: null | string;
+  }
+  export interface RegressionCaseBatchResultItem {
+    case_id: null | number;
+    case_key: null | string;
+    question: string;
+    reason: null | string;
+    redaction_findings: Record<string, number>;
+    source_task_id: null | string;
+    status: 'CREATED' | 'FAILED' | 'REUSED' | 'SKIPPED';
+  }
+  export interface RegressionCaseBatchResult {
+    created: number;
+    failed: number;
+    items: RegressionCaseBatchResultItem[];
+    reused: number;
+    skipped: number;
+    total: number;
+  }
+  export interface RegressionCaseBatchReviewItem {
+    case_id: number;
+    case_key: null | string;
+    case_status: 'APPROVED' | 'ARCHIVED' | 'DRAFT' | null;
+    reason: null | string;
+    result: 'FAILED' | 'SKIPPED' | 'UPDATED';
+  }
+  export interface RegressionCaseBatchReviewResult {
+    failed: number;
+    items: RegressionCaseBatchReviewItem[];
+    skipped: number;
+    total: number;
+    updated: number;
   }
   export interface TaskPage {
     items: Task[];
@@ -405,6 +446,15 @@ export function createRegressionCaseApi(data: {
 }) {
   return requestClient.post<AgentApi.RegressionCase>('/ai/regression-cases', data);
 }
+export function createRegressionCasesBatchApi(data: {
+  items: AgentApi.RegressionCaseBatchItem[];
+  redacted_confirmed: boolean;
+}) {
+  return requestClient.post<AgentApi.RegressionCaseBatchResult>(
+    '/ai/regression-cases/batch',
+    data,
+  );
+}
 export function getRegressionCasePageApi(params: {
   page?: number;
   page_size?: number;
@@ -412,7 +462,11 @@ export function getRegressionCasePageApi(params: {
 }) {
   return requestClient.get<AgentApi.RegressionCasePage>('/ai/regression-cases', { params });
 }
-export function getRegressionCaseCandidatesApi(params: { days?: number; limit?: number }) {
+export function getRegressionCaseCandidatesApi(params: {
+  days?: number;
+  include_infra?: boolean;
+  limit?: number;
+}) {
   return requestClient.get<AgentApi.RegressionCaseCandidatePage>(
     '/ai/regression-cases/candidates',
     { params },
@@ -422,5 +476,14 @@ export function reviewRegressionCaseApi(caseId: number, action: 'APPROVE' | 'ARC
   return requestClient.post<AgentApi.RegressionCase>(
     `/ai/regression-cases/${caseId}/review`,
     { action },
+  );
+}
+export function reviewRegressionCasesBatchApi(data: {
+  action: 'APPROVE' | 'ARCHIVE';
+  case_ids: number[];
+}) {
+  return requestClient.post<AgentApi.RegressionCaseBatchReviewResult>(
+    '/ai/regression-cases/batch-review',
+    data,
   );
 }

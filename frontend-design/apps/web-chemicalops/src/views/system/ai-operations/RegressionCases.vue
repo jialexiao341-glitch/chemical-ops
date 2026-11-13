@@ -2,12 +2,14 @@
 import type { AgentApi } from '#/api';
 
 import { computed, onMounted, ref } from 'vue';
-import { Button, Modal, Select, Table, Tag, message } from 'antdv-next';
+import { Button, Checkbox, Modal, Select, Table, Tag, message } from 'antdv-next';
 
 import {
+  createRegressionCasesBatchApi,
   getRegressionCaseCandidatesApi,
   getRegressionCaseOptionsApi,
   getRegressionCasePageApi,
+  reviewRegressionCasesBatchApi,
   reviewRegressionCaseApi,
 } from '#/api';
 import RegressionCaseModal from '#/views/ai/tasks/RegressionCaseModal.vue';
@@ -27,8 +29,17 @@ const candidatesLoading = ref(false);
 const candidates = ref<AgentApi.RegressionCaseCandidate[]>([]);
 const candidateTotal = ref(0);
 const candidateDays = ref(7);
+const candidateIncludeInfra = ref(false);
 const createOpen = ref(false);
 const activeCandidate = ref<AgentApi.RegressionCaseCandidate>();
+const selectedKeys = ref<string[]>([]);
+const batchOpen = ref(false);
+const batchSaving = ref(false);
+const batchConfirmed = ref(false);
+const selectedCaseIds = ref<number[]>([]);
+const approveOpen = ref(false);
+const approveSaving = ref(false);
+const approveConfirmed = ref(false);
 const statusOptions = [
   { label: '草稿', value: 'DRAFT' },
   { label: '已批准', value: 'APPROVED' },
@@ -77,13 +88,53 @@ const columns = [
 
 const candidateColumns = [
   { dataIndex: 'source', key: 'source', title: '来源', width: 90 },
-  { dataIndex: 'question', key: 'question', title: '问题（提交前需脱敏）', ellipsis: true },
+  { dataIndex: 'question', key: 'question', title: '问题（自动脱敏预览）', ellipsis: true },
   { dataIndex: 'task_status', key: 'task_status', title: '任务状态', width: 100 },
   { dataIndex: 'error_code', key: 'error', title: '错误码 / 失败阶段', width: 190 },
   { dataIndex: 'feedback_reason_code', key: 'reason', title: '差评原因', width: 110 },
   { dataIndex: 'existing_case_id', key: 'existing', title: '已入库', width: 90 },
   { key: 'operation', title: '操作', width: 100, fixed: 'right' as const },
 ];
+
+const batchColumns = [
+  { dataIndex: 'question', key: 'question', title: '脱敏后的问题（将保存）', ellipsis: true },
+  { dataIndex: 'tasks', key: 'tasks', title: '任务', width: 150 },
+  { dataIndex: 'findings', key: 'findings', title: '自动脱敏命中', width: 180 },
+];
+
+const redactionLabels: Record<string, string> = {
+  bank_card: '银行卡',
+  company: '单位名称',
+  contact: '联系人',
+  email: '邮箱',
+  id_card: '身份证',
+  ip: 'IP',
+  landline: '座机',
+  mobile: '手机号',
+};
+
+const selectedCandidates = computed(() => candidates.value.filter(
+  (item) => selectedKeys.value.includes(item.case_key) && !item.existing_case_id));
+const batchPreview = computed(() => selectedCandidates.value.map((item) => ({
+  case_key: item.case_key,
+  findings: findingsText(item.redaction_findings),
+  question: item.redacted_question,
+  tasks: candidateTaskText(item),
+})));
+
+const approveColumns = [
+  { dataIndex: 'case_key', key: 'case_key', title: '用例编号', width: 140 },
+  { dataIndex: 'question', key: 'question', title: '脱敏后的问题', ellipsis: true },
+  { dataIndex: 'tasks', key: 'tasks', title: '任务', width: 150 },
+];
+
+const selectedCases = computed(() => rows.value.filter(
+  (item) => selectedCaseIds.value.includes(item.id) && item.status === 'DRAFT'));
+const approvePreview = computed(() => selectedCases.value.map((row) => ({
+  case_key: row.case_key,
+  question: row.question,
+  tasks: taskText(row),
+})));
 
 async function load() {
   loading.value = true;
@@ -95,6 +146,7 @@ async function load() {
     });
     rows.value = result.items;
     total.value = result.total;
+    selectedCaseIds.value = [];
   } catch {
     message.error('读取回归用例失败，请确认管理员权限');
   } finally {
@@ -134,12 +186,130 @@ function candidateStageText(row: AgentApi.RegressionCaseCandidate) {
   return `${row.error_code} / ${stage}`;
 }
 
+function findingsText(findings: Record<string, number> | undefined) {
+  const entries = Object.entries(findings ?? {});
+  if (!entries.length) return '无';
+  return entries.map(([key, count]) => `${redactionLabels[key] ?? key}×${count}`).join('、');
+}
+
+function onCandidateSelect(keys: (number | string)[]) {
+  selectedKeys.value = keys.map(String);
+  batchConfirmed.value = false;
+}
+
+function candidateCheckboxProps(row: AgentApi.RegressionCaseCandidate) {
+  return { disabled: Boolean(row.existing_case_id) };
+}
+
+function openBatch() {
+  if (!selectedCandidates.value.length) return;
+  batchConfirmed.value = false;
+  batchOpen.value = true;
+}
+
+function batchNote(row: AgentApi.RegressionCaseCandidate) {
+  if (row.source === 'feedback') {
+    return row.feedback_reason_code ? `差评：${row.feedback_reason_code}` : '差评任务转用例';
+  }
+  return row.error_code ? `失败任务：${row.error_code}` : null;
+}
+
+async function submitBatch() {
+  if (!batchConfirmed.value || !selectedCandidates.value.length) return;
+  batchSaving.value = true;
+  try {
+    const result = await createRegressionCasesBatchApi({
+      items: selectedCandidates.value.map((item) => ({
+        expected_execution_mode: item.expected_execution_mode,
+        expected_tasks: item.expected_tasks,
+        forbidden_tasks: item.forbidden_tasks,
+        note: batchNote(item),
+        question: item.redacted_question,
+        source_task_id: item.source_task_id,
+      })),
+      redacted_confirmed: true,
+    });
+    const summary = `新增 ${result.created}、复用 ${result.reused}、跳过 ${result.skipped}、失败 ${result.failed}`;
+    if (result.failed) {
+      const reasons = result.items
+        .filter((item) => item.status === 'FAILED')
+        .slice(0, 2)
+        .map((item) => item.reason)
+        .filter(Boolean)
+        .join('；');
+      message.warning(`批量生成完成：${summary}${reasons ? `；${reasons}` : ''}`);
+    } else {
+      message.success(`批量生成完成：${summary}`);
+    }
+    batchOpen.value = false;
+    selectedKeys.value = [];
+    await loadCandidates();
+    await load();
+  } catch (error: any) {
+    message.error(error?.message || '批量生成失败');
+  } finally {
+    batchSaving.value = false;
+  }
+}
+
+function onCaseSelect(keys: (number | string)[]) {
+  selectedCaseIds.value = keys.map(Number);
+  approveConfirmed.value = false;
+}
+
+function caseCheckboxProps(row: AgentApi.RegressionCase) {
+  return { disabled: row.status !== 'DRAFT' };
+}
+
+function openApprove() {
+  if (!selectedCases.value.length) return;
+  approveConfirmed.value = false;
+  approveOpen.value = true;
+}
+
+async function submitApprove() {
+  if (!approveConfirmed.value || !selectedCases.value.length) return;
+  approveSaving.value = true;
+  try {
+    const result = await reviewRegressionCasesBatchApi({
+      action: 'APPROVE',
+      case_ids: selectedCases.value.map((item) => item.id),
+    });
+    const summary = `批准 ${result.updated}、跳过 ${result.skipped}、失败 ${result.failed}`;
+    if (result.skipped || result.failed) {
+      const reasons = result.items
+        .filter((item) => item.result !== 'UPDATED')
+        .slice(0, 2)
+        .map((item) => item.reason)
+        .filter(Boolean)
+        .join('；');
+      message.warning(`批量批准完成：${summary}${reasons ? `；${reasons}` : ''}`);
+    } else {
+      message.success(`批量批准完成：${summary}`);
+    }
+    approveOpen.value = false;
+    selectedCaseIds.value = [];
+    await load();
+    await loadCandidates();
+  } catch (error: any) {
+    message.error(error?.message || '批量批准失败');
+  } finally {
+    approveSaving.value = false;
+  }
+}
+
 async function loadCandidates() {
   candidatesLoading.value = true;
   try {
-    const result = await getRegressionCaseCandidatesApi({ days: candidateDays.value, limit: 20 });
+    const result = await getRegressionCaseCandidatesApi({
+      days: candidateDays.value,
+      include_infra: candidateIncludeInfra.value,
+      limit: 20,
+    });
     candidates.value = result.items;
     candidateTotal.value = result.total;
+    selectedKeys.value = [];
+    batchConfirmed.value = false;
   } catch {
     message.error('读取候选失败，请确认管理员权限');
   } finally {
@@ -205,12 +375,13 @@ onMounted(async () => {
       <div>
         <h2 class="text-base font-semibold">回归用例</h2>
         <p class="text-muted-foreground mt-1 text-xs">
-          由任务详情提交、人工脱敏的回归用例；管理员批准后由导出脚本纳入评测集。Agent 不自动修改用例或提示词。
+          由任务详情或候选批量提交、人工确认后由服务端确定性脱敏的回归用例；管理员批准后由导出脚本纳入评测集。Agent 不自动修改用例或提示词。
         </p>
       </div>
       <div class="flex items-center gap-2">
         <Select v-model:value="status" :options="statusOptions" allow-clear placeholder="全部状态" class="w-36" />
         <Button @click="openCandidates">生成候选</Button>
+        <Button :disabled="!selectedCases.length" @click="openApprove">批量批准</Button>
         <Button @click="reset">重置</Button>
         <Button type="primary" :loading="loading" @click="search">查询</Button>
       </div>
@@ -226,6 +397,11 @@ onMounted(async () => {
         pageSize,
         total,
         showSizeChanger: false,
+      }"
+      :row-selection="{
+        selectedRowKeys: selectedCaseIds,
+        onChange: onCaseSelect,
+        getCheckboxProps: caseCheckboxProps,
       }"
       row-key="id"
       size="small"
@@ -274,12 +450,19 @@ onMounted(async () => {
 
     <Modal v-model:open="candidatesOpen" :footer="null" :width="1040" title="差评与失败任务候选">
       <div class="flex flex-wrap items-start justify-between gap-2">
-        <p class="text-muted-foreground text-xs">
-          来自近期差评或带错误码的失败任务；问题原文需人工脱敏后才能提交，系统不会自动脱敏。
+        <p class="text-muted-foreground max-w-[640px] text-xs">
+          来自近期差评或带错误码的失败任务，默认排除 WORKER_UNAVAILABLE 等基础设施失败；服务端按固定规则自动遮蔽手机号、邮箱、身份证、银行卡、IP 与联系人/单位名称；
+          产品、供应商等业务实体不会自动改写，请核对后再提交。
         </p>
         <div class="flex items-center gap-2">
           <Select v-model:value="candidateDays" :options="candidateDayOptions" class="w-32" />
+          <Checkbox v-model:checked="candidateIncludeInfra" @change="loadCandidates">
+            含基础设施失败
+          </Checkbox>
           <Button :loading="candidatesLoading" @click="loadCandidates">刷新</Button>
+          <Button type="primary" :disabled="!selectedCandidates.length" @click="openBatch">
+            批量生成草稿
+          </Button>
         </div>
       </div>
       <Table
@@ -288,6 +471,11 @@ onMounted(async () => {
         :data-source="candidates"
         :loading="candidatesLoading"
         :pagination="{ pageSize: 10, showSizeChanger: false }"
+        :row-selection="{
+          selectedRowKeys: selectedKeys,
+          onChange: onCandidateSelect,
+          getCheckboxProps: candidateCheckboxProps,
+        }"
         row-key="case_key"
         size="small"
       >
@@ -298,11 +486,12 @@ onMounted(async () => {
             </Tag>
           </template>
           <template v-else-if="column.key === 'question'">
-            <span :title="(record as AgentApi.RegressionCaseCandidate).question">
-              {{ (record as AgentApi.RegressionCaseCandidate).question }}
+            <span :title="(record as AgentApi.RegressionCaseCandidate).redacted_question">
+              {{ (record as AgentApi.RegressionCaseCandidate).redacted_question }}
             </span>
             <div class="text-muted-foreground mt-0.5 text-xs">
               {{ candidateTaskText(record as AgentApi.RegressionCaseCandidate) }}
+              · 脱敏命中：{{ findingsText((record as AgentApi.RegressionCaseCandidate).redaction_findings) }}
             </div>
           </template>
           <template v-else-if="column.key === 'error'">
@@ -321,6 +510,61 @@ onMounted(async () => {
           </template>
         </template>
       </Table>
+    </Modal>
+
+    <Modal
+      v-model:open="batchOpen"
+      :confirm-loading="batchSaving"
+      :ok-button-props="{ disabled: !batchConfirmed || !selectedCandidates.length }"
+      :width="880"
+      cancel-text="取消"
+      ok-text="确认批量生成"
+      title="批量生成回归用例"
+      @ok="submitBatch"
+    >
+      <div class="rounded border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        将提交 {{ selectedCandidates.length }} 条候选。服务端保存前会再次执行确定性脱敏；
+        已有本人草稿会复用，已审阅或同来源任务已有用例会跳过。产品、供应商等业务实体不会被自动改写。
+      </div>
+      <Table
+        class="mt-3"
+        :columns="batchColumns"
+        :data-source="batchPreview"
+        :pagination="false"
+        :scroll="{ y: 300 }"
+        row-key="case_key"
+        size="small"
+      />
+      <Checkbox v-model:checked="batchConfirmed" class="mt-3">
+        我已核对以上脱敏预览，确认不含客户、联系人、联系方式、真实单号等敏感信息
+      </Checkbox>
+    </Modal>
+
+    <Modal
+      v-model:open="approveOpen"
+      :confirm-loading="approveSaving"
+      :ok-button-props="{ disabled: !approveConfirmed || !selectedCases.length }"
+      :width="880"
+      cancel-text="取消"
+      ok-text="确认批准"
+      title="批量批准回归用例"
+      @ok="submitApprove"
+    >
+      <div class="rounded border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        将批准 {{ selectedCases.length }} 条草稿，批准后由导出脚本纳入评测集。已在审阅状态或已被他人处理的用例会跳过并给出原因。
+      </div>
+      <Table
+        class="mt-3"
+        :columns="approveColumns"
+        :data-source="approvePreview"
+        :pagination="false"
+        :scroll="{ y: 300 }"
+        row-key="case_key"
+        size="small"
+      />
+      <Checkbox v-model:checked="approveConfirmed" class="mt-3">
+        我已核对以上用例的问题文本与期望任务
+      </Checkbox>
     </Modal>
 
     <RegressionCaseModal

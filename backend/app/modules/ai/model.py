@@ -181,7 +181,7 @@ class AIFeedback(Base):
 
 
 class AIRegressionCase(Base):
-    """已审阅的 Agent 回归用例；问题文本需人工脱敏，导出时不带任务原文和用户身份。"""
+    """已审阅的 Agent 回归用例；提交需确认脱敏且服务端再执行确定性脱敏，导出不带任务原文和用户身份。"""
 
     __tablename__ = "ai_regression_cases"
     __table_args__ = (

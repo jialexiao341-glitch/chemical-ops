@@ -6,13 +6,22 @@ import hashlib
 from datetime import datetime, timedelta
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
 from app.modules.ai.capabilities import AGENT_TASK_REQUIREMENTS
-from app.modules.ai.error_policy import failure_stage
+from app.modules.ai.error_policy import ErrorClass, classify, failure_stage
 from app.modules.ai.model import AIAgentTask, AIFeedback, AIRegressionCase
+from app.modules.ai.redaction import redact
 from app.modules.ai.schema import (
+    RegressionCaseBatchCreate,
+    RegressionCaseBatchItem,
+    RegressionCaseBatchItemResult,
+    RegressionCaseBatchResult,
+    RegressionCaseBatchReview,
+    RegressionCaseBatchReviewItem,
+    RegressionCaseBatchReviewResult,
     RegressionCaseCandidate,
     RegressionCaseCandidatePage,
     RegressionCaseCreate,
@@ -140,13 +149,24 @@ def draft_from_task(db: Session, user: User, task_id: str) -> RegressionCaseDraf
     return _draft(_owned_task(db, user, task_id))
 
 
+def _infra_failure(error_code: str | None) -> bool:
+    """基础设施失败不能作为能力回归候选；差评属于主观信号，另按来源判断。"""
+    if not error_code:
+        return False
+    category, _, _ = classify(str(error_code))
+    return category in (ErrorClass.TRANSIENT_INFRA, ErrorClass.AMBIGUOUS_TIMEOUT)
+
+
 def candidate_drafts(db: Session, user: User, *, days: int = 7,
-                     limit: int = 10) -> RegressionCaseCandidatePage:
+                     limit: int = 10, include_infra: bool = False
+                     ) -> RegressionCaseCandidatePage:
     """从近期差评或失败任务确定性生成草稿；不落库、不调用模型，管理员审阅后才成为用例。
 
     差评与失败都是可复现信号：差评补充主观原因，失败的 error_code 直接给出失败阶段。
     非管理员只看到本人任务；同一问题已存在用例时仍返回草稿并附可用用例编号，
     由审阅人决定是否跳过或重新提交，避免静默去重掩盖同类问题。
+    默认排除 WORKER_UNAVAILABLE 等基础设施失败，避免把服务抖动做成能力回归；
+    差评来源不受此过滤影响，管理员可显式 include_infra 审计。
     """
     if not 1 <= days <= 90 or not 1 <= limit <= 50:
         raise BusinessValidationError("天数需为 1-90，条数需为 1-50")
@@ -174,6 +194,9 @@ def candidate_drafts(db: Session, user: User, *, days: int = 7,
     for task in ordered:
         if not admin and task.user_id != user.id:
             continue
+        source = "feedback" if task.id in down_reasons else "failure"
+        if source == "failure" and not include_infra and _infra_failure(task.error_code):
+            continue
         draft = _draft(task)
         if not draft.question:
             continue
@@ -181,7 +204,6 @@ def candidate_drafts(db: Session, user: User, *, days: int = 7,
         if key in seen:
             continue
         seen.add(key)
-        source = "feedback" if task.id in down_reasons else "failure"
         collected.append((draft, key, down_reasons.get(task.id), task, source))
         if len(collected) >= limit:
             break
@@ -204,6 +226,7 @@ def candidate_drafts(db: Session, user: User, *, days: int = 7,
         case = existing_by_key.get(key) or existing_by_source.get(task.id)
         visible = case is not None and (admin or case.created_by == user.id)
         error_code = getattr(task, "error_code", None)
+        preview = redact(draft.question)
         items.append(RegressionCaseCandidate(
             **draft.model_dump(),
             case_key=key,
@@ -213,6 +236,8 @@ def candidate_drafts(db: Session, user: User, *, days: int = 7,
             failure_stage=failure_stage(error_code) if error_code else None,
             feedback_reason_code=reason_code,
             existing_case_id=case.id if visible else None,
+            redacted_question=preview.text,
+            redaction_findings=preview.findings,
         ))
     return RegressionCaseCandidatePage(days=days, total=len(items), items=items)
 
@@ -227,7 +252,8 @@ def options() -> RegressionCaseOptions:
 def create_case(db: Session, user: User, data: RegressionCaseCreate) -> RegressionCaseRead:
     if not data.redacted_confirmed:
         raise BusinessValidationError("请确认问题文本已脱敏后再提交回归用例")
-    question = data.question.strip()
+    # 客户端可能漏改：保存前统一做确定性脱敏，评测集里不出现联系方式与证件号。
+    question = redact(data.question).text.strip()
     if not question:
         raise BusinessValidationError("回归用例问题不能为空")
     expected = _norm_tasks(data.expected_tasks)
@@ -262,7 +288,8 @@ def create_case(db: Session, user: User, data: RegressionCaseCreate) -> Regressi
         expected_execution_mode=data.expected_execution_mode,
         expected_tasks=expected,
         forbidden_tasks=forbidden,
-        note=data.note.strip() if isinstance(data.note, str) and data.note.strip() else None,
+        note=(redact(data.note).text.strip()
+              if isinstance(data.note, str) and data.note.strip() else None),
         status="DRAFT",
         created_by=user.id,
         created_at=now,
@@ -272,6 +299,143 @@ def create_case(db: Session, user: User, data: RegressionCaseCreate) -> Regressi
     db.commit()
     db.refresh(case)
     return _read(case)
+
+
+def create_cases_batch(
+        db: Session, user: User, data: RegressionCaseBatchCreate) -> RegressionCaseBatchResult:
+    """一次确认批量创建：逐条服务端脱敏、校验归属与任务类别，重复项跳过而不中断整批。
+
+    与单条提交共用同一脱敏与去重口径：保存的是脱敏后文本；批内重复、已存在草稿、
+    已审阅用例、来源任务已有用例分别归入 SKIPPED/REUSED，单项失败不影响其余项。
+    """
+    if not data.redacted_confirmed:
+        raise BusinessValidationError("请确认问题文本已脱敏后再提交回归用例")
+    admin = _is_admin(db, user)
+    results: list[RegressionCaseBatchItemResult | None] = [None] * len(data.items)
+    pending: list[tuple[int, RegressionCaseBatchItem, str, list[str], list[str],
+                         AIAgentTask | None, str, dict[str, int]]] = []
+    pending_keys: set[str] = set()
+    pending_sources: set[str] = set()
+
+    def failed(index: int, item: RegressionCaseBatchItem, question: str,
+               findings: dict[str, int], reason: str) -> None:
+        results[index] = RegressionCaseBatchItemResult(
+            source_task_id=item.source_task_id, status="FAILED", reason=reason,
+            question=question, redaction_findings=findings)
+
+    for index, item in enumerate(data.items):
+        preview = redact(item.question)
+        question = preview.text.strip()
+        findings = preview.findings
+        if len(question) < 5:
+            failed(index, item, question, findings, "脱敏后问题不足 5 个字符")
+            continue
+        try:
+            expected = _norm_tasks(item.expected_tasks)
+            forbidden = _norm_tasks(item.forbidden_tasks)
+            if set(expected) & set(forbidden):
+                raise BusinessValidationError("同一任务不能同时作为必选和禁止项")
+        except BusinessValidationError as exc:
+            failed(index, item, question, findings, str(exc))
+            continue
+
+        task = None
+        if item.source_task_id:
+            task = (db.get(AIAgentTask, item.source_task_id) if admin
+                    else db.scalar(select(AIAgentTask).where(
+                        AIAgentTask.id == item.source_task_id,
+                        AIAgentTask.user_id == user.id)))
+            if task is None:
+                failed(index, item, question, findings, "Agent 任务不存在")
+                continue
+        elif not admin:
+            failed(index, item, question, findings, "从任务详情提交回归用例时需要关联任务")
+            continue
+
+        key = _case_key(question, item.expected_execution_mode, expected)
+        existing = db.scalar(select(AIRegressionCase).where(AIRegressionCase.case_key == key))
+        if existing is not None:
+            reusable = existing.status == "DRAFT" and (existing.created_by == user.id or admin)
+            results[index] = RegressionCaseBatchItemResult(
+                source_task_id=item.source_task_id, case_key=key, case_id=existing.id,
+                status="REUSED" if reusable else "SKIPPED",
+                reason=None if reusable else "该回归用例已存在且进入审阅状态",
+                question=question, redaction_findings=findings)
+            continue
+        if task is not None:
+            source_case = db.scalar(select(AIRegressionCase).where(
+                AIRegressionCase.source_task_id == task.id).limit(1))
+            if source_case is not None:
+                results[index] = RegressionCaseBatchItemResult(
+                    source_task_id=item.source_task_id, case_key=key,
+                    case_id=source_case.id, status="SKIPPED",
+                    reason="该来源任务已有回归用例", question=question,
+                    redaction_findings=findings)
+                continue
+        # 批内去重只看“本次会新建”的项：前一项已因既有用例被跳过时，
+        # 后一项仍应报出真实原因（既有用例），而不是笼统的“批内重复”。
+        if key in pending_keys or (task is not None and task.id in pending_sources):
+            results[index] = RegressionCaseBatchItemResult(
+                source_task_id=item.source_task_id, case_key=key, status="SKIPPED",
+                reason="本批次内重复", question=question,
+                redaction_findings=findings)
+            continue
+        pending_keys.add(key)
+        if task is not None:
+            pending_sources.add(task.id)
+        pending.append((index, item, question, expected, forbidden, task, key, findings))
+
+    created = 0
+    for index, item, question, expected, forbidden, task, key, findings in pending:
+        now = datetime.now()
+        case = AIRegressionCase(
+            case_key=key,
+            source_task_id=task.id if task is not None else None,
+            source_task_hash=_task_hash(task.id) if task is not None else None,
+            source_prompt_version=_source_prompt_version(task) if task is not None else None,
+            question=question,
+            expected_execution_mode=item.expected_execution_mode,
+            expected_tasks=expected,
+            forbidden_tasks=forbidden,
+            note=(redact(item.note).text.strip()
+                  if isinstance(item.note, str) and item.note.strip() else None),
+            status="DRAFT",
+            created_by=user.id,
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            with db.begin_nested():
+                db.add(case)
+                db.flush()
+        except IntegrityError:
+            # 并发提交同一用例：先查回既有行，不让整批回滚。
+            existing = db.scalar(select(AIRegressionCase).where(AIRegressionCase.case_key == key))
+            reusable = (existing is not None and existing.status == "DRAFT"
+                        and (existing.created_by == user.id or admin))
+            results[index] = RegressionCaseBatchItemResult(
+                source_task_id=item.source_task_id, case_key=key,
+                case_id=existing.id if existing is not None else None,
+                status="REUSED" if reusable else "SKIPPED",
+                reason=None if reusable else "该回归用例已存在且进入审阅状态",
+                question=question, redaction_findings=findings)
+            continue
+        created += 1
+        results[index] = RegressionCaseBatchItemResult(
+            source_task_id=item.source_task_id, case_key=key, case_id=case.id,
+            status="CREATED", question=question, redaction_findings=findings)
+    if created:
+        db.commit()
+
+    rows = [row for row in results if row is not None]
+    return RegressionCaseBatchResult(
+        items=rows,
+        created=sum(1 for row in rows if row.status == "CREATED"),
+        reused=sum(1 for row in rows if row.status == "REUSED"),
+        skipped=sum(1 for row in rows if row.status == "SKIPPED"),
+        failed=sum(1 for row in rows if row.status == "FAILED"),
+        total=len(rows),
+    )
 
 
 def list_cases(db: Session, user: User, *, status: str | None = None,
@@ -317,3 +481,61 @@ def review_case(db: Session, user: User, case_id: int, action: str) -> Regressio
     db.commit()
     db.refresh(case)
     return _read(case)
+
+
+def review_cases_batch(
+        db: Session, user: User, data: RegressionCaseBatchReview
+) -> RegressionCaseBatchReviewResult:
+    """管理员一次批准/归档多条；不存在、状态不允许或重复编号逐条给出原因。
+
+    与单条审阅共用同一状态迁移规则（仅 DRAFT 可批准、DRAFT/APPROVED 可归档），
+    但批量模式不因一条失败回滚其余项，便于把一批候选推进到评测集。
+    """
+    if not _is_admin(db, user):
+        raise AuthorizationError("仅管理员可审阅回归用例")
+    now = datetime.now()
+    seen: set[int] = set()
+    items: list[RegressionCaseBatchReviewItem] = []
+    updated = 0
+    for case_id in data.case_ids:
+        case = db.get(AIRegressionCase, case_id)
+        if case is None:
+            items.append(RegressionCaseBatchReviewItem(
+                case_id=case_id, result="FAILED", reason="回归用例不存在"))
+            continue
+        if case_id in seen:
+            items.append(RegressionCaseBatchReviewItem(
+                case_id=case_id, case_key=case.case_key, result="SKIPPED",
+                case_status=case.status, reason="重复编号"))
+            continue
+        seen.add(case_id)
+        if data.action == "APPROVE":
+            if case.status != "DRAFT":
+                items.append(RegressionCaseBatchReviewItem(
+                    case_id=case_id, case_key=case.case_key, result="SKIPPED",
+                    case_status=case.status, reason="仅草稿可批准"))
+                continue
+            case.status = "APPROVED"
+        else:
+            if case.status not in ("DRAFT", "APPROVED"):
+                items.append(RegressionCaseBatchReviewItem(
+                    case_id=case_id, case_key=case.case_key, result="SKIPPED",
+                    case_status=case.status, reason="当前状态不可归档"))
+                continue
+            case.status = "ARCHIVED"
+        case.reviewed_by = user.id
+        case.reviewed_at = now
+        case.updated_at = now
+        updated += 1
+        items.append(RegressionCaseBatchReviewItem(
+            case_id=case_id, case_key=case.case_key, result="UPDATED",
+            case_status=case.status))
+    if updated:
+        db.commit()
+    return RegressionCaseBatchReviewResult(
+        items=items,
+        updated=sum(1 for row in items if row.result == "UPDATED"),
+        skipped=sum(1 for row in items if row.result == "SKIPPED"),
+        failed=sum(1 for row in items if row.result == "FAILED"),
+        total=len(items),
+    )

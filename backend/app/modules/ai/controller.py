@@ -28,6 +28,10 @@ from app.modules.ai.schema import (
     AIFeedbackSummary,
     AIQualitySummary,
     RegressionCaseCreate,
+    RegressionCaseBatchCreate,
+    RegressionCaseBatchResult,
+    RegressionCaseBatchReview,
+    RegressionCaseBatchReviewResult,
     RegressionCaseCandidatePage,
     RegressionCaseDraft,
     RegressionCaseOptions,
@@ -395,11 +399,13 @@ def regression_case_draft(task_id: str = Query(min_length=1, max_length=32),
             summary="从近期差评或失败任务生成待脱敏确认的回归用例草稿")
 def regression_case_candidates(days: int = Query(default=7, ge=1, le=90),
                                limit: int = Query(default=10, ge=1, le=50),
+                               include_infra: bool = Query(default=False),
                                db: Session = Depends(get_db),
                                user: User = Depends(get_current_user)):
-    """只读生成草稿，不落库；确认脱敏后仍走现有创建接口保存并进入管理员审阅。"""
+    """只读生成草稿，不落库；默认排除基础设施失败，避免服务抖动进入回归集。"""
     from app.modules.ai import regression_cases as regression_cases_service
-    return regression_cases_service.candidate_drafts(db, user, days=days, limit=limit)
+    return regression_cases_service.candidate_drafts(
+        db, user, days=days, limit=limit, include_infra=include_infra)
 
 
 @router.post("/regression-cases", response_model=RegressionCaseRead,
@@ -408,6 +414,16 @@ def regression_case_create(data: RegressionCaseCreate, db: Session = Depends(get
                            user: User = Depends(get_current_user)):
     from app.modules.ai import regression_cases as regression_cases_service
     return regression_cases_service.create_case(db, user, data)
+
+
+@router.post("/regression-cases/batch", response_model=RegressionCaseBatchResult,
+             summary="批量提交已脱敏的回归用例草稿")
+def regression_case_batch_create(data: RegressionCaseBatchCreate,
+                                 db: Session = Depends(get_db),
+                                 user: User = Depends(get_current_user)):
+    """单项失败不中断整批；服务端逐条重新脱敏，保存的始终是脱敏后文本。"""
+    from app.modules.ai import regression_cases as regression_cases_service
+    return regression_cases_service.create_cases_batch(db, user, data)
 
 
 @router.get("/regression-cases", response_model=RegressionCasePage,
@@ -426,6 +442,16 @@ def regression_case_review(case_id: int, data: RegressionCaseReview,
                            db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app.modules.ai import regression_cases as regression_cases_service
     return regression_cases_service.review_case(db, user, case_id, data.action)
+
+
+@router.post("/regression-cases/batch-review", response_model=RegressionCaseBatchReviewResult,
+             summary="管理员批量批准或归档回归用例")
+def regression_case_batch_review(data: RegressionCaseBatchReview,
+                                 db: Session = Depends(get_db),
+                                 user: User = Depends(get_current_user)):
+    """状态不允许或已处理的条目跳过并说明原因，其余条目照常推进。"""
+    from app.modules.ai import regression_cases as regression_cases_service
+    return regression_cases_service.review_cases_batch(db, user, data)
 
 
 @router.get("/quality/summary", response_model=AIQualitySummary,
