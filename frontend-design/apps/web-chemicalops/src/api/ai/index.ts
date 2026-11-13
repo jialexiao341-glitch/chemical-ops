@@ -456,10 +456,24 @@ export function routeAiRequestApi(
   conversationId?: number,
   pageContext?: { object_id: number; object_type: AiApi.ContextObjectType },
 ) {
-  return requestClient.post<{ route: string; route_token: string; understanding: {
-    action_fields?: Record<string, unknown> | null;
-    slots: { po_no?: string | null; request_no?: string | null };
-  } }>('/ai/route', {
+  return requestClient.post<{
+    route: string;
+    route_token: string;
+    understanding: {
+      action_fields?: Record<string, unknown> | null;
+      clarification_options?: string[];
+      clarification_slot?: null | string;
+      purpose?: string;
+      question?: null | string;
+      slots: {
+        exception_no?: null | string;
+        po_no?: null | string;
+        product_keyword?: null | string;
+        request_no?: null | string;
+        supplier_code?: null | string;
+      };
+    };
+  }>('/ai/route', {
     question,
     conversation_id: conversationId,
     ...(pageContext ? { page_context: pageContext } : {}),

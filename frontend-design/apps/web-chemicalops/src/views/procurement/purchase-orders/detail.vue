@@ -260,12 +260,20 @@ async function openFollowupFromRoute() {
   }
 }
 watch(() => [route.query.followup, route.query.followup_proposal], openFollowupFromRoute);
+function onProposalExecuted(event: Event) {
+  const detail = (event as CustomEvent<{ objectId?: number; objectType?: string }>).detail;
+  if (detail?.objectType === 'purchase_order' && detail.objectId === order.value?.id) {
+    void load();
+  }
+}
 onMounted(async () => {
+  window.addEventListener('chemicalops:proposal-executed', onProposalExecuted);
   viewActive = true;
   await load();
   await openFollowupFromRoute();
 });
 onBeforeUnmount(() => {
+  window.removeEventListener('chemicalops:proposal-executed', onProposalExecuted);
   viewActive = false;
   if (order.value) clearPageCopilotContext('purchase_order', order.value.id);
 });

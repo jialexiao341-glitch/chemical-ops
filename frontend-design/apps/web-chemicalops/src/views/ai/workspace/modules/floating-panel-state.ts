@@ -11,7 +11,9 @@ export class PanelAnswerCache<T> {
 
 export function shouldDismissAssistant(open: boolean, target: { closest: (selector: string) => unknown } | null) {
   if (!open || !target) return false;
-  return !target.closest('.page-copilot-panel, .chemical-agent, .ant-select-dropdown, .ant-dropdown, [data-radix-popper-content-wrapper]');
+  return !target.closest(
+    '.page-copilot-panel, .chemical-agent, .ant-select-dropdown, .ant-dropdown, .ant-modal-root, .ant-modal-wrap, .ant-modal, .ant-picker-dropdown, [data-radix-popper-content-wrapper]',
+  );
 }
 
 export function sameAuthorizedEvidence(

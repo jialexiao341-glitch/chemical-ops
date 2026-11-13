@@ -7,9 +7,10 @@ describe('悬浮助手交互状态', () => {
     expect(openingAction(false, true)).toBe('confirm_restore');
     expect(openingAction(true, true)).toBe('restore_local');
   });
-  it('只在打开时点击面板和下拉框以外的位置收起', () => {
+  it('只在打开时点击面板、下拉框和提案弹窗以外的位置收起', () => {
     expect(shouldDismissAssistant(true, { closest: () => null })).toBe(true);
     expect(shouldDismissAssistant(true, { closest: () => ({}) })).toBe(false);
+    expect(shouldDismissAssistant(true, { closest: (selector) => (selector.includes('.ant-modal') ? {} : null) })).toBe(false);
     expect(shouldDismissAssistant(false, { closest: () => null })).toBe(false);
   });
   it('权限或业务来源变化时不恢复历史内容', () => {

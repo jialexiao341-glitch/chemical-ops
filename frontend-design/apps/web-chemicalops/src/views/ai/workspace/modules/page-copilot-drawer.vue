@@ -3,27 +3,48 @@
 import type { AiApi } from '#/api';
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { useVbenDrawer } from '@vben/common-ui';
 import { useAccessStore } from '@vben/stores';
 import { IconifyIcon } from '@vben/icons';
 
-import { Button, Dropdown, Input, Spin, Tag } from 'antdv-next';
+import { Button, Dropdown, Input, Modal, Spin, Tag, message } from 'antdv-next';
 
-import { askPageContextApi, askPurchaseOrderListContextApi, streamChatApi, streamPageContextApi } from '#/api';
+import {
+  askPageContextApi,
+  askPurchaseOrderListContextApi,
+  cancelActionProposalApi,
+  confirmActionProposalApi,
+  createActionProposalApi,
+  getActionProposalApi,
+  reviseActionProposalApi,
+  routeAiRequestApi,
+  streamChatApi,
+  streamPageContextApi,
+} from '#/api';
 import { answerSources } from '../answer-sources';
+import { buildActionProposalPlan, isActionProposalRoute, type ActionProposalPlan } from '../action-proposal-plan';
+import { canConfirmActionProposal } from '../action-proposal-policy';
+import ActionProposalDetail from '../../tasks/ActionProposalDetail.vue';
 import ChemicalAssistantMark from './ChemicalAssistantMark.vue';
 import { PanelAnswerCache, openingAction, sameAuthorizedEvidence, shouldDismissAssistant } from './floating-panel-state';
 import { renderMarkdown } from '#/utils/markdown';
 import { activeListCopilotContext, activePageCopilotContext } from '#/utils/page-copilot-context';
 
 const emit = defineEmits<{ 'open-change': [isOpen: boolean] }>();
+const router = useRouter();
+const { hasAccessByCodes, hasAccessByRoles } = useAccess();
 
 interface Turn {
   question: string;
   result: AiApi.ContextAskResult;
   trace?: AiApi.OrderTrace;
   incomplete?: boolean;
+  openWorkspace?: boolean;
+  proposal?: AiApi.ActionProposalRead;
+  proposalPlan?: ActionProposalPlan;
   sources?: ReturnType<typeof answerSources>;
 }
 
@@ -64,6 +85,110 @@ const errorMessage = ref('');
 const targetType = ref<AiApi.ContextObjectType>('purchase_order');
 const targetId = ref(0);
 const listFilters = ref<{ keyword?: string; status?: string } | null>(null);
+const proposalModalOpen = ref(false);
+const proposalBusy = ref(false);
+const selectedProposal = ref<AiApi.ActionProposalRead>();
+const selectedProposalTurn = ref<Turn>();
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function openTurnProposal(turn: Turn) {
+  if (!turn.proposal) return;
+  selectedProposalTurn.value = turn;
+  selectedProposal.value = turn.proposal;
+  proposalModalOpen.value = true;
+}
+
+async function refreshActiveProposal() {
+  const current = selectedProposal.value;
+  if (!current || proposalBusy.value) return;
+  proposalBusy.value = true;
+  try {
+    const latest = await getActionProposalApi(current.confirmation_id);
+    selectedProposal.value = latest;
+    if (selectedProposalTurn.value) selectedProposalTurn.value.proposal = latest;
+  } catch {
+    message.error('提案状态读取失败，请稍后重试');
+  } finally {
+    proposalBusy.value = false;
+  }
+}
+
+async function confirmActiveProposal() {
+  const proposal = selectedProposal.value;
+  const turn = selectedProposalTurn.value;
+  if (!proposal?.requires_user_confirmation || proposalBusy.value) return;
+  proposalBusy.value = true;
+  try {
+    const result = await confirmActionProposalApi<Record<string, any>>(proposal.confirmation_id, proposal.preview_version);
+    const latest = await getActionProposalApi(proposal.confirmation_id);
+    selectedProposal.value = latest;
+    if (turn) {
+      turn.proposal = latest;
+      const doneText = turn.proposalPlan?.ok ? turn.proposalPlan.executedMessage(result) : '已按确认的预览执行动作。';
+      turn.result.answer = `${turn.result.answer}\n\n${doneText}`;
+    }
+    message.success(turn?.proposalPlan?.ok ? turn.proposalPlan.successToast : '已按确认的预览执行动作');
+    saveCompleted();
+    window.dispatchEvent(new CustomEvent('chemicalops:proposal-executed', {
+      detail: { actionType: proposal.action_type, objectId: targetId.value, objectType: targetType.value, result },
+    }));
+  } catch {
+    message.error('提案执行未完成，正在读取最新状态');
+    await refreshActiveProposal();
+  } finally {
+    proposalBusy.value = false;
+  }
+}
+
+async function cancelActiveProposal() {
+  const proposal = selectedProposal.value;
+  const turn = selectedProposalTurn.value;
+  if (!proposal?.requires_user_confirmation || proposalBusy.value) return;
+  proposalBusy.value = true;
+  try {
+    await cancelActionProposalApi(proposal.confirmation_id, proposal.preview_version);
+    const latest = await getActionProposalApi(proposal.confirmation_id);
+    selectedProposal.value = latest;
+    if (turn) {
+      turn.proposal = latest;
+      turn.result.answer = `${turn.result.answer}\n\n已取消该动作提案。`;
+    }
+    message.success('提案已取消');
+    saveCompleted();
+  } catch {
+    message.error('提案取消未完成，正在读取最新状态');
+    await refreshActiveProposal();
+  } finally {
+    proposalBusy.value = false;
+  }
+}
+
+async function reviseActiveProposal(payload: Record<string, unknown>) {
+  const proposal = selectedProposal.value;
+  const turn = selectedProposalTurn.value;
+  if (!proposal?.requires_user_confirmation || proposalBusy.value) return;
+  proposalBusy.value = true;
+  try {
+    await reviseActionProposalApi(proposal.confirmation_id, proposal.preview_version, payload);
+    const latest = await getActionProposalApi(proposal.confirmation_id);
+    selectedProposal.value = latest;
+    if (turn) turn.proposal = latest;
+    message.success('已保存新的提案预览，请重新核对');
+  } catch {
+    message.error('提案修改未完成，正在读取最新状态');
+    await refreshActiveProposal();
+  } finally {
+    proposalBusy.value = false;
+  }
+}
+
+function openWorkspace() {
+  void drawerApi.close();
+  void router.push({ name: 'AiWorkspace' });
+}
 const listRef = ref<HTMLElement>();
 const panelWidth = ref(560);
 const resizeHandle = ref<HTMLElement>();
@@ -166,7 +291,7 @@ const [Drawer, drawerApi] = useVbenDrawer<{
   async onOpenChange(isOpen) {
     panelVisible.value = isOpen;
     emit('open-change', isOpen);
-    if (!isOpen) { saveCompleted(); requestEpoch++; streamAbort?.abort(); streamAbort = undefined; loading.value = false; return; }
+    if (!isOpen) { proposalModalOpen.value = false; saveCompleted(); requestEpoch++; streamAbort?.abort(); streamAbort = undefined; loading.value = false; return; }
     const target = drawerApi.getData();
     turns.value = [];
     errorMessage.value = '';
@@ -275,6 +400,62 @@ async function ask(next?: string) {
     } else {
       if (listFilters.value && !activeListCopilotContext.value) throw new Error('当前订单列表已离开，请重新打开列表');
       if (listFilters.value && activeListCopilotContext.value) listFilters.value = { ...activeListCopilotContext.value.filters };
+      if (!listFilters.value && (hasAccessByRoles(['SYS_ADMIN']) || hasAccessByCodes(['ai.workspace.read']))) {
+        progressMessage.value = '正在识别意图与单据权限…';
+        const decision = await routeAiRequestApi(text, undefined, { object_id: targetId.value, object_type: targetType.value });
+        if (epoch !== requestEpoch || abort.signal.aborted) return;
+        if (decision.route === 'clarify' || decision.route === 'unsupported') {
+          current.result = {
+            ...current.result,
+            answer: decision.understanding.question || (decision.route === 'unsupported' ? '当前页面入口暂不支持直接执行该请求。' : '请补充更具体的操作信息。'),
+            context: { ...emptyContext, suggested_questions: decision.route === 'clarify' ? (decision.understanding.clarification_options ?? []) : [] },
+            model: 'route-guard',
+          };
+          current.incomplete = false;
+          saveCompleted();
+          return;
+        }
+        if (decision.route === 'purchase_draft') {
+          current.result = { ...current.result, answer: '新建采购申请草稿需要在 AI 工作台中填写或补全明细。请前往「AI 工作台」继续起草。', model: 'route-guard' };
+          current.openWorkspace = true;
+          current.incomplete = false;
+          saveCompleted();
+          return;
+        }
+        if (isActionProposalRoute(decision.route)) {
+          const plan = buildActionProposalPlan(decision.route, decision.understanding, {
+            hasCode: hasAccessByCodes,
+            hasRole: hasAccessByRoles,
+          });
+          if (!plan.ok) {
+            current.result = { ...current.result, answer: plan.message, model: 'action-proposal' };
+            current.incomplete = false;
+            if (plan.kind === 'error') message.error(plan.message);
+            else message.warning(plan.message);
+            saveCompleted();
+            return;
+          }
+          progressMessage.value = plan.progressText;
+          const preview = await createActionProposalApi(plan.actionType, plan.payload, makeIdempotencyKey());
+          const proposal = await getActionProposalApi(preview.confirmation_id);
+          if (epoch !== requestEpoch || abort.signal.aborted) return;
+          const canConfirm = canConfirmActionProposal(proposal, proposal.preview_version, false);
+          current.proposal = proposal;
+          current.proposalPlan = plan;
+          current.result = {
+            ...current.result,
+            answer: canConfirm
+              ? `待确认提案已生成（${plan.subjectLine}），请在弹窗中核对差异后确认执行。`
+              : proposal.blockers.join('；') || '当前提案不能确认，请补充信息后重试。',
+            model: 'action-proposal',
+          };
+          current.incomplete = false;
+          saveCompleted();
+          openTurnProposal(current);
+          return;
+        }
+        progressMessage.value = '';
+      }
       const target = listFilters.value ? { filters: listFilters.value } : { objectType: targetType.value, objectId: targetId.value };
       await streamPageContextApi(text, target, {
         onDelta(part) { if (epoch === requestEpoch) { current.result.answer += part; void scrollToLatest(); } },
@@ -410,6 +591,12 @@ defineExpose({ open, openList, openGeneral, close: () => drawerApi.close() });
             <div class="assistant-answer-mark" aria-hidden="true"><ChemicalAssistantMark /></div>
             <div class="assistant-answer-content">
               <div class="assistant-answer-text" v-html="renderMarkdown(turn.result.answer)" />
+              <div v-if="turn.proposal || turn.openWorkspace" class="mt-2 flex flex-wrap gap-2">
+                <Button v-if="turn.proposal" size="small" :type="turn.proposal.status === 'PENDING' ? 'primary' : 'default'" @click="openTurnProposal(turn)">
+                  {{ turn.proposal.status === 'PENDING' ? '查看与确认提案' : '查看提案详情' }}
+                </Button>
+                <Button v-if="turn.openWorkspace" size="small" type="primary" @click="openWorkspace">前往 AI 工作台</Button>
+              </div>
               <div v-if="turn.incomplete && !loading && turn.result.answer" class="assistant-answer-meta">回答未完成，请重试。</div>
 
               <details v-if="!turn.incomplete && turn.sources?.length" class="assistant-evidence">
@@ -474,6 +661,19 @@ defineExpose({ open, openList, openGeneral, close: () => drawerApi.close() });
       </form>
     </section>
   </Drawer>
+  <Modal v-model:open="proposalModalOpen" title="动作提案详情与确认" :footer="null" width="760px" :closable="!proposalBusy" :mask-closable="!proposalBusy" :keyboard="!proposalBusy">
+    <ActionProposalDetail
+      v-if="selectedProposal"
+      :proposal="selectedProposal"
+      :busy="proposalBusy"
+      @cancel="cancelActiveProposal"
+      @confirm="confirmActiveProposal"
+      @revise="reviseActiveProposal"
+    />
+    <div class="mt-2 flex justify-end">
+      <Button :disabled="proposalBusy" @click="refreshActiveProposal">刷新状态</Button>
+    </div>
+  </Modal>
 </template>
 
 <style scoped>
