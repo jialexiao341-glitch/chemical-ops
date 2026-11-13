@@ -1,0 +1,55 @@
+{
+  "prompt_key": "routing@1-752b1384__planner@1-2911a494",
+  "routing_version": "routing@1-752b1384",
+  "planner_version": "planner@1-2911a494",
+  "registered_at": "2026-11-14T07:47:23",
+  "files": [],
+  "envelopes": [
+    "harness-routing.json",
+    "harness-tasks.json",
+    "harness-business.json",
+    "harness-prod.json"
+  ],
+  "envelope_meta": {
+    "harness-routing.json": {
+      "model": "deepseek-v4.1-flash",
+      "code_revision": null,
+      "prompt_sha256": "752b1384c177460b88f9e0b57329aeaa6fdca7493e45c9423f11c436240f6e9a",
+      "dataset_sha256": null,
+      "repeat": 3
+    },
+    "harness-tasks.json": {
+      "model": "deepseek-v4.1-flash",
+      "code_revision": "15bee1308cedf16d069a24cf0f6341a140157f50",
+      "prompt_sha256": "2911a494a5f6681ca2697c1f00c9e41358080dd15d31354589807d0d4fe3a6c7",
+      "dataset_sha256": "f2e85b14ee15734e731c2356622fb377855546a534780f71d74da3534cf2b237",
+      "repeat": 3
+    },
+    "harness-business.json": {
+      "model": "deepseek-v4.1-flash",
+      "code_revision": "15bee1308cedf16d069a24cf0f6341a140157f50",
+      "prompt_sha256": "2911a494a5f6681ca2697c1f00c9e41358080dd15d31354589807d0d4fe3a6c7",
+      "dataset_sha256": "e3584a09affdea2501570b71c6ab3143d2cf6a52ad3284e2a4aeddf544c46622",
+      "repeat": 3
+    },
+    "harness-prod.json": {
+      "model": "deepseek-v4.1-flash",
+      "code_revision": null,
+      "prompt_sha256": null,
+      "dataset_sha256": null,
+      "repeat": 3
+    }
+  },
+  "coverage": {
+    "files": [],
+    "missing": [
+      "intent_routing.json",
+      "agent_tasks.json",
+      "agent_business.json",
+      "prod_regression.json"
+    ],
+    "note": "只登记候选目录实际存在的报告；未重跑项在 coverage.missing 中显式留痕"
+  },
+  "report_versions": {},
+  "carried_forward": []
+}

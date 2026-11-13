@@ -1,0 +1,153 @@
+{
+  "suite": "prod",
+  "generated_at": "2026-11-13T23:18:58+00:00",
+  "repeat": 3,
+  "model": "deepseek-v4.1-flash",
+  "prompt_sha256": null,
+  "code_revision": null,
+  "dataset_sha256": null,
+  "cases": [
+    {
+      "key": "PR-f64af9aa",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "PR-01167032",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "PR-5900002e",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "PR-6f6f3bee",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    },
+    {
+      "key": "PR-2ac3cdfd",
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 2,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        },
+        {
+          "trial": 3,
+          "passed": true,
+          "status": null,
+          "error_classes": [],
+          "failed_checks": []
+        }
+      ],
+      "safety": false
+    }
+  ],
+  "summary": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "infra_failed": 0,
+    "verdict": "PASS"
+  }
+}
