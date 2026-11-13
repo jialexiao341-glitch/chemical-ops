@@ -1,6 +1,6 @@
 # Agent 能力与 Harness/RSI 成熟度分析
 
-> 依据当前代码核对（commit `7d83eea` 及未提交的 CI envelope 切换、差评批量脱敏、routing 14 轮补证），不把“有接口、有测试”等同于“已验收”。量化数据注明来源与口径。
+> 依据当前代码核对（commit `9d7186c`），不把“有接口、有测试”等同于“已验收”。量化数据注明来源与口径。
 
 ## 1 结论摘要
 
@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Agent 只读能力 | 15 个工具覆盖主数据、库存、报价、申请、订单、到货、质检、对账、供应商与异常 | 可用 |
 | Agent 写入能力 | 11 个动作处理器，全部经提案预览 + 显式确认 | 可用，边界收紧 |
-| 页面上下文 | 7 类业务对象，服务端按权限重读 | 覆盖首批 |
+| 页面上下文 | 服务端按权限重读 8 类注册对象（前端详情已接入 7 类）；工作台与详情浮窗均接入 `/ai/route` 上下文消歧与受控提案弹窗 | 闭环可用 |
 | 评测工程 | 四套件各 3 轮：170 STABLE_PASS / 5 UNSTABLE / 0 STABLE_FAIL，门禁四态裁决；routing 补 14 轮 34/34，business 3 条补 14 轮后 16/17 | M2 已判定 |
 | 自改进（RSI） | 候选可人工触发生成并批量脱敏；对照实验与配对显著性可用，无自动生成 | M3 中段 |
 
@@ -73,9 +73,9 @@
 
 共同约束：`confirm=true` + 当前 `preview_version` + 幂等键；确认前重验权限、资源快照与业务状态；Agent 自身不触发确认。
 
-### 2.4 页面上下文（7 类）
+### 2.4 页面上下文（服务端 8 类 / 详情页接入 7 类）
 
-采购申请、采购订单、到货单、库存余额抽屉、质量验收核对抽屉、财务对账明细抽屉、供应商编辑抽屉。服务端只接受 `object_type + object_id`，按当前用户重读，不接受客户端快照。
+采购申请、采购订单、到货单、库存余额抽屉、质量验收核对抽屉、财务对账明细抽屉、供应商编辑抽屉（协议类型另含 `rfq`）。服务端只接受 `object_type + object_id`，按当前用户重读，不接受客户端快照；除只读流式问答 `/ai/context/stream` 外，AI 工作台与详情页浮窗 Copilot（`page-copilot-drawer.vue`）均已接入 `/api/v1/ai/route` 的 `page_context` 绑定、状态/权限硬约束与 `<ActionProposalDetail>` 提案确认弹窗。
 
 ### 2.5 运营与质量
 
@@ -296,3 +296,20 @@ business 3 条定向补证已落地（未提交）：
 
 离线核对仍成立：用历史报告合成 envelope 后自比判 PASS，注入 3 轮全失败用例判 REGRESSION；
 真实采样已验证四套件都能产出 envelope，且污染轮次被重跑后统计为 0 排除。
+
+## 10 页面上下文路由、能力硬约束与浮窗提案闭环进展
+
+在保持 `ROUTING_PROMPT` 不变（基线指纹仍为 `routing@1-5531c235`）的前提下，已完成以下改造与验证：
+
+| 变更 | 实现 | 验证与边界 |
+| --- | --- | --- |
+| 路由页面上下文与兜底（`b8aa972`） | `/api/v1/ai/route` 增加可选 `page_context` 权限校验与只读快照注入；`routing.understand` 自动绑定当前单据编号并执行能力清单与单据状态硬约束；`Understanding` 前置清理 `action_fields` 中的 `null` 占位键 | 后端相关 `pytest` 215 项全过；标准 `routing` 34 条 × 3 轮补跑 `34/34` 通过、0 回归（`eval_prompt_gate.py --mode envelope` 单项 `PASS`）；9 场景 × 3 轮专项对照（`deepseek-v4.1-flash`）从 `3/27` 提至 `23/27`，仅 `PC03`（“预算改成 5000 元”）因未改 Prompt 模型偶发猜 `budget`/`amount` 仍为 `0/3` |
+| 工作台与浮窗提案闭环（`0781891`、`f68b935`） | `routeAiRequestApi` 与 AI 工作台透传 `pageContext`；抽出共用 `action-proposal-plan.ts` 统一 6 类写操作校验与负载；详情浮窗 `page-copilot-drawer.vue` 接入 `/ai/route`，在 `clarify`/`unsupported`、只读流式（`/ai/context/stream`）与写操作之间分流，并复用 `<Modal>` + `<ActionProposalDetail>` 完成提案预览、修订、取消与确认执行；遮罩白名单防弹窗内点击误关抽屉，订单详情监听执行事件自动刷新 | `vue-tsc --noEmit --skipLibCheck` 退出码 0；`vitest` 3 个文件 10 项通过；`http://localhost:3000` 浏览器实机验证 `QA-PO-20261004-03`（`ORDERED`）只读流式追溯与写操作状态拦截，以及草稿采购申请 `PR20261025002124` 生成提案 → 弹窗展示 → 取消提案全链路（0 个 4xx/5xx 与控制台报错；未在真机点击“确认执行”落库） |
+| 专项脚本沉淀（`9d7186c`） | 新增独立脚本 `scripts/evaluate_page_context_routing.py`（支持 `eval`/`compare`，不改 34 条基线题集）与单测 `tests/test_eval_page_context_routing.py` | 路由与专项评测单测 118 项通过，`--help` 退出码 0；合入 `scripts/` 后未重跑真模型 |
+
+后续任务顺序：
+
+1. **决策并处理 `PC03` 动作字段猜错**：若需压掉“修改预算”猜错 `budget`/`amount` 的问题，走受控 `ROUTING_PROMPT` 升级实验（四套件 `eval_harness.py` + `prompt_experiment.py` McNemar 检验过闸后再人工升级基线）。
+2. **补全“确认执行”落库刷新与多页实机核对**：在浏览器补充草稿采购订单提交、已审批采购申请建询价及点击“确认执行”后详情状态自动刷新的实测。
+3. **收口 M2 Harness 工程缺口**：跑通 `.github/workflows/agent-eval.yml` 首轮 GitHub Actions 真实评测取证；为 `eval_harness.py` / `evaluate_agent_business.py` 增加分片并行，将 75–90 分钟全量 3 轮耗时压低至 DoD 目标（单轮 ≤40 分钟）。
+4. **推进 M3 → T3 RSI 闭环**：通过真实差评/失败任务审核与批量批准解除 `NO_PRODUCTION_SAMPLES` 阻塞、实测回归转化时长（目标 ≤1 天）；补齐差评/失败轨迹自动产出候选与自动发起只读对照实验呈报（保持禁止自动写基线红线）。
