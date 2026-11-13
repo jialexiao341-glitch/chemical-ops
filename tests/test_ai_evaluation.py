@@ -1,8 +1,9 @@
 """固定 AI 离线评测门槛。"""
 
 from app.modules.ai.evaluation import run_offline_evaluation
+from app.modules.ai.routing import IntentRecognitionError
 from app.modules.ai.schema import Understanding, SubTask
-from scripts.evaluate_intent_routing import check_execution_contract
+from scripts.evaluate_intent_routing import check_execution_contract, failure_meta
 
 
 def test_offline_evaluation_cases_all_pass() -> None:
@@ -39,3 +40,12 @@ def test_semantic_route_evaluation_checks_explicit_execution_contract() -> None:
 
     purchase_draft = Understanding(purpose="purchase_draft", execution_mode="none")
     assert check_execution_contract(purchase_draft, "purchase_draft")
+
+
+def test_routing_failure_meta_exposes_error_class_for_harness() -> None:
+    """模型服务故障必须标成 TRANSIENT_INFRA，否则会被统计成实现失败。"""
+    assert failure_meta(IntentRecognitionError("服务故障", "INTENT_SERVICE_ERROR")) == {
+        "error": {"class": "TRANSIENT_INFRA", "code": "INTENT_SERVICE_ERROR"}}
+    assert failure_meta(IntentRecognitionError("结构错误", "INTENT_SCHEMA_ERROR")) == {
+        "error": {"class": "FORMAT", "code": "INTENT_SCHEMA_ERROR"}}
+    assert failure_meta(ValueError("无错误码")) == {}

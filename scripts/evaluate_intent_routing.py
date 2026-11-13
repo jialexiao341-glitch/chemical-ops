@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.core.config import get_settings
 from app.modules.ai import model_catalog, routing
+from app.modules.ai.error_policy import classify
 from app.modules.ai.gateway import resolve_model_profile
 from app.modules.ai.routing import ROUTING_PROMPT, understand
 from scripts.evaluation_manifest import build_manifest
@@ -105,6 +106,19 @@ def check_execution_contract(result, expected_route: str) -> bool:
     return result.tasks == ["document"] and len(result.sub_tasks) == 1 and result.sub_tasks[0].kind == "document"
 
 
+def failure_meta(exc: Exception) -> dict:
+    """把异常码映射为与任务报告一致的 run_meta.error，供 harness 隔离基础设施失败。
+
+    routing 评测行原先只写 evaluation_error_code，eval_harness 读不到错误类别，
+    会把模型服务抖动当成实现失败计入稳定性分母，也无法在 resume 时自动重跑。
+    """
+    code = getattr(exc, "code", None)
+    if not code:
+        return {}
+    category, _, _ = classify(str(code), exc)
+    return {"error": {"class": category.value, "code": str(code)}}
+
+
 async def evaluate(output: Path, repeats: int = 1) -> None:
     """调用配置模型评测合成样本，写入不含密钥的 JSON 证据。
 
@@ -132,7 +146,8 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
                         "execution_contract_passed": False, "tool_invoked": False,
                         "passed": False, "seconds": round(perf_counter() - start, 2),
                         "evaluation_error_type": type(exc).__name__,
-                        "evaluation_error_code": getattr(exc, "code", None)}
+                        "evaluation_error_code": getattr(exc, "code", None),
+                        "run_meta": failure_meta(exc)}
             recognized = result.route == expected_route and set(result.tasks) == set(expected_tasks)
             execution_contract = check_execution_contract(result, expected_route)
             planned = check_contract(question, result)
