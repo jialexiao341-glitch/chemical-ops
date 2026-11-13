@@ -1,6 +1,6 @@
 # Agent 能力与 Harness/RSI 成熟度分析
 
-> 依据当前代码核对（commit `9d7186c`），不把“有接口、有测试”等同于“已验收”。量化数据注明来源与口径。
+> 依据当前代码核对（commit `3ebe8be`），不把“有接口、有测试”等同于“已验收”。量化数据注明来源与口径。
 
 ## 1 结论摘要
 
@@ -303,13 +303,14 @@ business 3 条定向补证已落地（未提交）：
 
 | 变更 | 实现 | 验证与边界 |
 | --- | --- | --- |
-| 路由页面上下文与兜底（`b8aa972`） | `/api/v1/ai/route` 增加可选 `page_context` 权限校验与只读快照注入；`routing.understand` 自动绑定当前单据编号并执行能力清单与单据状态硬约束；`Understanding` 前置清理 `action_fields` 中的 `null` 占位键 | 后端相关 `pytest` 215 项全过；标准 `routing` 34 条 × 3 轮补跑 `34/34` 通过、0 回归（`eval_prompt_gate.py --mode envelope` 单项 `PASS`）；9 场景 × 3 轮专项对照（`deepseek-v4.1-flash`）从 `3/27` 提至 `23/27`，仅 `PC03`（“预算改成 5000 元”）因未改 Prompt 模型偶发猜 `budget`/`amount` 仍为 `0/3` |
-| 工作台与浮窗提案闭环（`0781891`、`f68b935`） | `routeAiRequestApi` 与 AI 工作台透传 `pageContext`；抽出共用 `action-proposal-plan.ts` 统一 6 类写操作校验与负载；详情浮窗 `page-copilot-drawer.vue` 接入 `/ai/route`，在 `clarify`/`unsupported`、只读流式（`/ai/context/stream`）与写操作之间分流，并复用 `<Modal>` + `<ActionProposalDetail>` 完成提案预览、修订、取消与确认执行；遮罩白名单防弹窗内点击误关抽屉，订单详情监听执行事件自动刷新 | `vue-tsc --noEmit --skipLibCheck` 退出码 0；`vitest` 3 个文件 10 项通过；`http://localhost:3000` 浏览器实机验证 `QA-PO-20261004-03`（`ORDERED`）只读流式追溯与写操作状态拦截，以及草稿采购申请 `PR20261025002124` 生成提案 → 弹窗展示 → 取消提案全链路（0 个 4xx/5xx 与控制台报错；未在真机点击“确认执行”落库） |
-| 专项脚本沉淀（`9d7186c`） | 新增独立脚本 `scripts/evaluate_page_context_routing.py`（支持 `eval`/`compare`，不改 34 条基线题集）与单测 `tests/test_eval_page_context_routing.py` | 路由与专项评测单测 118 项通过，`--help` 退出码 0；合入 `scripts/` 后未重跑真模型 |
+| 路由页面上下文与兜底（`b8aa972`、`e1654db`） | `/api/v1/ai/route` 增加可选 `page_context` 权限校验与只读快照注入；`routing.understand` 自动绑定当前单据编号并执行能力清单与单据状态硬约束；`Understanding` 前置清理 `action_fields` 中的 `null` 占位键；`StrictJsonDecimal` 与 `PurchaseRequestActionItem` 修复 `strict=True` JSON 对 `Decimal`（`budget_amount` / `quantity` / 明细单价与数量）全拒的契约缺陷 | 后端路由/契约/动作单测（146 + 25 + 36 项）通过；标准 `routing` 34 条 × 3 轮补跑 `34/34` 通过；9 场景 × 3 轮专项真模型实测（`deepseek-v4.1-flash`）保持 `23/27`，其中 `PC03` 由 `0/3` 升至 `2/3`（1 轮因模型猜 `budget`/`amount` 失败；`GD02` 2/3、`GD04` 1/3 为模型偶发直出 `guidance`/`clarify`） |
+| 工作台与浮窗提案闭环（`0781891`、`f68b935`、`aa7a2ce`） | `routeAiRequestApi` 与 AI 工作台透传 `pageContext`；抽出共用 `action-proposal-plan.ts` 统一 6 类写操作校验与负载；详情浮窗 `page-copilot-drawer.vue` 接入 `/ai/route` 与 `<Modal>` + `<ActionProposalDetail>` 完成提案预览、修订、取消与确认执行；遮罩白名单防弹窗内点击误关抽屉；采购订单详情与采购申请详情抽屉/列表均接入 `chemicalops:proposal-executed` 自动刷新 | `vue-tsc --noEmit --skipLibCheck` 退出码 0；`vitest` 3 个文件 10 项通过；`http://localhost:3000` 浏览器实机验证 `QA-PO-20261004-03`（`ORDERED`）只读追溯与状态拦截，以及草稿采购申请 `PR20261025002124` “修改预算为 5500 元 → 生成提案 → `<ActionProposalDetail>` 点击确认执行（HTTP 200）→ 详情抽屉与列表行无整页刷新实时更新为 `5,500 CNY`”全链路 |
+| 专项脚本沉淀（`9d7186c`） | 新增独立脚本 `scripts/evaluate_page_context_routing.py`（支持 `eval`/`compare`，不改 34 条基线题集）与单测 `tests/test_eval_page_context_routing.py` | 路由与专项评测单测 118 项通过，`--help` 退出码 0；真实模型验证见首行 `23/27` |
+| Harness 分片并行与 CI DAG（`3ebe8be`） | `evaluate_agent_business.py` 新增步长均衡分片（`--shard-index`/`--shard-count`）；`eval_harness.py` 支持本地并行分片（`--business-shards`）、跨套件并行（`--parallel-suites`）、单轮及 envelope 合并（`--merge-shards`）；`.github/workflows/agent-eval.yml` 拆分为 `preflight → fast-suites + 3×business-shard → gate` 矩阵并行 | `eval_harness` / `run_eval_suite` / 门禁相关 `pytest` 207 项通过；`--shard-index 1 --shard-count 3 --validate` 验证 40 条隔离样本构建；CI 工作流 YAML 解析通过（GitHub Actions 实跑耗时与限流表现待首轮触发取证） |
 
 后续任务顺序：
 
-1. **决策并处理 `PC03` 动作字段猜错**：若需压掉“修改预算”猜错 `budget`/`amount` 的问题，走受控 `ROUTING_PROMPT` 升级实验（四套件 `eval_harness.py` + `prompt_experiment.py` McNemar 检验过闸后再人工升级基线）。
-2. **补全“确认执行”落库刷新与多页实机核对**：在浏览器补充草稿采购订单提交、已审批采购申请建询价及点击“确认执行”后详情状态自动刷新的实测。
-3. **收口 M2 Harness 工程缺口**：跑通 `.github/workflows/agent-eval.yml` 首轮 GitHub Actions 真实评测取证；为 `eval_harness.py` / `evaluate_agent_business.py` 增加分片并行，将 75–90 分钟全量 3 轮耗时压低至 DoD 目标（单轮 ≤40 分钟）。
-4. **推进 M3 → T3 RSI 闭环**：通过真实差评/失败任务审核与批量批准解除 `NO_PRODUCTION_SAMPLES` 阻塞、实测回归转化时长（目标 ≤1 天）；补齐差评/失败轨迹自动产出候选与自动发起只读对照实验呈报（保持禁止自动写基线红线）。
+1. **收口 `PC03` / `GD02` / `GD04` 稳定性（受控 Prompt 实验）**：利用已就绪的分片并行链路，在不破环既有 `routing@1-5531c235` 基线前先运行 `ROUTING_PROMPT` 对照实验（明确 `purchase_update.action_fields` 可用字段名与 `page_context.valid_write_purposes` 状态边界），用 `eval_harness.py` + `prompt_experiment.py` 过闸后再决定是否升级基线。
+2. **完成 GitHub Actions 首轮实跑取证与耗时校准**：触发 `.github/workflows/agent-eval.yml`，验证 `fast-suites` + 3 路 `business-shard` 并行后的实际墙钟耗时是否稳定 ≤40 分钟及模型限流表现。
+3. **补齐其余已注册详情场景真机验证**：在浏览器抽测草稿采购订单提交、已审批采购申请创建询价草稿等其余写操作路径，并顺手评估详情抽屉与助手面板的叠放层级体验。
+4. **推进 M3 → T3 RSI 自改进闭环**：基于真实差评/失败任务审核与批量批准解除 `NO_PRODUCTION_SAMPLES` 阻塞、实测回归转化时长（目标 ≤1 天），并补齐从差评/失败轨迹自动产出候选与自动发起只读对照实验呈报的能力（保持禁止自动修改基线红线）。
