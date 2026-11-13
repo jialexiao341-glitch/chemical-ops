@@ -11,8 +11,8 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.modules.system.audit import add_audit_log
-from app.modules.system.model import User
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.model import User
 from scripts.seed_demo_accounts import LEGACY_USERNAMES
 
 

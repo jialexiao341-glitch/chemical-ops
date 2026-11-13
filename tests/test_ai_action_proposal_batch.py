@@ -7,8 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import action_proposals
-from app.modules.ai.schema import (
+from app.modules.ai_agent import action_proposals
+from app.modules.ai_agent.schema import (
     AIActionProposalBatchCreate,
     AIActionProposalCreate,
     AIActionProposalPreview,
@@ -55,7 +55,7 @@ def test_batch_keeps_successes_and_reports_single_failure(monkeypatch):
 
 
 def test_batch_schema_limits_items_and_forbids_extra_fields():
-    from app.modules.ai.schema import AIActionProposalBatchResult
+    from app.modules.ai_agent.schema import AIActionProposalBatchResult
 
     with pytest.raises(ValidationError):
         AIActionProposalBatchCreate(items=[])

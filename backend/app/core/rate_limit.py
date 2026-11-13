@@ -9,7 +9,7 @@ from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.observability import metrics
 from app.core.redis_client import get_redis, redis_key
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 # 窗口从首次获准请求起算；拒绝请求不续期、不消耗额外计数。

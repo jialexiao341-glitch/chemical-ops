@@ -3,7 +3,7 @@
 from subprocess import CompletedProcess
 
 from app.core.config import Settings
-from app.modules.files import scanner
+from app.modules.files_storage import scanner
 
 
 def test_scanner_is_skipped_by_default(monkeypatch) -> None:

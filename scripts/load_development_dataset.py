@@ -34,20 +34,20 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.core.db import SessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
-from app.modules.chemicals.model import Chemical  # noqa: E402
-from app.modules.deliveries.model import Delivery, DeliveryItem  # noqa: E402
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation  # noqa: E402
-from app.modules.notifications.model import Notification  # noqa: E402
+from app.modules.chemicals_master.model import Chemical  # noqa: E402
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem  # noqa: E402
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation  # noqa: E402
+from app.modules.notifications_center.model import Notification  # noqa: E402
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment  # noqa: E402
-from app.modules.products.category_model import ProductCategory  # noqa: E402
-from app.modules.products.model import Product  # noqa: E402
+from app.modules.products_master.category_model import ProductCategory  # noqa: E402
+from app.modules.products_master.model import Product  # noqa: E402
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderEvent, PurchaseOrderItem  # noqa: E402
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem, Unit  # noqa: E402
 from app.modules.quality_acceptances.model import QualityAcceptance  # noqa: E402
-from app.modules.rfqs.model import RFQ, RFQItem, RFQSupplier, QuoteComparison, QuoteComparisonItem, SupplierQuote, SupplierQuoteItem  # noqa: E402
-from app.modules.suppliers.model import Supplier  # noqa: E402
-from app.modules.suppliers.product_model import SupplierProduct  # noqa: E402
-from app.modules.system.model import Department, User  # noqa: E402
+from app.modules.rfq_quotes.model import RFQ, RFQItem, RFQSupplier, QuoteComparison, QuoteComparisonItem, SupplierQuote, SupplierQuoteItem  # noqa: E402
+from app.modules.suppliers_master.model import Supplier  # noqa: E402
+from app.modules.suppliers_master.product_model import SupplierProduct  # noqa: E402
+from app.modules.system_management.model import Department, User  # noqa: E402
 from import_pubchem_chemicals import DEFAULT_CHEMICALS, build_row, fetch_properties, write_outputs  # noqa: E402
 
 

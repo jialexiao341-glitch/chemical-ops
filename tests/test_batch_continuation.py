@@ -7,12 +7,12 @@ import pytest
 
 from app.core.errors import BusinessValidationError
 from app.core.config import get_settings
-from app.modules.ai import multi_intent
-from app.modules.ai.schema import PendingChoice, SubTask, TaskResult, TaskStatus, Understanding
+from app.modules.ai_agent import multi_intent
+from app.modules.ai_agent.schema import PendingChoice, SubTask, TaskResult, TaskStatus, Understanding
 
 
 def test_choice_rejects_stale_or_foreign_candidate():
-    from app.modules.ai.candidate_resolution import validate_selection
+    from app.modules.ai_agent.candidate_resolution import validate_selection
     pending = PendingChoice(entity='product', lookup_arguments={'keyword': '试剂'},
                             candidates=[{'product_id': 7}], revision=2)
     assert validate_selection(pending, entity='product', selected_id=7, revision=2) == 7
@@ -22,7 +22,7 @@ def test_choice_rejects_stale_or_foreign_candidate():
 
 
 def test_batch_choice_survives_reload_and_preserves_successes(monkeypatch):
-    from app.modules.ai.schema import BatchChoice
+    from app.modules.ai_agent.schema import BatchChoice
     pending = PendingChoice(entity='product', lookup_arguments={'keyword': '试剂'},
                             candidates=[{'product_id': 7}, {'product_id': 8}], revision=2)
     completed = TaskResult(id='t1', kind='inventory', question='已完成库存查询', status=TaskStatus.SUCCEEDED,

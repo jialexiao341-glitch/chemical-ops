@@ -13,9 +13,9 @@ from app.core.auth import get_current_user
 from app.core.db import get_db
 from app.main import app
 from app.core.security import hash_password
-from app.modules.system.model import Permission, Role, RolePermission, User, UserRole
-from app.modules.rfqs.model import RFQ
-from app.modules.inventory.model import (
+from app.modules.system_management.model import Permission, Role, RolePermission, User, UserRole
+from app.modules.rfq_quotes.model import RFQ
+from app.modules.inventory_stock.model import (
     InventoryBalance,
     InventoryBalanceStatusLog,
     InventoryBatch,
@@ -29,15 +29,15 @@ from app.modules.inventory.model import (
     Warehouse,
     WarehouseLocation,
 )
-from app.modules.insights.model import InsightSnapshot
+from app.modules.insights_analytics.model import InsightSnapshot
 from app.modules.purchase_requests.model import PurchaseRequest
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.operation_exceptions.model import OperationException, OperationTask
-from app.modules.system.model import Department
-from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
-from app.modules.system.schema import RoleUpdate, UserUpdate
-from app.modules.system import service as system_service
-from app.modules.suppliers.model import Supplier
+from app.modules.system_management.model import Department
+from app.modules.system_management.crud import get_user_permission_codes, get_user_role_codes
+from app.modules.system_management.schema import RoleUpdate, UserUpdate
+from app.modules.system_management import service as system_service
+from app.modules.suppliers_master.model import Supplier
 from .conftest import grant_test_warehouse
 from tests.conftest import login
 from scripts.seed_demo_accounts import ROLE_SCOPES
@@ -457,7 +457,7 @@ def test_combined_technical_and_warehouse_roles_keep_warehouse_scope(
 
 def test_notifications_keep_recipient_scope_and_read_only_permission(client: TestClient, db_session) -> None:
     """通知列表/总数/未读统计和批量已读均限制接收人，只读角色不能标记。"""
-    from app.modules.notifications.model import Notification
+    from app.modules.notifications_center.model import Notification
 
     buyer = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     quality_manager = db_session.scalar(select(User).where(User.username == "QualityManager"))
@@ -494,7 +494,7 @@ def test_procurement_approver_cannot_review_own_work(client: TestClient, db_sess
     """经办审批分离同时约束采购经理与管理员，通过和驳回均不得修改本人记录。"""
     from app.modules.inventory_returns.model import InventoryReturnRequest
     from app.modules.purchase_orders.model import PurchaseOrder
-    from app.modules.replenishments.model import ReplenishmentRequest
+    from app.modules.replenishment_plans.model import ReplenishmentRequest
 
     supplier = db_session.scalar(select(Supplier).where(Supplier.status == "ACTIVE"))
     assert supplier is not None
@@ -535,9 +535,9 @@ def test_procurement_approver_cannot_review_own_work(client: TestClient, db_sess
 
 def test_replenishment_links_cannot_bypass_order_scope(client: TestClient, db_session) -> None:
     """补货来源订单、单独到货来源和完成订单均须属于经办人的采购范围。"""
-    from app.modules.deliveries.model import Delivery
+    from app.modules.deliveries_receipt.model import Delivery
     from app.modules.purchase_orders.model import PurchaseOrder
-    from app.modules.replenishments.model import ReplenishmentRequest
+    from app.modules.replenishment_plans.model import ReplenishmentRequest
 
     buyer = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     template = db_session.scalar(select(PurchaseOrder).where(PurchaseOrder.status == "COMPLETED"))
@@ -619,7 +619,7 @@ def test_admin_cannot_review_own_warehouse_request(client: TestClient, db_sessio
 ])
 def test_finance_reviewer_cannot_review_own_record(client: TestClient, db_session, role_code, resource, action) -> None:
     from datetime import date
-    from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
+    from app.modules.finance_management.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
     from app.modules.purchase_orders.model import PurchaseOrder
 
     with as_demo_role(db_session, role_code):
@@ -661,7 +661,7 @@ def test_finance_reviewer_cannot_review_own_record(client: TestClient, db_sessio
 def test_builtin_buyer_replenishment_flow_and_foreign_request_scope(client: TestClient, db_session) -> None:
     """默认采购员可办理本人补货，不能审批或借本人订单完成他人补货。"""
     from app.modules.purchase_orders.model import PurchaseOrder
-    from app.modules.replenishments.model import ReplenishmentRequest
+    from app.modules.replenishment_plans.model import ReplenishmentRequest
 
     buyer = db_session.scalar(select(User).where(User.username == "BuyerUser"))
     manager = db_session.scalar(select(User).where(User.username == "ProcManager"))
@@ -893,7 +893,7 @@ def test_quality_inspector_lists_and_reads_only_assigned_acceptances(
 
 
 def test_quality_manager_assigns_acceptance_and_inspector_cannot_self_assign(client: TestClient, db_session) -> None:
-    from app.modules.deliveries.model import Delivery
+    from app.modules.deliveries_receipt.model import Delivery
     from app.modules.purchase_orders.model import PurchaseOrder
 
     inspector = db_session.scalar(select(User).where(User.username == "QualityInspector"))
@@ -1105,7 +1105,7 @@ def test_procurement_role_cannot_read_or_write_finance_checklists(
 def test_supplier_insight_omits_quality_evidence_without_quality_permission(
     client: TestClient, db_session
 ) -> None:
-    from app.modules.system import crud as system_crud
+    from app.modules.system_management import crud as system_crud
 
     buyer = db_session.scalar(select(User).where(User.username == "BuyerUser", User.status == "ACTIVE"))
     supplier = db_session.scalar(select(Supplier).order_by(Supplier.id))

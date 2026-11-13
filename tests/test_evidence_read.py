@@ -8,9 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
-from app.modules.ai.evidence_store import make_ref, read_evidence
-from app.modules.ai.model import AIAgentTask
-from app.modules.ai.schema import EvidenceReadInput
+from app.modules.ai_agent.evidence_store import make_ref, read_evidence
+from app.modules.ai_agent.model import AIAgentTask
+from app.modules.ai_agent.schema import EvidenceReadInput
 
 
 def _task(trace, *, user_id=7, task_id="a" * 32):
@@ -34,7 +34,7 @@ def db():
 
 @pytest.fixture(autouse=True)
 def _skip_permission_recheck(monkeypatch):
-    from app.modules.ai import agent_runtime
+    from app.modules.ai_agent import agent_runtime
     monkeypatch.setattr(agent_runtime, "_check_trace_access", lambda *args, **kwargs: [])
 
 
@@ -93,7 +93,7 @@ def test_inactive_user_is_denied(db):
 
 
 def test_planner_view_exposes_spill_ref_for_truncated_results():
-    from app.modules.ai.agent_runtime import _planner_view
+    from app.modules.ai_agent.agent_runtime import _planner_view
 
     entry = {"step": 2, "action": "call_tool", "tool": "suppliers.profile", "status": "SUCCEEDED",
              "result": {"rows": [{"i": i} for i in range(20)], "total_rows": 20}}
@@ -104,7 +104,7 @@ def test_planner_view_exposes_spill_ref_for_truncated_results():
 
 
 def test_planner_view_marks_tool_level_truncation():
-    from app.modules.ai.agent_runtime import _planner_view
+    from app.modules.ai_agent.agent_runtime import _planner_view
 
     entry = {"step": 4, "action": "call_tool", "tool": "quality_acceptances.get_by_no",
              "status": "SUCCEEDED", "result": {"rows": [{"i": 1}], "truncated": True}}

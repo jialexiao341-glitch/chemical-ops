@@ -7,11 +7,11 @@
 
 from __future__ import annotations
 
-from app.modules.ai import action_handlers
-from app.modules.ai.agent_tools import TOOLS
-from app.modules.ai.capabilities import ACTION_ENTRIES, AGENT_TASK_REQUIREMENTS, _dataset_description
-from app.modules.ai.catalog import CATALOG
-from app.modules.ai.schema import CapabilityManifest
+from app.modules.ai_agent import action_handlers
+from app.modules.ai_agent.agent_tools import TOOLS
+from app.modules.ai_agent.capabilities import ACTION_ENTRIES, AGENT_TASK_REQUIREMENTS, _dataset_description
+from app.modules.ai_agent.catalog import CATALOG
+from app.modules.ai_agent.schema import CapabilityManifest
 
 
 def build_manifest(digest: str) -> CapabilityManifest:

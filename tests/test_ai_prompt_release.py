@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.modules.ai import agent_runtime as runtime, prompt_registry, routing
-from app.modules.ai.prompt_registry import PromptRelease
+from app.modules.ai_agent import agent_runtime as runtime, prompt_registry, routing
+from app.modules.ai_agent.prompt_registry import PromptRelease
 
 
 @pytest.fixture(autouse=True)

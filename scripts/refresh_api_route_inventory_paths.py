@@ -45,7 +45,7 @@ def _registered_path(path: str, methods: set[str], openapi_paths: dict) -> str:
 
 
 def _insight_source_locations() -> dict[tuple[str, str], str]:
-    controller = ROOT / "backend/app/modules/insights/controller.py"
+    controller = ROOT / "backend/app/modules/insights_analytics/controller.py"
     tree = ast.parse(controller.read_text(encoding="utf-8"))
     locations: dict[tuple[str, str], str] = {}
     for node in ast.walk(tree):
@@ -65,7 +65,7 @@ def _insight_source_locations() -> dict[tuple[str, str], str]:
             if not isinstance(path, str):
                 continue
             locations[(f"/api/v1/insights{path}", method)] = (
-                f"backend/app/modules/insights/controller.py:{node.lineno}"
+                f"backend/app/modules/insights_analytics/controller.py:{node.lineno}"
             )
     return locations
 

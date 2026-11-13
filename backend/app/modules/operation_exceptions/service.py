@@ -8,10 +8,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.files import service as file_service
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
-from app.modules.insights.model import ExceptionActionDecision
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.files_storage import service as file_service
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch, Warehouse
+from app.modules.insights_analytics.model import ExceptionActionDecision
 from app.modules.operation_exceptions import crud
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment
 from app.modules.operation_exceptions.schema import (
@@ -23,15 +23,15 @@ from app.modules.operation_exceptions.schema import (
 )
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.purchase_orders.scope import order_read_condition
-from app.modules.products.model import Product
+from app.modules.products_master.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.quality_acceptances.scope import acceptance_read_condition
-from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
-from app.modules.system.file_model import SysFile, SysFileAttachment
-from app.modules.system.model import Department, User
-from app.modules.rfqs.model import RFQ, SupplierQuote
-from app.modules.finance.model import FinanceInvoice, FinanceInvoiceMatch
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.crud import get_user_permission_codes, get_user_role_codes
+from app.modules.system_management.file_model import SysFile, SysFileAttachment
+from app.modules.system_management.model import Department, User
+from app.modules.rfq_quotes.model import RFQ, SupplierQuote
+from app.modules.finance_management.model import FinanceInvoice, FinanceInvoiceMatch
 
 
 def _now() -> datetime:
@@ -42,7 +42,7 @@ def _now() -> datetime:
 
 def _exception_department_scope(user: User, roles: set[str]):
     """关联订单、到货和责任部门均不得超出用户部门授权。"""
-    from app.modules.system.data_scope import department_scope_condition
+    from app.modules.system_management.data_scope import department_scope_condition
     cap = department_scope_condition(user, roles, PurchaseOrder.department_id)
     allowed_orders = select(PurchaseOrder.id).where(cap)
     allowed_deliveries = select(Delivery.id).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(cap)
@@ -67,7 +67,7 @@ def _exception_warehouse_scope(db: Session, user: User, roles: set[str]):
     """仓库授权为异常来源的上限，负责人或任务指派不能绕过。"""
     if 'SYS_ADMIN' in roles:
         return True
-    from app.modules.inventory.service import accessible_warehouse_ids
+    from app.modules.inventory_stock.service import accessible_warehouse_ids
     warehouse_ids = accessible_warehouse_ids(db, user) or set()
     allowed = exists(select(InventoryBalance.id).where(
         InventoryBalance.batch_id == OperationException.source_id,
@@ -116,7 +116,7 @@ def _exception_scope_condition(db: Session, user: User):
         ))
 
     if "warehouse.inventory.read" in permissions:
-        from app.modules.inventory.service import accessible_warehouse_ids
+        from app.modules.inventory_stock.service import accessible_warehouse_ids
         warehouse_ids = accessible_warehouse_ids(db, user)
         warehouse_scope = True if warehouse_ids is None else Warehouse.id.in_(warehouse_ids)
         visible_batches = select(InventoryBalance.batch_id).join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(warehouse_scope)
@@ -131,7 +131,7 @@ def _exception_scope_condition(db: Session, user: User):
         ))
 
     if "procurement.rfqs.read" in permissions:
-        from app.modules.rfqs.scope import rfq_read_condition
+        from app.modules.rfq_quotes.scope import rfq_read_condition
         rfq_scope = rfq_read_condition(user, roles)
         visible_quotes = select(SupplierQuote.id).join(RFQ, RFQ.id == SupplierQuote.rfq_id).where(rfq_scope)
         scopes.append(and_(OperationException.source_type == "SUPPLIER_QUOTE", OperationException.source_id.in_(visible_quotes)))
@@ -205,7 +205,7 @@ def _has_source_scope(db: Session, user: User, data: OperationExceptionCreate) -
         acceptance_scope = acceptance_read_condition(user, roles)
         return db.scalar(select(QualityAcceptance.id).where(QualityAcceptance.id == data.source_id, acceptance_scope)) is not None
     if data.source_type == "INVENTORY_BATCH" and "warehouse.inventory.read" in permissions:
-        from app.modules.inventory.service import accessible_warehouse_ids
+        from app.modules.inventory_stock.service import accessible_warehouse_ids
         warehouse_ids = accessible_warehouse_ids(db, user)
         warehouse_scope = True if warehouse_ids is None else Warehouse.id.in_(warehouse_ids)
         return db.scalar(select(InventoryBalance.id).join(Warehouse, Warehouse.id == InventoryBalance.warehouse_id).where(InventoryBalance.batch_id == data.source_id, warehouse_scope).limit(1)) is not None
@@ -564,7 +564,7 @@ def list_tasks(db: Session, user: User, exception_id: int, *, status: str | None
 
 def _notify_task_assignee(db: Session, task: OperationTask) -> None:
     """同事务通知新负责人；通知正文不包含异常或任务敏感信息。"""
-    from app.modules.notifications.model import Notification
+    from app.modules.notifications_center.model import Notification
     db.add(Notification(recipient_id=task.assignee_id, notification_type="OPERATION_TASK_ASSIGNED",
         title="异常处理任务待办理", content="您有一项异常处理任务，请查看详情。",
         related_type="OPERATION_TASK", related_id=task.id))

@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.modules.jobs.wiki_versions import WikiVersion, create_version, history
+from app.modules.jobs_scheduler.wiki_versions import WikiVersion, create_version, history
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def test_version_rejects_technical_text_without_matching_evidence(db):
 
 def test_note_endpoint_uses_server_owned_source_not_client_data(db, monkeypatch):
     from types import SimpleNamespace
-    from app.modules.jobs import controller, wiki_release
+    from app.modules.jobs_scheduler import controller, wiki_release
     baseline = {'msds': {'source_table': 1, 'source': {'sha256': 'abc'}, 'rows': []},
                 'technical': {'source': {'table': 1, 'sha256': 'abc'}, 'items': []}}
     monkeypatch.setattr(controller.technical_documents, 'require_technical_or_admin', lambda *_: None)
@@ -59,7 +59,7 @@ def test_note_endpoint_uses_server_owned_source_not_client_data(db, monkeypatch)
 
 def test_technical_edit_uses_only_exact_original_cells(db, monkeypatch):
     from types import SimpleNamespace
-    from app.modules.jobs import controller, wiki_release
+    from app.modules.jobs_scheduler import controller, wiki_release
     baseline = {'msds': {'source_table': 1, 'source': {'sha256': 'abc'},
                          'rows': [{'row': 1, 'cells': ['理化性质', '沸点：78']} ]},
                 'technical': {'source': {'table': 1, 'sha256': 'abc'}, 'items': [], 'sections': ['理化性质']}}
@@ -73,7 +73,7 @@ def test_technical_edit_uses_only_exact_original_cells(db, monkeypatch):
 
 def test_technical_edit_rejects_forged_text():
     from pydantic import ValidationError
-    from app.modules.jobs.schema import WikiVersionCreate
+    from app.modules.jobs_scheduler.schema import WikiVersionCreate
 
     with pytest.raises(ValidationError):
         WikiVersionCreate(expected_version=0, note='', items=[{'section': '理化性质', 'source_row': 1,
@@ -82,7 +82,7 @@ def test_technical_edit_rejects_forged_text():
 
 def test_source_update_keeps_initial_version(db, monkeypatch):
     from types import SimpleNamespace
-    from app.modules.jobs import controller, wiki_release, wiki_source
+    from app.modules.jobs_scheduler import controller, wiki_release, wiki_source
 
     original = {'msds': {'source_table': 1, 'source': {'sha256': 'old'}, 'rows': []},
                 'technical': {'source': {'table': 1, 'sha256': 'old'}, 'items': []}}
@@ -100,8 +100,8 @@ def test_source_update_keeps_initial_version(db, monkeypatch):
 
 @pytest.mark.integration
 def test_mysql_version_snapshot_roundtrip_is_transactional(db_session):
-    from app.modules.jobs import wiki_release
-    from app.modules.system.model import User
+    from app.modules.jobs_scheduler import wiki_release
+    from app.modules.system_management.model import User
     from sqlalchemy import select
 
     user = db_session.scalar(select(User).limit(1))

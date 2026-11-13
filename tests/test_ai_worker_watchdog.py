@@ -6,8 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.modules.ai import agent_runtime
-from app.modules.ai.model import AIAgentTask
+from app.modules.ai_agent import agent_runtime
+from app.modules.ai_agent.model import AIAgentTask
 from app.modules.task_queue.model import TaskExecution
 
 

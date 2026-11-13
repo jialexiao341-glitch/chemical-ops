@@ -3,10 +3,10 @@ from datetime import datetime
 from uuid import uuid4
 from sqlalchemy import select
 
-from app.modules.ai.model import AIAgentTask, AIPurchaseDraftConfirmation, AIConversation, AIMessage
-from app.modules.ai.conversation_store import delete_conversation
+from app.modules.ai_agent.model import AIAgentTask, AIPurchaseDraftConfirmation, AIConversation, AIMessage
+from app.modules.ai_agent.conversation_store import delete_conversation
 from app.modules.task_queue.model import TaskExecution, TaskResourceLock
-from app.modules.system.crud import get_user_by_username
+from app.modules.system_management.crud import get_user_by_username
 
 
 def _login(client: TestClient, password: str) -> dict[str, str]:
@@ -58,10 +58,10 @@ def test_manage_own_ai_conversation(client: TestClient, db_session, demo_passwor
 
 def test_delete_conversation_cancels_owned_running_tasks_and_draft(db_session):
     from types import SimpleNamespace
-    from app.modules.ai import conversation_store
+    from app.modules.ai_agent import conversation_store
     from app.modules.purchase_requests.model import PurchaseRequest
 
-    from app.modules.system.model import User
+    from app.modules.system_management.model import User
     user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     conversation = AIConversation(user_id=user.id, title='生命周期回归', business_scene='GENERAL', permission_snapshot={}, status='ACTIVE')
     db_session.add(conversation); db_session.flush()

@@ -10,12 +10,12 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import conversation_store, schema
-from app.modules.ai.model import AIAgentTask, AIConversation, AIConversationState, AIMessage
+from app.modules.ai_agent import conversation_store, schema
+from app.modules.ai_agent.model import AIAgentTask, AIConversation, AIConversationState, AIMessage
 
 
 def test_chat_answer_is_bound_to_saved_option_and_invalid_answer_keeps_state(monkeypatch):
-    from app.modules.ai import capabilities, routing, service
+    from app.modules.ai_agent import capabilities, routing, service
 
     user = SimpleNamespace(id=7)
     pending = schema.PendingClarification(
@@ -106,8 +106,8 @@ def test_clarification_output_requires_a_bound_slot_and_finite_options():
 
 @pytest.fixture
 def clarification_db(monkeypatch):
-    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
-    monkeypatch.setattr("app.modules.system.data_scope.warehouse_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.department_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.warehouse_scope_snapshot", lambda *_: None)
     # 生产环境的 MySQL CURRENT_TIMESTAMP(3) 不兼容 SQLite 更新语法。
     monkeypatch.setattr(AIConversationState.__table__.c.updated_at, "onupdate", None)
     engine = create_engine("sqlite:///:memory:", echo=False, connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -158,7 +158,7 @@ def test_pending_state_is_versioned_owned_and_merged_with_other_memory(clarifica
 
 
 def test_pending_context_restores_original_question_from_owned_messages(clarification_db):
-    from app.modules.ai import routing
+    from app.modules.ai_agent import routing
 
     user = SimpleNamespace(id=7)
     decision = schema.Understanding(purpose="clarify", question="按订单还是明细统计？",
@@ -243,7 +243,7 @@ def test_corrupt_pending_state_is_removed_instead_of_masking_original_error(clar
 
 
 def test_deleting_conversation_removes_pending_state(clarification_db, monkeypatch):
-    from app.modules.ai import conversation_store
+    from app.modules.ai_agent import conversation_store
 
     engine = clarification_db.get_bind()
     AIAgentTask.__table__.create(engine)

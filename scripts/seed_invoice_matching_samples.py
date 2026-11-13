@@ -14,14 +14,14 @@ sys.path.insert(0, str(ROOT / 'backend'))
 from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.finance import service, invoice_matches
-from app.modules.finance.model import FinanceInvoice, FinanceReconciliation, FinanceReconciliationItem
-from app.modules.finance.schema import InvoiceCreate, InvoiceMatchSave
-from app.modules.products.model import Product
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.finance_management import service, invoice_matches
+from app.modules.finance_management.model import FinanceInvoice, FinanceReconciliation, FinanceReconciliationItem
+from app.modules.finance_management.schema import InvoiceCreate, InvoiceMatchSave
+from app.modules.products_master.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
 
 CASES = [('FULL', '全额匹配待复核'), ('SPLIT', '分两张发票开票'), ('MULTI', '一张发票匹配多个产品行'), ('AMOUNT', '匹配合计不符待处理'), ('TAX', '税额差异待说明'), ('REJECT', '驳回后重新录入')]
 NOTE = '开发模拟：用于发票行匹配演示，非真实交易、验收或开票，不产生库存和资金流水。'

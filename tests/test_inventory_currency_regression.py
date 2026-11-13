@@ -51,18 +51,18 @@ def test_outbound_rejects_mixed_currencies_before_deducting():
 def test_fifo_outbound_preserves_currency_or_rejects_mixed(db_session, currencies, quantity, expected):
     from uuid import uuid4
     from sqlalchemy import select
-    from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
+    from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
     from app.modules.inventory_cost.model import InventoryCostLayer
     from app.modules.inventory_cost.schema import FifoOutboundCreate
     from app.modules.inventory_cost.service import create_fifo_outbound
-    from app.modules.system.model import User
+    from app.modules.system_management.model import User
 
     batch = db_session.scalar(select(InventoryBatch).limit(1))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(1))
     admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     assert batch is not None and warehouse is not None and admin is not None
     product_id = batch.product_id
-    from app.modules.products.model import Product
+    from app.modules.products_master.model import Product
     product = db_session.get(Product, product_id)
     assert product is not None and product.status == 'ACTIVE'
     location = WarehouseLocation(warehouse_id=warehouse.id, location_code=f'T-{uuid4().hex[:12]}', location_name='测试', status='ACTIVE')
@@ -95,13 +95,13 @@ def test_fifo_outbound_preserves_currency_or_rejects_mixed(db_session, currencie
 def test_inbound_cost_layer_uses_order_currency(db_session):
     from uuid import uuid4
     from sqlalchemy import select
-    from app.modules.deliveries.model import Delivery, DeliveryItem
-    from app.modules.inventory.model import Warehouse, WarehouseLocation, InventoryTransferRequest, InventoryTransferItem
-    from app.modules.inventory.schema import InboundCreate
-    from app.modules.inventory.service import create_inbound, execute_transfer_request
+    from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+    from app.modules.inventory_stock.model import Warehouse, WarehouseLocation, InventoryTransferRequest, InventoryTransferItem
+    from app.modules.inventory_stock.schema import InboundCreate
+    from app.modules.inventory_stock.service import create_inbound, execute_transfer_request
     from app.modules.inventory_cost.model import InventoryCostLayer
     from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
-    from app.modules.system.model import User
+    from app.modules.system_management.model import User
 
     order_item = db_session.scalar(select(PurchaseOrderItem).limit(1))
     order = db_session.get(PurchaseOrder, order_item.po_id)

@@ -7,9 +7,9 @@ from sqlalchemy import func, select
 
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.supplier_portal.model import SupplierPortalAccount
-from app.modules.suppliers.model import Supplier
-from app.modules.system.audit import AuditLog
-from app.modules.system.model import Role, User, UserRole
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.audit import AuditLog
+from app.modules.system_management.model import Role, User, UserRole
 
 from .conftest import login
 

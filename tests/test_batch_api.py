@@ -5,7 +5,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from tests.conftest import login
-from app.modules.batch.controller import EXPORT_COLUMNS, RESOURCES
+from app.modules.batch_operations.controller import EXPORT_COLUMNS, RESOURCES
 
 
 def sample_cas() -> str:
@@ -79,7 +79,7 @@ def test_batch_import_is_atomic_on_invalid_row(client: TestClient, demo_password
 
 def test_batch_user_disable_rejects_pending_registration_atomically(client: TestClient, db_session, demo_password: str) -> None:
     from sqlalchemy import select
-    from app.modules.system.model import User
+    from app.modules.system_management.model import User
     user = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
     other = db_session.scalar(select(User).where(User.username == 'WarehouseUser'))
     if user is None or other is None:
@@ -99,7 +99,7 @@ def test_batch_user_disable_rejects_pending_registration_atomically(client: Test
 
 def test_batch_role_disable_revokes_member_tokens(client: TestClient, db_session, demo_password: str) -> None:
     from sqlalchemy import select
-    from app.modules.system.model import Role, User, UserRole
+    from app.modules.system_management.model import Role, User, UserRole
     role = db_session.scalar(select(Role).where(Role.role_code == 'BUYER'))
     assert role is not None
     user = db_session.scalar(select(User).join(UserRole, UserRole.user_id == User.id).where(UserRole.role_id == role.id))
@@ -139,8 +139,8 @@ def test_batch_import_duplicate_within_file_rolls_back(client: TestClient, demo_
 
 def test_batch_import_records_audit(client: TestClient, db_session, demo_password: str) -> None:
     from sqlalchemy import select
-    from app.modules.chemicals.model import Chemical
-    from app.modules.system.audit import AuditLog
+    from app.modules.chemicals_master.model import Chemical
+    from app.modules.system_management.audit import AuditLog
     suffix = uuid4().hex[:10]
     name = f'批量审计-{suffix}'
     headers = login(client, 'SystemAdmin', demo_password)

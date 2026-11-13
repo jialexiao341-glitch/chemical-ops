@@ -6,9 +6,9 @@ from sqlalchemy import select
 
 
 def test_configured_warehouse_scope_limits_access_and_admin_bypasses(db_session):
-    from app.modules.inventory.model import Warehouse
-    from app.modules.inventory import service
-    from app.modules.system.model import User, UserWarehouseScope, UserWarehouseGrant
+    from app.modules.inventory_stock.model import Warehouse
+    from app.modules.inventory_stock import service
+    from app.modules.system_management.model import User, UserWarehouseScope, UserWarehouseGrant
 
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     warehouses = list(db_session.scalars(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(2)))
@@ -34,8 +34,8 @@ def test_configured_warehouse_scope_limits_access_and_admin_bypasses(db_session)
 
 def test_only_admin_can_configure_warehouse_scope(client, db_session, demo_password):
     from tests.conftest import login
-    from app.modules.inventory.model import Warehouse
-    from app.modules.system.model import User
+    from app.modules.inventory_stock.model import Warehouse
+    from app.modules.system_management.model import User
 
     admin = login(client, 'SystemAdmin', demo_password)
     manager = login(client, 'ProcManager', demo_password)
@@ -54,9 +54,9 @@ def test_only_admin_can_configure_warehouse_scope(client, db_session, demo_passw
 
 
 def test_unconfigured_user_has_no_implicit_warehouse_access(db_session, monkeypatch):
-    from app.modules.inventory.model import Warehouse
-    from app.modules.inventory import service
-    from app.modules.system.model import UserWarehouseScope
+    from app.modules.inventory_stock.model import Warehouse
+    from app.modules.inventory_stock import service
+    from app.modules.system_management.model import UserWarehouseScope
     user = SimpleNamespace(id=-12345)
     monkeypatch.setattr(service, 'get_user_role_codes', lambda *_: ['PROCUREMENT_MANAGER'])
     assert db_session.get(UserWarehouseScope, user.id) is None
@@ -67,9 +67,9 @@ def test_unconfigured_user_has_no_implicit_warehouse_access(db_session, monkeypa
 
 
 def test_disabled_warehouse_is_removed_from_scope_snapshot(db_session):
-    from app.modules.inventory.model import Warehouse
-    from app.modules.system.data_scope import warehouse_scope_snapshot
-    from app.modules.system.model import User, UserWarehouseScope, UserWarehouseGrant
+    from app.modules.inventory_stock.model import Warehouse
+    from app.modules.system_management.data_scope import warehouse_scope_snapshot
+    from app.modules.system_management.model import User, UserWarehouseScope, UserWarehouseGrant
 
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     warehouse = db_session.scalar(select(Warehouse).where(Warehouse.status == 'ACTIVE').limit(1))
@@ -88,8 +88,8 @@ def test_disabled_warehouse_is_removed_from_scope_snapshot(db_session):
 
 def test_warehouse_scope_change_invalidates_old_agent_task_and_proposal(monkeypatch):
     from app.core.errors import ResourceNotFoundError
-    from app.modules.ai import agent_runtime, action_proposals
-    from app.modules.system import data_scope
+    from app.modules.ai_agent import agent_runtime, action_proposals
+    from app.modules.system_management import data_scope
 
     monkeypatch.setattr(data_scope, 'department_scope_snapshot', lambda *_: None)
     monkeypatch.setattr(data_scope, 'warehouse_scope_snapshot', lambda *_: [2])
@@ -107,8 +107,8 @@ def test_warehouse_scope_change_invalidates_old_agent_task_and_proposal(monkeypa
 
 def test_warehouse_scope_change_invalidates_old_conversation(monkeypatch):
     from app.core.errors import BusinessValidationError
-    from app.modules.ai import conversation_store
-    from app.modules.system import data_scope
+    from app.modules.ai_agent import conversation_store
+    from app.modules.system_management import data_scope
 
     monkeypatch.setattr(data_scope, 'department_scope_snapshot', lambda *_: None)
     monkeypatch.setattr(data_scope, 'warehouse_scope_snapshot', lambda *_: [2])
@@ -119,10 +119,10 @@ def test_warehouse_scope_change_invalidates_old_conversation(monkeypatch):
 
 
 def test_exception_owner_cannot_bypass_empty_warehouse_scope(db_session):
-    from app.modules.inventory.model import InventoryBalance
+    from app.modules.inventory_stock.model import InventoryBalance
     from app.modules.operation_exceptions.model import OperationException
     from app.modules.operation_exceptions import service
-    from app.modules.system.model import User, UserWarehouseScope
+    from app.modules.system_management.model import User, UserWarehouseScope
 
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     balance = db_session.scalar(select(InventoryBalance).limit(1))
@@ -138,9 +138,9 @@ def test_exception_owner_cannot_bypass_empty_warehouse_scope(db_session):
 
 
 def test_agent_association_sql_accepts_warehouse_scoped_exception_filter(db_session):
-    from app.modules.ai import text2sql
-    from app.modules.ai.catalog import CATALOG
-    from app.modules.system.model import User, UserWarehouseScope
+    from app.modules.ai_agent import text2sql
+    from app.modules.ai_agent.catalog import CATALOG
+    from app.modules.system_management.model import User, UserWarehouseScope
 
     user = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     if db_session.get(UserWarehouseScope, user.id) is None:
@@ -155,7 +155,7 @@ def test_agent_association_sql_accepts_warehouse_scoped_exception_filter(db_sess
 @pytest.mark.parametrize('kind', ['issue', 'transfer', 'stocktake'])
 def test_manager_can_read_other_users_record_only_with_warehouse_access(monkeypatch, kind):
     from app.core.errors import ResourceNotFoundError
-    from app.modules.inventory import service
+    from app.modules.inventory_stock import service
 
     manager = SimpleNamespace(id=7)
     monkeypatch.setattr(service, 'get_user_role_codes', lambda *_: ['PROCUREMENT_MANAGER'])
@@ -178,7 +178,7 @@ def test_manager_can_read_other_users_record_only_with_warehouse_access(monkeypa
 
 @pytest.mark.parametrize('kind', ['issue', 'transfer', 'stocktake'])
 def test_manager_list_keeps_authorized_warehouse_filter(monkeypatch, kind):
-    from app.modules.inventory import service
+    from app.modules.inventory_stock import service
     manager = SimpleNamespace(id=7)
     monkeypatch.setattr(service, 'get_user_role_codes', lambda *_: ['PROCUREMENT_MANAGER'])
     monkeypatch.setattr(service, '_can_access_all_warehouses', lambda *_: False)
@@ -191,7 +191,7 @@ def test_manager_list_keeps_authorized_warehouse_filter(monkeypatch, kind):
 
 
 def test_supplier_internal_mixed_role_is_warehouse_restricted(monkeypatch):
-    from app.modules.system import data_scope
+    from app.modules.system_management import data_scope
     user = SimpleNamespace(id=7)
     monkeypatch.setattr(data_scope, 'get_user_role_codes', lambda *_: ['SUPPLIER_PORTAL', 'WAREHOUSE'])
     assert data_scope.is_warehouse_restricted(None, user)
@@ -203,7 +203,7 @@ def test_supplier_internal_mixed_role_is_warehouse_restricted(monkeypatch):
 
 def test_stocktake_execute_requires_independent_permission(client, db_session, demo_password, monkeypatch):
     from tests.conftest import login
-    from app.modules.system import crud
+    from app.modules.system_management import crud
 
     headers = login(client, 'WarehouseUser', demo_password)
     permissions = ['warehouse.inventory.stocktake.write']
@@ -216,9 +216,9 @@ def test_stocktake_execute_requires_independent_permission(client, db_session, d
 
 def test_manager_approves_other_issue_only_with_permission_and_scope(client, db_session, demo_password, monkeypatch):
     from uuid import uuid4
-    from app.modules.inventory.model import InventoryBalance, InventoryIssueItem, InventoryIssueRequest
-    from app.modules.system import crud
-    from app.modules.system.model import User, UserWarehouseGrant
+    from app.modules.inventory_stock.model import InventoryBalance, InventoryIssueItem, InventoryIssueRequest
+    from app.modules.system_management import crud
+    from app.modules.system_management.model import User, UserWarehouseGrant
     from tests.conftest import login, grant_test_warehouse
 
     manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
@@ -258,8 +258,8 @@ def test_manager_approves_other_issue_only_with_permission_and_scope(client, db_
 
 
 def test_admin_can_configure_mixed_supplier_internal_account(client, db_session, demo_password):
-    from app.modules.inventory.model import Warehouse
-    from app.modules.system.model import Role, User, UserRole
+    from app.modules.inventory_stock.model import Warehouse
+    from app.modules.system_management.model import Role, User, UserRole
     from tests.conftest import login
 
     headers = login(client, 'SystemAdmin', demo_password)
@@ -275,8 +275,8 @@ def test_admin_can_configure_mixed_supplier_internal_account(client, db_session,
     mixed = client.put(f'/api/v1/system/users/{user.id}/warehouse-scope', headers=headers, json=payload)
     assert mixed.status_code == 200, mixed.text
     assert mixed.json() == payload
-    from app.modules.inventory.service import accessible_warehouse_ids
-    from app.modules.system.data_scope import is_warehouse_restricted
+    from app.modules.inventory_stock.service import accessible_warehouse_ids
+    from app.modules.system_management.data_scope import is_warehouse_restricted
     assert is_warehouse_restricted(db_session, user)
     assert accessible_warehouse_ids(db_session, user) == {warehouse.id}
     pure = client.put(f'/api/v1/system/users/{supplier.id}/warehouse-scope', headers=headers, json=payload)
@@ -284,9 +284,9 @@ def test_admin_can_configure_mixed_supplier_internal_account(client, db_session,
 
 
 def test_pure_supplier_cannot_reuse_old_internal_warehouse_grant(db_session):
-    from app.modules.inventory.model import Warehouse
-    from app.modules.inventory import service
-    from app.modules.system.model import User
+    from app.modules.inventory_stock.model import Warehouse
+    from app.modules.inventory_stock import service
+    from app.modules.system_management.model import User
     from tests.conftest import grant_test_warehouse
 
     supplier = db_session.scalar(select(User).where(User.username == 'SupplierUser'))
@@ -298,8 +298,8 @@ def test_pure_supplier_cannot_reuse_old_internal_warehouse_grant(db_session):
 
 
 def test_global_notification_excludes_mixed_supplier_internal_user(db_session):
-    from app.modules.notifications.service import notify_users
-    from app.modules.system.model import Role, User, UserRole
+    from app.modules.notifications_center.service import notify_users
+    from app.modules.system_management.model import Role, User, UserRole
 
     manager = db_session.scalar(select(User).where(User.username == 'ProcManager'))
     supplier = db_session.scalar(select(User).where(User.username == 'SupplierUser'))

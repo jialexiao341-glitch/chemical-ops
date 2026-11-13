@@ -7,12 +7,12 @@ import pytest
 from sqlalchemy import select
 from fastapi.testclient import TestClient
 
-from app.modules.products.model import Product
+from app.modules.products_master.model import Product
 from app.modules.purchase_requests.model import Unit
-from app.modules.suppliers.model import Supplier
-from app.modules.rfqs.model import SupplierQuote
+from app.modules.suppliers_master.model import Supplier
+from app.modules.rfq_quotes.model import SupplierQuote
 from app.core.security import hash_password
-from app.modules.system.model import Department, User
+from app.modules.system_management.model import Department, User
 from .conftest import login
 
 
@@ -24,7 +24,7 @@ def test_warehouse_role_does_not_expand_delivery_scope(monkeypatch) -> None:
 
     from types import SimpleNamespace
 
-    from app.modules.deliveries import service as delivery_service
+    from app.modules.deliveries_receipt import service as delivery_service
 
     role_codes = {"WAREHOUSE"}
     monkeypatch.setattr(delivery_service, "get_user_role_codes", lambda _db, _user_id: list(role_codes))

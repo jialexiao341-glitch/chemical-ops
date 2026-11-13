@@ -5,9 +5,9 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.modules.ai import agent_tools, schema
-from app.modules.products.model import Product
-from app.modules.system.model import User
+from app.modules.ai_agent import agent_tools, schema
+from app.modules.products_master.model import Product
+from app.modules.system_management.model import User
 
 
 def test_tool_is_registered_and_task_requires_product_keyword():
@@ -70,7 +70,7 @@ def test_plan_without_incoming_permissions_adds_warnings(db_session, monkeypatch
 
 
 def test_agent_summary_and_finish_use_plan_result():
-    from app.modules.ai import agent_runtime
+    from app.modules.ai_agent import agent_runtime
 
     plan = {"tool": "inventory.replenishment_plan", "summary": "建议补货 10 升。"}
     agent_runtime._validate_finish_evidence("replenishment_plan", [

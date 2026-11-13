@@ -9,9 +9,9 @@ import pytest
 from app.core.errors import BusinessValidationError
 from app.modules.purchase_orders import service
 from app.modules.purchase_orders.schema import PurchaseOrderCreate
-from app.modules.finance import reconciliation_items
-from app.modules.finance.schema import ReconciliationItemsRefresh
-from app.modules.inventory import service as inventory_service
+from app.modules.finance_management import reconciliation_items
+from app.modules.finance_management.schema import ReconciliationItemsRefresh
+from app.modules.inventory_stock import service as inventory_service
 
 
 class OrderSession:

@@ -6,11 +6,11 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.modules.deliveries.model import Delivery, DeliveryItem
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
-from app.modules.products.model import Product
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
+from app.modules.products_master.model import Product
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
 
 from .conftest import login
 

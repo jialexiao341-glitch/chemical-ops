@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import action_handlers
+from app.modules.ai_agent import action_handlers
 from app.modules.operation_exceptions import service as exception_service
 from app.modules.operation_exceptions.schema import OperationTaskRead
 
@@ -120,7 +120,7 @@ def test_execute_uses_domain_service_with_caller_transaction(monkeypatch):
 
 
 def test_exception_task_understanding_requires_number_and_safe_fields():
-    from app.modules.ai.schema import Understanding
+    from app.modules.ai_agent.schema import Understanding
 
     with pytest.raises(ValueError):
         Understanding(purpose="exception_task", slots={}, action_fields={"title": "补交资料"})

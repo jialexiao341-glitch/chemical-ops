@@ -2,7 +2,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from app.modules.ai import context_stream
+from app.modules.ai_agent import context_stream
 
 
 def test_stream_uses_authorized_facts_and_preserves_evidence(monkeypatch):
@@ -40,9 +40,9 @@ def test_stream_error_does_not_claim_done(monkeypatch):
 def test_stream_endpoint_authorizes_and_returns_incremental_evidence(client, db_session, demo_password, monkeypatch):
     from uuid import uuid4
     from sqlalchemy import select
-    from app.modules.system.model import User
-    from app.modules.system import crud as system_crud
-    from app.modules.suppliers.model import Supplier
+    from app.modules.system_management.model import User
+    from app.modules.system_management import crud as system_crud
+    from app.modules.suppliers_master.model import Supplier
     from app.modules.purchase_orders.model import PurchaseOrder
     from tests.conftest import login
     buyer = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
@@ -75,9 +75,9 @@ def test_stream_endpoint_authorizes_and_returns_incremental_evidence(client, db_
 def test_floating_conversation_is_separate_from_workspace(db_session, demo_password, client):
     from sqlalchemy import select
     from app.core.errors import BusinessValidationError
-    from app.modules.ai import conversation_store
-    from app.modules.ai.schema import AIChatRequest, AIChatMessage
-    from app.modules.system.model import User
+    from app.modules.ai_agent import conversation_store
+    from app.modules.ai_agent.schema import AIChatRequest, AIChatMessage
+    from app.modules.system_management.model import User
     from tests.conftest import login
     import pytest
     login(client, 'BuyerUser', demo_password)

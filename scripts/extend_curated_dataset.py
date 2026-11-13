@@ -23,27 +23,27 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.modules.chemicals.model import Chemical
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
-from app.modules.inventory.model import (InventoryBalance, InventoryBatch, InventoryIssueItem, InventoryIssueRequest,
+from app.modules.chemicals_master.model import Chemical
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.finance_management.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement
+from app.modules.inventory_stock.model import (InventoryBalance, InventoryBatch, InventoryIssueItem, InventoryIssueRequest,
     InventoryStocktakeItem, InventoryStocktakeRequest, InventoryTransaction, InventoryTransferItem,
     InventoryTransferRequest, Warehouse, WarehouseLocation)
 from app.modules.inventory_cost.model import InventoryCostAllocation, InventoryCostLayer
 from app.modules.inventory_returns.model import InventoryReturnItem, InventoryReturnRequest
-from app.modules.notifications.model import Notification
+from app.modules.notifications_center.model import Notification
 from app.modules.operation_exceptions.model import OperationException, OperationTask, OperationTaskComment
-from app.modules.products.model import Product
-from app.modules.products.category_model import ProductCategory
+from app.modules.products_master.model import Product
+from app.modules.products_master.category_model import ProductCategory
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderEvent, PurchaseOrderItem
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestApproval, PurchaseRequestItem
 from app.modules.purchase_requests.model import Unit
 from app.modules.quality_acceptances.model import QualityAcceptance
-from app.modules.replenishments.model import ReplenishmentItem, ReplenishmentRequest
-from app.modules.rfqs.model import RFQ, RFQItem, RFQSupplier, QuoteComparison, QuoteComparisonItem, SupplierQuote, SupplierQuoteItem
-from app.modules.suppliers.product_model import SupplierProduct
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import Department, User
+from app.modules.replenishment_plans.model import ReplenishmentItem, ReplenishmentRequest
+from app.modules.rfq_quotes.model import RFQ, RFQItem, RFQSupplier, QuoteComparison, QuoteComparisonItem, SupplierQuote, SupplierQuoteItem
+from app.modules.suppliers_master.product_model import SupplierProduct
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import Department, User
 from rebuild_curated_development_data import verify
 from curated_record_copy import acceptance_copy, batch_no, business_no
 

@@ -8,10 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.db import SessionLocal
-from app.modules.system.idempotency_model import IdempotencyRecord
-from app.modules.system.model import Role, User
-from app.modules.system.schema import UserUpdate
-from app.modules.system import service as system_service
+from app.modules.system_management.idempotency_model import IdempotencyRecord
+from app.modules.system_management.model import Role, User
+from app.modules.system_management.schema import UserUpdate
+from app.modules.system_management import service as system_service
 from sqlalchemy import select
 
 from .conftest import login

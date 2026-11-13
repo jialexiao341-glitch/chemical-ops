@@ -8,8 +8,8 @@ import pytest
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai import llm
-from app.modules.ai.schema import AIChatMessage, AIChatRequest
+from app.modules.ai_agent import llm
+from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest
 
 
 REQUEST = AIChatRequest(messages=[AIChatMessage(role="user", content="分析附件")])

@@ -6,13 +6,13 @@ import pytest
 from sqlalchemy import text
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai.candidate_resolution import inventory_family, validate_selection
-from app.modules.ai.product_query_policy import (
+from app.modules.ai_agent.candidate_resolution import inventory_family, validate_selection
+from app.modules.ai_agent.product_query_policy import (
     can_aggregate_inventory,
     unsupported_product_slot_prompt,
     unsupported_product_slots,
 )
-from app.modules.ai.schema import PendingChoice, Slots
+from app.modules.ai_agent.schema import PendingChoice, Slots
 from tests.test_agent_read_tools import tool_db
 
 

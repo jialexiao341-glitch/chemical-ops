@@ -7,7 +7,7 @@ from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
-from app.modules.system.file_model import SysFile
+from app.modules.system_management.file_model import SysFile
 
 
 class QualityAcceptance(Base):

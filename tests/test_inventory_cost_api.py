@@ -4,9 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.modules.inventory.model import InventoryBalance
+from app.modules.inventory_stock.model import InventoryBalance
 from app.core.security import hash_password
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 from .conftest import login
 
@@ -20,7 +20,7 @@ def test_fifo_outbound_request_is_idempotent(client: TestClient, db_session, dem
     balance = db_session.scalar(select(InventoryBalance).where(InventoryBalance.quantity > 0).order_by(InventoryBalance.id).limit(1))
     assert balance is not None
     # 本用例验证请求幂等性，不把历史质量隔离样本当作可出库库存。
-    from app.modules.inventory.model import InventoryBatch
+    from app.modules.inventory_stock.model import InventoryBatch
     from app.modules.inventory_cost.model import InventoryCostLayer
     from app.modules.quality_acceptances.model import QualityAcceptance
     source_ids = select(InventoryBatch.source_delivery_id).join(

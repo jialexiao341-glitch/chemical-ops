@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.ai.cost_report import (  # noqa: E402,F401
+from app.modules.ai_agent.cost_report import (  # noqa: E402,F401
     build_report,
     collect_rows,
     percentile,

@@ -31,7 +31,7 @@ from sqlalchemy import select  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.chemicals.model import Chemical  # noqa: E402
+from app.modules.chemicals_master.model import Chemical  # noqa: E402
 from app.modules.doc_kb.model import AiDocument  # noqa: E402
 from app.modules.doc_kb.service import (  # noqa: E402
     document_sha256,

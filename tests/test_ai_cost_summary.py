@@ -7,9 +7,9 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import AuthorizationError
-from app.modules.ai.controller import agent_cost_summary
-from app.modules.ai.model import AIAgentTask
-from app.modules.system.model import User
+from app.modules.ai_agent.controller import agent_cost_summary
+from app.modules.ai_agent.model import AIAgentTask
+from app.modules.system_management.model import User
 
 
 def test_cost_summary_requires_admin(db_session):

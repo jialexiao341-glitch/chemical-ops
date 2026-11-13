@@ -7,20 +7,20 @@ from sqlalchemy import and_, case, exists, false, func, select, true
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
 from app.modules.inventory_returns.model import InventoryReturnItem, InventoryReturnRequest
 from app.modules.inventory_returns.schema import ReturnCreate, ReturnSourceRead
-from app.modules.inventory import service as inventory_service
-from app.modules.inventory.quality_hold import lock_available_batches
+from app.modules.inventory_stock import service as inventory_service
+from app.modules.inventory_stock.quality_hold import lock_available_batches
 from app.modules.inventory_cost.service import allocate_outbound_cost
-from app.modules.products.model import Product
+from app.modules.products_master.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
 from app.modules.purchase_requests.model import Unit
-from app.modules.suppliers.model import Supplier
-from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_role_codes
-from app.modules.system.model import User
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.crud import get_user_role_codes
+from app.modules.system_management.model import User
 
 
 def _now() -> datetime:
@@ -212,7 +212,7 @@ def create_return(db: Session, user: User, data: ReturnCreate) -> InventoryRetur
 
 
 def _return_department_scope(user: User, roles: set[str]):
-    from app.modules.system.data_scope import department_scope_condition
+    from app.modules.system_management.data_scope import department_scope_condition
     order_department = select(PurchaseOrder.department_id).where(PurchaseOrder.id == InventoryReturnRequest.po_id).scalar_subquery()
     delivery_department = select(PurchaseOrder.department_id).join(Delivery, Delivery.po_id == PurchaseOrder.id).where(Delivery.id == InventoryReturnRequest.delivery_id).scalar_subquery()
     applicant_department = select(User.department_id).where(User.id == InventoryReturnRequest.applicant_id).scalar_subquery()

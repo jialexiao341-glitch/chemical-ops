@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.modules.chemicals.cas import extract_valid_cas
+from app.modules.chemicals_master.cas import extract_valid_cas
 from app.modules.doc_kb import vector_store
 from app.modules.doc_kb.embedding import embed_texts
 from app.modules.doc_kb.model import AiDocumentSection
@@ -72,7 +72,7 @@ def _name_pattern(name: str) -> str:
 
 async def resolve_doc_targets(db: Session, question: str) -> list[str]:
     """Resolve explicit CAS, master aliases and parsed document names without guessing."""
-    from app.modules.chemicals.model import Chemical
+    from app.modules.chemicals_master.model import Chemical
     from app.modules.doc_kb.model import AiDocument
     from app.core.errors import BusinessValidationError
 

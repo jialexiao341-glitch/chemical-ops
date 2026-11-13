@@ -10,9 +10,9 @@ def test_quality_summary_requires_admin(monkeypatch):
     from app.core.auth import get_current_user
     from app.core.db import get_db
     from app.core.rate_limit import limit_ai
-    from app.modules.system import crud
-    from app.modules.ai import quality_report
-    from app.modules.ai import controller as ai_controller
+    from app.modules.system_management import crud
+    from app.modules.ai_agent import quality_report
+    from app.modules.ai_agent import controller as ai_controller
 
     user = SimpleNamespace(id=1)
     permissions = {"ai.workspace.read"}

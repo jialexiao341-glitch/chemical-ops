@@ -5,9 +5,9 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app.modules.files.service import recover_stale_parses
-from app.modules.system.file_model import SysFile
-from app.modules.system.model import User
+from app.modules.files_storage.service import recover_stale_parses
+from app.modules.system_management.file_model import SysFile
+from app.modules.system_management.model import User
 
 
 def test_recover_stale_processing_files(db_session) -> None:

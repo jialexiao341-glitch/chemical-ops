@@ -4,8 +4,8 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 from app.core.errors import AuthorizationError
-from app.modules.ai import context
-from app.modules.ai.schema import AIListContextAskRequest
+from app.modules.ai_agent import context
+from app.modules.ai_agent.schema import AIListContextAskRequest
 
 
 def test_rejects_unregistered_filter_and_invalid_status():
@@ -42,9 +42,9 @@ def test_http_order_list_scope_filters_and_permission_revocation(client, db_sess
     from uuid import uuid4
     from decimal import Decimal
     from sqlalchemy import select
-    from app.modules.system.model import Department, User
-    from app.modules.system import crud as system_crud
-    from app.modules.suppliers.model import Supplier
+    from app.modules.system_management.model import Department, User
+    from app.modules.system_management import crud as system_crud
+    from app.modules.suppliers_master.model import Supplier
     from app.modules.purchase_orders.model import PurchaseOrder
     from tests.conftest import login
     actor = login(client, 'BuyerUser', demo_password)

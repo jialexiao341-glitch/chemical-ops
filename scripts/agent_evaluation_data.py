@@ -112,7 +112,7 @@ def evaluation_db():
                                  (qid, sid, f"Q-{qid}", version, quoted, valid, currency, status))
             conn.exec_driver_sql("INSERT INTO supplier_quote_items (id, quote_id, rfq_item_id, unit_id, supplier_model, tax_rate, tax_included, unit_price, quoted_quantity, moq_quantity, moq_unit_id, lead_days) VALUES (?, ?, 11, ?, ?, ?, ?, ?, 20, 5, 1, 3)",
                                  (qid, qid, unit, model, tax, None if qid == 16 else 0 if qid == 15 else 1, price))
-    from app.modules.ai.model import AIAgentTask
+    from app.modules.ai_agent.model import AIAgentTask
     AIAgentTask.__table__.create(engine)
     with engine.begin() as conn:
         for ddl in (

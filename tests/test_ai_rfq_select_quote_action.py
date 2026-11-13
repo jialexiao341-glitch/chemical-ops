@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import action_handlers
-from app.modules.rfqs import crud as rfq_crud
-from app.modules.rfqs import service as rfq_service
+from app.modules.ai_agent import action_handlers
+from app.modules.rfq_quotes import crud as rfq_crud
+from app.modules.rfq_quotes import service as rfq_service
 
 
 def _data(*, status="RESPONDING", comparison_status="DRAFT", quote_status="SUBMITTED", include_quote=True):
@@ -78,7 +78,7 @@ def test_select_quote_handler_rejects_stale_or_unselectable_resources(monkeypatc
 
 
 def test_select_quote_handler_revalidates_snapshot_and_uses_transactional_domain_service(monkeypatch):
-    from app.modules.rfqs.schema import RFQRead
+    from app.modules.rfq_quotes.schema import RFQRead
 
     rfq, comparison, quote = _data()
     handler = _handler(monkeypatch, rfq, comparison, quote)
@@ -143,7 +143,7 @@ def test_select_quote_domain_service_can_flush_without_committing(monkeypatch):
 def test_select_quote_proposal_revision_preserves_resource_ids_and_updates_reason(monkeypatch):
     from datetime import timedelta
 
-    from app.modules.ai import action_proposals
+    from app.modules.ai_agent import action_proposals
 
     rfq, comparison, quote = _data()
     handler = _handler(monkeypatch, rfq, comparison, quote)

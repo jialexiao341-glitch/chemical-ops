@@ -17,8 +17,8 @@ from app.modules.task_queue.model import TaskExecution, TaskOutbox, TaskResource
 from app.modules.task_queue import service
 from app.modules.task_queue import worker
 from app.core.config import Settings
-from app.modules.jobs.model import SchedulerJobRun
-from app.modules.jobs.service import start_scheduled_run
+from app.modules.jobs_scheduler.model import SchedulerJobRun
+from app.modules.jobs_scheduler.service import start_scheduled_run
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -158,7 +158,7 @@ def test_unknown_task_is_not_accepted(db):
 def test_document_queue_drains_before_returning_to_legacy_path(db, monkeypatch):
     from types import SimpleNamespace
     from fastapi import BackgroundTasks
-    from app.modules.jobs import technical_documents
+    from app.modules.jobs_scheduler import technical_documents
     from app.modules.task_queue import adapters
     settings = Settings(_env_file=None, technical_document_execution_mode="database", agent_execution_mode="in_process")
     monkeypatch.setattr(technical_documents, "get_settings", lambda: settings)
@@ -182,7 +182,7 @@ def test_document_queue_drains_before_returning_to_legacy_path(db, monkeypatch):
 def test_document_acceptance_serializes_same_cas_requests(queue_engine, monkeypatch):
     from types import SimpleNamespace
     from fastapi import BackgroundTasks, HTTPException
-    from app.modules.jobs import technical_documents
+    from app.modules.jobs_scheduler import technical_documents
     config = Settings(_env_file=None, technical_document_execution_mode="database")
     monkeypatch.setattr(technical_documents, "get_settings", lambda: config)
     factory = sessionmaker(queue_engine, expire_on_commit=False)

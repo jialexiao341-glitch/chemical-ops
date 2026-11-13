@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.modules.ai.error_policy import failure_stage
-from app.modules.ai.failure_report import render_markdown, summarize
+from app.modules.ai_agent.error_policy import failure_stage
+from app.modules.ai_agent.failure_report import render_markdown, summarize
 
 
 @pytest.mark.parametrize("code,stage", [

@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.dialects import mysql
 
-from app.modules.inventory import crud, service
-from app.modules.inventory.model import InventoryIssueRequest, InventoryTransferRequest, InventoryStocktakeRequest
-from app.modules.replenishments import service as replenishments
+from app.modules.inventory_stock import crud, service
+from app.modules.inventory_stock.model import InventoryIssueRequest, InventoryTransferRequest, InventoryStocktakeRequest
+from app.modules.replenishment_plans import service as replenishments
 
 
 class StopLookup(Exception):

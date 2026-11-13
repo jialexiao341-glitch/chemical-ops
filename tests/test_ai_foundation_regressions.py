@@ -9,19 +9,19 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai.text2sql import QueryPlan, build_statement, _validate_scoped_statement
-from app.modules.ai.catalog import CATALOG
-from app.modules.ai.formatting import format_decimal
-from app.modules.deliveries.model import Delivery
+from app.modules.ai_agent.text2sql import QueryPlan, build_statement, _validate_scoped_statement
+from app.modules.ai_agent.catalog import CATALOG
+from app.modules.ai_agent.formatting import format_decimal
+from app.modules.deliveries_receipt.model import Delivery
 from app.modules.doc_kb.retrieve import resolve_doc_targets
-from app.modules.finance import service as finance
-from app.modules.finance.model import FinanceReconciliation, FinanceInvoice, FinancePayment, FinanceSettlement
-from app.modules.insights.controller import _supplier_score, _replenishment
-from app.modules.inventory.model import InventoryBalance, InventoryTransaction
+from app.modules.finance_management import service as finance
+from app.modules.finance_management.model import FinanceReconciliation, FinanceInvoice, FinancePayment, FinanceSettlement
+from app.modules.insights_analytics.controller import _supplier_score, _replenishment
+from app.modules.inventory_stock.model import InventoryBalance, InventoryTransaction
 from app.modules.purchase_orders import service as orders
 from app.modules.purchase_orders.model import PurchaseOrder
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
 from tests.conftest import login
 
 
@@ -172,7 +172,7 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
     from app.modules.purchase_requests.model import PurchaseRequest
     from app.modules.quality_acceptances.model import QualityAcceptance
     from app.modules.quality_acceptances import service as quality
-    from app.modules.inventory.model import Warehouse, WarehouseLocation
+    from app.modules.inventory_stock.model import Warehouse, WarehouseLocation
     from app.modules.operation_exceptions.model import OperationException
 
     actor = user(db_session, "QualityInspector" if dataset == "quality_acceptances" else "WarehouseUser" if dataset == "inventory" else "BuyerUser")
@@ -197,7 +197,7 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
         record = OperationException(exception_no=f"SQL-EX-{suffix}", exception_type="DELIVERY", source_type="OTHER", source_id=order.id, owner_id=other.id, description="scope regression")
         authorize = lambda: setattr(record, "owner_id", actor.id)
     else:
-        from app.modules.system.model import UserWarehouseGrant, UserWarehouseScope
+        from app.modules.system_management.model import UserWarehouseGrant, UserWarehouseScope
         template = db_session.scalar(select(InventoryBalance))
         warehouse = Warehouse(warehouse_code=f"SQL-WH-{suffix}", warehouse_name="scope regression", manager_id=other.id)
         db_session.add(warehouse); db_session.flush()
@@ -216,7 +216,7 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
     assert db_session.execute(statement).scalar() == 0
     resource_type = {"deliveries": "DELIVERY", "quality_acceptances": "QUALITY_ACCEPTANCE", "exceptions": "OPERATION_EXCEPTION"}.get(dataset)
     if resource_type:
-        from app.modules.files.service import _can_access_resource_instance
+        from app.modules.files_storage.service import _can_access_resource_instance
         assert not _can_access_resource_instance(db_session, actor, resource_type, record)
     if dataset == "quality_acceptances":
         with pytest.raises(ResourceNotFoundError):
@@ -235,7 +235,7 @@ def test_aggregate_scope_excludes_foreign_records_and_preserves_authorized_recor
 def test_quality_readonly_scope_matches_detail_total_sql_and_attachment(db_session, username):
     from app.modules.quality_acceptances.model import QualityAcceptance
     from app.modules.quality_acceptances import service as quality
-    from app.modules.files.service import _can_access_resource_instance
+    from app.modules.files_storage.service import _can_access_resource_instance
 
     actor = user(db_session, username)
     other = user(db_session, "SystemAdmin")

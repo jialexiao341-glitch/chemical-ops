@@ -14,9 +14,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.core.config import get_settings  # noqa: E402
-from app.modules.ai import model_catalog, routing  # noqa: E402
-from app.modules.ai.gateway import resolve_model_profile  # noqa: E402
-from app.modules.ai.prompt_registry import prompt_version  # noqa: E402
+from app.modules.ai_agent import model_catalog, routing  # noqa: E402
+from app.modules.ai_agent.gateway import resolve_model_profile  # noqa: E402
+from app.modules.ai_agent.prompt_registry import prompt_version  # noqa: E402
 from scripts.evaluation_manifest import build_manifest  # noqa: E402
 
 

@@ -2,9 +2,9 @@ from decimal import Decimal
 
 import pytest
 
-from app.modules.rfqs.total_cost import calculate_total_cost
-from app.modules.rfqs import service
-from app.modules.rfqs.schema import SupplierQuoteItemCreate
+from app.modules.rfq_quotes.total_cost import calculate_total_cost
+from app.modules.rfq_quotes import service
+from app.modules.rfq_quotes.schema import SupplierQuoteItemCreate
 
 
 def test_total_cost_uses_requested_quantity_moq_and_separate_tax_bases():

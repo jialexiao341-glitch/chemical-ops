@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import select  # noqa: E402
 
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.ai.model import AIEvalRun  # noqa: E402
+from app.modules.ai_agent.model import AIEvalRun  # noqa: E402
 
 SUITES = ("routing", "tasks", "business", "prod")
 

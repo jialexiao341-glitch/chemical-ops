@@ -6,8 +6,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderApproval, PurchaseOrderEvent
-from app.modules.rfqs.model import QuoteComparison, SupplierQuote
-from app.modules.suppliers.model import Supplier
+from app.modules.rfq_quotes.model import QuoteComparison, SupplierQuote
+from app.modules.suppliers_master.model import Supplier
 
 
 def detail_options():

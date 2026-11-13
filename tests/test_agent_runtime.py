@@ -17,10 +17,10 @@ from app.core.auth import get_current_user
 from app.core.config import Settings
 from app.core.db import get_db
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
-from app.modules.ai import agent_runtime as runtime, agent_tools as tools
-from app.modules.ai.controller import router
-from app.modules.ai.model import AIAgentTask, AIConversationState, AIMessage, AIConversation
-from app.modules.products.model import Product
+from app.modules.ai_agent import agent_runtime as runtime, agent_tools as tools
+from app.modules.ai_agent.controller import router
+from app.modules.ai_agent.model import AIAgentTask, AIConversationState, AIMessage, AIConversation
+from app.modules.products_master.model import Product
 from tests.conftest import login
 from tests.test_agent_read_tools import allow_ai_workspace_permission, tool_db
 
@@ -31,8 +31,8 @@ USER = SimpleNamespace(id=7)
 @pytest.fixture
 def task_db(tool_db, monkeypatch):
     """复用真实 SQL 的隔离业务样本，额外建立任务表和有限预算配置。"""
-    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
-    monkeypatch.setattr("app.modules.system.data_scope.warehouse_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.department_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.warehouse_scope_snapshot", lambda *_: None)
     AIAgentTask.__table__.create(tool_db.bind)
     monkeypatch.setattr(runtime, "get_settings", lambda: Settings(_env_file=None, agent_execution_mode="in_process", openai_api_key="test-key"))
     return tool_db
@@ -285,7 +285,7 @@ def start(db, question="查询测试乙醇库存"):
 
 def test_prepare_task_records_prompt_release(task_db, monkeypatch):
     """任务启动时解析发布映射并写入 run_meta，续答不重新解析。"""
-    from app.modules.ai import prompt_registry
+    from app.modules.ai_agent import prompt_registry
     release = prompt_registry.PromptRelease("role:BUYER", {
         "routing": prompt_registry.prompt_version("routing"),
         "planner": prompt_registry.prompt_version("planner"),
@@ -386,7 +386,7 @@ def test_full_goal_drives_four_tools_with_evidence_and_persisted_trace(task_db, 
     ("tool", "TOOL_TIMEOUT"), ("unsupported", "TOOL_TIMEOUT_UNSUPPORTED"),
 ])
 def test_tool_timeout_fails_task_without_replanning(task_db, model_script, monkeypatch, timeout_error, expected_code):
-    from app.modules.ai.tool_sql_timeout import ToolExecutionTimeout, ToolTimeoutUnsupported
+    from app.modules.ai_agent.tool_sql_timeout import ToolExecutionTimeout, ToolTimeoutUnsupported
 
     actions, contexts = model_script
     actions.append(tool("catalog.search_products", keyword="测试乙醇"))
@@ -428,7 +428,7 @@ def test_invalid_tool_arguments_keep_existing_error_mapping(task_db, model_scrip
     {"unit": "升"},
 ])
 def test_agent_waits_before_tools_for_unsupported_product_slots(task_db, model_script, monkeypatch, task_kind, unsupported_slots):
-    from app.modules.ai.product_query_policy import unsupported_product_slot_prompt
+    from app.modules.ai_agent.product_query_policy import unsupported_product_slot_prompt
 
     actions, _ = model_script
     actions.extend([
@@ -618,9 +618,9 @@ def test_inventory_summary_queries_all_specs_and_keeps_units_separate(task_db, m
 def test_candidate_aggregation_uses_structured_understanding_slot(
     monkeypatch, question, aggregate_products, expected_aggregate
 ):
-    from app.modules.ai.schema import Workflow
+    from app.modules.ai_agent.schema import Workflow
 
-    monkeypatch.setattr("app.modules.ai.candidate_resolution.inventory_family", lambda *_args: True)
+    monkeypatch.setattr("app.modules.ai_agent.candidate_resolution.inventory_family", lambda *_args: True)
     state = runtime.RunState(
         task_id="test",
         revision=0,
@@ -789,7 +789,7 @@ def test_context_and_time_budget_stop(task_db, model_script, monkeypatch):
 
 
 def test_decision_history_budget_keeps_latest_request_and_structured_state():
-    from app.modules.ai.agent_runtime import _decision_messages
+    from app.modules.ai_agent.agent_runtime import _decision_messages
     messages = [f'历史轮次 {index} ' + ('x' * 2000) for index in range(20)]
     bounded = _decision_messages(messages)
     assert len(bounded) == 6
@@ -955,7 +955,7 @@ def test_cancel_before_background_starts_does_not_call_model(task_db, model_scri
 
 
 def test_agent_entry_rejects_non_agent_route_before_creating_task(task_db):
-    from app.modules.ai import routing
+    from app.modules.ai_agent import routing
 
     decision = routing.Understanding(
         purpose="query", execution_mode="query", tasks=["analytics"],
@@ -969,7 +969,7 @@ def test_agent_entry_rejects_non_agent_route_before_creating_task(task_db):
 
 
 def test_agent_entry_rejects_missing_tool_permission(task_db, monkeypatch):
-    from app.modules.ai import routing
+    from app.modules.ai_agent import routing
 
     monkeypatch.setattr(tools, "get_user_permission_codes",
                         lambda *_args: ["master.products.read", "warehouse.inventory.read"])
@@ -999,7 +999,7 @@ def test_agent_entry_rejects_missing_tool_permission(task_db, monkeypatch):
 def test_numbered_agent_task_starts_with_only_its_read_permission(
     task_db, monkeypatch, kind, slot, number, permission, tool_name, intent,
 ):
-    from app.modules.ai import routing
+    from app.modules.ai_agent import routing
 
     permissions = list(permission) if isinstance(permission, tuple) else [permission]
     monkeypatch.setattr(tools, "get_user_permission_codes", lambda *_args: permissions)
@@ -1014,7 +1014,7 @@ def test_numbered_agent_task_starts_with_only_its_read_permission(
 
 
 def test_agent_capability_mapping_requires_only_the_task_tool():
-    from app.modules.ai import routing
+    from app.modules.ai_agent import routing
 
     for kind, tool_name, slots in (("purchase_request", "purchase_requests.get_by_no", {}),
                                    ("order_trace", "purchase_orders.trace_by_no", {}),
@@ -1100,8 +1100,8 @@ def test_revoked_numbered_tool_permission_blocks_historical_evidence(monkeypatch
 
 def test_agent_accepts_only_ticket_bound_pending_clarification(task_db, monkeypatch):
     from datetime import datetime, timedelta, timezone
-    from app.modules.ai import routing
-    from app.modules.ai.schema import PendingClarification
+    from app.modules.ai_agent import routing
+    from app.modules.ai_agent.schema import PendingClarification
 
     pending = PendingClarification(state_id="a" * 32, question_hash="b" * 64,
         slot="product_keyword", question="查哪个产品？", options=["乙醇", "甲醇"],
@@ -1268,7 +1268,7 @@ def test_chat_api_returns_conversation_and_reloadable_task(chat_task_db, model_s
 
 
 def test_chat_history_rechecks_permissions_and_cancel_updates_reply(chat_task_db, model_script):
-    from app.modules.ai.controller import messages
+    from app.modules.ai_agent.controller import messages
     state = runtime.prepare_chat_task(chat_task_db, USER, runtime.ChatTaskCreate(question='查库存'))
     actions, _ = model_script
     actions.extend([tool('catalog.search_products', keyword='测试乙醇'),

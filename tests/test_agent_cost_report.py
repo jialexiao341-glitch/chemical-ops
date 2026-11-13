@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.modules.ai import agent_runtime as runtime
+from app.modules.ai_agent import agent_runtime as runtime
 from scripts import agent_cost_report as report
 
 

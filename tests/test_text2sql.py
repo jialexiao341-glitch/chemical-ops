@@ -7,9 +7,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import text2sql
-from app.modules.ai.catalog import CATALOG
-from app.modules.ai.text2sql import QueryFilter, QueryPlan, Text2SQLRequest, build_statement, run_text2sql, validate_sql
+from app.modules.ai_agent import text2sql
+from app.modules.ai_agent.catalog import CATALOG
+from app.modules.ai_agent.text2sql import QueryFilter, QueryPlan, Text2SQLRequest, build_statement, run_text2sql, validate_sql
 
 
 def test_text2sql_sql_validation_is_select_only_and_table_scoped():
@@ -26,8 +26,8 @@ def test_text2sql_sql_validation_is_select_only_and_table_scoped():
 def test_department_filter_is_validated_separately_without_expanding_dataset_tables():
     from sqlalchemy import select
     from app.modules.purchase_orders.model import PurchaseOrder
-    from app.modules.system.data_scope import department_scope_condition
-    from app.modules.system.model import UserDepartmentGrant
+    from app.modules.system_management.data_scope import department_scope_condition
+    from app.modules.system_management.model import UserDepartmentGrant
 
     user = SimpleNamespace(id=17)
     scope = department_scope_condition(user, {'PROCUREMENT_MANAGER'}, PurchaseOrder.department_id)
@@ -43,7 +43,7 @@ def test_department_filter_is_validated_separately_without_expanding_dataset_tab
         text2sql._validate_scoped_statement(injected, db, CATALOG['purchase_orders'].tables, literal_binds=False)
 
     # 范围条件自身也只能使用授权策略所需的表。
-    from app.modules.system.file_model import SysFile
+    from app.modules.system_management.file_model import SysFile
     foreign_department = select(SysFile.id).limit(1).scalar_subquery()
     foreign_scope = department_scope_condition(user, {'PROCUREMENT_MANAGER'}, foreign_department)
     with pytest.raises(BusinessValidationError):
@@ -165,7 +165,7 @@ def test_overdue_dataset_declares_server_derived_summary_outputs():
 
 
 def test_truncated_overdue_answer_has_one_concise_scope_warning():
-    from app.modules.ai.service import _format_overdue_unfulfilled_orders
+    from app.modules.ai_agent.service import _format_overdue_unfulfilled_orders
 
     result = SimpleNamespace(
         rows=[{
@@ -188,7 +188,7 @@ def test_truncated_overdue_answer_has_one_concise_scope_warning():
 
 
 def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):
-    from app.modules.ai import capabilities
+    from app.modules.ai_agent import capabilities
     monkeypatch.setattr(capabilities, "analytics_catalog", lambda *_: [{"key": "purchase_orders"}])
     async def fake_chat(*_args, **_kwargs):
         content = "规划结果：\n" + "`" * 3 + "json\n" + '{"dataset":"purchase_order","metric":"sum_amount","group_by":"supplier_name","filters":null,"order":"降序","top_n":"10"}' + "\n" + "`" * 3
@@ -204,7 +204,7 @@ def test_text2sql_rejects_markdown_json_and_common_aliases(monkeypatch):
 
 
 def test_text2sql_does_not_replace_invalid_model_plan_with_keyword_fallback(monkeypatch):
-    from app.modules.ai import capabilities
+    from app.modules.ai_agent import capabilities
     monkeypatch.setattr(capabilities, "analytics_catalog", lambda *_: [{"key": "purchase_orders"}])
     async def fake_chat(*_args, **_kwargs):
         return SimpleNamespace(message=SimpleNamespace(content="无法生成计划"))
@@ -238,7 +238,7 @@ class _FakeDB:
 
 
 def test_text2sql_runs_the_query_stages(monkeypatch):
-    from app.modules.ai import routing, capabilities
+    from app.modules.ai_agent import routing, capabilities
     monkeypatch.setattr(capabilities, "build_capability_manifest", lambda *_: {"analytics_datasets": [{"key":"purchase_orders"}]})
     async def understand(*args, **kwargs):
         return routing.Understanding(purpose="query", execution_mode="query", tasks=["analytics"], sub_tasks=[

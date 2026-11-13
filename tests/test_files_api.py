@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.modules.files import service
-from app.modules.system.model import User
+from app.modules.files_storage import service
+from app.modules.system_management.model import User
 from app.modules.purchase_orders.model import PurchaseOrder
 from .conftest import login
 

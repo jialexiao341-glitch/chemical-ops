@@ -7,19 +7,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.files import service as file_service
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.files_storage import service as file_service
 from app.modules.quality_acceptances import crud
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.quality_acceptances.scope import acceptance_read_condition
 from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptanceResult
-from app.modules.notifications.service import notify_users
+from app.modules.notifications_center.service import notify_users
 from app.modules.operation_exceptions.service import create_automatic_exception
 from app.modules.purchase_orders.model import PurchaseOrder
-from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
-from app.modules.system.file_model import SysFile, SysFileAttachment
-from app.modules.system.model import User
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.crud import get_user_permission_codes, get_user_role_codes
+from app.modules.system_management.file_model import SysFile, SysFileAttachment
+from app.modules.system_management.model import User
 
 
 def _now() -> datetime:
@@ -46,7 +46,7 @@ def create_acceptance(db: Session, user: User, data: QualityAcceptanceCreate) ->
     delivery = crud.get_delivery(db, data.delivery_id, for_update=True)
     if delivery is None:
         raise ResourceNotFoundError("到货单不存在")
-    from app.modules.system.data_scope import department_scope_condition
+    from app.modules.system_management.data_scope import department_scope_condition
     if db.scalar(select(PurchaseOrder.id).where(
         PurchaseOrder.id == delivery.po_id,
         department_scope_condition(user, get_user_role_codes(db, user.id), PurchaseOrder.department_id),
@@ -86,7 +86,7 @@ def _is_inspector(db: Session, user: User) -> bool:
 
 def assignment_options(db: Session, user: User) -> dict:
     """只向获准指派者提供待送检单号和有效检验员，不开放系统用户目录。"""
-    from app.modules.system.data_scope import department_scope_condition
+    from app.modules.system_management.data_scope import department_scope_condition
     deliveries = db.scalars(select(Delivery).join(PurchaseOrder, PurchaseOrder.id == Delivery.po_id).where(
         Delivery.status == "RECEIVED",
         department_scope_condition(user, get_user_role_codes(db, user.id), PurchaseOrder.department_id),
@@ -146,7 +146,7 @@ def submit_result(db: Session, user: User, acceptance_id: int, data: QualityAcce
         if len(delivery_item_ids) > 1 and data.result != "REINSPECTION":
             raise BusinessValidationError("多明细验收单必须按到货明细分别填写检测结果")
         test_result = data.test_result
-    from app.modules.inventory.model import InventoryBatch
+    from app.modules.inventory_stock.model import InventoryBatch
     if data.result in {"REINSPECTION", "FAILED", "PARTIAL", "PASSED"}:
         batches = db.scalars(select(InventoryBatch).where(InventoryBatch.source_delivery_id == delivery.id)
             .order_by(InventoryBatch.id).with_for_update().execution_options(populate_existing=True)).all()

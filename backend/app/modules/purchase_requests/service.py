@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.products.model import Product
+from app.modules.products_master.model import Product
 from app.modules.purchase_requests import crud
 from app.modules.purchase_requests.scope import request_read_condition
 from app.modules.purchase_requests.model import (
@@ -22,8 +22,8 @@ from app.modules.purchase_requests.schema import (
     PurchaseRequestCreate,
     PurchaseRequestUpdate,
 )
-from app.modules.system.crud import get_user_role_codes
-from app.modules.system.model import Department, User
+from app.modules.system_management.crud import get_user_role_codes
+from app.modules.system_management.model import Department, User
 
 
 def _now() -> datetime:
@@ -42,7 +42,7 @@ def _validate_department_scope(db: Session, user: User, department_id: int | Non
     """阻止普通申请人把申请创建或转移到自身部门范围之外。"""
 
     from sqlalchemy import literal
-    from app.modules.system.data_scope import department_scope_condition
+    from app.modules.system_management.data_scope import department_scope_condition
     if not db.scalar(select(department_scope_condition(user, get_user_role_codes(db, user.id), literal(department_id)))):
         raise ResourceNotFoundError("采购申请部门不存在")
     if _can_manage_all(db, user):
@@ -86,7 +86,7 @@ def _validate_items(db: Session, items) -> None:
 def _audit(db: Session, user_id: int, action: str, request: PurchaseRequest, summary: str) -> None:
     """在当前业务事务中写入审计记录。"""
 
-    from app.modules.system.audit import add_audit_log
+    from app.modules.system_management.audit import add_audit_log
 
     add_audit_log(
         db,

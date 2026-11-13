@@ -19,9 +19,9 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'backend'))
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
-from app.modules.files.parser import ParsedFile, parse_file_content
-from app.modules.rfqs import quote_extraction
-from app.modules.system import crud as system_crud
+from app.modules.files_storage.parser import ParsedFile, parse_file_content
+from app.modules.rfq_quotes import quote_extraction
+from app.modules.system_management import crud as system_crud
 
 HEADER_LINES=['Supplier: Demo A','Currency: CNY','Quote date: 2026-10-20','Valid until: 2026-11-20']
 ITEM_LINE='Ethanol | Model E99 | Quantity 10 L | Unit price 12.50 CNY/L | Tax 13% excluded | MOQ 20 L | Lead 7 days | Payment net 30 days'

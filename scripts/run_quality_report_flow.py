@@ -12,12 +12,12 @@ from sqlalchemy import select  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.deliveries.model import DeliveryItem  # noqa: E402
-from app.modules.files import service as file_service  # noqa: E402
-from app.modules.files.schema import FileAttachmentCreate  # noqa: E402
+from app.modules.deliveries_receipt.model import DeliveryItem  # noqa: E402
+from app.modules.files_storage import service as file_service  # noqa: E402
+from app.modules.files_storage.schema import FileAttachmentCreate  # noqa: E402
 from app.modules.quality_acceptances.model import QualityAcceptance  # noqa: E402
 from app.modules.quality_acceptances.report_review import list_report_files, review_report  # noqa: E402
-from app.modules.system.model import User  # noqa: E402
+from app.modules.system_management.model import User  # noqa: E402
 
 
 CASES = (

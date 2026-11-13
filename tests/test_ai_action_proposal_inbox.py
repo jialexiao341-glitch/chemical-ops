@@ -6,14 +6,14 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai import action_handlers, action_proposals, controller as ai_controller
-from app.modules.ai.model import AIAgentActionProposal
+from app.modules.ai_agent import action_handlers, action_proposals, controller as ai_controller
+from app.modules.ai_agent.model import AIAgentActionProposal
 
 
 @pytest.fixture
 def proposal_db(monkeypatch):
-    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
-    monkeypatch.setattr("app.modules.system.data_scope.warehouse_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.department_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.warehouse_scope_snapshot", lambda *_: None)
     # The production model uses MySQL CURRENT_TIMESTAMP(3) for onupdate;
     # SQLite does not support that expression, so keep timestamp updates DB-neutral here.
     monkeypatch.setattr(AIAgentActionProposal.__table__.c.updated_at, "onupdate", None)
@@ -99,7 +99,7 @@ def followup_source(monkeypatch):
 
 
 def test_followup_inbox_revision_confirmation_and_idempotent_result(proposal_db, followup_source, monkeypatch):
-    from app.modules.ai.schema import AIActionProposalConfirm
+    from app.modules.ai_agent.schema import AIActionProposalConfirm
 
     _, user, order = followup_source
     preview = action_proposals.propose_action(proposal_db, user, "deliveries.followup_draft",
@@ -173,7 +173,7 @@ def test_followup_order_scope_revocation_and_owner_isolation(proposal_db, follow
 
 
 def test_saved_followup_confirmation_replay_rechecks_order_scope(proposal_db, followup_source, monkeypatch):
-    from app.modules.ai.schema import AIActionProposalConfirm
+    from app.modules.ai_agent.schema import AIActionProposalConfirm
     from app.modules.purchase_orders import service as order_service
 
     _, user, order = followup_source
@@ -341,7 +341,7 @@ def test_rfq_send_inbox_shows_rfq_reference_and_deep_link(proposal_db, monkeypat
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
     monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.write"))
-    from app.modules.rfqs import service as rfq_service
+    from app.modules.rfq_quotes import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     proposal = _proposal(proposal_db, action_type="rfq.send")
     proposal.resource_type = "RFQ"
@@ -384,7 +384,7 @@ def test_rfq_select_quote_inbox_shows_rfq_reference_and_selection_reason(proposa
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
     monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.award"))
-    from app.modules.rfqs import service as rfq_service
+    from app.modules.rfq_quotes import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     proposal = _proposal(proposal_db, action_type="rfq.select_quote")
     proposal.resource_type = "RFQ"
@@ -406,7 +406,7 @@ def test_rfq_select_quote_list_is_scoped_to_owner(proposal_db, monkeypatch):
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
     monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.award"))
-    from app.modules.rfqs import service as rfq_service
+    from app.modules.rfq_quotes import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     own = _proposal(proposal_db, owner_id=1, action_type="rfq.select_quote")
     own.resource_type = "RFQ"
@@ -428,7 +428,7 @@ def test_rfq_select_quote_inbox_disables_confirmation_after_award_permission_rev
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
     monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.rfqs.award"))
-    from app.modules.rfqs import service as rfq_service
+    from app.modules.rfq_quotes import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     proposal = _proposal(proposal_db, action_type="rfq.select_quote")
     proposal.permission_code = "procurement.rfqs.award"
@@ -470,7 +470,7 @@ def test_purchase_order_proposal_inbox_shows_rfq_reference_and_allowed_revision_
     monkeypatch.setattr(action_proposals, "get_user_role_codes", lambda *_args: [])
     monkeypatch.setattr(action_proposals, "_now", lambda: datetime(2026, 1, 1, 12))
     monkeypatch.setattr(action_handlers, "get_handler", lambda _type: _ReadHandler(permission_code="procurement.orders.write"))
-    from app.modules.rfqs import service as rfq_service
+    from app.modules.rfq_quotes import service as rfq_service
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: SimpleNamespace(id=73, rfq_no="RFQ-0073"))
     proposal = _proposal(proposal_db, action_type="purchase_order.create_draft")
     proposal.resource_type = "RFQ"
@@ -653,7 +653,7 @@ def test_replenishment_inbox_shows_pending_draft_reference_and_evidence(proposal
 
 
 def test_replenishment_inbox_shows_created_reference_after_execution(proposal_db, monkeypatch):
-    from app.modules.replenishments import service as replenishment_service
+    from app.modules.replenishment_plans import service as replenishment_service
 
     monkeypatch.setattr(replenishment_service, "get_replenishment",
                         lambda *_args, **_kwargs: SimpleNamespace(id=77, replenishment_no="RP20261025000077"))
@@ -745,7 +745,7 @@ def test_create_draft_inbox_shows_sources_when_current_permissions_allow(proposa
 
 def test_notification_failure_rolls_back_proposal(proposal_db, followup_source):
     from sqlalchemy import event, func, select
-    from app.modules.notifications.model import Notification
+    from app.modules.notifications_center.model import Notification
     _, user, order = followup_source
     @event.listens_for(proposal_db, "before_flush")
     def reject_notification(session, *_args):

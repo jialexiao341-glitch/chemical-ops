@@ -2,8 +2,8 @@
 from datetime import datetime, timedelta
 from uuid import uuid4
 from sqlalchemy import func, select
-from app.modules.ai.model import AIAgentActionProposal
-from app.modules.notifications.model import Notification
+from app.modules.ai_agent.model import AIAgentActionProposal
+from app.modules.notifications_center.model import Notification
 from tests.conftest import login
 from tests.test_agent_procurement_chain import chain_catalog
 
@@ -29,7 +29,7 @@ def test_proposal_notification_once_owner_only_and_expiry(client, db_session, de
     result = client.get(url, headers=buyer)
     assert result.status_code == 200 and result.json()['confirmation_id'] == confirmation_id
     assert client.get(url, headers=manager).status_code == 404
-    from app.modules.ai import action_proposals
+    from app.modules.ai_agent import action_proposals
     original = action_proposals.get_user_permission_codes
     monkeypatch.setattr(action_proposals, 'get_user_permission_codes', lambda db, uid: [p for p in original(db, uid) if p != 'procurement.requests.write'])
     revoked = client.get(f'/api/v1/ai/action-proposals/{confirmation_id}', headers=buyer)

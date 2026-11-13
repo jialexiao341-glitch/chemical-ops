@@ -6,7 +6,7 @@ import json
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai.context_assembler import assemble_planner_context, estimate_tokens
+from app.modules.ai_agent.context_assembler import assemble_planner_context, estimate_tokens
 
 
 @pytest.mark.parametrize(("text", "expected"), [("", 0), ("中文测试", 4), ("abcdefgh", 2), ("中文abcd", 3), ("a" * 10001, 2501)])

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.deliveries import service
-from app.modules.deliveries.schema import DeliveryReceive
+from app.modules.deliveries_receipt import service
+from app.modules.deliveries_receipt.schema import DeliveryReceive
 
 
 def test_receipt_rejects_unexplained_quantity(monkeypatch):
@@ -27,7 +27,7 @@ def test_receipt_rejects_unexplained_quantity(monkeypatch):
 
 def test_delivery_listing_does_not_materialize_visible_orders(db_session):
     from sqlalchemy import event, select
-    from app.modules.system.model import User
+    from app.modules.system_management.model import User
 
     user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     assert user is not None

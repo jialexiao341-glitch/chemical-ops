@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from app.core.errors import BusinessValidationError
 from app.core.time import business_today
-from app.modules.ai.formatting import format_decimal
+from app.modules.ai_agent.formatting import format_decimal
 from app.modules.purchase_orders import service
 from app.modules.purchase_requests.model import Unit
 

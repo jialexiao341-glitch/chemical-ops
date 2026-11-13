@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, Warehouse
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch, Warehouse
 from app.modules.purchase_orders.model import PurchaseOrder
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 from .conftest import login, grant_test_warehouse
 
@@ -95,7 +95,7 @@ def test_warehouse_user_can_only_read_returns_in_authorized_warehouses(
     assert before_scope_change.status_code == 200
     assert return_id in {row["id"] for row in before_scope_change.json()["items"]}
 
-    from app.modules.system.model import UserWarehouseGrant
+    from app.modules.system_management.model import UserWarehouseGrant
     db_session.delete(db_session.get(UserWarehouseGrant, (warehouse_user.id, warehouse_record.id)))
     db_session.flush()
     scoped = client.get("/api/v1/inventory/returns", headers=headers)

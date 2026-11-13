@@ -6,11 +6,11 @@ import pytest
 from sqlalchemy import create_engine
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import text2sql
-from app.modules.ai.text2sql import _inventory_movement_trace_plan, _supplier_profile_plan
-from app.modules.ai.catalog import CATALOG, catalog_prompt
-from app.modules.ai.text2sql import QueryFilter, QueryPlan, _normalize_query_plan_payload, _reject_unsupported_metric, _validate_plan, build_statement
-from app.modules.inventory import service as inventory_service
+from app.modules.ai_agent import text2sql
+from app.modules.ai_agent.text2sql import _inventory_movement_trace_plan, _supplier_profile_plan
+from app.modules.ai_agent.catalog import CATALOG, catalog_prompt
+from app.modules.ai_agent.text2sql import QueryFilter, QueryPlan, _normalize_query_plan_payload, _reject_unsupported_metric, _validate_plan, build_statement
+from app.modules.inventory_stock import service as inventory_service
 
 
 @pytest.mark.parametrize(

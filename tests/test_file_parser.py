@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from pptx import Presentation
 from pypdf import PdfWriter
 
-from app.modules.files.parser import MAX_PARSE_BYTES, parse_file_content
+from app.modules.files_storage.parser import MAX_PARSE_BYTES, parse_file_content
 
 
 def test_parse_text_and_keep_reference() -> None:

@@ -8,9 +8,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai import feedback
-from app.modules.ai.model import AIAgentTask, AIFeedback
-from app.modules.ai.schema import AIFeedbackCreate
+from app.modules.ai_agent import feedback
+from app.modules.ai_agent.model import AIAgentTask, AIFeedback
+from app.modules.ai_agent.schema import AIFeedbackCreate
 
 
 @pytest.fixture

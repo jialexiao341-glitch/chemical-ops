@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.dialects import mysql
 
 from app.core.errors import BusinessValidationError
-from app.modules.rfqs import service
+from app.modules.rfq_quotes import service
 from app.modules.supplier_portal import service as portal
 
 

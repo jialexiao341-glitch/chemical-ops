@@ -3,7 +3,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.modules.deliveries.model import Delivery
+from app.modules.deliveries_receipt.model import Delivery
 from app.modules.quality_acceptances.model import QualityAcceptance
 
 

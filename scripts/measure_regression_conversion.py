@@ -21,10 +21,10 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
-from app.modules.ai import regression_cases  # noqa: E402
-from app.modules.ai.model import AIAgentTask, AIFeedback  # noqa: E402
-from app.modules.ai.schema import RegressionCaseBatchCreate, RegressionCaseBatchReview  # noqa: E402
-from app.modules.system.model import User  # noqa: E402
+from app.modules.ai_agent import regression_cases  # noqa: E402
+from app.modules.ai_agent.model import AIAgentTask, AIFeedback  # noqa: E402
+from app.modules.ai_agent.schema import RegressionCaseBatchCreate, RegressionCaseBatchReview  # noqa: E402
+from app.modules.system_management.model import User  # noqa: E402
 from scripts.export_regression_cases import case_payload  # noqa: E402
 
 DEFAULT_FIXTURES = ROOT / "docs/evaluation/regression-conversion-fixtures/feedback-samples.json"

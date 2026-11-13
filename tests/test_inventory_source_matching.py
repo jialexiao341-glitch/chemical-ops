@@ -5,9 +5,9 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.insights.source_matching import match_source, match_sources, transfer_pairs
-from app.modules.inventory.model import (
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.insights_analytics.source_matching import match_source, match_sources, transfer_pairs
+from app.modules.inventory_stock.model import (
     InventoryBalance, InventoryBatch, InventoryIssueItem, InventoryIssueRequest,
     InventoryStocktakeItem, InventoryStocktakeRequest, InventoryTransaction,
     InventoryTransferItem, InventoryTransferRequest, WarehouseLocation,
@@ -15,8 +15,8 @@ from app.modules.inventory.model import (
 from app.modules.inventory_returns.model import InventoryReturnItem, InventoryReturnRequest
 from app.modules.purchase_orders.model import PurchaseOrderItem
 from app.modules.purchase_orders.model import PurchaseOrder
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
 from .conftest import login
 
 
@@ -127,7 +127,7 @@ def test_transfer_pairs_require_both_unique_exact_visible_sides(db_session, exec
 
 @pytest.mark.parametrize("executed_line", ["INVENTORY_TRANSFER"], indirect=True)
 def test_report_and_checklist_include_both_transfer_sides(client, db_session, demo_password, executed_line, monkeypatch):
-    from app.modules.inventory import service as inventory_service
+    from app.modules.inventory_stock import service as inventory_service
 
     document, item, outbound = executed_line
     inbound = InventoryTransaction(transaction_no="TEST-SOURCE-REPORT-IN", transaction_type="INBOUND", warehouse_id=item.target_warehouse_id, location_id=item.target_location_id, product_id=item.product_id, batch_id=item.batch_id, unit_id=item.unit_id, quantity=item.transferred_quantity, source_type="INVENTORY_TRANSFER", source_id=document.id, operator_id=outbound.operator_id)

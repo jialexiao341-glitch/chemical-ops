@@ -10,8 +10,8 @@ from fastapi import BackgroundTasks
 from sqlalchemy import select
 
 from app.core.config import Settings
-from app.modules.ai import agent_runtime as runtime
-from app.modules.ai.model import AIAgentTask, AIConversation, AIMessage
+from app.modules.ai_agent import agent_runtime as runtime
+from app.modules.ai_agent.model import AIAgentTask, AIConversation, AIMessage
 from app.modules.task_queue import service
 from app.modules.task_queue.model import TaskExecution, TaskOutbox, TaskResourceLock
 from tests.test_agent_runtime import USER, task_db, chat_task_db, model_script, tool
@@ -231,7 +231,7 @@ def test_async_start_and_continue_api_remain_202(queued_db, model_script, monkey
     from fastapi.testclient import TestClient
     from app.core.auth import get_current_user
     from app.core.db import get_db
-    from app.modules.ai.controller import router
+    from app.modules.ai_agent.controller import router
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     allow_ai_workspace_permission(app)
@@ -274,7 +274,7 @@ def test_transport_error_preserves_checkpoint_for_queue_retry(queued_db, monkeyp
 
 
 def test_token_budget_is_persisted_to_task_and_queue_checkpoint(queued_db, monkeypatch):
-    from app.modules.ai import gateway
+    from app.modules.ai_agent import gateway
 
     task, execution = accept(queued_db)
     current = claim(queued_db, execution, monkeypatch)

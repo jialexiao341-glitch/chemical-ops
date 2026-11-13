@@ -14,7 +14,7 @@ from app.modules.purchase_requests.schema import (
     PurchaseRequestRead,
     PurchaseRequestUpdate,
 )
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 router = APIRouter(prefix="/purchase-requests", tags=["采购申请"])

@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import agent_prompt, service
-from app.modules.ai.schema import Intent
-from app.modules.ai.schema import AIChatMessage, AIChatResponse
+from app.modules.ai_agent import agent_prompt, service
+from app.modules.ai_agent.schema import Intent
+from app.modules.ai_agent.schema import AIChatMessage, AIChatResponse
 
 
 def _fake_response(content: str) -> AIChatResponse:

@@ -6,8 +6,8 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from backend.app.modules.jobs.schema import TechnicalDocumentPipelineCreate, TechnicalDocumentPreviewRead
-from backend.app.modules.jobs import technical_documents
+from backend.app.modules.jobs_scheduler.schema import TechnicalDocumentPipelineCreate, TechnicalDocumentPreviewRead
+from backend.app.modules.jobs_scheduler import technical_documents
 
 
 def test_pipeline_accepts_only_supported_document_types():
@@ -38,7 +38,7 @@ def test_fetch_requires_each_requested_type_to_be_available_in_minio():
 
 def test_queue_waiting_and_retrying_are_active_without_recent_run_limit(monkeypatch):
     """排队和重试参与 CAS 互斥，不以固定最近 100 条作为安全边界。"""
-    from app.modules.jobs import technical_documents as queued_documents
+    from app.modules.jobs_scheduler import technical_documents as queued_documents
     class Database:
         def scalars(self, statement):
             sql = str(statement.compile(compile_kwargs={"literal_binds": True}))

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.rfqs import quote_extraction, service as rfq_service
-from app.modules.system import crud as system_crud
+from app.modules.rfq_quotes import quote_extraction, service as rfq_service
+from app.modules.system_management import crud as system_crud
 
 
 class _FakeSession:

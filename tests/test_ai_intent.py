@@ -1,6 +1,6 @@
-from app.modules.ai.agent_prompt import PROJECT_CAPABILITY_REPLY, UNSUPPORTED_REPLY, build_project_reply
-from app.modules.ai.schema import Intent
-from app.modules.ai.evaluation import classify_intent
+from app.modules.ai_agent.agent_prompt import PROJECT_CAPABILITY_REPLY, UNSUPPORTED_REPLY, build_project_reply
+from app.modules.ai_agent.schema import Intent
+from app.modules.ai_agent.evaluation import classify_intent
 
 
 def test_intent_recognizes_supported_categories():

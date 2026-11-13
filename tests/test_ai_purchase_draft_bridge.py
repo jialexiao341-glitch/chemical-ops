@@ -10,8 +10,8 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import conversation_store, purchase_draft_bridge as bridge
-from app.modules.ai.model import AIAgentTask, AIConversation, AIConversationState, AIMessage
+from app.modules.ai_agent import conversation_store, purchase_draft_bridge as bridge
+from app.modules.ai_agent.model import AIAgentTask, AIConversation, AIConversationState, AIMessage
 
 
 CATALOG_RESULT = {
@@ -46,8 +46,8 @@ def _trace():
 
 @pytest.fixture
 def bridge_db(monkeypatch):
-    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
-    monkeypatch.setattr("app.modules.system.data_scope.warehouse_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.department_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.warehouse_scope_snapshot", lambda *_: None)
     engine = create_engine("sqlite:///:memory:", echo=False, connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     with engine.begin() as connection:

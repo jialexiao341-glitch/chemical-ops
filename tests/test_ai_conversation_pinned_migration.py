@@ -69,7 +69,7 @@ def test_025_accepts_matching_pinned_from_fresh_schema(monkeypatch):
 
 
 def test_fresh_schema_and_orm_define_the_migration_contract():
-    from app.modules.ai.model import AIConversation
+    from app.modules.ai_agent.model import AIConversation
 
     schema = (ROOT / "database/schema.sql").read_text(encoding="utf-8")
     conversation_table = schema.split("CREATE TABLE ai_conversations (", 1)[1].split(

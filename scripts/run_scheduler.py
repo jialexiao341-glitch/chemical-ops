@@ -14,13 +14,13 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.core.observability import metrics
 from app.core.production import production_config_errors
-from app.modules.files.service import recover_stale_parses
-from app.modules.jobs.service import (
+from app.modules.files_storage.service import recover_stale_parses
+from app.modules.jobs_scheduler.service import (
     scan_overdue_deliveries,
     start_scheduled_run,
     update_scheduled_run,
 )
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 LOGGER = logging.getLogger("chemicalops.scheduler")

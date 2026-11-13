@@ -10,11 +10,11 @@ from pydantic import ValidationError
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
 from app.core.observability import metrics
-from app.modules.ai import llm, routing, service
-from app.modules.ai.catalog import catalog_prompt
+from app.modules.ai_agent import llm, routing, service
+from app.modules.ai_agent.catalog import catalog_prompt
 
 
-from app.modules.ai.schema import Slots
+from app.modules.ai_agent.schema import Slots
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -372,8 +372,8 @@ def test_supplied_ids_and_confidence_are_not_understanding_contract():
 def test_route_endpoint_permissions_and_foreign_context(client, db_session, monkeypatch):
     from app.core.auth import get_current_user
     from app.main import app
-    from app.modules.ai.model import AIConversation
-    from app.modules.system.model import User
+    from app.modules.ai_agent.model import AIConversation
+    from app.modules.system_management.model import User
     from sqlalchemy import select
     from tests.test_rbac_separation import as_demo_role
 

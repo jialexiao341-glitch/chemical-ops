@@ -1,6 +1,6 @@
 """回归用例确定性脱敏：只遮蔽可判定的联系与身份信息，业务实体保持原样。"""
 
-from app.modules.ai import redaction
+from app.modules.ai_agent import redaction
 
 
 def test_redacts_contact_identity_and_network_fields():

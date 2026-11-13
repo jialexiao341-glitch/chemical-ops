@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.security import hash_password
-from app.modules.system.model import Permission, Role, RolePermission, User, UserRole
+from app.modules.system_management.model import Permission, Role, RolePermission, User, UserRole
 
 
 PERMISSIONS = (

@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import select  # noqa: E402
 
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.chemicals.model import Chemical  # noqa: E402
+from app.modules.chemicals_master.model import Chemical  # noqa: E402
 
 
 PUBCHEM_PROPERTY_URL = (

@@ -1,7 +1,7 @@
 {
   "production_revision": "2275ff7e9e66968b00ff9ef5fee64815ef46754d",
   "production_file_sha256": {
-    "backend/app/modules/rfqs/quote_extraction.py": "e0e0b39aa59d9d070cdb1759cca7675887815a5776b21fa1db56e35caec89d43"
+    "backend/app/modules/rfq_quotes/quote_extraction.py": "e0e0b39aa59d9d070cdb1759cca7675887815a5776b21fa1db56e35caec89d43"
   },
   "current_reproducer_sha256": "2f56c5af39102e925d89da53c5ec5cc795214f6f38690a0fdb34eb5cc61fafa2",
   "dependencies": {

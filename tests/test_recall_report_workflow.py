@@ -5,10 +5,10 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.modules.insights.model import InsightSnapshot
-from app.modules.inventory import service as inventory_service
-from app.modules.inventory.model import InventoryBalance, InventoryBatch
-from app.modules.system.model import User
+from app.modules.insights_analytics.model import InsightSnapshot
+from app.modules.inventory_stock import service as inventory_service
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch
+from app.modules.system_management.model import User
 from .conftest import login
 
 

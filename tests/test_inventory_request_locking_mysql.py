@@ -15,11 +15,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
-from app.modules.inventory import crud, service
-from app.modules.inventory.model import InventoryIssueRequest, InventoryTransferRequest, InventoryStocktakeRequest
-from app.modules.inventory.schema import InventoryIssueRequestUpdate
-from app.modules.replenishments import service as replenishments
-from app.modules.replenishments.model import ReplenishmentRequest
+from app.modules.inventory_stock import crud, service
+from app.modules.inventory_stock.model import InventoryIssueRequest, InventoryTransferRequest, InventoryStocktakeRequest
+from app.modules.inventory_stock.schema import InventoryIssueRequestUpdate
+from app.modules.replenishment_plans import service as replenishments
+from app.modules.replenishment_plans.model import ReplenishmentRequest
 
 
 @pytest.mark.skipif(os.environ.get('CHEMICALOPS_ISOLATED_MYSQL_TEST') != '1', reason='需要显式启用独立 MySQL 验收')

@@ -1,10 +1,10 @@
 from types import SimpleNamespace
 from sqlalchemy import select
-from app.modules.ai.model import AIOperationSuggestion
-from app.modules.finance.model import FinanceInvoice, FinanceInvoiceMatch, FinanceReconciliation
-from app.modules.jobs import service
+from app.modules.ai_agent.model import AIOperationSuggestion
+from app.modules.finance_management.model import FinanceInvoice, FinanceInvoiceMatch, FinanceReconciliation
+from app.modules.jobs_scheduler import service
 from app.modules.operation_exceptions.model import OperationException
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 def test_submitted_invoice_with_stale_match_generates_deduplicated_suggestion(db_session):

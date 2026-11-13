@@ -19,16 +19,16 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.main import app
-from app.modules.ai.model import AIAgentActionProposal
-from app.modules.chemicals.model import Chemical
-from app.modules.files import service as file_service
-from app.modules.system.file_model import SysFile
-from app.modules.products.model import Product
+from app.modules.ai_agent.model import AIAgentActionProposal
+from app.modules.chemicals_master.model import Chemical
+from app.modules.files_storage import service as file_service
+from app.modules.system_management.file_model import SysFile
+from app.modules.products_master.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem, Unit
-from app.modules.rfqs import quote_extraction
-from app.modules.rfqs.model import RFQ, SupplierQuote
-from app.modules.suppliers.model import Supplier
+from app.modules.rfq_quotes import quote_extraction
+from app.modules.rfq_quotes.model import RFQ, SupplierQuote
+from app.modules.suppliers_master.model import Supplier
 
 from .conftest import login
 

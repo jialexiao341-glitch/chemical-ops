@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from app.modules.ai.model import AIAgentTask, AIFeedback, AIRegressionCase
+from app.modules.ai_agent.model import AIAgentTask, AIFeedback, AIRegressionCase
 from scripts import report_regression_conversion as report
 
 _DDL = (

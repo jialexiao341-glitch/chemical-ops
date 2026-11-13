@@ -3,9 +3,9 @@
 import pytest
 from sqlalchemy import select
 
-from app.modules.insights.model import ExceptionActionDecision, ExceptionActionEvent, InsightSnapshot
+from app.modules.insights_analytics.model import ExceptionActionDecision, ExceptionActionEvent, InsightSnapshot
 from app.modules.operation_exceptions.model import OperationTask
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 from .conftest import login
 

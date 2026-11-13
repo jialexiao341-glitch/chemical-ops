@@ -8,7 +8,7 @@ from zipfile import ZipFile
 import pytest
 
 from app.core.config import Settings
-from app.modules.files import mineru
+from app.modules.files_storage import mineru
 
 
 class FakeResponse:

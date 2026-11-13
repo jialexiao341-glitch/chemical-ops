@@ -10,10 +10,10 @@ from app.modules.quality_acceptances.schema import QualityAcceptanceResult, Qual
 from app.modules.quality_acceptances import service as quality_service, standards
 from app.modules.quality_acceptances.model import QualityAcceptance, QualityReportReviewRecord
 from app.modules.quality_acceptances.schema import QualityReportReview
-from app.modules.deliveries.model import DeliveryItem
-from app.modules.system.file_model import SysFile, SysFileAttachment
-from app.modules.products.model import Product
-from app.modules.system.model import User
+from app.modules.deliveries_receipt.model import DeliveryItem
+from app.modules.system_management.file_model import SysFile, SysFileAttachment
+from app.modules.products_master.model import Product
+from app.modules.system_management.model import User
 from .conftest import login
 
 

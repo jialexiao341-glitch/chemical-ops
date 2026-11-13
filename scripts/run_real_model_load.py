@@ -23,9 +23,9 @@ async def run(args):
     if args.requests * reservation > args.token_budget:
         raise SystemExit("Token 预算不足以预留全部请求输入和最大输出，未调用模型")
     from app.core.config import get_settings
-    from app.modules.ai.gateway import resolve_model_profile
-    from app.modules.ai.llm import chat
-    from app.modules.ai.schema import AIChatMessage, AIChatRequest
+    from app.modules.ai_agent.gateway import resolve_model_profile
+    from app.modules.ai_agent.llm import chat
+    from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest
 
     settings = get_settings()
     profile = resolve_model_profile(settings)

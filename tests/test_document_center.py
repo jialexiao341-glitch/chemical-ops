@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.core.errors import ResourceNotFoundError
-from app.modules.ai import document_center
+from app.modules.ai_agent import document_center
 import pytest
 
 
@@ -126,7 +126,7 @@ def test_document_center_real_database_and_http(client, db_session, demo_passwor
 
 def test_missing_invoice_source_on_real_api(client, db_session, demo_password):
     from sqlalchemy import select
-    from app.modules.finance.model import FinanceInvoice
+    from app.modules.finance_management.model import FinanceInvoice
     from tests.conftest import login
     invoice = db_session.scalar(select(FinanceInvoice).limit(1))
     if invoice is None:
@@ -143,10 +143,10 @@ def test_missing_invoice_source_on_real_api(client, db_session, demo_password):
 def test_foreign_rfq_hidden_even_when_buyer_uploaded_file(client, db_session, demo_password):
     from uuid import uuid4
     from sqlalchemy import select
-    from app.modules.rfqs.model import RFQ, SupplierQuote
-    from app.modules.suppliers.model import Supplier
-    from app.modules.system.file_model import SysFile
-    from app.modules.system.model import User
+    from app.modules.rfq_quotes.model import RFQ, SupplierQuote
+    from app.modules.suppliers_master.model import Supplier
+    from app.modules.system_management.file_model import SysFile
+    from app.modules.system_management.model import User
     from tests.conftest import login
     buyer = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
     admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
@@ -180,8 +180,8 @@ def test_quality_search_matches_attached_filename(client, db_session, demo_passw
     from uuid import uuid4
     from sqlalchemy import select
     from app.modules.quality_acceptances.model import QualityAcceptance
-    from app.modules.system.file_model import SysFile, SysFileAttachment
-    from app.modules.system.model import User
+    from app.modules.system_management.file_model import SysFile, SysFileAttachment
+    from app.modules.system_management.model import User
     from tests.conftest import login
     acceptance = db_session.scalar(select(QualityAcceptance).limit(1))
     admin = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))

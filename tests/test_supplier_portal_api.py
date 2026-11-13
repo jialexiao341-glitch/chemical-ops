@@ -10,11 +10,11 @@ from uuid import uuid4
 from app.core.security import hash_password
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderEvent, PurchaseOrderItem
 from app.modules.purchase_requests.model import Unit
-from app.modules.rfqs.model import RFQ, RFQItem, RFQSupplier, SupplierQuote
+from app.modules.rfq_quotes.model import RFQ, RFQItem, RFQSupplier, SupplierQuote
 from app.modules.supplier_portal.model import SupplierDeliveryUpdate, SupplierPortalAccount
-from app.modules.products.model import Product
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import Role, User, UserRole
+from app.modules.products_master.model import Product
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import Role, User, UserRole
 
 from .conftest import login
 
@@ -175,8 +175,8 @@ def test_supplier_eta_and_shipment_notice_are_scoped_and_quantity_checked(client
 def test_supplier_quality_document_upload_and_download_are_binding_scoped(client: TestClient, db_session, demo_password: str, monkeypatch, tmp_path, request, storage_backend) -> None:
     """供应商能提交并下载本方订单质量文件，未绑定供应商账号不能借文件编号访问。"""
 
-    from app.modules.files import service as file_service
-    from app.modules.system.file_model import SysFile
+    from app.modules.files_storage import service as file_service
+    from app.modules.system_management.file_model import SysFile
     import os
 
     if storage_backend == "minio":

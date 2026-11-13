@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from app.modules.doc_kb.model import AiDocument
-from app.modules.jobs import technical_documents as documents
-from app.modules.jobs.model import SchedulerJobRun
+from app.modules.jobs_scheduler import technical_documents as documents
+from app.modules.jobs_scheduler.model import SchedulerJobRun
 from app.modules.task_queue import context, execution, service
 from app.modules.task_queue.model import TaskExecution
 from tests.test_task_queue_delivery import queue_engine, db

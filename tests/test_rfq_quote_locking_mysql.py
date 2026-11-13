@@ -15,9 +15,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
-from app.modules.rfqs import crud, service
-from app.modules.rfqs.model import RFQ, SupplierQuote
-from app.modules.rfqs.schema import QuoteSelection
+from app.modules.rfq_quotes import crud, service
+from app.modules.rfq_quotes.model import RFQ, SupplierQuote
+from app.modules.rfq_quotes.schema import QuoteSelection
 
 
 @pytest.mark.skipif(os.environ.get('CHEMICALOPS_ISOLATED_MYSQL_TEST') != '1', reason='需要显式启用独立 MySQL 验收')

@@ -7,15 +7,15 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
-from app.modules.ai import regression_cases
-from app.modules.ai.model import AIAgentTask, AIFeedback, AIRegressionCase
-from app.modules.ai.schema import (
+from app.modules.ai_agent import regression_cases
+from app.modules.ai_agent.model import AIAgentTask, AIFeedback, AIRegressionCase
+from app.modules.ai_agent.schema import (
     RegressionCaseBatchCreate,
     RegressionCaseBatchItem,
     RegressionCaseBatchReview,
     RegressionCaseCreate,
 )
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 @pytest.fixture

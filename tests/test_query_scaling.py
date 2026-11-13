@@ -5,15 +5,15 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select
 
-from app.modules.inventory import service as inventory
-from app.modules.inventory.model import InventoryBalance, InventoryBatch
+from app.modules.inventory_stock import service as inventory
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch
 from app.modules.inventory_cost import service as costs
 from app.modules.supplier_portal import service as portal
 from app.modules.supplier_portal.model import SupplierQualityDocument
 from app.modules.purchase_orders.model import PurchaseOrder
-from app.modules.deliveries.model import Delivery
-from app.modules.system.file_model import SysFile
-from app.modules.system.model import User
+from app.modules.deliveries_receipt.model import Delivery
+from app.modules.system_management.file_model import SysFile
+from app.modules.system_management.model import User
 from tests.test_remediation_boundaries import stock_fixture
 
 

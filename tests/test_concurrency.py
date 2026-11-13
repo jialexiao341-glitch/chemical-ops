@@ -12,8 +12,8 @@ from sqlalchemy import delete, func, select
 
 from app.core.db import SessionLocal
 from app.core.errors import BusinessValidationError
-from app.modules.inventory import service
-from app.modules.inventory.model import (
+from app.modules.inventory_stock import service
+from app.modules.inventory_stock.model import (
     InventoryBalance,
     InventoryBatch,
     InventoryIssueItem,
@@ -23,10 +23,10 @@ from app.modules.inventory.model import (
     WarehouseLocation,
 )
 from app.modules.inventory_cost.model import InventoryCostAllocation, InventoryCostLayer
-from app.modules.products.model import Product
+from app.modules.products_master.model import Product
 from app.modules.purchase_requests.model import Unit
-from app.modules.system.audit import AuditLog
-from app.modules.system.model import User
+from app.modules.system_management.audit import AuditLog
+from app.modules.system_management.model import User
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.concurrency]

@@ -10,15 +10,15 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
 from app.core.time import business_today, utc_now
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.finance import reconciliation_items
-from app.modules.finance.model import FinanceReconciliation
-from app.modules.files import service as file_service
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.finance_management import reconciliation_items
+from app.modules.finance_management.model import FinanceReconciliation
+from app.modules.files_storage import service as file_service
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderEvent, PurchaseOrderItem
-from app.modules.rfqs.model import RFQ, RFQItem, RFQSupplier, SupplierQuote
-from app.modules.rfqs.schema import SupplierQuoteCreate, SupplierQuoteItemCreate
-from app.modules.rfqs.service import create_quote_for_supplier
-from app.modules.suppliers.model import Supplier
+from app.modules.rfq_quotes.model import RFQ, RFQItem, RFQSupplier, SupplierQuote
+from app.modules.rfq_quotes.schema import SupplierQuoteCreate, SupplierQuoteItemCreate
+from app.modules.rfq_quotes.service import create_quote_for_supplier
+from app.modules.suppliers_master.model import Supplier
 from app.modules.supplier_portal.model import (
     SupplierDeliveryUpdate,
     SupplierPortalAccount,
@@ -47,10 +47,10 @@ from app.modules.supplier_portal.schema import (
     SupplierRFQListItem,
     SupplierRFQPage,
 )
-from app.modules.system.audit import add_audit_log
-from app.modules.system.file_model import SysFile, SysFileAttachment
-from app.modules.system.model import User
-from app.modules.system import crud as system_crud
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.file_model import SysFile, SysFileAttachment
+from app.modules.system_management.model import User
+from app.modules.system_management import crud as system_crud
 
 
 def _supplier_id(db: Session, user: User) -> int:
@@ -335,7 +335,7 @@ def update_expected_delivery(db: Session, user: User, order_id: int, data: Suppl
         event_note=f"供应商更新预计交期：{previous or '未设置'} → {data.expected_date}" + (f"；{data.note}" if data.note else ""),
     ))
     add_audit_log(db, actor_id=user.id, action_type="UPDATE_ETA", resource_type="PURCHASE_ORDER", resource_id=order.id, request_summary="供应商更新预计交期", result_status="SUCCESS")
-    from app.modules.ai.business_events import record_delivery_change_event
+    from app.modules.ai_agent.business_events import record_delivery_change_event
     record_delivery_change_event(db, order, update, actor_id=user.id)
     if commit:
         db.commit()
@@ -559,7 +559,7 @@ def supplier_confirm_reconciliation(db: Session, user: User, reconciliation_id: 
     if reconciliation.items_version < 1:
         raise BusinessValidationError("对账明细尚未生成，不能确认")
     order = _require_order(db, user, reconciliation.po_id, for_update=True)
-    from app.modules.finance.service import _check_order_ready_for_reconciliation
+    from app.modules.finance_management.service import _check_order_ready_for_reconciliation
     _check_order_ready_for_reconciliation(db, order)
     reconciliation_items.validate_for_confirmation(db, reconciliation, order)
     reconciliation.status = "CONFIRMED"
@@ -587,7 +587,7 @@ def supplier_dispute_reconciliation(db: Session, user: User, reconciliation_id: 
 
 
 def finance_list_reconciliation_messages(db: Session, user: User, reconciliation_id: int, *, page: int = 1, page_size: int = 100):
-    from app.modules.finance.service import get_reconciliation
+    from app.modules.finance_management.service import get_reconciliation
     reconciliation = get_reconciliation(db, user, reconciliation_id)
     total = db.scalar(select(func.count(SupplierReconciliationMessage.id)).where(SupplierReconciliationMessage.reconciliation_id == reconciliation.id)) or 0
     rows = db.scalars(select(SupplierReconciliationMessage).where(SupplierReconciliationMessage.reconciliation_id == reconciliation.id).order_by(SupplierReconciliationMessage.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
@@ -595,7 +595,7 @@ def finance_list_reconciliation_messages(db: Session, user: User, reconciliation
 
 
 def finance_add_reconciliation_message(db: Session, user: User, reconciliation_id: int, data: SupplierReconciliationMessageCreate):
-    from app.modules.finance.service import get_reconciliation
+    from app.modules.finance_management.service import get_reconciliation
     reconciliation = get_reconciliation(db, user, reconciliation_id)
     if reconciliation.status in {"CLOSED", "CANCELLED"}:
         raise BusinessValidationError("已关闭或已取消的对账单不能继续留言")

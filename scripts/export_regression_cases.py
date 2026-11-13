@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import select  # noqa: E402
 
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.ai.model import AIRegressionCase  # noqa: E402
+from app.modules.ai_agent.model import AIRegressionCase  # noqa: E402
 
 
 def case_payload(row: AIRegressionCase) -> dict:

@@ -3,8 +3,8 @@
   "source_snapshot_timing": "最终验证后采集；不冒充历史调用时逐文件快照",
   "live_retest_note": "三格式真实模型复测进程启动于最终冲突分组修正之前；该修正另有31/null/999回归，单条正常样本无冲突候选。",
   "sources": {
-    "backend/app/modules/rfqs/quote_extraction.py": "4fd262f4f8fa069988a82408cef1a9de5ac866025bfb55806dd7a76d29c1b856",
-    "backend/app/modules/rfqs/quote_evidence.py": "69b19963c497bf168361cc17c7139436063b1e16d77f6e85e64cf75fc9222129",
+    "backend/app/modules/rfq_quotes/quote_extraction.py": "4fd262f4f8fa069988a82408cef1a9de5ac866025bfb55806dd7a76d29c1b856",
+    "backend/app/modules/rfq_quotes/quote_evidence.py": "69b19963c497bf168361cc17c7139436063b1e16d77f6e85e64cf75fc9222129",
     "scripts/evaluate_quote_extraction.py": "49ceeb651a06e33ca105436b34480983353064fe9ec6d981b97de50d5da5984c",
     "tests/test_rfq_quote_extraction.py": "e3ca15e61a10a69359b4bf8070bf455615f857e116297e1503d91c754018e5a3",
     "tests/test_quote_extraction_evaluation.py": "e0a62c0617565944bdfc9acf62f84568eac7e70b4ba0e6a0b84664ebe39dd0c0",

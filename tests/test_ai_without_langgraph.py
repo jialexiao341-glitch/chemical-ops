@@ -12,7 +12,7 @@ def blocked(name, *args, **kwargs):
         raise ImportError("langgraph intentionally unavailable")
     return real_import(name, *args, **kwargs)
 builtins.__import__ = blocked
-from app.modules.ai import text2sql, agent_runtime
+from app.modules.ai_agent import text2sql, agent_runtime
 '''
     env = dict(os.environ)
     env['PYTHONPATH'] = os.pathsep.join(filter(None, ['backend', env.get('PYTHONPATH')]))

@@ -19,9 +19,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import sessionmaker
 
 from app.models.base import Base
-from app.modules.ai.model import AIAgentTask
-from app.modules.jobs.model import SchedulerJobRun
-from app.modules.system.model import Department, User, Role, Permission, UserRole, RolePermission
+from app.modules.ai_agent.model import AIAgentTask
+from app.modules.jobs_scheduler.model import SchedulerJobRun
+from app.modules.system_management.model import Department, User, Role, Permission, UserRole, RolePermission
 from app.modules.task_queue import service, processes
 from app.modules.task_queue.model import TaskExecution, TaskOutbox, TaskResourceLock
 from tests.test_task_queue_delivery import queue_engine

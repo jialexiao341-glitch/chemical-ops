@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 import pytest
 from app.core.errors import BusinessValidationError
-from app.modules.ai import proactive
+from app.modules.ai_agent import proactive
 
 
 def test_terminal_suggestion_cannot_be_changed(monkeypatch):
@@ -21,7 +21,7 @@ def suggestion_db(monkeypatch):
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
     from app.modules.operation_exceptions import service as exception_service
-    from app.modules.system import audit
+    from app.modules.system_management import audit
     engine = create_engine('sqlite://')
     with engine.begin() as connection:
         connection.exec_driver_sql('CREATE TABLE operation_exceptions (id INTEGER PRIMARY KEY)')
@@ -36,7 +36,7 @@ def suggestion_db(monkeypatch):
 
 
 def test_deduplication_and_scope(suggestion_db, monkeypatch):
-    from app.modules.ai.model import AIOperationSuggestion
+    from app.modules.ai_agent.model import AIOperationSuggestion
     from sqlalchemy import func, select
     from app.core.errors import ResourceNotFoundError
     exception = SimpleNamespace(id=1, exception_type='LOW_STOCK', exception_no='EX-1', description='低库存', owner_id=None)
@@ -57,7 +57,7 @@ def test_deduplication_and_scope(suggestion_db, monkeypatch):
 
 
 def test_handoff_creates_one_task_and_cannot_repeat(suggestion_db, monkeypatch):
-    from app.modules.ai.model import AIOperationSuggestion
+    from app.modules.ai_agent.model import AIOperationSuggestion
     from app.modules.operation_exceptions import service as exception_service
     item = AIOperationSuggestion(exception_id=1, title='运营建议', content='内容', instruction='核查异常 EX-1', status='OPEN')
     suggestion_db.add(item); suggestion_db.commit()
@@ -77,7 +77,7 @@ def test_handoff_creates_one_task_and_cannot_repeat(suggestion_db, monkeypatch):
 
 @pytest.mark.parametrize('status', ['IGNORED', 'CLOSED'])
 def test_ignore_and_close_change_only_suggestion(suggestion_db, status):
-    from app.modules.ai.model import AIOperationSuggestion
+    from app.modules.ai_agent.model import AIOperationSuggestion
     item = AIOperationSuggestion(exception_id=1, title='建议', content='内容', instruction='指令', status='OPEN')
     suggestion_db.add(item); suggestion_db.commit()
     result = proactive.transition_suggestion(suggestion_db, SimpleNamespace(id=7, visible_exception=1), item.id, status)
@@ -90,7 +90,7 @@ def test_api_requires_both_read_and_write_and_uses_scope(monkeypatch):
     from app.core.auth import get_current_user
     from app.core.db import get_db
     from app.core.rate_limit import limit_ai
-    from app.modules.system import crud
+    from app.modules.system_management import crud
     from app.core.errors import ResourceNotFoundError
     user = SimpleNamespace(id=1)
     permissions = {'ai.workspace.read', 'operations.exceptions.read'}
@@ -115,7 +115,7 @@ def test_api_requires_both_read_and_write_and_uses_scope(monkeypatch):
 def test_mysql_api_suggestion_lifecycle(client, db_session, demo_password):
     from uuid import uuid4
     from sqlalchemy import select, func
-    from app.modules.ai.model import AIOperationSuggestion
+    from app.modules.ai_agent.model import AIOperationSuggestion
     from app.modules.operation_exceptions.model import OperationException, OperationTask
     from tests.conftest import login
     actor = login(client, 'SystemAdmin', demo_password)
@@ -144,7 +144,7 @@ def test_mysql_api_suggestion_lifecycle(client, db_session, demo_password):
 
 def test_notification_response_hides_legacy_suggestion_content():
     from datetime import datetime
-    from app.modules.notifications.controller import _safe_notification
+    from app.modules.notifications_center.controller import _safe_notification
     notification = SimpleNamespace(id=1, recipient_id=7, notification_type='OPERATION_SUGGESTION',
         title='运营建议：客户名称', content='异常 EX-SECRET', related_type='OPERATION_EXCEPTION',
         related_id=123, is_read=0, read_at=None, created_at=datetime.now())
@@ -155,7 +155,7 @@ def test_notification_response_hides_legacy_suggestion_content():
 
 def test_assignee_only_cannot_handle_shared_suggestion(suggestion_db, monkeypatch):
     from app.core.errors import ResourceNotFoundError
-    from app.modules.ai.model import AIOperationSuggestion
+    from app.modules.ai_agent.model import AIOperationSuggestion
     from app.modules.operation_exceptions import service as exception_service
     item = AIOperationSuggestion(exception_id=1, title='建议', content='内容', instruction='指令', status='OPEN')
     suggestion_db.add(item); suggestion_db.commit()
@@ -170,8 +170,8 @@ def test_assignee_only_cannot_handle_shared_suggestion(suggestion_db, monkeypatc
 def test_scan_reconciles_missing_active_suggestions(db_session, monkeypatch):
     from uuid import uuid4
     from sqlalchemy import select, func
-    from app.modules.ai.model import AIOperationSuggestion
-    from app.modules.jobs import service
+    from app.modules.ai_agent.model import AIOperationSuggestion
+    from app.modules.jobs_scheduler import service
     from app.modules.operation_exceptions.model import OperationException
     exception = OperationException(exception_no=f'TEST-{uuid4().hex[:12]}', exception_type='LOW_STOCK',
         source_type='PRODUCT', source_id=987654, severity='HIGH', description='补偿验收', status='OPEN')
@@ -181,7 +181,7 @@ def test_scan_reconciles_missing_active_suggestions(db_session, monkeypatch):
     monkeypatch.setattr(service, 'scan_pending_quality_acceptances', lambda *a, **k: {'scanned_count': 0, 'created_count': 0})
     monkeypatch.setattr(service, 'scan_low_inventory', lambda *a, **k: {'scanned_count': 0, 'created_count': 0, 'recovered_count': 0, 'skipped_unit_mismatch_count': 0})
     # 只测试本条记录，避免本地开发库中已有异常影响样本。
-    from app.modules.ai import proactive
+    from app.modules.ai_agent import proactive
     monkeypatch.setattr(proactive, 'notify_users', lambda *a, **k: [])
     service.scan_active_alerts(db_session, SimpleNamespace(id=1))
     service.scan_active_alerts(db_session, SimpleNamespace(id=1))

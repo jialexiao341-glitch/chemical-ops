@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.config import get_settings
-from app.modules.ai import service, briefing
-from app.modules.ai.numeric_fidelity import faithful_numbers
-from app.modules.ai.schema import BriefingRequest
+from app.modules.ai_agent import service, briefing
+from app.modules.ai_agent.numeric_fidelity import faithful_numbers
+from app.modules.ai_agent.schema import BriefingRequest
 
 
 def test_swapped_metric_values_fall_back(monkeypatch):
@@ -30,7 +30,7 @@ def test_unauthorized_units_fall_back(answer):
 
 
 def test_briefing_swapped_values_fall_back(monkeypatch):
-    from app.modules.system import data_scope
+    from app.modules.system_management import data_scope
     monkeypatch.setattr(data_scope, "is_department_restricted", lambda *_: False)
     monkeypatch.setattr(data_scope, "is_warehouse_restricted", lambda *_: False)
     monkeypatch.setattr(briefing, "build_snapshot", lambda *_, **__: {"overview": {"purchase_orders_total": 12, "open_exceptions": 3}})

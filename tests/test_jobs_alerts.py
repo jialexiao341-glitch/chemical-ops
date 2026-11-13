@@ -5,7 +5,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from app.core.config import Settings
-from app.modules.jobs import service
+from app.modules.jobs_scheduler import service
 from app.modules.operation_exceptions.schema import OperationExceptionCreate
 
 

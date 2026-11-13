@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from app.modules.ai import schema
+from app.modules.ai_agent import schema
 
 
 AI_ROOT = Path(schema.__file__).parent
@@ -33,23 +33,23 @@ def test_pydantic_contracts_are_declared_only_in_schema():
 def test_schema_and_llm_do_not_depend_on_business_execution():
     """基础契约与模型客户端不能反向依赖会话或 Agent 业务执行。"""
     allowed = {
-        "app.modules.ai.catalog",
-        "app.modules.ai.agent_prompt",
-        "app.modules.ai.gateway",
-        "app.modules.ai.schema",
+        "app.modules.ai_agent.catalog",
+        "app.modules.ai_agent.agent_prompt",
+        "app.modules.ai_agent.gateway",
+        "app.modules.ai_agent.schema",
     }
     for name in ("schema.py", "llm.py"):
         tree = ast.parse((AI_ROOT / name).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.modules.ai"):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.modules.ai_agent"):
                 assert node.module in allowed, (name, node.module)
 
 
 def test_conversation_store_does_not_depend_on_execution():
     tree = ast.parse((AI_ROOT / "conversation_store.py").read_text(encoding="utf-8"))
-    allowed = {"app.modules.ai.model", "app.modules.ai.schema"}
+    allowed = {"app.modules.ai_agent.model", "app.modules.ai_agent.schema"}
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.modules.ai"):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.modules.ai_agent"):
             assert node.module in allowed, node.module
 
 
@@ -57,6 +57,6 @@ def test_history_access_does_not_depend_on_batch_executor():
     tree = ast.parse((AI_ROOT / "history_access.py").read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            assert node.module != "app.modules.ai.multi_intent"
-            if node.module == "app.modules.ai":
+            assert node.module != "app.modules.ai_agent.multi_intent"
+            if node.module == "app.modules.ai_agent":
                 assert "multi_intent" not in {alias.name for alias in node.names}

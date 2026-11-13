@@ -17,8 +17,8 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import select  # noqa: E402
 
 from app.core.db import SessionLocal  # noqa: E402
-from app.modules.ai.capabilities import AGENT_TASK_REQUIREMENTS  # noqa: E402
-from app.modules.ai.model import AIAgentTask  # noqa: E402
+from app.modules.ai_agent.capabilities import AGENT_TASK_REQUIREMENTS  # noqa: E402
+from app.modules.ai_agent.model import AIAgentTask  # noqa: E402
 
 
 def build_case(task, *, question: str, expected_mode: str, expected_tasks: list[str],

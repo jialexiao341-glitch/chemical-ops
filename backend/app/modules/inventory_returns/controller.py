@@ -7,7 +7,7 @@ from app.core.auth import require_permission
 from app.core.db import get_db
 from app.modules.inventory_returns import service
 from app.modules.inventory_returns.schema import ReturnCreate, ReturnPage, ReturnRead, ReturnReject, ReturnSourceRead
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 router = APIRouter(prefix="/inventory/returns", tags=["供应商退货"])

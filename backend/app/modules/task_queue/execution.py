@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.modules.task_queue import adapters, context, service
 from app.modules.task_queue.model import TaskExecution
-from app.modules.system import crud
+from app.modules.system_management import crud
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -23,7 +23,7 @@ class PermanentTaskError(RuntimeError):
 
 
 def source_hash(db, cas, doc_types):
-    from app.modules.jobs import technical_documents as documents
+    from app.modules.jobs_scheduler import technical_documents as documents
     digest = hashlib.sha256()
     sources = [row for row in documents.list_source_documents(db, cas=cas) if row["doc_type"] in doc_types]
     for row in sorted(sources, key=lambda row: (row["doc_type"], row["extension"])):
@@ -34,7 +34,7 @@ def source_hash(db, cas, doc_types):
 
 
 def document_permission(db, actor_id):
-    from app.modules.jobs.technical_documents import require_technical_or_admin
+    from app.modules.jobs_scheduler.technical_documents import require_technical_or_admin
     user = crud.get_user(db, actor_id)
     if user is None or user.status != "ACTIVE" or "master.chemicals.write" not in crud.get_user_permission_codes(db, actor_id):
         raise PermanentTaskError("PERMISSION_DENIED")
@@ -43,8 +43,8 @@ def document_permission(db, actor_id):
 
 
 def run_documents(execution_id, token):
-    from app.modules.jobs import technical_documents as documents
-    from app.modules.jobs.model import SchedulerJobRun
+    from app.modules.jobs_scheduler import technical_documents as documents
+    from app.modules.jobs_scheduler.model import SchedulerJobRun
     from app.modules.doc_kb.model import AiDocument
     settings = get_settings()
     with SessionLocal() as db:
@@ -139,7 +139,7 @@ async def run():
         if task_type.startswith("documents."):
             run_documents(execution_id, token)
         elif task_type == "agent.run":
-            from app.modules.ai.agent_runtime import run_prepared_task
+            from app.modules.ai_agent.agent_runtime import run_prepared_task
             await run_prepared_task(business_id, actor_id, revision)
         else:
             raise PermanentTaskError("UNKNOWN_TASK_TYPE")

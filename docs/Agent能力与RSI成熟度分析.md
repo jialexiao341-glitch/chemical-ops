@@ -236,7 +236,7 @@ P1「差评批量脱敏」已落地（未提交）：
 | 变更 | 实现 | 安全边界 |
 | --- | --- | --- |
 | 批量入口 | `POST /ai/regression-cases/batch`（1–50 条）；候选弹窗多选、一次确认，逐条返回 CREATED/REUSED/SKIPPED/FAILED | 单项失败不中断整批；整批仍需 `redacted_confirmed` |
-| 确定性脱敏 | `backend/app/modules/ai/redaction.py`：邮箱、身份证、银行卡、手机号、座机、IP、联系人/单位名称按固定规则遮蔽 | 不调用模型；重复执行结果不变 |
+| 确定性脱敏 | `backend/app/modules/ai_agent/redaction.py`：邮箱、身份证、银行卡、手机号、座机、IP、联系人/单位名称按固定规则遮蔽 | 不调用模型；重复执行结果不变 |
 | 预览即保存 | 候选接口返回 `redacted_question` 与 `redaction_findings`；前端批量提交使用预览文本 | 服务端再次脱敏，客户端漏改也不会把联系方式写进评测集 |
 | 去重与归属 | 批内重复、既有草稿复用、已审阅或同来源任务已有用例跳过；非管理员仅本人任务 | 管理员可跨用户；状态仍走既有审阅流 |
 | 候选过滤 | 候选默认跳过 `TRANSIENT_INFRA` / `AMBIGUOUS_TIMEOUT` 失败；差评来源保留，`include_infra` 可显式审计 | 避免 worker 宕机、模型服务抖动被做成能力回归 |

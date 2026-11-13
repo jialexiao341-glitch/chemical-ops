@@ -11,21 +11,21 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai.schema import AIChatMessage, AIChatRequest
-from app.modules.ai.llm import chat
-from app.modules.ai.llm import extract_json_object
-from app.modules.deliveries.model import DeliveryItem
-from app.modules.files import mineru, service as file_service
-from app.modules.files.parser import parse_file_content
-from app.modules.products.model import Product
+from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest
+from app.modules.ai_agent.llm import chat
+from app.modules.ai_agent.llm import extract_json_object
+from app.modules.deliveries_receipt.model import DeliveryItem
+from app.modules.files_storage import mineru, service as file_service
+from app.modules.files_storage.parser import parse_file_content
+from app.modules.products_master.model import Product
 from app.modules.quality_acceptances.model import QualityAcceptance, QualityInspectionStandard, QualityReportReviewRecord, QualityReviewCorrection
 from app.modules.quality_acceptances.schema import QualityCorrectionAction, QualityCorrectionRead, QualityCriterion, QualityReportCheck, QualityReportComparison, QualityReportFile, QualityReportReview, QualityReportSummary, QualityReviewDecision, QualityReviewHistory, QualityReviewTarget
 from app.modules.quality_acceptances.standards import latest_standard
 from app.modules.quality_acceptances.service import get_acceptance
-from app.modules.system.file_model import SysFile, SysFileAttachment
-from app.modules.system.audit import add_audit_log
-from app.modules.system.model import User
-from app.modules.system.crud import get_user_role_codes
+from app.modules.system_management.file_model import SysFile, SysFileAttachment
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.model import User
+from app.modules.system_management.crud import get_user_role_codes
 
 
 class _ExtractedItem(BaseModel):

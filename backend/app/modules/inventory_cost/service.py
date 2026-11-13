@@ -7,15 +7,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
-from app.modules.inventory.quality_hold import lock_available_batches
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch, InventoryTransaction, Warehouse, WarehouseLocation
+from app.modules.inventory_stock.quality_hold import lock_available_batches
 from app.modules.inventory_cost.model import InventoryCostAllocation, InventoryCostLayer, InventoryFifoOutboundAllocation, InventoryFifoOutboundRequest
 from app.modules.inventory_cost.schema import FifoOutboundCreate
-from app.modules.products.model import Product
+from app.modules.products_master.model import Product
 from app.modules.purchase_requests.model import Unit
-from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_role_codes
-from app.modules.system.model import User
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.crud import get_user_role_codes
+from app.modules.system_management.model import User
 
 
 def _require_request(db: Session, request_id: int) -> InventoryFifoOutboundRequest:
@@ -30,7 +30,7 @@ def _require_request(db: Session, request_id: int) -> InventoryFifoOutboundReque
 def _require_warehouse_scope(db: Session, user: User, warehouse: Warehouse) -> None:
     """FIFO 出库与普通仓储操作使用同一负责人范围。"""
 
-    from app.modules.inventory.service import _require_warehouse_scope as require_inventory_scope
+    from app.modules.inventory_stock.service import _require_warehouse_scope as require_inventory_scope
     require_inventory_scope(db, user, warehouse.id)
 
 

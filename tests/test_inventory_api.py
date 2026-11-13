@@ -6,12 +6,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.modules.inventory.model import InventoryBalance, InventoryTransaction
-from app.modules.inventory.model import Warehouse
+from app.modules.inventory_stock.model import InventoryBalance, InventoryTransaction
+from app.modules.inventory_stock.model import Warehouse
 from app.modules.inventory_cost.model import InventoryCostAllocation
-from app.modules.deliveries.model import Delivery
+from app.modules.deliveries_receipt.model import Delivery
 from app.modules.purchase_orders.model import PurchaseOrder
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 from .conftest import login
 
@@ -35,7 +35,7 @@ def test_fifo_outbound_uses_warehouse_owner_scope(monkeypatch) -> None:
 
     from app.core.errors import ResourceNotFoundError
     from app.modules.inventory_cost import service as cost_service
-    from app.modules.inventory import service as inventory_service
+    from app.modules.inventory_stock import service as inventory_service
 
     warehouse = Warehouse(id=10, manager_id=99)
     db = SimpleNamespace(get=lambda *_: warehouse)
@@ -107,7 +107,7 @@ def test_issue_request_repeat_execute_is_rejected(client: TestClient, db_session
     """同一领用申请执行两次时，第二次不会重复扣减。"""
 
     balance = get_available_balance(db_session)
-    from app.modules.system.model import User, UserWarehouseGrant, UserWarehouseScope
+    from app.modules.system_management.model import User, UserWarehouseGrant, UserWarehouseScope
     for username in ('TechEngineer', 'WarehouseUser'):
         actor = db_session.scalar(select(User).where(User.username == username))
         if db_session.get(UserWarehouseScope, actor.id) is None:

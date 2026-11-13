@@ -23,7 +23,7 @@ from app.modules.operation_exceptions.schema import (
     OperationMyTaskRead,
     OperationTaskUpdate,
 )
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 router = APIRouter(prefix="/operation-exceptions", tags=["运营异常"])

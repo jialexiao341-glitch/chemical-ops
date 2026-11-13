@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from app.modules.ai.conversation_store import _load_messages
+from app.modules.ai_agent.conversation_store import _load_messages
 
 
 def test_history_paginates_backwards_without_losing_chronological_order():
@@ -21,8 +21,8 @@ def test_history_page_api_is_owned_and_preserves_messages(client, db_session):
     from sqlalchemy import select
     from app.core.auth import get_current_user
     from app.main import app
-    from app.modules.ai.model import AIConversation, AIMessage
-    from app.modules.system.model import User
+    from app.modules.ai_agent.model import AIConversation, AIMessage
+    from app.modules.system_management.model import User
     from types import SimpleNamespace
     db = db_session
     owner = db.scalar(select(User).where(User.username == 'SystemAdmin'))

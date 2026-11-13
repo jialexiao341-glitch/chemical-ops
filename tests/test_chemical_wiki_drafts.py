@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.modules.jobs import wiki_drafts
+from app.modules.jobs_scheduler import wiki_drafts
 
 
 def test_paired_draft_directory_and_detail_keep_source(tmp_path):

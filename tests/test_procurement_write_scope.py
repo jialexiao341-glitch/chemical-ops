@@ -33,8 +33,8 @@ def test_purchase_order_write_scope_excludes_other_department_member(monkeypatch
 
 
 def test_batch_delete_records_audit_in_same_transaction(monkeypatch):
-    from app.modules.batch import controller
-    from app.modules.system.audit import AuditLog
+    from app.modules.batch_operations import controller
+    from app.modules.system_management.audit import AuditLog
 
     class Session:
         def __init__(self):
@@ -57,7 +57,7 @@ def test_batch_delete_records_audit_in_same_transaction(monkeypatch):
 
 
 def test_management_can_read_other_users_rfq_without_write_scope(monkeypatch):
-    from app.modules.rfqs import service
+    from app.modules.rfq_quotes import service
     from app.core.errors import BusinessValidationError
     user = SimpleNamespace(id=1)
     row = SimpleNamespace(id=10, requester_id=2)
@@ -71,9 +71,9 @@ def test_management_can_read_other_users_rfq_without_write_scope(monkeypatch):
 
 
 def test_high_risk_actions_have_independent_permissions():
-    from app.modules.finance.controller import router as finance_router
-    from app.modules.inventory.controller import router as inventory_router
-    from app.modules.system.crud import get_user_permission_codes
+    from app.modules.finance_management.controller import router as finance_router
+    from app.modules.inventory_stock.controller import router as inventory_router
+    from app.modules.system_management.crud import get_user_permission_codes
     from fastapi import HTTPException
     from types import SimpleNamespace
 
@@ -96,7 +96,7 @@ def test_high_risk_actions_have_independent_permissions():
 
 
 def test_attachment_write_requires_business_permission_and_order_scope(monkeypatch):
-    from app.modules.files import service
+    from app.modules.files_storage import service
     user = SimpleNamespace(id=1)
     row = SimpleNamespace(id=5)
     monkeypatch.setattr(service, '_is_system_admin', lambda *args: False)
@@ -114,7 +114,7 @@ def test_attachment_write_requires_business_permission_and_order_scope(monkeypat
     ('SUPPLIER_QUALITY_DOCUMENT', 'APPROVED'),
 ])
 def test_attachment_rejects_final_business_record_even_for_admin(monkeypatch, resource_type, status):
-    from app.modules.files import service
+    from app.modules.files_storage import service
     from app.core.errors import BusinessValidationError
     monkeypatch.setattr(service, '_is_system_admin', lambda *_: True)
     with pytest.raises(BusinessValidationError):
@@ -122,7 +122,7 @@ def test_attachment_rejects_final_business_record_even_for_admin(monkeypatch, re
 
 
 def test_attachment_exception_requires_action_scope(monkeypatch):
-    from app.modules.files import service
+    from app.modules.files_storage import service
     from app.modules.operation_exceptions import service as exceptions
     user = SimpleNamespace(id=1)
     monkeypatch.setattr(service, '_is_system_admin', lambda *_: False)
@@ -167,7 +167,7 @@ def test_request_list_uses_shared_read_scope(db_session, monkeypatch):
 
 def test_rfq_list_uses_shared_read_scope(db_session, monkeypatch):
     from sqlalchemy import false
-    from app.modules.rfqs import service
+    from app.modules.rfq_quotes import service
     user = SimpleNamespace(id=1, department_id=1)
     monkeypatch.setattr(service, 'get_user_role_codes', lambda *_: ['PROCUREMENT_MANAGER'])
     monkeypatch.setattr(service, 'rfq_read_condition', lambda *_: false(), raising=False)

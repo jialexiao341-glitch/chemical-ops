@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 
-from app.modules.ai import agent_runtime as runtime, agent_tools as tools
+from app.modules.ai_agent import agent_runtime as runtime, agent_tools as tools
 from scripts.agent_business_cases import CASES, RFQ_CONTROLS, business_db, evidence_correct, INVENTORY, COMPARE
 from scripts.evaluate_agent_business import evaluate_one, summarize, answer_facts_correct, score_row, write_atomic
 from scripts import evaluate_agent_tasks as original

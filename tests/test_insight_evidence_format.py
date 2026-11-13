@@ -1,4 +1,4 @@
-from app.modules.insights.controller import _evidence, _result
+from app.modules.insights_analytics.controller import _evidence, _result
 
 
 def test_insight_evidence_trims_decimal_padding_without_changing_identifiers():

@@ -4,11 +4,11 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import AuthorizationError, BusinessValidationError
-from app.modules.ai import agent_tools, schema
-from app.modules.ai import supplier_profile as profile_module
-from app.modules.ai.schema import ToolCall
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
+from app.modules.ai_agent import agent_tools, schema
+from app.modules.ai_agent import supplier_profile as profile_module
+from app.modules.ai_agent.schema import ToolCall
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
 
 
 def _supplier_code(db_session) -> str:
@@ -61,7 +61,7 @@ def test_profile_unknown_code_returns_no_business_data(db_session):
 def test_history_rejects_revoked_stage_permissions(monkeypatch):
     from types import SimpleNamespace
 
-    from app.modules.ai import agent_runtime
+    from app.modules.ai_agent import agent_runtime
 
     monkeypatch.setattr(agent_runtime.tools, "list_tools", lambda *_args: [{"name": "suppliers.profile"}])
     monkeypatch.setattr(agent_runtime.tools, "accessible_warehouse_ids", lambda *_args: None)
@@ -77,7 +77,7 @@ def test_history_rejects_revoked_stage_permissions(monkeypatch):
 
 
 def test_agent_finish_and_summary_use_profile_tool():
-    from app.modules.ai import agent_runtime
+    from app.modules.ai_agent import agent_runtime
 
     profile_result = {"tool": "suppliers.profile", "answer": "供应商 SUP-26001：订单 1 笔。"}
     agent_runtime._validate_finish_evidence("supplier_profile", [

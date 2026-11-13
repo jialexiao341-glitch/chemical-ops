@@ -8,7 +8,7 @@ from app.modules.task_queue.model import TaskExecution
 
 def apply_business_status(db, execution: TaskExecution):
     if execution.task_type.startswith("documents."):
-        from app.modules.jobs.model import SchedulerJobRun
+        from app.modules.jobs_scheduler.model import SchedulerJobRun
         row = db.scalar(select(SchedulerJobRun).where(SchedulerJobRun.run_id == execution.business_id))
         if row:
             row.status = execution.status if execution.status != "WAITING_INPUT" else "SUCCEEDED"
@@ -16,7 +16,7 @@ def apply_business_status(db, execution: TaskExecution):
             row.error_type = execution.error_code
             row.finished_at = service.now() if execution.status in service.TERMINAL else None
     else:
-        from app.modules.ai.model import AIAgentTask
+        from app.modules.ai_agent.model import AIAgentTask
         status = "RUNNING" if execution.status in {"RETRYING", "QUEUED", "RECOVERING"} else execution.status
         db.execute(update(AIAgentTask).where(AIAgentTask.id == execution.business_id,
             AIAgentTask.user_id == execution.actor_id, AIAgentTask.status == "RUNNING",

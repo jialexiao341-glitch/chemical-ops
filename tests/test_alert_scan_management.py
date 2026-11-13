@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 from app.core.auth import get_current_user
 from app.core.config import Settings
 from app.core.db import get_db
-from app.modules.jobs import controller, service
-from app.modules.system import crud
+from app.modules.jobs_scheduler import controller, service
+from app.modules.system_management import crud
 
 
 def test_alert_scheduler_defaults_enabled():
@@ -58,7 +58,7 @@ def test_alert_management_api_requires_permissions(client, monkeypatch):
 
 def test_manual_scan_persists_latest_run(db_session, monkeypatch):
     from sqlalchemy import select
-    from app.modules.system.model import User
+    from app.modules.system_management.model import User
     user = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     monkeypatch.setattr(service, 'scan_active_alerts', lambda *_: {'quote_expiry_created_count': 2})
     service.run_manual_alert_scan(db_session, user)

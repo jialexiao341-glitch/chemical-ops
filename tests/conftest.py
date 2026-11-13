@@ -30,13 +30,13 @@ def _restore_model_catalog() -> Generator[None, None, None]:
     """应用启动会激活数据库模型目录；用例结束后恢复，避免后续用例读到数据库模型配置。"""
 
     yield
-    from app.modules.ai import model_catalog
+    from app.modules.ai_agent import model_catalog
     model_catalog.deactivate()
 
 
 def grant_test_warehouse(db: Session, user_id: int, warehouse_id: int) -> None:
     """在测试事务中为样本账号显式授权仓库。"""
-    from app.modules.system.model import UserWarehouseScope, UserWarehouseGrant
+    from app.modules.system_management.model import UserWarehouseScope, UserWarehouseGrant
     if db.get(UserWarehouseScope, user_id) is None:
         db.add(UserWarehouseScope(user_id=user_id))
         db.flush()
@@ -45,7 +45,7 @@ def grant_test_warehouse(db: Session, user_id: int, warehouse_id: int) -> None:
         db.flush()
 from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
-from app.modules.system.model import User  # noqa: E402
+from app.modules.system_management.model import User  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 

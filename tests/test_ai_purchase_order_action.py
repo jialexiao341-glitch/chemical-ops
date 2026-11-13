@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai import action_handlers
+from app.modules.ai_agent import action_handlers
 from app.modules.purchase_orders import service as order_service
 
 
@@ -48,7 +48,7 @@ def handler_source(monkeypatch):
     monkeypatch.setattr(order_service, "_validate_source", lambda *_args, **_kwargs: (
         comparison, quote, request, rfq_items, quote_items,
     ))
-    from app.modules.rfqs import service as rfq_service
+    from app.modules.rfq_quotes import service as rfq_service
 
     monkeypatch.setattr(rfq_service, "get_rfq", lambda _db, _user, rfq_id, **_kwargs: (
         rfq if rfq_id == rfq.id else (_ for _ in ()).throw(ResourceNotFoundError("询价不可见"))
@@ -96,7 +96,7 @@ def test_prepare_rejects_client_supplied_source_fields_and_invalid_identifiers(h
 
 
 def test_prepare_rejects_inaccessible_rfq_even_when_quote_id_is_known(handler_source, monkeypatch):
-    from app.modules.rfqs import service as rfq_service
+    from app.modules.rfq_quotes import service as rfq_service
 
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: (_ for _ in ()).throw(
         ResourceNotFoundError("询价不可见")))

@@ -14,9 +14,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'backend'))
 
-from app.modules.ai import capabilities, routing
+from app.modules.ai_agent import capabilities, routing
 from app.core.config import get_settings
-from app.modules.ai.schema import Understanding, schema_response_format
+from app.modules.ai_agent.schema import Understanding, schema_response_format
 
 
 CASES = [

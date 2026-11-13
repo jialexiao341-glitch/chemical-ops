@@ -5,10 +5,10 @@ import pytest
 from sqlalchemy import select
 
 from app.core.security import hash_password
-from app.modules.finance.model import FinanceReconciliation
+from app.modules.finance_management.model import FinanceReconciliation
 from app.modules.supplier_portal.model import SupplierPortalAccount
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import Role, User, UserRole
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import Role, User, UserRole
 from .conftest import login
 from .test_reconciliation_items import scenario  # noqa: F401 -- shared business-chain fixture
 

@@ -3,12 +3,12 @@
 from sqlalchemy import select
 
 from app.core.db import SessionLocal
-from app.modules.chemicals.model import Chemical
-from app.modules.inventory.model import Warehouse, WarehouseLocation
-from app.modules.products.model import Product
-from app.modules.products.category_model import ProductCategory
+from app.modules.chemicals_master.model import Chemical
+from app.modules.inventory_stock.model import Warehouse, WarehouseLocation
+from app.modules.products_master.model import Product
+from app.modules.products_master.category_model import ProductCategory
 from app.modules.purchase_requests.model import Unit
-from app.modules.suppliers.model import Supplier
+from app.modules.suppliers_master.model import Supplier
 
 
 UNITS = (

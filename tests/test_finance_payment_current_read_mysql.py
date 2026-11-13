@@ -16,9 +16,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
-from app.modules.finance import service
-from app.modules.finance.model import FinancePayment, FinanceReconciliation
-from app.modules.finance.schema import PaymentCreate
+from app.modules.finance_management import service
+from app.modules.finance_management.model import FinancePayment, FinanceReconciliation
+from app.modules.finance_management.schema import PaymentCreate
 
 
 @pytest.mark.skipif(os.environ.get('CHEMICALOPS_ISOLATED_MYSQL_TEST') != '1', reason='需要显式启用独立 MySQL 验收')

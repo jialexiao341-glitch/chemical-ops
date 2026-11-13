@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from app.core.observability import RequestContextMiddleware
-from app.modules.system.audit import add_audit_log
+from app.modules.system_management.audit import add_audit_log
 
 
 def test_chunked_body_limit_without_content_length():
@@ -52,8 +52,8 @@ def test_untrusted_xff_ignored_and_audit_context_reset():
 def test_rbac_cache_is_request_scoped_and_invalidates_on_role_change(db_session):
     from sqlalchemy import event, select
     from app.core.observability import request_scope_context
-    from app.modules.system import crud
-    from app.modules.system.model import User
+    from app.modules.system_management import crud
+    from app.modules.system_management.model import User
 
     user = db_session.scalar(select(User).where(User.username == 'BuyerUser'))
     statements = []
@@ -111,7 +111,7 @@ def test_shared_nat_account_lock_isolated(db_session):
     from datetime import datetime, timedelta
     from uuid import uuid4
     from sqlalchemy import text
-    from app.modules.system import service
+    from app.modules.system_management import service
 
     ip = f'nat-{uuid4().hex}'
     now = datetime.now()

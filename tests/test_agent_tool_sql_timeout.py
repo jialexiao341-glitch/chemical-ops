@@ -12,8 +12,8 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings
-from app.modules.ai import tool_sql_timeout
-from app.modules.ai.tool_sql_timeout import (
+from app.modules.ai_agent import tool_sql_timeout
+from app.modules.ai_agent.tool_sql_timeout import (
     ToolExecutionTimeout,
     install_tool_sql_timeout_listeners,
     tool_deadline_context,

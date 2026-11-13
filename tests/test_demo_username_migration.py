@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.modules.system.audit import AuditLog
-from app.modules.system.model import User
+from app.modules.system_management.audit import AuditLog
+from app.modules.system_management.model import User
 from scripts.seed_demo_accounts import LEGACY_USERNAMES
 from scripts.update_demo_user_identities import migrate_usernames
 

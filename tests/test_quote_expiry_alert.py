@@ -3,12 +3,12 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app.modules.ai.model import AIOperationSuggestion
-from app.modules.jobs import service
+from app.modules.ai_agent.model import AIOperationSuggestion
+from app.modules.jobs_scheduler import service
 from app.modules.operation_exceptions.model import OperationException
-from app.modules.rfqs.model import RFQ, SupplierQuote
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
+from app.modules.rfq_quotes.model import RFQ, SupplierQuote
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
 
 
 def test_expired_latest_quotes_generate_one_actionable_suggestion(db_session):
@@ -33,7 +33,7 @@ def test_expired_latest_quotes_generate_one_actionable_suggestion(db_session):
     assert db.scalar(select(OperationException).where(OperationException.source_type == 'SUPPLIER_QUOTE', OperationException.source_id == quotes[1].id)) is None
     service.scan_expired_quotes(db, actor)
     assert len(db.scalars(select(OperationException).where(OperationException.source_type == 'SUPPLIER_QUOTE', OperationException.source_id == quotes[0].id)).all()) == 1
-    from app.modules.ai import proactive
+    from app.modules.ai_agent import proactive
     from app.modules.operation_exceptions.model import OperationTask
     suggestion = proactive.transition_suggestion(db, actor, suggestion.id, 'HANDED_OFF')
     assert suggestion.status == 'HANDED_OFF'

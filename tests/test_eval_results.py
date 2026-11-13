@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.models.base import Base
-from app.modules.ai.model import AIEvalCaseResult, AIEvalRun
+from app.modules.ai_agent.model import AIEvalCaseResult, AIEvalRun
 from scripts import eval_trend, record_eval_run
 
 

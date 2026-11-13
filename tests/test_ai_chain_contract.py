@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import AuthorizationError, BusinessValidationError
-from app.modules.ai import agent_runtime, capabilities, service, text2sql
-from app.modules.ai.agent_prompt import text2sql_plan_prompt
-from app.modules.ai.schema import CapabilityManifest, Intent, Understanding, QueryPlan
+from app.modules.ai_agent import agent_runtime, capabilities, service, text2sql
+from app.modules.ai_agent.agent_prompt import text2sql_plan_prompt
+from app.modules.ai_agent.schema import CapabilityManifest, Intent, Understanding, QueryPlan
 
 
 def run(coroutine):
@@ -93,8 +93,8 @@ def test_bad_plan_stops_without_a_business_query_or_old_plan_fallback(monkeypatc
 
 
 def test_direct_analytics_entry_passes_current_manifest_before_routing(monkeypatch):
-    from app.modules.ai import routing
-    from app.modules.ai.schema import Text2SQLRequest
+    from app.modules.ai_agent import routing
+    from app.modules.ai_agent.schema import Text2SQLRequest
     expected = manifest()
     events = []
     monkeypatch.setattr(capabilities, 'build_capability_manifest', lambda *_: events.append('manifest') or expected)

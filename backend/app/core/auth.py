@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.security import decode_access_token_claims
-from app.modules.system import crud
-from app.modules.system.model import User
+from app.modules.system_management import crud
+from app.modules.system_management.model import User
 
 
 bearer_scheme = HTTPBearer(auto_error=False)

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.dialects import mysql
 
-from app.modules.finance import service
+from app.modules.finance_management import service
 
 
 @pytest.mark.parametrize('paid_only', [False, True])

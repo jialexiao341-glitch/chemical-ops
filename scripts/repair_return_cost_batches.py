@@ -10,10 +10,10 @@ sys.path.insert(0, str(ROOT / "backend"))
 from sqlalchemy import select, text
 from app.core.db import SessionLocal
 from app.core.config import get_settings
-from app.modules.inventory.model import InventoryBalance, InventoryTransaction
+from app.modules.inventory_stock.model import InventoryBalance, InventoryTransaction
 from app.modules.inventory_cost.model import InventoryCostAllocation, InventoryCostLayer
-from app.modules.system.audit import add_audit_log
-from app.modules.system.model import User, UserRole, Role
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.model import User, UserRole, Role
 
 
 def repair(db, actor_id: int) -> list[dict]:

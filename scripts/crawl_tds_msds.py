@@ -462,7 +462,7 @@ def resolve_cas_list(args: argparse.Namespace) -> list[str]:
         from sqlalchemy import select
 
         from app.core.db import SessionLocal
-        from app.modules.chemicals.model import Chemical
+        from app.modules.chemicals_master.model import Chemical
 
         db = SessionLocal()
         try:

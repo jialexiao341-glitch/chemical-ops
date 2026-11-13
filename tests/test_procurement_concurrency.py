@@ -9,17 +9,17 @@ from sqlalchemy import delete, select, func
 
 from app.core.db import SessionLocal
 from app.core.errors import DuplicateResourceError
-from app.modules.deliveries import crud as delivery_crud
-from app.modules.deliveries.model import Delivery
-from app.modules.inventory import crud as inventory_crud
-from app.modules.products.model import Product
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
-from app.modules.system.audit import AuditLog
+from app.modules.deliveries_receipt import crud as delivery_crud
+from app.modules.deliveries_receipt.model import Delivery
+from app.modules.inventory_stock import crud as inventory_crud
+from app.modules.products_master.model import Product
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
+from app.modules.system_management.audit import AuditLog
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem
-from app.modules.rfqs.model import RFQ, RFQItem, SupplierQuote, SupplierQuoteItem, QuoteComparison, QuoteComparisonItem
-from app.modules.rfqs.schema import QuoteSelection
-from app.modules.rfqs.service import select_quote
+from app.modules.rfq_quotes.model import RFQ, RFQItem, SupplierQuote, SupplierQuoteItem, QuoteComparison, QuoteComparisonItem
+from app.modules.rfq_quotes.schema import QuoteSelection
+from app.modules.rfq_quotes.service import select_quote
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.purchase_orders.schema import PurchaseOrderCreate
 from app.modules.purchase_orders.service import create_order

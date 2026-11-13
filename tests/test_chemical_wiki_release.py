@@ -3,7 +3,7 @@ import hashlib
 
 import pytest
 
-from app.modules.jobs import wiki_release
+from app.modules.jobs_scheduler import wiki_release
 
 
 def test_release_exposes_current_pair_with_provenance_and_no_approval_state(tmp_path):
@@ -42,7 +42,7 @@ def test_release_rejects_technical_text_not_matching_original_cell(tmp_path):
 
 
 def test_wiki_endpoints_enforce_existing_technical_role(monkeypatch):
-    from app.modules.jobs import controller
+    from app.modules.jobs_scheduler import controller
     from fastapi import HTTPException
 
     def deny(*_args):

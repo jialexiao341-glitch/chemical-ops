@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.errors import BusinessValidationError
-from app.modules.ai.schema import AIChatRequest
-from app.modules.ai.llm import chat
+from app.modules.ai_agent.schema import AIChatRequest
+from app.modules.ai_agent.llm import chat
 
 
 def _login(client: TestClient, password: str) -> dict[str, str]:
@@ -48,7 +48,7 @@ class FakeClient:
 
 
 def test_ai_service_uses_deepseek_model_without_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.modules.ai import llm, service
+    from app.modules.ai_agent import llm, service
 
     monkeypatch.setattr(llm.httpx, "AsyncClient", FakeClient)
     settings = Settings(openai_api_key="test-key", openai_base_url="https://api.deepseek.com", llm_model="deepseek-flash")
@@ -66,7 +66,7 @@ def test_ai_service_uses_deepseek_model_without_real_network(monkeypatch: pytest
 
 
 def test_ai_service_retries_transient_network_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.modules.ai import llm, service
+    from app.modules.ai_agent import llm, service
 
     class FlakyClient(FakeClient):
         attempts = 0
@@ -91,7 +91,7 @@ def test_ai_service_retries_transient_network_failure(monkeypatch: pytest.Monkey
 
 
 def test_ai_service_does_not_retry_ambiguous_response_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.modules.ai import llm
+    from app.modules.ai_agent import llm
 
     class TimedOutClient(FakeClient):
         attempts = 0
@@ -119,7 +119,7 @@ def test_ai_service_does_not_retry_ambiguous_response_timeout(monkeypatch: pytes
 
 def test_ai_service_treats_missing_usage_as_unavailable_not_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     from httpx import AsyncClient, MockTransport, Response
-    from app.modules.ai import llm
+    from app.modules.ai_agent import llm
 
     def respond(_request):
         return Response(200, json={"choices": [{"message": {"content": "回答"}}]})
@@ -136,8 +136,8 @@ def test_ai_service_treats_missing_usage_as_unavailable_not_zero(monkeypatch: py
 def test_ai_attachment_is_rescanned_before_ai_use(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
-    from app.modules.ai import llm, service
-    from app.modules.files.scanner import FileScanResult
+    from app.modules.ai_agent import llm, service
+    from app.modules.files_storage.scanner import FileScanResult
 
     uploaded_file = SimpleNamespace(id=12, uploader_id=1, file_name="库存.csv", mime_type="text/csv")
     monkeypatch.setattr(service, "get_user_role_codes", lambda *_args: [])
@@ -167,9 +167,9 @@ def test_ai_service_rejects_missing_api_key() -> None:
 
 def test_cancelled_chat_releases_database_connection_during_model_wait(db_engine, monkeypatch) -> None:
     """A stalled route/model call must not retain a pooled SQL connection."""
-    from app.modules.ai import conversation_store, routing, service
-    from app.modules.ai.schema import AIChatMessage
-    from app.modules.system.model import User
+    from app.modules.ai_agent import conversation_store, routing, service
+    from app.modules.ai_agent.schema import AIChatMessage
+    from app.modules.system_management.model import User
 
     question = f"事务边界取消验收 {uuid4().hex}"
     db = Session(bind=db_engine, autoflush=False, expire_on_commit=False)
@@ -215,7 +215,7 @@ def test_cancelled_chat_releases_database_connection_during_model_wait(db_engine
 
 
 def test_ai_message_context_marks_only_verified_attachment_content() -> None:
-    from app.modules.ai.llm import _build_messages
+    from app.modules.ai_agent.llm import _build_messages
 
     request = AIChatRequest(
         messages=[{"role": "user", "content": "请读取这个报价单"}],
@@ -231,8 +231,8 @@ def test_ai_message_context_marks_only_verified_attachment_content() -> None:
 
 
 def test_native_image_payload_skips_document_parser() -> None:
-    from app.modules.ai.llm import _build_messages
-    from app.modules.ai.service import _build_native_image_part
+    from app.modules.ai_agent.llm import _build_messages
+    from app.modules.ai_agent.service import _build_native_image_part
 
     request = AIChatRequest(messages=[{"role": "user", "content": "请读取图片中的批次号"}], attachments=["label.png"], attachment_file_ids=[12])
     image_part = _build_native_image_part("label.png", "image/png", b"png-bytes")
@@ -247,13 +247,13 @@ def test_native_image_payload_skips_document_parser() -> None:
 
 
 def test_ai_business_context_is_not_built_for_queries() -> None:
-    from app.modules.ai import llm, service
+    from app.modules.ai_agent import llm, service
 
     assert not hasattr(service, "_build_business_context")
 
 
 def test_overdue_delivery_query_has_safe_plan_fallback() -> None:
-    from app.modules.ai.text2sql import _fallback_query_plan
+    from app.modules.ai_agent.text2sql import _fallback_query_plan
 
     plan = _fallback_query_plan("查看本周逾期到货")
     assert plan is not None
@@ -270,7 +270,7 @@ def test_overdue_delivery_query_has_safe_plan_fallback() -> None:
 
 
 def test_stream_text_chunks_are_incremental() -> None:
-    from app.modules.ai.service import _stream_text_chunks, STREAM_CHUNK_SIZE
+    from app.modules.ai_agent.service import _stream_text_chunks, STREAM_CHUNK_SIZE
     content = "你好，我是化运助手。" * 20
 
     async def collect() -> list[str]:
@@ -283,9 +283,9 @@ def test_stream_text_chunks_are_incremental() -> None:
 
 
 def test_ai_chat_routes_business_query_to_text2sql(client: TestClient, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.modules.ai import llm, service
+    from app.modules.ai_agent import llm, service
 
-    from app.modules.ai import routing
+    from app.modules.ai_agent import routing
     async def understand(*args, **kwargs):
         return routing.Understanding(purpose='query', execution_mode='query', tasks=['analytics'], sub_tasks=[
             routing.SubTask(id='t1', kind='analytics', question='查询本月各供应商采购订单总金额')])
@@ -293,7 +293,7 @@ def test_ai_chat_routes_business_query_to_text2sql(client: TestClient, demo_pass
 
     calls: list[str] = []
 
-    from app.modules.ai.schema import AIQueryTrace
+    from app.modules.ai_agent.schema import AIQueryTrace
 
     async def fake_text2sql(*args: object, **_kwargs: object) -> tuple[str, dict[str, object], AIQueryTrace]:
         calls.append(str(args[2]))
@@ -328,8 +328,8 @@ def test_ai_conversation_list_requires_login_and_reads_database(client: TestClie
 
 
 def test_ai_chat_persists_conversation_and_messages(client: TestClient, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.modules.ai import routing, service
-    from app.modules.ai.schema import AIQueryTrace
+    from app.modules.ai_agent import routing, service
+    from app.modules.ai_agent.schema import AIQueryTrace
 
     async def fake_text2sql(*args: object, **_kwargs: object) -> tuple[str, dict[str, object], AIQueryTrace]:
         assert args[2] == "查询采购订单"
@@ -355,9 +355,9 @@ def test_ai_chat_persists_conversation_and_messages(client: TestClient, demo_pas
 def test_ai_chat_persists_attachment_parse_citation(client: TestClient, db_session, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
-    from app.modules.ai import llm, service
-    from app.modules.ai.schema import AIChatMessage, AIChatResponse
-    from app.modules.system.crud import get_user_by_username
+    from app.modules.ai_agent import llm, service
+    from app.modules.ai_agent.schema import AIChatMessage, AIChatResponse
+    from app.modules.system_management.crud import get_user_by_username
 
     user = get_user_by_username(db_session, "SystemAdmin")
     assert user is not None
@@ -387,10 +387,10 @@ def test_ai_chat_uses_mineru_for_enabled_office_attachment(client: TestClient, d
     from types import SimpleNamespace
 
     from app.core.config import Settings
-    from app.modules.ai import llm, service
-    from app.modules.ai.schema import AIChatMessage, AIChatResponse
-    from app.modules.files.parser import ParsedFile
-    from app.modules.system.crud import get_user_by_username
+    from app.modules.ai_agent import llm, service
+    from app.modules.ai_agent.schema import AIChatMessage, AIChatResponse
+    from app.modules.files_storage.parser import ParsedFile
+    from app.modules.system_management.crud import get_user_by_username
 
     user = get_user_by_username(db_session, "SystemAdmin")
     assert user is not None

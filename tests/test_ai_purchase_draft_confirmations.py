@@ -7,8 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError
-from app.modules.ai import purchase_draft_confirmations as confirmations
-from app.modules.ai.schema import AIPurchaseDraftConfirm
+from app.modules.ai_agent import purchase_draft_confirmations as confirmations
+from app.modules.ai_agent.schema import AIPurchaseDraftConfirm
 
 
 class _DB:

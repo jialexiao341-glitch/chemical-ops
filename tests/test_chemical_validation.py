@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.modules.chemicals.schema import ChemicalCreate, ChemicalUpdate, ChemicalRead
+from app.modules.chemicals_master.schema import ChemicalCreate, ChemicalUpdate, ChemicalRead
 
 
 @pytest.mark.parametrize('payload', [
@@ -45,7 +45,7 @@ def test_common_formula_notation(formula):
 def test_legacy_record_requires_cas_before_update(monkeypatch):
     from types import SimpleNamespace
     from app.core.errors import BusinessValidationError
-    from app.modules.chemicals import service
+    from app.modules.chemicals_master import service
     monkeypatch.setattr(service, 'get_chemical', lambda db, chemical_id: SimpleNamespace(id=chemical_id, cas_no=None))
     with pytest.raises(BusinessValidationError, match='CAS'):
         service.update_chemical(None, 1, ChemicalUpdate(chemical_name='更新'))
@@ -53,7 +53,7 @@ def test_legacy_record_requires_cas_before_update(monkeypatch):
 
 def test_api_and_csv_enforce_cas_and_rollback(client, db_session, demo_password):
     from sqlalchemy import select
-    from app.modules.system.model import User
+    from app.modules.system_management.model import User
     from tests.conftest import login
     from tests.test_batch_api import sample_cas
 
@@ -71,5 +71,5 @@ def test_api_and_csv_enforce_cas_and_rollback(client, db_session, demo_password)
     content = f'chemical_name,cas_no\n导入有效,{sample_cas()}\n导入缺失,\n'.encode('utf-8')
     response = client.post('/api/v1/batch/master.chemicals/import', headers=headers, files={'file': ('data.csv', content, 'text/csv')})
     assert response.status_code == 400
-    from app.modules.chemicals.model import Chemical
+    from app.modules.chemicals_master.model import Chemical
     assert db_session.scalar(select(Chemical.id).where(Chemical.chemical_name == '导入有效')) is None

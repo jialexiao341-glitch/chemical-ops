@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import action_handlers, schema
-from app.modules.products.model import Product
+from app.modules.ai_agent import action_handlers, schema
+from app.modules.products_master.model import Product
 from app.modules.purchase_requests.model import Unit
-from app.modules.replenishments import service as replenishment_service
-from app.modules.suppliers.model import Supplier
+from app.modules.replenishment_plans import service as replenishment_service
+from app.modules.suppliers_master.model import Supplier
 
 
 class _DB:
@@ -35,7 +35,7 @@ def _entities():
 
 
 def _patch_tools(monkeypatch):
-    from app.modules.ai import agent_tools
+    from app.modules.ai_agent import agent_tools
 
     monkeypatch.setattr(agent_tools, "list_tools", lambda *_args: [{"name": "catalog.search_products"}])
 
@@ -86,7 +86,7 @@ def test_prepare_builds_draft_payload_and_evidence(monkeypatch):
 def test_prepare_requires_unique_product_and_positive_quantity(monkeypatch):
     db = _DB()
     _patch_entities(monkeypatch, db)
-    from app.modules.ai import agent_tools
+    from app.modules.ai_agent import agent_tools
     monkeypatch.setattr(agent_tools, "execute_tool",
                         lambda *_args, **_kwargs: SimpleNamespace(rows=[SimpleNamespace(product_id=318)],
                                                                   total_rows=2, truncated=False))

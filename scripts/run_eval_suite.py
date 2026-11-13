@@ -59,8 +59,8 @@ def preflight_model() -> tuple[bool, str]:
     import httpx  # noqa: PLC0415
 
     from app.core.config import get_settings  # noqa: PLC0415
-    from app.modules.ai import model_catalog  # noqa: PLC0415
-    from app.modules.ai.gateway import resolve_model_profile  # noqa: PLC0415
+    from app.modules.ai_agent import model_catalog  # noqa: PLC0415
+    from app.modules.ai_agent.gateway import resolve_model_profile  # noqa: PLC0415
 
     model_catalog.activate()
     profile = resolve_model_profile(get_settings())

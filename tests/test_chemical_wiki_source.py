@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.modules.jobs.wiki_source import build_source_pair, fingerprint
+from app.modules.jobs_scheduler.wiki_source import build_source_pair, fingerprint
 
 
 def test_new_source_pair_preserves_old_identity_and_full_section():
@@ -33,7 +33,7 @@ def test_new_source_rejects_wrong_cas_and_unparsed_documents():
 
 
 def test_changed_source_keeps_old_snapshot_and_reports_change(monkeypatch):
-    from app.modules.jobs import wiki_source
+    from app.modules.jobs_scheduler import wiki_source
 
     original = {'msds': {'source_table': 4, 'name_from_heading': '乙醇', 'cas_candidate': '64-17-5',
                          'cas_valid_checksum': True}, 'technical': {'sections': []}}

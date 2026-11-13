@@ -4,8 +4,8 @@ import pytest
 
 from app.modules.purchase_requests import service
 from app.modules.purchase_requests.schema import PurchaseRequestUpdate
-from app.modules.rfqs import service as rfq_service
-from app.modules.rfqs.schema import RFQCreate, RFQItemCreate
+from app.modules.rfq_quotes import service as rfq_service
+from app.modules.rfq_quotes.schema import RFQCreate, RFQItemCreate
 
 
 class _DB:
@@ -21,8 +21,8 @@ class _DB:
 
 
 def test_create_draft_catalog_validation_uses_product_code_with_valid_limit(monkeypatch):
-    from app.modules.ai import action_handlers, agent_tools
-    from app.modules.products.model import Product
+    from app.modules.ai_agent import action_handlers, agent_tools
+    from app.modules.products_master.model import Product
 
     product = SimpleNamespace(id=9, product_code="PRD-ETHANOL-AR", status="ACTIVE")
     db = _DB()
@@ -101,11 +101,11 @@ def _source_request(status="APPROVED"):
 
 def test_rfq_handler_requires_visible_approved_source_and_creates_only_a_preview(monkeypatch):
     from app.core.errors import BusinessValidationError
-    from app.modules.ai import action_handlers
+    from app.modules.ai_agent import action_handlers
     from app.modules.purchase_requests import service as request_service
-    from app.modules.rfqs import service as rfq_service
-    from app.modules.system import crud as system_crud
-    from app.modules.rfqs.schema import RFQCreate
+    from app.modules.rfq_quotes import service as rfq_service
+    from app.modules.system_management import crud as system_crud
+    from app.modules.rfq_quotes.schema import RFQCreate
 
     monkeypatch.setattr(request_service, "get_request", lambda *_args: _source_request("DRAFT"))
     monkeypatch.setattr(system_crud, "get_user_permission_codes", lambda *_args: ["master.suppliers.read"])
@@ -121,9 +121,9 @@ def test_rfq_handler_requires_visible_approved_source_and_creates_only_a_preview
 
 def test_rfq_handler_requires_supplier_directory_permission(monkeypatch):
     from app.core.errors import BusinessValidationError
-    from app.modules.ai import action_handlers
-    from app.modules.system import crud as system_crud
-    from app.modules.rfqs.schema import RFQCreate
+    from app.modules.ai_agent import action_handlers
+    from app.modules.system_management import crud as system_crud
+    from app.modules.rfq_quotes.schema import RFQCreate
 
     monkeypatch.setattr(system_crud, "get_user_permission_codes", lambda *_args: [])
     monkeypatch.setattr(system_crud, "get_user_role_codes", lambda *_args: [])

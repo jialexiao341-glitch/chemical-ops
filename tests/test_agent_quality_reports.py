@@ -2,7 +2,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from app.core.errors import ResourceNotFoundError
-from app.modules.ai import agent_tools, agent_runtime
+from app.modules.ai_agent import agent_tools, agent_runtime
 from app.modules.quality_acceptances import report_review
 from app.modules.quality_acceptances.schema import QualityReportCheck, QualityReportReview
 
@@ -58,10 +58,10 @@ def test_historical_report_rechecks_file_permission(monkeypatch):
 
 def test_actual_report_lookup_and_revoked_file_is_filtered(db_session, monkeypatch):
     from sqlalchemy import select
-    from app.modules.system.model import User
+    from app.modules.system_management.model import User
     from app.modules.quality_acceptances.model import QualityReportReviewRecord, QualityAcceptance
-    from app.modules.files import service as file_service
-    from app.modules.ai.schema import QualityAcceptanceInput
+    from app.modules.files_storage import service as file_service
+    from app.modules.ai_agent.schema import QualityAcceptanceInput
     db = db_session
     user = db.scalar(select(User).where(User.username == 'SystemAdmin'))
     record = db.scalar(select(QualityReportReviewRecord).order_by(QualityReportReviewRecord.id.desc()))
@@ -69,8 +69,8 @@ def test_actual_report_lookup_and_revoked_file_is_filtered(db_session, monkeypat
     acceptance = db.get(QualityAcceptance, record.acceptance_id)
     result = agent_tools.get_quality_acceptance(db, user, QualityAcceptanceInput(acceptance_no=acceptance.acceptance_no))
     assert any(review.review_id == record.id for review in result.rows[0].report_reviews.reviews)
-    from app.modules.deliveries.model import Delivery
-    from app.modules.ai.schema import DeliveryInput
+    from app.modules.deliveries_receipt.model import Delivery
+    from app.modules.ai_agent.schema import DeliveryInput
     delivery = db.get(Delivery, acceptance.delivery_id)
     delivery_result = agent_tools.get_delivery(db, user, DeliveryInput(delivery_no=delivery.delivery_no))
     assert any(group.acceptance_no == acceptance.acceptance_no and
@@ -87,8 +87,8 @@ def test_actual_report_lookup_and_revoked_file_is_filtered(db_session, monkeypat
 
 
 def test_delivery_tool_does_not_read_quality_without_permission(monkeypatch):
-    from app.modules.deliveries import service as delivery_service
-    from app.modules.ai.schema import DeliveryInput
+    from app.modules.deliveries_receipt import service as delivery_service
+    from app.modules.ai_agent.schema import DeliveryInput
     delivery = SimpleNamespace(id=7, delivery_no='DL-123', status='IN_TRANSIT',
         expected_arrival_date=None, actual_arrival_date=None, items=[])
     monkeypatch.setattr(delivery_service, 'get_delivery_by_no', lambda *args: delivery)
@@ -126,7 +126,7 @@ def test_historical_successful_task_is_reformatted_from_original_evidence():
 
 
 def test_history_keeps_earlier_turn_when_same_task_has_continued(monkeypatch):
-    from app.modules.ai.history_access import visible_message
+    from app.modules.ai_agent.history_access import visible_message
     task = SimpleNamespace(status='SUCCEEDED', reply='新排版')
     monkeypatch.setattr(agent_runtime, 'get_task', lambda *args: task)
     monkeypatch.setattr(agent_runtime, '_load', lambda *args: SimpleNamespace(reply='原始最终答案'))

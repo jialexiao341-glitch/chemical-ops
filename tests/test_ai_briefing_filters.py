@@ -8,9 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import briefing, nl_filters
-from app.modules.ai.catalog import CATALOG
-from app.modules.ai.schema import (
+from app.modules.ai_agent import briefing, nl_filters
+from app.modules.ai_agent.catalog import CATALOG
+from app.modules.ai_agent.schema import (
     AIChatMessage,
     AIChatResponse,
     BriefingRequest,

@@ -4,11 +4,11 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import BusinessValidationError
-from app.modules.deliveries.model import Delivery
+from app.modules.deliveries_receipt.model import Delivery
 from app.modules.purchase_orders.model import PurchaseOrder
 from app.modules.quality_acceptances import service
 from app.modules.quality_acceptances.schema import QualityAcceptanceCreate
-from app.modules.system.model import User, UserDepartmentScope, UserDepartmentGrant
+from app.modules.system_management.model import User, UserDepartmentScope, UserDepartmentGrant
 
 
 def test_assignment_options_and_inspector_respect_department_scope(db_session, client):

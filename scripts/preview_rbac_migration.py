@@ -15,7 +15,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.core.db import SessionLocal
-from app.modules.system.model import Permission, Role, RolePermission
+from app.modules.system_management.model import Permission, Role, RolePermission
 from seed_demo_accounts import ROLE_SCOPES
 
 

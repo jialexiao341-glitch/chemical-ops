@@ -3,8 +3,8 @@
 import pytest
 
 from app.core.errors import AuthorizationError
-from app.modules.monitoring import controller
-from app.modules.system.model import User
+from app.modules.monitoring_health import controller
+from app.modules.system_management.model import User
 
 
 def _admin() -> User:

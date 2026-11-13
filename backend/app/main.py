@@ -34,36 +34,36 @@ from app.core.errors import (
     DuplicateResourceError,
     ResourceNotFoundError,
 )
-from app.modules.chemicals.controller import router as chemicals_router
-from app.modules.batch.controller import router as batch_router
-from app.modules.products.controller import router as products_router
+from app.modules.chemicals_master.controller import router as chemicals_router
+from app.modules.batch_operations.controller import router as batch_router
+from app.modules.products_master.controller import router as products_router
 from app.modules.purchase_requests.controller import router as purchase_requests_router
 from app.modules.purchase_orders.controller import router as purchase_orders_router
-from app.modules.deliveries.controller import router as deliveries_router
-from app.modules.rfqs.controller import router as rfqs_router
+from app.modules.deliveries_receipt.controller import router as deliveries_router
+from app.modules.rfq_quotes.controller import router as rfqs_router
 from app.modules.quality_acceptances.controller import router as quality_acceptances_router
-from app.modules.inventory.controller import router as inventory_router
+from app.modules.inventory_stock.controller import router as inventory_router
 from app.modules.operation_exceptions.controller import router as operation_exceptions_router
-from app.modules.notifications.controller import router as notifications_router
-from app.modules.suppliers.controller import router as suppliers_router
-from app.modules.finance.controller import router as finance_router
+from app.modules.notifications_center.controller import router as notifications_router
+from app.modules.suppliers_master.controller import router as suppliers_router
+from app.modules.finance_management.controller import router as finance_router
 from app.modules.inventory_returns.controller import router as inventory_returns_router
-from app.modules.replenishments.controller import router as replenishments_router
+from app.modules.replenishment_plans.controller import router as replenishments_router
 from app.modules.supplier_portal.controller import rfqs_router as supplier_portal_rfqs_router
 from app.modules.supplier_portal.controller import router as supplier_portal_router
 from app.modules.supplier_portal.controller import collaboration_router as supplier_portal_collaboration_router
-from app.modules.files.controller import router as files_router
+from app.modules.files_storage.controller import router as files_router
 from app.modules.inventory_cost.controller import router as inventory_cost_router
-from app.modules.jobs.controller import router as jobs_router
-from app.modules.jobs.service import run_scheduled_alert_scan
+from app.modules.jobs_scheduler.controller import router as jobs_router
+from app.modules.jobs_scheduler.service import run_scheduled_alert_scan
 from app.modules.task_queue.controller import router as task_queue_router
 from app.modules.task_queue.progress import run_progress_scan
-from app.modules.dashboard.controller import router as dashboard_router
-from app.modules.ai.controller import router as ai_router, model_router as ai_model_router, suggestion_router as ai_suggestion_router
-from app.modules.ai.lifecycle import cleanup_expired_ai_records
-from app.modules.insights.controller import router as insights_router
-from app.modules.monitoring.controller import router as monitoring_router
-from app.modules.system.controller import auth_router, router as system_router
+from app.modules.dashboard_overview.controller import router as dashboard_router
+from app.modules.ai_agent.controller import router as ai_router, model_router as ai_model_router, suggestion_router as ai_suggestion_router
+from app.modules.ai_agent.lifecycle import cleanup_expired_ai_records
+from app.modules.insights_analytics.controller import router as insights_router
+from app.modules.monitoring_health.controller import router as monitoring_router
+from app.modules.system_management.controller import auth_router, router as system_router
 
 
 settings = get_settings()
@@ -261,7 +261,7 @@ async def lifespan(app: FastAPI):
     if database_ready and not _check_schema_migrations():
         raise RuntimeError("数据库结构尚未升级到当前代码版本；请先运行 scripts/migrate_database.py upgrade")
     if database_ready:
-        from app.modules.ai import model_catalog
+        from app.modules.ai_agent import model_catalog
         model_catalog.activate()
     minio_ready = _check_minio()
     if database_ready and minio_ready:

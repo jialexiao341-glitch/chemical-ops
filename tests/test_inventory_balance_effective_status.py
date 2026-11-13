@@ -2,9 +2,9 @@ from sqlalchemy import select
 
 from app.core.auth import get_current_user
 from app.main import app
-from app.modules.inventory.model import InventoryBalance, InventoryBatch
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch
 from app.modules.quality_acceptances.model import QualityAcceptance
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 def test_balance_api_reports_manual_and_quality_holds_independently(client, db_session):

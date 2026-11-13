@@ -13,10 +13,10 @@ from time import perf_counter
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.core.config import get_settings
-from app.modules.ai import model_catalog, routing
-from app.modules.ai.error_policy import classify
-from app.modules.ai.gateway import resolve_model_profile
-from app.modules.ai.routing import ROUTING_PROMPT, understand
+from app.modules.ai_agent import model_catalog, routing
+from app.modules.ai_agent.error_policy import classify
+from app.modules.ai_agent.gateway import resolve_model_profile
+from app.modules.ai_agent.routing import ROUTING_PROMPT, understand
 from scripts.evaluation_manifest import build_manifest
 
 

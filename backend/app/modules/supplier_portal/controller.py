@@ -32,8 +32,8 @@ from app.modules.supplier_portal.schema import (
     SupplierQualityDocumentPage,
     SupplierQualityDocumentRead,
 )
-from app.modules.files import service as file_service
-from app.modules.system.model import User
+from app.modules.files_storage import service as file_service
+from app.modules.system_management.model import User
 
 
 router = APIRouter(prefix="/supplier-portal/orders", tags=["供应商门户"])

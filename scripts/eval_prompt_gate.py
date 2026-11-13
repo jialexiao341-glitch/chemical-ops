@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.modules.ai import prompt_registry  # noqa: E402
+from app.modules.ai_agent import prompt_registry  # noqa: E402
 from scripts import compare_eval_reports  # noqa: E402
 from scripts import eval_stability  # noqa: E402
 

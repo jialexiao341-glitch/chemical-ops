@@ -11,8 +11,8 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
 from app.core.time import business_today, utc_now
-from app.modules.ai.model import AIAgentActionProposal
-from app.modules.notifications.service import notify_users
+from app.modules.ai_agent.model import AIAgentActionProposal
+from app.modules.notifications_center.service import notify_users
 from app.modules.purchase_orders import service as order_service
 from app.modules.purchase_orders.followup import build_followup
 from app.modules.purchase_orders.followup_model import DeliveryFollowup
@@ -21,9 +21,9 @@ from app.modules.purchase_orders.model import PurchaseOrderEvent, PurchaseOrderI
 from app.modules.supplier_portal import service as portal_service
 from app.modules.supplier_portal.model import SupplierPortalAccount
 from app.modules.supplier_portal.schema import SupplierDeliveryDateUpdate
-from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_permission_codes, get_user_role_codes
-from app.modules.system.model import User
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.crud import get_user_permission_codes, get_user_role_codes
+from app.modules.system_management.model import User
 
 
 def _authorize(db, user, *permissions):

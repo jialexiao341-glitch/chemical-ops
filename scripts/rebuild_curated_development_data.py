@@ -23,10 +23,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import SessionLocal, engine  # noqa: E402
-from app.modules.chemicals.model import Chemical  # noqa: E402
-from app.modules.deliveries.model import Delivery  # noqa: E402
-from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement  # noqa: E402
-from app.modules.inventory.model import (  # noqa: E402
+from app.modules.chemicals_master.model import Chemical  # noqa: E402
+from app.modules.deliveries_receipt.model import Delivery  # noqa: E402
+from app.modules.finance_management.model import FinanceInvoice, FinancePayment, FinanceReconciliation, FinanceSettlement  # noqa: E402
+from app.modules.inventory_stock.model import (  # noqa: E402
     InventoryBalance, InventoryIssueItem, InventoryIssueRequest,
     InventoryStocktakeItem, InventoryStocktakeRequest, InventoryTransaction,
     InventoryTransferItem, InventoryTransferRequest, Warehouse, WarehouseLocation,
@@ -35,8 +35,8 @@ from app.modules.inventory_cost.model import InventoryCostAllocation, InventoryC
 from app.modules.inventory_returns.model import InventoryReturnItem, InventoryReturnRequest  # noqa: E402
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem  # noqa: E402
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestApproval, Unit  # noqa: E402
-from app.modules.replenishments.model import ReplenishmentItem, ReplenishmentRequest  # noqa: E402
-from app.modules.system.model import Department, User  # noqa: E402
+from app.modules.replenishment_plans.model import ReplenishmentItem, ReplenishmentRequest  # noqa: E402
+from app.modules.system_management.model import Department, User  # noqa: E402
 from load_development_dataset import load_master_data, load_procurement_chain, load_units  # noqa: E402
 
 

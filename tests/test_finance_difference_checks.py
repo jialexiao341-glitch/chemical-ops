@@ -8,13 +8,13 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.finance.model import FinanceInvoice, FinancePayment, FinanceReconciliation
-from app.modules.insights.model import FinanceDifferenceCheck, FinanceDifferenceEvent
-from app.modules.products.model import Product
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.finance_management.model import FinanceInvoice, FinancePayment, FinanceReconciliation
+from app.modules.insights_analytics.model import FinanceDifferenceCheck, FinanceDifferenceEvent
+from app.modules.products_master.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
 
 from .conftest import login
 

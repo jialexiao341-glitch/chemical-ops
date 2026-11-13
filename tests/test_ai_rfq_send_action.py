@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError
-from app.modules.ai import action_handlers
-from app.modules.rfqs import service as rfq_service
+from app.modules.ai_agent import action_handlers
+from app.modules.rfq_quotes import service as rfq_service
 
 
 def _rfq(status="DRAFT", items=None, suppliers=None):
@@ -41,7 +41,7 @@ def test_rfq_send_handler_rejects_non_sendable_draft(monkeypatch, rfq):
 
 
 def test_rfq_send_handler_revalidates_snapshot_and_executes_without_committing(monkeypatch):
-    from app.modules.rfqs.schema import RFQRead
+    from app.modules.rfq_quotes.schema import RFQRead
 
     rfq = _rfq()
     monkeypatch.setattr(rfq_service, "get_rfq", lambda *_args, **_kwargs: rfq)

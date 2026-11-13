@@ -20,10 +20,10 @@ from app.modules.purchase_orders.schema import (
 )
 from app.modules.purchase_requests.model import PurchaseRequest, PurchaseRequestItem
 from app.modules.purchase_requests.service import get_request as get_scoped_purchase_request
-from app.modules.rfqs.model import RFQ, RFQItem, QuoteComparison, SupplierQuoteItem
-from app.modules.system.audit import add_audit_log
-from app.modules.system.crud import get_user_role_codes
-from app.modules.system.model import User
+from app.modules.rfq_quotes.model import RFQ, RFQItem, QuoteComparison, SupplierQuoteItem
+from app.modules.system_management.audit import add_audit_log
+from app.modules.system_management.crud import get_user_role_codes
+from app.modules.system_management.model import User
 
 
 def _now() -> datetime:
@@ -220,7 +220,7 @@ def read_order(db: Session, user: User, order_id: int) -> PurchaseOrder:
 def _assert_order_scope(db: Session, user: User, order: PurchaseOrder) -> None:
     if not _can_manage_all(db, user) and order.buyer_id != user.id:
         raise ResourceNotFoundError(f"采购订单 {order.id} 不存在")
-    from app.modules.system.data_scope import department_scope_condition
+    from app.modules.system_management.data_scope import department_scope_condition
     from sqlalchemy import literal
     roles = get_user_role_codes(db, user.id)
     if not db.scalar(select(department_scope_condition(user, roles, literal(order.department_id)))):

@@ -3,9 +3,9 @@ from uuid import uuid4
 from sqlalchemy import select
 from app.core.auth import get_current_user
 from app.main import app
-from app.modules.notifications.model import Notification
+from app.modules.notifications_center.model import Notification
 from app.modules.operation_exceptions.model import OperationException
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 def test_assigned_task_inbox_reassignment_and_notification(client, db_session):

@@ -9,7 +9,7 @@ from sqlalchemy.dialects import mysql
 from app.core.errors import BusinessValidationError
 from app.modules.purchase_orders import service
 from app.modules.purchase_requests.model import PurchaseRequestItem
-from app.modules.rfqs.model import RFQItem
+from app.modules.rfq_quotes.model import RFQItem
 
 
 class PlacementSession:

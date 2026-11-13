@@ -20,7 +20,7 @@ def test_oracle_rejects_supported_quote_with_unsupported_values():
 
 
 def test_real_pdf_and_xlsx_parsers_preserve_locations():
-    from app.modules.files.parser import parse_file_content
+    from app.modules.files_storage.parser import parse_file_content
     for extension,location in [('pdf','第 2 页'),('xlsx','工作表：Quote · 第 6 行')]:
         content=evaluation.sample_bytes(extension)
         parsed=parse_file_content('quote.'+extension,'application/octet-stream',content)
@@ -57,7 +57,7 @@ def test_cli_refuses_to_replace_historical_evidence(tmp_path,monkeypatch):
 
 
 def test_scan_fixture_has_no_selectable_text():
-    from app.modules.files.parser import parse_file_content
+    from app.modules.files_storage.parser import parse_file_content
     parsed=parse_file_content('scan.pdf','application/pdf',evaluation.sample_bytes('scan'))
     assert parsed.status!='SUCCEEDED' and not parsed.text.strip()
 
@@ -79,9 +79,9 @@ def test_offline_suite_distinguishes_regressions_from_real_model_quality():
 
 
 def test_manual_corrections_reach_quote_and_total_cost_without_being_replaced_by_candidates(monkeypatch):
-    from app.modules.rfqs import service
-    from app.modules.rfqs.schema import SupplierQuoteCreate
-    from app.modules.rfqs.total_cost import calculate_total_cost
+    from app.modules.rfq_quotes import service
+    from app.modules.rfq_quotes.schema import SupplierQuoteCreate
+    from app.modules.rfq_quotes.total_cost import calculate_total_cost
     candidate=evaluation.run_case('csv',evaluation.cases()['csv'])['candidate']
     item=candidate['items'][0]
     # 人工复核主动修订单价、税率、数量与账期，并明确录入无运费。

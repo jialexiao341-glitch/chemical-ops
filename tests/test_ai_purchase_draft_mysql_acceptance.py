@@ -19,15 +19,15 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.modules.ai import purchase_draft_confirmations as confirmations
-from app.modules.ai.model import AIAgentActionProposal, AIPurchaseDraftConfirmation
-from app.modules.ai.schema import AIPurchaseDraftConfirm
+from app.modules.ai_agent import purchase_draft_confirmations as confirmations
+from app.modules.ai_agent.model import AIAgentActionProposal, AIPurchaseDraftConfirmation
+from app.modules.ai_agent.schema import AIPurchaseDraftConfirm
 from app.modules.purchase_requests.model import (
     PurchaseRequest,
     PurchaseRequestApproval,
     PurchaseRequestItem,
 )
-from app.modules.system.audit import AuditLog
+from app.modules.system_management.audit import AuditLog
 
 
 ROOT = Path(__file__).resolve().parents[1]

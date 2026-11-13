@@ -8,7 +8,7 @@ from sqlalchemy import DefaultClause, create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError, ResourceNotFoundError
-from app.modules.ai.model import AIAgentActionProposal
+from app.modules.ai_agent.model import AIAgentActionProposal
 from app.modules.purchase_orders import followup_service as service
 from app.modules.purchase_orders.followup_model import DeliveryFollowup
 from app.modules.purchase_orders.followup_schema import FollowupReply, FollowupSend
@@ -174,7 +174,7 @@ def test_existing_eta_service_can_participate_without_committing(setup,monkeypat
     s.order.events=[]
     monkeypatch.setattr(service.portal_service,'business_today',lambda:date(2026,10,26))
     monkeypatch.setattr(service.portal_service,'add_audit_log',lambda *a,**kw:None)
-    import app.modules.ai.business_events as business_events
+    import app.modules.ai_agent.business_events as business_events
     recorded=[]
     monkeypatch.setattr(business_events,'record_delivery_change_event',
         lambda db,order,update,**kw:(recorded.append(update),None)[1])

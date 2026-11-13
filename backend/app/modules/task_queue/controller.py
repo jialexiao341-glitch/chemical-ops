@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.db import get_db
 from app.core.errors import AuthorizationError
-from app.modules.system import crud
-from app.modules.system.model import User
+from app.modules.system_management import crud
+from app.modules.system_management.model import User
 from app.modules.task_queue.progress import scan_progress
 
 

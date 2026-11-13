@@ -10,15 +10,15 @@ from sqlalchemy import select, func
 
 from app.core.errors import AuthorizationError, BusinessValidationError, ResourceNotFoundError
 from app.core.idempotency import IdempotencyMiddleware, MAX_IDEMPOTENCY_REQUEST_BYTES
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, InventoryTransaction, InventoryStocktakeRequest, InventoryStocktakeItem
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch, InventoryTransaction, InventoryStocktakeRequest, InventoryStocktakeItem
 from app.modules.inventory_cost.model import InventoryCostLayer
 from app.modules.inventory_cost.service import allocate_outbound_cost, adjust_stocktake_cost
-from app.modules.inventory import service as inventory_service
-from app.modules.system import service as system_service
-from app.modules.system.model import Role, User
-from app.modules.system.audit import AuditLog
-from app.modules.system.schema import UserUpdate, UserCreate
-from app.modules.files import service as file_service
+from app.modules.inventory_stock import service as inventory_service
+from app.modules.system_management import service as system_service
+from app.modules.system_management.model import Role, User
+from app.modules.system_management.audit import AuditLog
+from app.modules.system_management.schema import UserUpdate, UserCreate
+from app.modules.files_storage import service as file_service
 
 
 def stock_fixture(db):
@@ -163,7 +163,7 @@ def test_unlinked_internal_file_is_not_enumerable(monkeypatch):
 def test_download_reads_bounded_chunks_and_closes_stream(monkeypatch):
     import asyncio
     from io import BytesIO
-    from app.modules.files.controller import download_file
+    from app.modules.files_storage.controller import download_file
     class TrackedStream(BytesIO):
         sizes = []
         closes = 0
@@ -192,7 +192,7 @@ def test_download_reads_bounded_chunks_and_closes_stream(monkeypatch):
 
 def test_cleanup_expired_idempotency_records_preserves_live_record(db_session, monkeypatch):
     from datetime import datetime, timedelta
-    from app.modules.system.idempotency_model import IdempotencyRecord
+    from app.modules.system_management.idempotency_model import IdempotencyRecord
     from app.core import idempotency
     now = datetime.now()
     expired = IdempotencyRecord(actor_key=uuid4().hex, idempotency_key=uuid4().hex,

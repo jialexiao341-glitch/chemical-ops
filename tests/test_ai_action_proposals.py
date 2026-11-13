@@ -3,11 +3,11 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from app.modules.ai.model import AIAgentActionProposal
+from app.modules.ai_agent.model import AIAgentActionProposal
 
 
 def test_action_proposal_confirm_requires_literal_true_and_current_version():
-    from app.modules.ai.schema import AIActionProposalConfirm
+    from app.modules.ai_agent.schema import AIActionProposalConfirm
 
     confirmation_id = "a" * 32
     with pytest.raises(ValidationError):
@@ -19,7 +19,7 @@ def test_action_proposal_confirm_requires_literal_true_and_current_version():
 
 
 def test_action_proposal_schemas_forbid_extra_fields():
-    from app.modules.ai.schema import AIActionProposalCreate, AIActionProposalRevise
+    from app.modules.ai_agent.schema import AIActionProposalCreate, AIActionProposalRevise
 
     with pytest.raises(ValidationError):
         AIActionProposalCreate(action_type="purchase_request.create_draft", payload={}, arbitrary_service="x")
@@ -28,7 +28,7 @@ def test_action_proposal_schemas_forbid_extra_fields():
 
 
 def test_action_proposal_model_declares_unique_confirmation_and_idempotency_keys():
-    from app.modules.ai.model import AIAgentActionProposal
+    from app.modules.ai_agent.model import AIAgentActionProposal
 
     constraints = {constraint.name: tuple(column.name for column in constraint.columns)
                    for constraint in AIAgentActionProposal.__table__.constraints
@@ -41,14 +41,14 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import AuthorizationError, BusinessValidationError, DuplicateResourceError
-from app.modules.ai import action_handlers, action_proposals
-from app.modules.ai.schema import AIActionProposalConfirm
+from app.modules.ai_agent import action_handlers, action_proposals
+from app.modules.ai_agent.schema import AIActionProposalConfirm
 
 
 @pytest.fixture(autouse=True)
 def _unrestricted_scope(monkeypatch):
-    monkeypatch.setattr("app.modules.system.data_scope.department_scope_snapshot", lambda *_: None)
-    monkeypatch.setattr("app.modules.system.data_scope.warehouse_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.department_scope_snapshot", lambda *_: None)
+    monkeypatch.setattr("app.modules.system_management.data_scope.warehouse_scope_snapshot", lambda *_: None)
 
 
 class _DB:
@@ -206,7 +206,7 @@ def test_confirm_rejects_changed_source_facts_before_locking(monkeypatch):
     user = SimpleNamespace(id=5, status="ACTIVE")
     preview = action_proposals.propose_action(db, user, "test.create", {"purpose": "实验"}, idempotency_key="req-ev-1")
     db.rows[0].evidence = [_evidence_entry("stale-fingerprint")]
-    from app.modules.ai import agent_tools
+    from app.modules.ai_agent import agent_tools
     monkeypatch.setattr(agent_tools, "execute_tool", lambda *_args, **_kwargs:
                         _tool_result({"tool": "inventory.query_available", "totals": [], "rows": [], "sources": []}))
     request = AIActionProposalConfirm(confirmation_id=preview.confirmation_id, preview_version=1, confirm=True)
@@ -221,7 +221,7 @@ def test_confirm_rejects_revoked_source_permission(monkeypatch):
     user = SimpleNamespace(id=5, status="ACTIVE")
     preview = action_proposals.propose_action(db, user, "test.create", {"purpose": "实验"}, idempotency_key="req-ev-2")
     db.rows[0].evidence = [_evidence_entry("fingerprint")]
-    from app.modules.ai import agent_tools
+    from app.modules.ai_agent import agent_tools
     def denied(*_args, **_kwargs):
         raise AuthorizationError("没有执行该工具的权限")
     monkeypatch.setattr(agent_tools, "execute_tool", denied)
@@ -237,9 +237,9 @@ def test_confirm_executes_when_source_facts_are_unchanged(monkeypatch):
     user = SimpleNamespace(id=5, status="ACTIVE")
     preview = action_proposals.propose_action(db, user, "test.create", {"purpose": "实验"}, idempotency_key="req-ev-3")
     payload = {"tool": "inventory.query_available", "totals": [], "rows": [], "sources": []}
-    from app.modules.ai.purchase_draft_bridge import result_fingerprint
+    from app.modules.ai_agent.purchase_draft_bridge import result_fingerprint
     db.rows[0].evidence = [_evidence_entry(result_fingerprint(payload))]
-    from app.modules.ai import agent_tools
+    from app.modules.ai_agent import agent_tools
     monkeypatch.setattr(agent_tools, "execute_tool", lambda *_args, **_kwargs: _tool_result(payload))
     request = AIActionProposalConfirm(confirmation_id=preview.confirmation_id, preview_version=1, confirm=True)
     assert action_proposals.confirm_action(db, user, request)["request_no"] == "PR-001"

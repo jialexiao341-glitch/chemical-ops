@@ -28,7 +28,7 @@ def _row(
 
 
 def _recommend(rows, expected_item_ids, *, truncated=False):
-    from app.modules.rfqs.recommendation import build_quote_recommendation
+    from app.modules.rfq_quotes.recommendation import build_quote_recommendation
 
     return build_quote_recommendation(rows, expected_item_ids=expected_item_ids, truncated=truncated)
 

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.modules.rfqs import service
+from app.modules.rfq_quotes import service
 
 
 def _quote(quote_id, supplier_id, *, currency="CNY", items=None):

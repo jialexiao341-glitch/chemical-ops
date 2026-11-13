@@ -6,15 +6,15 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.inventory import service as inventory_service
-from app.modules.inventory.model import InventoryBalance, InventoryBatch, WarehouseLocation
-from app.modules.inventory.schema import InboundCreate
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.inventory_stock import service as inventory_service
+from app.modules.inventory_stock.model import InventoryBalance, InventoryBatch, WarehouseLocation
+from app.modules.inventory_stock.schema import InboundCreate
 from app.modules.inventory_returns.model import InventoryReturnItem, InventoryReturnRequest
-from app.modules.products.model import Product
+from app.modules.products_master.model import Product
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
-from app.modules.suppliers.model import Supplier
-from app.modules.system.model import User
+from app.modules.suppliers_master.model import Supplier
+from app.modules.system_management.model import User
 from .conftest import login, grant_test_warehouse
 
 pytestmark = pytest.mark.integration

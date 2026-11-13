@@ -1,6 +1,6 @@
 from decimal import Decimal
 from types import SimpleNamespace
-from app.modules.finance import invoice_extraction
+from app.modules.finance_management import invoice_extraction
 
 
 def test_candidates_require_field_specific_evidence_and_preserve_invoice_number():
@@ -38,12 +38,12 @@ def test_parse_preview_and_confirmed_invoice_link_use_real_services(client, db_s
     from app.core.auth import get_current_user
     from app.core.rate_limit import limit_document
     from app.main import app
-    from app.modules.files import service as files
-    from app.modules.finance import service as finance
-    from app.modules.finance.model import FinanceInvoice, FinanceReconciliation
-    from app.modules.finance.schema import InvoiceCreate
-    from app.modules.system.file_model import SysFile, SysFileAttachment
-    from app.modules.system.model import User
+    from app.modules.files_storage import service as files
+    from app.modules.finance_management import service as finance
+    from app.modules.finance_management.model import FinanceInvoice, FinanceReconciliation
+    from app.modules.finance_management.schema import InvoiceCreate
+    from app.modules.system_management.file_model import SysFile, SysFileAttachment
+    from app.modules.system_management.model import User
     from app.core.errors import BusinessValidationError, DuplicateResourceError
     import pytest
     db = db_session
@@ -116,9 +116,9 @@ def test_invalid_file_and_revoked_permission_never_upload(client, db_session, mo
     from app.core.auth import get_current_user
     from app.core.rate_limit import limit_document
     from app.main import app
-    from app.modules.files import service as files
-    from app.modules.finance.model import FinanceReconciliation
-    from app.modules.system.model import User
+    from app.modules.files_storage import service as files
+    from app.modules.finance_management.model import FinanceReconciliation
+    from app.modules.system_management.model import User
     from unittest.mock import Mock
     db = db_session
     actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))
@@ -148,9 +148,9 @@ def test_write_permission_rechecked_after_model_call(client, db_session, monkeyp
     from app.core.auth import get_current_user
     from app.core.rate_limit import limit_document
     from app.main import app
-    from app.modules.files import service as files
-    from app.modules.finance.model import FinanceReconciliation
-    from app.modules.system.model import User
+    from app.modules.files_storage import service as files
+    from app.modules.finance_management.model import FinanceReconciliation
+    from app.modules.system_management.model import User
     actor = db_session.scalar(select(User).where(User.username == 'SystemAdmin'))
     rec = db_session.scalar(select(FinanceReconciliation).where(FinanceReconciliation.status == 'CONFIRMED').limit(1))
     async def fake_chat(*args, **kwargs):
@@ -176,11 +176,11 @@ def test_other_users_upload_cannot_be_used_as_invoice_source(db_session):
     from uuid import uuid4
     from sqlalchemy import select, func
     from app.core.errors import BusinessValidationError
-    from app.modules.finance import service
-    from app.modules.finance.model import FinanceInvoice, FinanceReconciliation
-    from app.modules.finance.schema import InvoiceCreate
-    from app.modules.system.file_model import SysFile
-    from app.modules.system.model import User
+    from app.modules.finance_management import service
+    from app.modules.finance_management.model import FinanceInvoice, FinanceReconciliation
+    from app.modules.finance_management.schema import InvoiceCreate
+    from app.modules.system_management.file_model import SysFile
+    from app.modules.system_management.model import User
     import pytest
     db = db_session
     actor = db.scalar(select(User).where(User.username == 'SystemAdmin'))

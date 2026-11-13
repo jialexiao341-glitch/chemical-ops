@@ -4,11 +4,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.products.model import Product
+from app.modules.products_master.model import Product
 from app.modules.quality_acceptances.model import QualityInspectionStandard
 from app.modules.quality_acceptances.schema import QualityStandardCreate
-from app.modules.system.model import User
-from app.modules.system.audit import add_audit_log
+from app.modules.system_management.model import User
+from app.modules.system_management.audit import add_audit_log
 
 
 def list_standards(db: Session, product_id: int) -> list[QualityInspectionStandard]:

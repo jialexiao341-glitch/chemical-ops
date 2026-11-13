@@ -4,16 +4,16 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import BusinessValidationError
-from app.modules.deliveries.model import Delivery, DeliveryItem
-from app.modules.inventory.model import (InventoryBalance, InventoryBatch, Warehouse, WarehouseLocation,
+from app.modules.deliveries_receipt.model import Delivery, DeliveryItem
+from app.modules.inventory_stock.model import (InventoryBalance, InventoryBatch, Warehouse, WarehouseLocation,
     InventoryTransferRequest, InventoryTransferItem, InventoryStocktakeRequest, InventoryStocktakeItem)
-from app.modules.inventory.schema import InboundCreate, InventoryBalanceStatusChange
-from app.modules.inventory import service as inventory
+from app.modules.inventory_stock.schema import InboundCreate, InventoryBalanceStatusChange
+from app.modules.inventory_stock import service as inventory
 from app.modules.purchase_orders.model import PurchaseOrder, PurchaseOrderItem
 from app.modules.quality_acceptances.model import QualityAcceptance
 from app.modules.quality_acceptances.schema import QualityAcceptanceResult
 from app.modules.quality_acceptances import service as quality
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 def test_reinspection_blocks_batch_and_preserves_manual_freeze(db_session, monkeypatch):

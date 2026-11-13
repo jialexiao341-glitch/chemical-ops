@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import BusinessValidationError, ResourceNotFoundError
-from app.modules.ai import action_handlers, action_proposals, capabilities
+from app.modules.ai_agent import action_handlers, action_proposals, capabilities
 from app.modules.purchase_orders import followup, service as order_service
 
 

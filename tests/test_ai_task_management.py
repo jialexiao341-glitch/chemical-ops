@@ -8,13 +8,13 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import AuthorizationError, DuplicateResourceError, ResourceNotFoundError
-from app.modules.ai import agent_runtime, purchase_draft_confirmations as confirmations
-from app.modules.ai.model import AIAgentTask, AIPurchaseDraftConfirmation
-from app.modules.ai.lifecycle import cleanup_expired_ai_records
+from app.modules.ai_agent import agent_runtime, purchase_draft_confirmations as confirmations
+from app.modules.ai_agent.model import AIAgentTask, AIPurchaseDraftConfirmation
+from app.modules.ai_agent.lifecycle import cleanup_expired_ai_records
 from app.modules.task_queue.model import TaskExecution
-from app.modules.ai.schema import AIPurchaseDraftPatch
+from app.modules.ai_agent.schema import AIPurchaseDraftPatch
 from app.modules.purchase_requests.model import Unit
-from app.modules.system.model import User
+from app.modules.system_management.model import User
 
 
 def test_task_list_is_owner_scoped_and_paged(db_session, monkeypatch):

@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from app.modules.ai import proactive
-from app.modules.jobs import service
+from app.modules.ai_agent import proactive
+from app.modules.jobs_scheduler import service
 
 
 def _exception(**overrides):

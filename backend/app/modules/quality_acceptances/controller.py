@@ -13,9 +13,9 @@ from app.core.rate_limit import limit_document
 from app.modules.quality_acceptances import service
 from app.modules.quality_acceptances import report_review
 from app.modules.quality_acceptances.schema import QualityAcceptanceCreate, QualityAcceptancePage, QualityAcceptanceRead, QualityAcceptanceResult, QualityCorrectionAction, QualityCorrectionRead, QualityReportFile, QualityReportReview, QualityReportReviewRequest, QualityReportSummary, QualityReviewDecision, QualityReviewHistory, QualityReviewTarget
-from app.modules.files import service as file_service
-from app.modules.files.schema import FileAttachmentCreate
-from app.modules.system.model import User
+from app.modules.files_storage import service as file_service
+from app.modules.files_storage.schema import FileAttachmentCreate
+from app.modules.system_management.model import User
 from app.modules.quality_acceptances.schema import QualityAssignmentOptions
 
 

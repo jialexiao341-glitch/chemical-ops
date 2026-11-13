@@ -16,8 +16,8 @@ from app.core.observability import metrics
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.security import decode_access_token_claims
-from app.modules.system.idempotency_model import IdempotencyRecord
-from app.modules.system.model import User
+from app.modules.system_management.idempotency_model import IdempotencyRecord
+from app.modules.system_management.model import User
 
 
 LOGGER = logging.getLogger("chemicalops.idempotency")
