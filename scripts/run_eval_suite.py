@@ -10,6 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
+# 直接执行脚本时 sys.path[0] 是 scripts/，需补上仓库根才能导入 scripts.* 与 backend.app。
+sys.path.insert(0, str(ROOT))
 
 PREFLIGHT_PROMPT = "回复 OK"
 PREFLIGHT_TIMEOUT = 30.0
@@ -19,6 +21,35 @@ PREFLIGHT_TIMEOUT = 30.0
 ENVELOPE_SUBDIR = "envelopes"
 ENVELOPE_FILES = {suite: f"harness-{suite}.json"
                   for suite in ("routing", "tasks", "business", "prod")}
+BASELINE_ROOT = ROOT / "docs/evaluation/baselines"
+
+
+def baseline_probe(baseline_root: Path, suite: str) -> dict:
+    """按当前 prompt 版本查 envelope 基线；CI 在花 90 分钟采样前先用它快速失败。
+
+    目录与命名必须和 eval_prompt_gate.run_envelope_gate 一致，否则会出现“门禁找不到基线”
+    与“基线检查通过”两套判断。
+    """
+    from scripts import eval_prompt_gate  # 延迟导入：dry-run 与命令构造不需要模型/后端依赖
+
+    key = eval_prompt_gate.prompt_key()
+    suites = tuple(ENVELOPE_FILES) if suite == "all" else (suite,)
+    directory = baseline_root / key
+    missing = [name for name in suites if not (directory / ENVELOPE_FILES[name]).exists()]
+    return {"prompt_key": key, "baseline_dir": str(directory), "missing": missing,
+            "required": list(suites)}
+
+
+def require_baseline(baseline_root: Path, suite: str) -> dict:
+    """当前 prompt 版本没有完整 envelope 基线时直接报错，避免采样后才发现无法判定。"""
+    probe = baseline_probe(baseline_root, suite)
+    if probe["missing"]:
+        raise ValueError(
+            f"当前 prompt 版本 {probe['prompt_key']} 缺少 envelope 基线："
+            f"{'、'.join(ENVELOPE_FILES[name] for name in probe['missing'])}"
+            f"（目录 {probe['baseline_dir']}）；"
+            "请先审阅候选 envelope 并执行 eval_prompt_gate.py --promote-baseline")
+    return probe
 
 
 def preflight_model() -> tuple[bool, str]:
@@ -117,13 +148,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")
     parser.add_argument("--preflight", action="store_true",
                         help="先用一次最小模型请求确认服务可用，不可用时不发起批量评测")
+    parser.add_argument("--baseline-root", type=Path, default=BASELINE_ROOT,
+                        help="envelope 基线根目录；默认 docs/evaluation/baselines")
+    parser.add_argument("--require-baseline", action="store_true",
+                        help="harness 采样前校验当前 prompt 版本有完整 envelope 基线，缺失即退出")
     args = parser.parse_args(argv)
     if args.routing_repeats < 1 or args.business_repetitions < 1 or args.business_workers < 1:
         parser.error("重复次数和并发数必须为正数")
     if args.repeat < 1:
         parser.error("采样轮次必须为正数")
+    if args.require_baseline and not args.harness:
+        parser.error("--require-baseline 只适用于 --harness：基线以 envelope 为判定口径")
 
     if args.harness:
+        if args.require_baseline:
+            try:
+                probe = require_baseline(args.baseline_root, args.suite)
+            except ValueError as exc:
+                print(f"[eval] {exc}", file=sys.stderr)
+                return 1
+            print(f"[baseline] 基线齐全：{probe['prompt_key']}（{probe['baseline_dir']}）",
+                  flush=True)
         command = build_harness_command(args)
         if args.dry_run:
             print(json.dumps([{"name": "harness", "command": command}],

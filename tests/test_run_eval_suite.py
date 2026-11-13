@@ -102,3 +102,69 @@ def test_harness_mode_reports_missing_envelopes(tmp_path, monkeypatch):
     code = run_eval_suite.main(["--harness", "--gate", "--output-dir", str(tmp_path)])
 
     assert code == 1
+
+
+def _pin_prompt_key(monkeypatch, key: str = "routing@test__planner@test"):
+    from scripts import eval_prompt_gate
+
+    monkeypatch.setattr(eval_prompt_gate, "prompt_key", lambda: key)
+    return key
+
+
+def test_require_baseline_fails_before_any_sampling(tmp_path, monkeypatch, capsys):
+    """CI 在花几十分钟采样前就要发现缺基线，而不是跑完才报无法判定。"""
+    key = _pin_prompt_key(monkeypatch)
+    called = []
+    monkeypatch.setattr(run_eval_suite.subprocess, "run",
+                        lambda command, cwd: called.append(command))
+
+    code = run_eval_suite.main(["--harness", "--require-baseline",
+                                "--baseline-root", str(tmp_path / "baselines"),
+                                "--output-dir", str(tmp_path / "out")])
+
+    assert code == 1
+    assert called == []
+    stderr = capsys.readouterr().err
+    assert key in stderr
+    assert "harness-routing.json" in stderr
+
+
+def test_require_baseline_accepts_complete_envelope_baseline(tmp_path, monkeypatch):
+    key = _pin_prompt_key(monkeypatch)
+    baseline_dir = tmp_path / "baselines" / key
+    baseline_dir.mkdir(parents=True)
+    for name in run_eval_suite.ENVELOPE_FILES.values():
+        (baseline_dir / name).write_text("{}", encoding="utf-8")
+
+    calls = []
+
+    def fake_run(command, cwd):
+        calls.append(command)
+        joined = " ".join(command)
+        if "eval_harness.py" in joined:
+            envelope_dir = tmp_path / "out" / run_eval_suite.ENVELOPE_SUBDIR
+            envelope_dir.mkdir(parents=True, exist_ok=True)
+            for name in run_eval_suite.ENVELOPE_FILES.values():
+                (envelope_dir / name).write_text("{}", encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_eval_suite.subprocess, "run", fake_run)
+
+    code = run_eval_suite.main(["--harness", "--require-baseline",
+                                "--baseline-root", str(tmp_path / "baselines"),
+                                "--output-dir", str(tmp_path / "out"),
+                                "--gate", "--fail-on-regression"])
+
+    assert code == 0
+    assert "eval_harness.py" in " ".join(calls[0])
+    assert calls[1][1].endswith("eval_prompt_gate.py")
+    assert "--fail-on-regression" in calls[1]
+
+
+def test_require_baseline_rejected_outside_harness_mode(tmp_path):
+    try:
+        run_eval_suite.main(["--require-baseline", "--output-dir", str(tmp_path)])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:  # pragma: no cover - argparse 以 SystemExit 结束
+        raise AssertionError("--require-baseline 未配合 --harness 时应拒绝执行")
