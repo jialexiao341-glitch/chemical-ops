@@ -533,3 +533,38 @@ def test_route_endpoint_resolves_authorized_page_context_and_rejects_unauthorize
             "page_context": {"object_type": "finance_reconciliation", "object_id": 1},
         })
     assert denied.status_code == 403
+
+
+def test_rfq_draft_without_supplier_codes_repairs_to_open_ended_clarification(monkeypatch):
+    """未指定供应商编码触发询价契约校验后，修补输出为开放式追问应正常通过校验。"""
+    calls = []
+
+    async def model(request, settings, **kwargs):
+        calls.append(kwargs.get("system_prompt", ""))
+        if len(calls) == 1:
+            return SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+                "purpose": "rfq_draft", "execution_mode": "none", "action_fields": None,
+            })))
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "purpose": "clarify",
+            "execution_mode": "none",
+            "clarification_slot": "supplier_codes",
+            "clarification_options": [],
+            "question": "请提供希望纳入该询价单的供应商编码。",
+        })))
+
+    monkeypatch.setattr(llm, "chat", model)
+    manifest = _sample_manifest(chat_purposes=("purchase_order_submit", "purchase_submit", "rfq_draft"))
+    approved_request_ctx = {
+        "page_context": {
+            "object_type": "purchase_request", "reference_no": "QA-PR-20261004-03",
+            "status": "APPROVED", "title": "采购申请 QA-PR-20261004-03",
+        }
+    }
+    decision = _run_immediate(routing.understand("基于当前采购申请生成一张询价单草稿", approved_request_ctx, manifest=manifest))
+    assert len(calls) == 2
+    assert "创建询价提案必须提供用户明确指定的供应商编码" in calls[1]
+    assert decision.route == "clarify"
+    assert decision.clarification_slot == "supplier_codes"
+    assert decision.clarification_options == []
+    assert "供应商编码" in (decision.question or "")

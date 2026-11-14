@@ -156,11 +156,11 @@ def _resolved_query_question(question: str, intent: IntentResult) -> str:
 
 def _save_clarification_if_bound(db: Session, user: User, conversation_id: int, data: AIChatRequest,
                                  question: str, intent: IntentResult) -> None:
-    """只持久化具备明确槽位和有限选项的澄清，并与本轮消息同事务提交。"""
+    """只持久化具备明确槽位和至少两个有限选项的澄清，并与本轮消息同事务提交；开放式追问不写入待选状态。"""
     if intent.intent is not Intent.CLARIFY or not intent.understanding:
         return
     decision = Understanding.model_validate(intent.understanding)
-    if decision.dialogue_action == "cancel" or not decision.clarification_slot:
+    if decision.dialogue_action == "cancel" or not decision.clarification_slot or len(decision.clarification_options) < 2:
         return
     conversation_store.save_pending_clarification(db, user, conversation_id, question, decision)
 

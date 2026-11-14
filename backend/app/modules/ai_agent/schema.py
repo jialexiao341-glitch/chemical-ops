@@ -642,7 +642,8 @@ class Understanding(BaseModel):
         if self.purpose == "clarify":
             if self.clarification_options and not self.clarification_slot:
                 raise ValueError("澄清选项必须绑定待回答槽位")
-            if self.clarification_slot and len(self.clarification_options) < 2:
+            # 开放式追问（例如索取供应商编码或缺失字段）允许绑定待补槽位且选项为空；一旦给出候选选项，则必须至少包含两个以构成可持久化选择。
+            if self.clarification_slot and self.clarification_options and len(self.clarification_options) < 2:
                 raise ValueError("可持久化澄清必须包含至少两个选项")
             if len(set(self.clarification_options)) != len(self.clarification_options):
                 raise ValueError("澄清选项不得重复")

@@ -105,6 +105,31 @@ def test_clarification_output_requires_a_bound_slot_and_finite_options():
     with pytest.raises(ValueError):
         schema.Understanding(purpose="query", execution_mode="agent", tasks=["inventory"],
                              clarification_slot="product_keyword", clarification_options=["乙醇", "甲醇"])
+    open_ended = schema.Understanding(
+        purpose="clarify", question="请提供希望纳入该询价单的供应商编码。",
+        clarification_slot="supplier_codes", clarification_options=[],
+    )
+    assert open_ended.clarification_slot == "supplier_codes"
+    assert open_ended.clarification_options == []
+
+
+def test_open_ended_clarification_without_options_is_not_persisted(monkeypatch):
+    """开放式追问仅带待补槽位且无候选选项时，不应尝试写入可续接多选状态。"""
+    from app.modules.ai_agent import service
+
+    saved = []
+    monkeypatch.setattr(conversation_store, "save_pending_clarification", lambda *args, **kwargs: saved.append(args))
+    open_ended = schema.Understanding(
+        purpose="clarify", question="请提供希望纳入该询价单的供应商编码。",
+        clarification_slot="supplier_codes", clarification_options=[],
+    )
+    service._save_clarification_if_bound(
+        SimpleNamespace(), SimpleNamespace(id=7), 1,
+        schema.AIChatRequest(conversation_id=1, messages=[{"role": "user", "content": "生成询价单草稿"}]),
+        "生成询价单草稿",
+        schema.IntentResult(intent=schema.Intent.CLARIFY, reason="需要补充供应商编码", understanding=open_ended.model_dump(mode="json")),
+    )
+    assert saved == []
 
 
 @pytest.fixture
