@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     app_name: str = "ChemicalOps"
     app_env: str = "development"
     debug: bool = False
-    api_host: str = "0.0.0.0"
+    api_host: str = "127.0.0.1"
     api_port: int = 8888
     api_prefix: str = "/api/v1"
     cors_origins: str = "http://localhost:5173"

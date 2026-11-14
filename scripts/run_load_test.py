@@ -1,7 +1,6 @@
 """对指定 HTTP 接口执行轻量并发压测。"""
 
 import argparse
-import http.client
 import json
 import math
 import os
@@ -10,31 +9,44 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
+import httpx
+
+
+def _validate_http_url(url: str, name: str) -> str:
+    """校验仅允许 http/https URL，避免非预期协议请求。"""
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{name} 必须为合法的 http/https 地址：{url}")
+    return url
 
 
 def _request(url: str, headers: dict[str, str], timeout: float) -> tuple[int, float]:
     """发送一次请求并返回 HTTP 状态码和耗时。"""
+    _validate_http_url(url, "url")
     started = time.perf_counter()
     try:
-        request = Request(url, headers=headers, method="GET")
-        with urlopen(request, timeout=timeout) as response:
-            status = response.status
-    except HTTPError as exc:
-        status = exc.code
-    except (URLError, TimeoutError, OSError, http.client.HTTPException):
+        response = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=False)
+        status = response.status_code
+    except httpx.HTTPError:
         status = 0
     return status, time.perf_counter() - started
 
 
 def _metrics_snapshot(url: str, timeout: float, token: str = "") -> tuple[int | None, dict[str, int] | None]:
     """读取 API 内部累计 SQL 与 Redis 缓存事件，连接失败时返回不可用。"""
+    _validate_http_url(url, "metrics_url")
     try:
-        with urlopen(Request(url, headers={"Authorization": f"Bearer {token}"} if token else {}), timeout=timeout) as response:
-            body = response.read().decode("utf-8")
-    except (HTTPError, URLError, TimeoutError):
+        response = httpx.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"} if token else {},
+            timeout=timeout,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+        body = response.text
+    except httpx.HTTPError:
         return None, None
     queries = 0
     query_series_found = False

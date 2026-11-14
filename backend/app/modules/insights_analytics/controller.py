@@ -366,21 +366,21 @@ def _supplier_change(db: Session, user: User, rfq_id: int) -> BusinessInsight:
     """将已录入报价与询价需求逐项对照，呈现价格、数量及交期。"""
     rfq = rfq_service.get_rfq(db, user, rfq_id)
     result = _result("supplier-change", f"询价 {rfq.rfq_no} 变更核对", "采购员", "比较系统中已录入的结构化报价，不自动接受供应商变更。")
-    requests = {x.id: x for x in db.scalars(select(RFQItem).where(RFQItem.rfq_id == rfq.id)).all()}
+    rfq_items = {x.id: x for x in db.scalars(select(RFQItem).where(RFQItem.rfq_id == rfq.id)).all()}
     quotes = db.scalars(select(SupplierQuote).where(SupplierQuote.rfq_id == rfq.id, SupplierQuote.status == "SUBMITTED").order_by(SupplierQuote.supplier_id, SupplierQuote.quote_version)).all()
     previous: dict[tuple[int, int], SupplierQuoteItem] = {}
     for quote in quotes:
         supplier = db.get(Supplier, quote.supplier_id)
         lines = db.scalars(select(SupplierQuoteItem).where(SupplierQuoteItem.quote_id == quote.id)).all()
         for line in lines:
-            request = requests.get(line.rfq_item_id)
-            if request is None:
+            rfq_item = rfq_items.get(line.rfq_item_id)
+            if rfq_item is None:
                 continue
             old = previous.get((quote.supplier_id, line.rfq_item_id))
             change = "首次报价"
             if old is not None:
                 change = f"单价变化 {line.unit_price-old.unit_price:+}，报价数量变化 {line.quoted_quantity-old.quoted_quantity:+}，交期 {old.lead_days or '未填'}→{line.lead_days or '未填'} 天"
-            _evidence(result, f"{supplier.supplier_name if supplier else quote.supplier_id} · {request.requested_name}", f"当前报价 {line.unit_price} {quote.currency_code}，数量 {line.quoted_quantity}/{request.quantity}，交期 {line.lead_days or '未填'} 天；{change}", f"报价 {quote.quote_no}，需求行 #{request.id}", "/procurement/rfqs")
+            _evidence(result, f"{supplier.supplier_name if supplier else quote.supplier_id} · {rfq_item.requested_name}", f"当前报价 {line.unit_price} {quote.currency_code}，数量 {line.quoted_quantity}/{rfq_item.quantity}，交期 {line.lead_days or '未填'} 天；{change}", f"报价 {quote.quote_no}，需求行 #{rfq_item.id}", "/procurement/rfqs")
             previous[(quote.supplier_id, line.rfq_item_id)] = line
             linked_lines = db.scalars(select(PurchaseOrderItem).where(PurchaseOrderItem.source_quote_item_id == line.id)).all()
             for order_line in linked_lines:

@@ -1,7 +1,6 @@
 """对缓存只读 HTTP 接口执行串行冷/热对照并记录应用指标。"""
 
 import argparse
-import http.client
 import json
 import math
 import os
@@ -11,8 +10,9 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+
+import httpx
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,14 +21,22 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
+def _validate_http_url(url: str, name: str) -> str:
+    """校验仅允许 http/https URL，避免非预期协议请求。"""
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{name} 必须为合法的 http/https 地址：{url}")
+    return url
+
+
 def _get(url: str, headers: dict[str, str], timeout: float) -> tuple[int, float]:
+    """发送单次 HTTP GET 请求并统计耗时与状态码。"""
+    _validate_http_url(url, "url")
     started = time.perf_counter()
     try:
-        with urlopen(Request(url, headers=headers), timeout=timeout) as response:
-            status = response.status
-    except HTTPError as exc:
-        status = exc.code
-    except (URLError, TimeoutError, OSError, http.client.HTTPException):
+        response = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=False)
+        status = response.status_code
+    except httpx.HTTPError:
         status = 0
     return status, time.perf_counter() - started
 
@@ -40,8 +48,11 @@ def _percentile_ms(sorted_durations: list[float], quantile: float) -> float:
 
 
 def _snapshot(url: str, timeout: float, space: str) -> tuple[int | None, dict[str, int]]:
-    with urlopen(url, timeout=timeout) as response:
-        body = response.read().decode("utf-8")
+    """拉取 Prometheus 指标并统计指定缓存空间的命中与查询计数。"""
+    _validate_http_url(url, "metrics_url")
+    response = httpx.get(url, timeout=timeout, follow_redirects=False)
+    response.raise_for_status()
+    body = response.text
     selects = 0
     select_found = False
     cache: dict[str, int] = {}
