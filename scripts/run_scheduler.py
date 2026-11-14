@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.core.observability import metrics
 from app.core.production import production_config_errors
+from app.modules.ai_agent.quality_operations.rsi_cycle import sync_candidate_drafts
 from app.modules.files_storage.service import recover_stale_parses
 from app.modules.jobs_scheduler.service import (
     scan_overdue_deliveries,
@@ -79,6 +80,15 @@ def run_once() -> dict[str, int]:
             db,
             stale_after_seconds=get_settings().file_parse_stale_after_seconds,
         )
+        # 自动归集只写 DRAFT 回归草稿；失败时记录告警，不阻断主业务逾期扫描。
+        try:
+            rsi_sync = sync_candidate_drafts(db, actor, days=7, limit=20)
+            result["rsi_candidate_drafts_created"] = int(rsi_sync.get("created") or 0)
+            result["rsi_candidate_drafts_scanned"] = int(rsi_sync.get("scanned") or 0)
+        except Exception:
+            db.rollback()
+            LOGGER.exception("RSI 回归候选自动归集失败")
+            result["rsi_candidate_drafts_created"] = 0
         return result
     except Exception:
         db.rollback()
