@@ -64,7 +64,8 @@ def _ambiguous(exc: Exception | None) -> bool:
 
 def classify(error_code: str, exc: Exception | None = None) -> tuple[ErrorClass, RecoveryAction, str]:
     """返回分类与固定安全文案；不根据此结果修改重试或业务行为。"""
-    if error_code in {"MODEL_SERVICE_ERROR", "INTENT_SERVICE_ERROR", "RUNTIME_ERROR"} and _ambiguous(exc):
+    # 模型等待期间触发的 TASK_TIMEOUT 与响应阶段断流同属结果未知超时，需按 WAIT 处理。
+    if error_code in {"MODEL_SERVICE_ERROR", "INTENT_SERVICE_ERROR", "RUNTIME_ERROR", "TASK_TIMEOUT"} and _ambiguous(exc):
         category, action = ErrorClass.AMBIGUOUS_TIMEOUT, RecoveryAction.WAIT
     else:
         category, action = _MAPPING.get(error_code, (ErrorClass.UNKNOWN, RecoveryAction.CONTACT_SUPPORT))

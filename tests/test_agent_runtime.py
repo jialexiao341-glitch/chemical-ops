@@ -1316,3 +1316,50 @@ def test_task_api_against_mysql_with_authenticated_user(client, db_session, demo
         result = response.json()
     assert result['status'] == 'SUCCEEDED'
     assert client.get('/api/v1/ai/agent/tasks/' + result['id'], headers=headers).json()['trace'] == result['trace']
+
+
+def test_llm_wait_timeout_records_ambiguous_timeout_while_preserving_code(task_db, monkeypatch):
+    """模型等待期间触发任务超时时，保留 TASK_TIMEOUT 错误码但将 run_meta 归类为 AMBIGUOUS_TIMEOUT。"""
+    import asyncio as _asyncio
+    from types import SimpleNamespace as _NS
+    from app.modules.ai_agent.schema import Understanding
+
+    timeout_settings = runtime.get_settings().model_copy(update={'agent_task_timeout_seconds': 0.05})
+    monkeypatch.setattr(runtime, 'get_settings', lambda: timeout_settings)
+
+    async def fake_understand(*_args, **_kwargs):
+        return Understanding(purpose='query', execution_mode='agent', tasks=['inventory'])
+
+    async def slow_chat(*_args, **_kwargs):
+        await _asyncio.sleep(0.5)
+        return _NS(message=_NS(content='{}'))
+
+    monkeypatch.setattr(runtime.routing, 'understand', fake_understand)
+    monkeypatch.setattr(runtime.llm, 'chat', slow_chat)
+    result = start(task_db)
+    assert result.error_code == 'TASK_TIMEOUT'
+    assert result.run_meta['error']['class'] == 'AMBIGUOUS_TIMEOUT'
+    assert result.run_meta['error']['recovery'] == 'WAIT'
+    assert result.trace[-1]['recovery_action'] == 'WAIT'
+
+
+def test_decide_preserves_configured_llm_max_retries(task_db, monkeypatch):
+    """_decide 规划调用不得强行把 llm_max_retries 覆盖为 0，应保留全局配置重试策略。"""
+    from app.modules.ai_agent.schema import Understanding
+
+    seen_retries = []
+    base = runtime.get_settings().model_copy(update={'llm_max_retries': 2, 'llm_timeout_seconds': 120})
+    monkeypatch.setattr(runtime, 'get_settings', lambda: base)
+
+    async def fake_understand(*_args, **_kwargs):
+        return Understanding(purpose='query', execution_mode='agent', tasks=['inventory'])
+
+    async def capture_chat(_request, settings, **_kwargs):
+        seen_retries.append((settings.llm_max_retries, settings.llm_timeout_seconds))
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps({'action': 'ask_user', 'question': '请明确产品？'})))
+
+    monkeypatch.setattr(runtime.routing, 'understand', fake_understand)
+    monkeypatch.setattr(runtime.llm, 'chat', capture_chat)
+    result = start(task_db)
+    assert result.status == 'WAITING_INPUT'
+    assert seen_retries == [(2, 120)]

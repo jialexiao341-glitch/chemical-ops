@@ -56,3 +56,13 @@ def test_unknown_error_is_safe_and_does_not_expose_exception():
     category, action, hint = classify("unexpected", ValueError("secret"))
     assert (category, action) == (ErrorClass.UNKNOWN, RecoveryAction.CONTACT_SUPPORT)
     assert "secret" not in hint
+
+
+def test_task_timeout_differentiates_llm_wait_from_execution_budget():
+    """纯执行预算超时保持 BUDGET；若因果链为 LLM 响应超时，则归类为 AMBIGUOUS_TIMEOUT。"""
+    plain = classify("TASK_TIMEOUT")
+    assert plain[:2] == (ErrorClass.BUDGET, RecoveryAction.NARROW_SCOPE)
+
+    llm_wait = RuntimeError("AI 服务响应超时（planner）")
+    llm_wait.__cause__ = TimeoutError("read timeout")
+    assert classify("TASK_TIMEOUT", llm_wait)[:2] == (ErrorClass.AMBIGUOUS_TIMEOUT, RecoveryAction.WAIT)

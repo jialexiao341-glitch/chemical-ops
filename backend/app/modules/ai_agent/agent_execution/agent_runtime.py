@@ -136,6 +136,19 @@ class RunState:
     department_scope: list[int] | None = None
     warehouse_scope: list[int] | None = None
     run_meta: dict = field(default_factory=dict)
+    awaiting_llm_stage: str | None = field(default=None, repr=False)
+
+
+async def _await_llm_stage(state: RunState, stage: str, awaitable):
+    """标记当前正在等待外部模型响应的阶段，以便任务整体超时能区分 LLM 阻塞与步数超限。"""
+    state.awaiting_llm_stage = stage
+    try:
+        result = await awaitable
+    except Exception:
+        state.awaiting_llm_stage = None
+        raise
+    state.awaiting_llm_stage = None
+    return result
 
 
 def _empty_usage_totals() -> dict[str, int]:
@@ -752,14 +765,19 @@ async def _decide(state: RunState, catalog: list[dict], settings: Settings):
         return context
 
     context = assemble(payload)
-    model_settings = settings.model_copy(update={"llm_max_tokens": min(settings.llm_max_tokens, 2048),
-        "llm_max_retries": 0})
+    # 不强行清零重试：llm.chat 仅对 ConnectError / ConnectTimeout / PoolTimeout / HTTP 429 重试，
+    # 与无库回退环境变量及 MaxApi 模型配置保持一致。
+    model_settings = settings.model_copy(update={"llm_max_tokens": min(settings.llm_max_tokens, 2048)})
     timing = _timings(state)
     started = perf_counter()
     try:
         for attempt in range(2):
-            reply = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
-                model_settings, response_format={"type": "json_object"}, system_prompt=prompt_registry.get_prompt("planner"), interpret_only=True)
+            reply = await _await_llm_stage(
+                state,
+                "planner",
+                llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=context)]),
+                         model_settings, response_format={"type": "json_object"}, system_prompt=prompt_registry.get_prompt("planner"), interpret_only=True),
+            )
             try:
                 return ACTION.validate_json(reply.message.content)
             except ValidationError:
@@ -1140,7 +1158,11 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             from app.modules.ai_agent.agent_execution import capabilities
             manifest = await _offload_db_call(capabilities.build_capability_manifest, db, user)
             _record_prompt(current, "routing")
-            decision = await routing.understand(current.messages[-1], context, settings, manifest=manifest)
+            decision = await _await_llm_stage(
+                current,
+                "routing",
+                routing.understand(current.messages[-1], context, settings, manifest=manifest),
+            )
             await _offload_db_call(_assert_running, db, user, current)
             current.memory_state["understanding"] = decision.model_dump(mode="json")
             current.memory_state["route_turn"] = len(current.messages)
@@ -1342,8 +1364,11 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
                     if graph_state["data"].status != "RUNNING":
                         break
     except TaskInterrupted:
+        state.awaiting_llm_stage = None
         return await _offload_db_call(get_task, db, user, state.task_id)
     except Exception as exc:
+        timed_out_llm_stage = state.awaiting_llm_stage
+        state.awaiting_llm_stage = None
         from app.modules.task_queue.errors import transient
         if execution_context.identity() and transient(exc):
             await _offload_db_call(db.rollback)
@@ -1360,8 +1385,12 @@ async def _drive_impl(db: Session, user: User, state: RunState, settings: Settin
             "DATABASE_ERROR" if isinstance(exc, SQLAlchemyError) else str(exc) if str(exc) in codes else "RUNTIME_ERROR")
         if state.error_code == "RUNTIME_ERROR" and transient(exc):
             state.error_code = "MODEL_SERVICE_ERROR"
+        classify_exc = exc
+        if state.error_code == "TASK_TIMEOUT" and timed_out_llm_stage:
+            classify_exc = RuntimeError(f"AI 服务响应超时（{timed_out_llm_stage}）")
+            classify_exc.__cause__ = exc
         from app.modules.ai_agent.shared_utils.error_policy import classify
-        category, recovery, hint = classify(state.error_code, exc)
+        category, recovery, hint = classify(state.error_code, classify_exc)
         state.run_meta["error"] = {"code": state.error_code, "class": category.value,
                                    "recovery": recovery.value, "hint": hint}
         if isinstance(exc, routing.IntentRecognitionError):

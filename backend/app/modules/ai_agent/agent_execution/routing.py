@@ -409,11 +409,13 @@ async def understand(question: str, context: dict | None = None, settings=None, 
     repair = ""
     failure_reason = "请求识别服务发生技术故障"
     failure_code = "INTENT_SERVICE_ERROR"
+    last_exc: Exception | None = None
     for attempt in range(2):
         try:
             response = await llm.chat(AIChatRequest(messages=[AIChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))]),
                                           runtime, response_format=schema_response_format(Understanding, "intent_understanding"), system_prompt=prompt_registry.get_prompt("routing") + capability_context + repair, interpret_only=True)
         except Exception as exc:
+            last_exc = exc
             failure_code = "INTENT_SERVICE_ERROR"
             if str(exc) == "TOKEN_BUDGET_EXCEEDED":
                 raise
@@ -433,7 +435,8 @@ async def understand(question: str, context: dict | None = None, settings=None, 
         try:
             # 兼容代码块、前后说明和传输截断；修复只补齐闭合符号，不改写取值。
             content, shape = llm.load_json_object(response.message.content or "")
-        except BusinessValidationError:
+        except BusinessValidationError as exc:
+            last_exc = exc
             failure_reason = "请求识别结果未通过任务结构校验"
             failure_code = "INTENT_SCHEMA_ERROR"
             metrics.increment("llm_schema_errors", labels={"stage": "routing", "kind": "invalid_json"})
@@ -453,6 +456,7 @@ async def understand(question: str, context: dict | None = None, settings=None, 
             )
         except ValidationError as exc:
             # 只反馈结构错误位置，不把模型原始输出或用户数据写入日志。
+            last_exc = exc
             errors = schema_error_details(exc)
             failure_reason = "请求识别结果未通过任务结构校验"
             failure_code = "INTENT_SCHEMA_ERROR"
@@ -461,9 +465,9 @@ async def understand(question: str, context: dict | None = None, settings=None, 
                            {key: type(content[key]).__name__ for key in
                             ("slots", "tasks", "sub_tasks", "action_fields") if key in content})
             repair = "\n上次输出未通过结构校验，请从原问题重新理解并修正，不改变用户范围。错误位置：" + json.dumps(errors, ensure_ascii=False)
-    # 技术失败不能伪装成用户条件不明确，也不能回退关键词猜测执行工具。
+    # 技术失败不能伪装成用户条件不明确，也不能回退关键词猜测执行工具；保留原异常链供分类器识别断流/超时。
     raise IntentRecognitionError(
-        f"{failure_reason}；本次尚未执行查询，无需补充已有的查询条件。", failure_code)
+        f"{failure_reason}；本次尚未执行查询，无需补充已有的查询条件。", failure_code) from last_exc
 
 
 def issue_ticket(decision: Understanding, user_id: int, question: str, conversation_id: int | None,

@@ -292,6 +292,23 @@ def test_model_failure_does_not_become_business_clarification(monkeypatch):
     assert "无需补充" in str(failure.value) and "尚未执行" in str(failure.value)
 
 
+def test_intent_service_error_preserves_upstream_cause_for_classification(monkeypatch):
+    """understand() 重试耗尽抛出的 INTENT_SERVICE_ERROR 必须保留原始超时/断流因果链。"""
+    import httpx
+    from app.modules.ai_agent.shared_utils.error_policy import ErrorClass, classify
+
+    async def stream_reset(*args, **kwargs):
+        raise httpx.RemoteProtocolError("Server disconnected")
+
+    monkeypatch.setattr(llm, "chat", stream_reset)
+    with pytest.raises(routing.IntentRecognitionError) as failure:
+        _run_immediate(routing.understand("查乙醇库存"))
+
+    assert failure.value.code == "INTENT_SERVICE_ERROR"
+    assert isinstance(failure.value.__cause__, httpx.RemoteProtocolError)
+    assert classify(failure.value.code, failure.value)[0] == ErrorClass.AMBIGUOUS_TIMEOUT
+
+
 def test_provider_rejection_is_reported_as_technical_failure(monkeypatch):
     async def rejected(*args, **kwargs):
         raise BusinessValidationError("AI 服务拒绝了请求（HTTP 400），请检查模型接口、请求参数和结构化输出配置")
