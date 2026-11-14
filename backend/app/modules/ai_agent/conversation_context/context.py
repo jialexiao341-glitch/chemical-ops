@@ -30,7 +30,25 @@ from app.modules.purchase_requests.model import Unit
 from app.modules.quality_acceptances import service as quality_acceptance_service
 from app.modules.rfq_quotes import service as rfq_service
 from app.modules.rfq_quotes.model import RFQ
+from app.modules.system_management import crud as system_crud
 from app.modules.system_management.crud import get_user_permission_codes, get_user_role_codes
+
+_DEFAULT_GET_USER_PERMISSION_CODES = get_user_permission_codes
+_DEFAULT_GET_USER_ROLE_CODES = get_user_role_codes
+
+
+def _user_permission_codes(db: Session, user_id: int) -> list[str]:
+    """读取用户有效权限编码，同时兼容模块级与 system_crud 级测试替身。"""
+    if get_user_permission_codes is not _DEFAULT_GET_USER_PERMISSION_CODES:
+        return get_user_permission_codes(db, user_id)
+    return system_crud.get_user_permission_codes(db, user_id)
+
+
+def _user_role_codes(db: Session, user_id: int) -> list[str]:
+    """读取用户有效角色编码，同时兼容模块级与 system_crud 级测试替身。"""
+    if get_user_role_codes is not _DEFAULT_GET_USER_ROLE_CODES:
+        return get_user_role_codes(db, user_id)
+    return system_crud.get_user_role_codes(db, user_id)
 from app.modules.system_management.model import User
 from app.modules.suppliers_master import service as supplier_service
 from app.modules.suppliers_master.model import Supplier
@@ -120,8 +138,8 @@ def _purchase_order_snapshot(db: Session, user: User, object_id: int) -> tuple[A
 
 def _purchase_request_trace(db: Session, user: User, request: object) -> tuple[list[dict], list[dict]]:
     """追踪申请关联的询价与订单；每个模块均先校验权限和数据范围。"""
-    permissions = set(get_user_permission_codes(db, user.id))
-    roles = set(get_user_role_codes(db, user.id))
+    permissions = set(_user_permission_codes(db, user.id))
+    roles = set(_user_role_codes(db, user.id))
     from app.modules.rfq_quotes.scope import rfq_read_condition
     stages: list[dict] = []
     sources: list[dict] = []
@@ -295,8 +313,8 @@ def _purchase_request_answer(question: str, purchase_request: object, full_answe
 
 def _delivery_context(db: Session, user: User, object_id: int) -> tuple[AIContextSnapshot, dict]:
     """读取当前用户可见的到货单，并返回确定性收货摘要及来源。"""
-    roles = set(get_user_role_codes(db, user.id))
-    permissions = set(get_user_permission_codes(db, user.id))
+    roles = set(_user_role_codes(db, user.id))
+    permissions = set(_user_permission_codes(db, user.id))
     if "SYS_ADMIN" not in roles and "warehouse.deliveries.read" not in permissions:
         raise AuthorizationError("当前账号没有到货单读取权限")
 
@@ -372,8 +390,8 @@ def _delivery_answer(delivery: object, order: object) -> str:
 
 def _inventory_balance_context(db: Session, user: User, object_id: int) -> tuple[AIContextSnapshot, dict]:
     """读取有仓库范围权限的库存余额及其产品、批次等权威信息。"""
-    roles = set(get_user_role_codes(db, user.id))
-    permissions = set(get_user_permission_codes(db, user.id))
+    roles = set(_user_role_codes(db, user.id))
+    permissions = set(_user_permission_codes(db, user.id))
     if "SYS_ADMIN" not in roles and "warehouse.inventory.read" not in permissions:
         raise AuthorizationError("当前账号没有库存读取权限")
 
@@ -427,8 +445,8 @@ def _inventory_balance_answer(trace: dict) -> str:
 
 def _quality_acceptance_context(db: Session, user: User, object_id: int) -> tuple[AIContextSnapshot, dict]:
     """读取当前用户可见的质量验收记录、关联到货及已保存的检测结果。"""
-    roles = set(get_user_role_codes(db, user.id))
-    permissions = set(get_user_permission_codes(db, user.id))
+    roles = set(_user_role_codes(db, user.id))
+    permissions = set(_user_permission_codes(db, user.id))
     if "SYS_ADMIN" not in roles and "quality.acceptances.read" not in permissions:
         raise AuthorizationError("当前账号没有质量验收读取权限")
 
@@ -558,8 +576,8 @@ def _finance_reconciliation_context(db: Session, user: User, object_id: int) -> 
 
 def _supplier_context(db: Session, user: User, object_id: int) -> tuple[AIContextSnapshot, dict]:
     """读取有供应商主数据权限的合作信息。"""
-    roles = set(get_user_role_codes(db, user.id))
-    permissions = set(get_user_permission_codes(db, user.id))
+    roles = set(_user_role_codes(db, user.id))
+    permissions = set(_user_permission_codes(db, user.id))
     if "SYS_ADMIN" not in roles and "master.suppliers.read" not in permissions:
         raise AuthorizationError("当前账号没有供应商读取权限")
 
@@ -651,7 +669,7 @@ def check_page_context_permission(db: Session, user: User, object_type: str) -> 
     permission = PAGE_CONTEXT_PERMISSIONS.get(object_type)
     if permission is None:
         raise BusinessValidationError("不支持的页面上下文对象类型")
-    if "SYS_ADMIN" not in set(get_user_role_codes(db, user.id)) and permission not in set(get_user_permission_codes(db, user.id)):
+    if "SYS_ADMIN" not in set(_user_role_codes(db, user.id)) and permission not in set(_user_permission_codes(db, user.id)):
         raise AuthorizationError("当前账号没有该业务对象的读取权限")
 
 
@@ -787,8 +805,8 @@ def ask_order_list(db: Session, user: User, request):
     """按当前用户权限和列表筛选条件重新查询，返回有限且可核验的订单事实。"""
     from datetime import date
     from app.modules.purchase_orders import service as order_service
-    roles = set(get_user_role_codes(db, user.id))
-    permissions = set(get_user_permission_codes(db, user.id))
+    roles = set(_user_role_codes(db, user.id))
+    permissions = set(_user_permission_codes(db, user.id))
     if 'SYS_ADMIN' not in roles and 'procurement.orders.read' not in permissions:
         raise AuthorizationError('没有采购订单读取权限')
     filters = request.filters

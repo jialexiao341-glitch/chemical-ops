@@ -377,6 +377,17 @@ def test_ai_chat_persists_attachment_parse_citation(client: TestClient, db_sessi
         assert any("乙醇" in item for item in context)
         return AIChatResponse(message=AIChatMessage(role="assistant", content="已读取附件。"), conversation_id=0, model="deepseek-flash", provider="openai_compatible")
 
+    from app.modules.ai_agent.agent_execution import routing
+
+    async def fake_understand(*_args: object, **_kwargs: object):
+        return routing.Understanding(
+            purpose="query",
+            execution_mode="document",
+            tasks=["document"],
+            sub_tasks=[routing.SubTask(id="t1", kind="document", question="分析附件")],
+        )
+
+    monkeypatch.setattr(routing, "understand", fake_understand)
     monkeypatch.setattr(service.file_service, "get_file", lambda *_args: uploaded_file)
     monkeypatch.setattr(service.file_service, "read_file", lambda *_args: (uploaded_file, "物料,数量\n乙醇,12".encode()))
     monkeypatch.setattr(service, "chat", fake_chat)
@@ -390,15 +401,32 @@ def test_ai_chat_persists_attachment_parse_citation(client: TestClient, db_sessi
     assert uploaded_file.parse_status == "SUCCEEDED"
 
 
+def _make_scanned_pdf() -> bytes:
+    """构造仅含整页图片的扫描型 PDF，用于验证 PDF 内容路由会转交 MinerU。"""
+
+    from io import BytesIO
+    import pymupdf
+    from PIL import Image
+
+    image = BytesIO()
+    Image.new("RGB", (200, 200), "gray").save(image, format="PNG")
+    document = pymupdf.open()
+    page = document.new_page(width=300, height=300)
+    page.insert_image(pymupdf.Rect(30, 45, 270, 285), stream=image.getvalue())
+    raw = document.tobytes()
+    document.close()
+    return raw
+
+
 def test_ai_chat_uses_mineru_for_enabled_office_attachment(client: TestClient, db_session, demo_password: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """启用 MinerU 时，AI 附件链路使用远程解析结果并保存解析器引用。"""
+    """启用 MinerU 时，AI 附件链路对扫描型 PDF 使用远程解析结果并保存解析器引用。"""
 
     from types import SimpleNamespace
 
     from app.core.config import Settings
-    from app.modules.ai_agent.model_access import llm
     from app.modules.ai_agent import service
     from app.modules.ai_agent.schema import AIChatMessage, AIChatResponse
+    from app.modules.files_storage import mineru as mineru_storage
     from app.modules.files_storage.parser import ParsedFile
     from app.modules.system_management.crud import get_user_by_username
 
@@ -406,6 +434,7 @@ def test_ai_chat_uses_mineru_for_enabled_office_attachment(client: TestClient, d
     assert user is not None
     uploaded_file = SimpleNamespace(id=78, uploader_id=user.id, file_name="到货计划.pdf", mime_type="application/pdf")
     calls: list[tuple[str, Settings]] = []
+    scanned_pdf = _make_scanned_pdf()
 
     def fake_mineru(file_name: str, _content: bytes, settings: Settings) -> ParsedFile:
         calls.append((file_name, settings))
@@ -422,8 +451,19 @@ def test_ai_chat_uses_mineru_for_enabled_office_attachment(client: TestClient, d
         return AIChatResponse(message=AIChatMessage(role="assistant", content="已读取 MinerU 解析结果。"), conversation_id=0, model="deepseek-flash", provider="openai_compatible")
 
     monkeypatch.setattr(service.file_service, "get_file", lambda *_args: uploaded_file)
-    monkeypatch.setattr(service.file_service, "read_file", lambda *_args: (uploaded_file, b"%PDF-test"))
-    monkeypatch.setattr(service.mineru, "parse_bytes", fake_mineru)
+    monkeypatch.setattr(service.file_service, "read_file", lambda *_args: (uploaded_file, scanned_pdf))
+    from app.modules.ai_agent.agent_execution import routing
+
+    async def fake_understand(*_args: object, **_kwargs: object):
+        return routing.Understanding(
+            purpose="query",
+            execution_mode="document",
+            tasks=["document"],
+            sub_tasks=[routing.SubTask(id="t1", kind="document", question="分析附件")],
+        )
+
+    monkeypatch.setattr(routing, "understand", fake_understand)
+    monkeypatch.setattr(mineru_storage, "parse_bytes", fake_mineru)
     monkeypatch.setattr(service, "get_settings", lambda: Settings(openai_api_key="test-key", mineru_enabled=True))
     monkeypatch.setattr(service, "chat", fake_chat)
 

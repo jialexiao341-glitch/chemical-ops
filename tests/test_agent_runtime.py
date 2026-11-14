@@ -35,7 +35,11 @@ def task_db(tool_db, monkeypatch):
     monkeypatch.setattr("app.modules.system_management.data_scope.department_scope_snapshot", lambda *_: None)
     monkeypatch.setattr("app.modules.system_management.data_scope.warehouse_scope_snapshot", lambda *_: None)
     AIAgentTask.__table__.create(tool_db.bind)
-    monkeypatch.setattr(runtime, "get_settings", lambda: Settings(_env_file=None, agent_execution_mode="in_process", openai_api_key="test-key"))
+    monkeypatch.setattr(
+        runtime,
+        "get_settings",
+        lambda: Settings(_env_file=None, agent_execution_mode="in_process", openai_api_key="test-key", openai_base_url="https://api.deepseek.com"),
+    )
     return tool_db
 
 
