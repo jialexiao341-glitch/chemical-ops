@@ -542,6 +542,7 @@ defineExpose({ open, openList, openGeneral, close: () => drawerApi.close() });
     :footer="false"
     :modal="false"
     :close-on-click-modal="false"
+    :z-index="2050"
     :title="'化工助手'"
     class="page-copilot-panel"
   >
@@ -567,7 +568,7 @@ defineExpose({ open, openList, openGeneral, close: () => drawerApi.close() });
         <div class="assistant-heading">
           <h2>化工助手</h2>
         </div>
-        <Dropdown :menu="{ items: menuItems, selectedKeys: [selectedScope] }" :trigger="['click']" placement="bottomRight" :disabled="loading" @menu-click="({ key }) => switchMode(String(key))">
+        <Dropdown :menu="{ items: menuItems, selectedKeys: [selectedScope] }" :styles="{ root: { zIndex: 2150 } }" :trigger="['click']" placement="bottomRight" :disabled="loading" @menu-click="({ key }) => switchMode(String(key))">
           <Button type="primary" size="small" class="assistant-function" :disabled="loading" aria-label="选择助手功能">
             <span>{{ scopeTitle }}</span><IconifyIcon icon="lucide:chevron-down" class="assistant-function-icon" aria-hidden="true" />
           </Button>
@@ -661,7 +662,7 @@ defineExpose({ open, openList, openGeneral, close: () => drawerApi.close() });
       </form>
     </section>
   </Drawer>
-  <Modal v-model:open="proposalModalOpen" title="动作提案详情与确认" :footer="null" width="760px" :closable="!proposalBusy" :mask-closable="!proposalBusy" :keyboard="!proposalBusy">
+  <Modal v-model:open="proposalModalOpen" :z-index="2150" title="动作提案详情与确认" :footer="null" width="760px" :closable="!proposalBusy" :mask-closable="!proposalBusy" :keyboard="!proposalBusy">
     <ActionProposalDetail
       v-if="selectedProposal"
       :proposal="selectedProposal"
