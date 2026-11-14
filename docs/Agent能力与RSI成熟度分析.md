@@ -130,15 +130,15 @@
 
 | 环节 | 状态 | 说明 |
 | --- | --- | --- |
-| 候选来源 | 部分 | 差评与失败任务可生成候选，但仍由人触发批量提交；默认排除基础设施失败，可显式包含审计 |
-| 候选批量 | 有（含批量脱敏） | 评测失败用例可 `--failed-only` 批量转用例；差评/失败候选一次确认批量入库，服务端逐条再脱敏，重复项复用或跳过 |
-| 对照实验 | 有（人工发起） | `scripts/prompt_experiment.py` 做配对列联表与 McNemar 精确检验，只读基线、不写基线 |
+| 候选来源 | 已有自动采集 | `scripts/run_scheduler.py` 轮询调用 `rsi_cycle.sync_candidate_drafts`、`scripts/run_rsi_cycle.py` 支持定时/手工巡检；从差评与非基础设施失败任务确定性脱敏后幂等入库为 `DRAFT`，绝不自动批准或写基线 |
+| 候选批量 | 有（含批量脱敏） | 评测失败用例可 `--failed-only` 批量转用例；差评/失败候选支持自动入草稿及一次确认批量入库，服务端逐条再脱敏 |
+| 改进提案 | 有（只读聚类） | `rsi_cycle.build_improvement_proposals` 按真实 `failure_stage` 与 `reason_code` 聚集至 `ROUTING_PROMPT` / `AGENT_TOOL_CONTRACTS` / `PLANNER_PROMPT`，附脱敏纠正摘录与核验命令，`auto_applied=False` |
+| 对照实验 | 有（可自动发起） | `scripts/run_rsi_cycle.py --run-experiment` 可编排 `eval_harness` 采样、配对 `prompt_experiment`（McNemar 精确检验）与 `eval_prompt_gate`（envelope 裁决）并输出统一报告，只读不写基线 |
 | 统计显著性 | 有 | 逐用例配对检验给 p 值与改善/退化清单；轮次不足时只给 INCONCLUSIVE |
-| 采纳闸门 | 有人工 | `--promote-baseline` 需人工确认 |
+| 采纳闸门 | 有人工 | `review_cases_batch` 与 `--promote-baseline` 均强制人工确认 |
 | 自动改提示词 | 无（红线） | 设计上不开放 |
 
-结论：RSI 到 **M3 中段**——对照实验与统计显著性已具备，候选批量转用例的闭环已补齐，
-仍缺“自动产出候选（无需人工触发）、自动跑实验”两环。
+结论：RSI 已完成 **M3 → T3 机制闭环（受控红线内）**——无需人工触发的 `DRAFT` 候选归集、只读改进提案聚类以及对照实验 + McNemar 报告编排均已落地；仍待补齐的是生产环境积累足够 `APPROVED` 差评样本以解除 `NO_PRODUCTION_SAMPLES`，以及 GitHub Actions 云端实跑验证。
 
 ## 6 最终目标
 
@@ -308,9 +308,11 @@ business 3 条定向补证已落地（未提交）：
 | 专项脚本沉淀（`9d7186c`） | 新增独立脚本 `scripts/evaluate_page_context_routing.py`（支持 `eval`/`compare`，不改 34 条基线题集）与单测 `tests/test_eval_page_context_routing.py` | 路由与专项评测单测 118 项通过，`--help` 退出码 0 |
 | Harness 分片并行与 CI DAG（`3ebe8be`） | `evaluate_agent_business.py` 新增步长均衡分片（`--shard-index`/`--shard-count`）；`eval_harness.py` 支持本地并行分片（`--business-shards`）、跨套件并行（`--parallel-suites`）、单轮及 envelope 合并（`--merge-shards`）；`.github/workflows/agent-eval.yml` 拆分为 `preflight → fast-suites + 3×business-shard → gate` 矩阵并行 | `eval_harness` / `run_eval_suite` / 门禁相关 `pytest` 207 项通过；`--shard-index 1 --shard-count 3 --validate` 验证 40 条隔离样本构建；CI 工作流 YAML 解析通过；本机实测四套件 × 3 轮（`--business-shards 3 --workers 2 --parallel-suites`）总耗时约 29 分钟 56 秒（≤40 分钟 DoD 达标；GitHub Actions 云端实跑仍待首轮触发取证） |
 | 路由 Prompt 受控升级与基线切换（`42ae7db`） | `ROUTING_PROMPT` 增加 `purchase_update.action_fields` 允许字段说明与 `budget_amount` 边界示例，明确 `context.page_context` 指代绑定与 `valid_write_purposes` 能力/状态拦截规则；更新 `tests/fixtures/prompt_hashes.json` 并通过 `eval_prompt_gate.py --promote-baseline` 登记新基线 `routing@1-752b1384__planner@1-2911a494` | 9 场景 × 3 轮页面上下文专项实测升至 **`27/27`**（`PC03`、`GD02`、`GD04` 均 3/3）；四套件 × 3 轮（`deepseek-v4.1-flash`）全过：`routing 34/34`、`tasks 16/16`、`business 120/120`、`prod 5/5`（`175/175 STABLE_PASS`、0 失败、0 基础设施错误）；`prompt_experiment.py` 对旧基线 `routing@1-5531c235` 四套件均为 `0` 退化；`eval_prompt_gate.py --mode envelope --fail-on-regression` 判定 `PASS`；`record_eval_run.py` 入库后 `eval_trend.py` 显示 2026-11 累计 8 次运行 `345/350` 稳定通过（`98.6%`）；提示词/路由/门禁相关 `pytest` 209 项通过 |
+| 助手面板叠放层级修复（`85bc9c6`） | `page-copilot-drawer.vue` 设置抽屉 `:z-index="2050"`（高于业务详情抽屉 `1000`，低于浮动入口 `2100`），并为作用域下拉 `<Dropdown>` 与提案确认 `<Modal>` 统一设置 `:z-index="2150"` / `root: { zIndex: 2150 }` | `vue-tsc --noEmit` 退出码 0，`vitest` `floating-panel-state.test.ts` 4/4 通过；浏览器实测因 Vite 开发编译耗时被中断，详情抽屉叠放与多详情页动作流待复验 |
+| M3 → T3 自动归集与实验闭环（`7cbd0b9`） | 新增 `rsi_cycle.py` 与 `scripts/run_rsi_cycle.py`，并在 `run_scheduler.py` `run_once()` 挂载异常隔离的自动候选归集：管理员权限校验 + 确定性脱敏后幂等生成 `DRAFT` 回归用例；按 `error_policy.failure_stage` 与 `AIFeedback.reason_code` 聚合至 `ROUTING_PROMPT` / `AGENT_TOOL_CONTRACTS` / `PLANNER_PROMPT` 只读改进提案（`auto_applied=False`）；支持编排 `eval_harness` + `prompt_experiment` + `eval_prompt_gate` 出统一 JSON/Markdown 报告且禁止 `--promote-baseline` | 离线 `pytest` 相关套件 `183 passed`（含 `tests/test_rsi_cycle.py`）；本地库 `run_rsi_cycle.py --dry-run --days 30` 联合 `routing@1-752b1384__planner@1-2911a494` 自比验证通过（`DRY_RUN`、`INCONCLUSIVE`、`PASS`）；当前库 30 天内反馈 `0` 条，`NO_PRODUCTION_SAMPLES` 待真实反馈积累 |
 
 后续任务顺序：
 
-1. **完成 GitHub Actions 首轮实跑取证**：触发 `.github/workflows/agent-eval.yml`（需远端同步并具备仓库 Secret），验证云端 `fast-suites` + 3 路 `business-shard` 并行耗时与模型限流表现。
-2. **补齐其余已注册详情场景真机验证**：在浏览器抽测草稿采购订单提交、已审批采购申请创建询价草稿等其余写操作路径，并顺手优化详情抽屉与助手面板叠放层级体验。
-3. **推进 M3 → T3 RSI 自改进闭环**：基于真实差评/失败任务审核与批量批准解除 `NO_PRODUCTION_SAMPLES` 阻塞、实测回归转化时长（目标 ≤1 天），并补齐从差评/失败轨迹自动产出候选与自动发起只读对照实验呈报的能力（保持禁止自动修改基线红线）。
+1. **恢复浏览器实机验收（叠放层级 + 多详情页写操作提案）**：在预热后的 `http://localhost:3000` 验证详情抽屉与 `page-copilot-drawer` / `<Modal>` 叠放层级，并抽测草稿采购订单提交、已审批采购申请生成询价草稿等动作提案闭环。
+2. **完成 GitHub Actions 首轮实跑取证**：推送远端并触发 `.github/workflows/agent-eval.yml`，验证云端 `fast-suites` + 3 路 `business-shard` 并行耗时与模型限流表现。
+3. **补充生产反馈审核样本**：基于真实业务使用中的差评与有效失败任务，经后台审阅批准入 `prod-regression/cases.json`，以实测回归转化时长（目标 ≤1 天，解除 `NO_PRODUCTION_SAMPLES`）。
