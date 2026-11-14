@@ -115,6 +115,35 @@ def _index_exists(connection, table_name: str, index_name: str) -> bool:
     return any(index["name"] == index_name for index in inspect(connection).get_indexes(table_name))
 
 
+def _column_map(connection, table_name: str) -> dict[str, dict]:
+    """按列名返回表字段元信息，用于空库基线与增量迁移幂等校验。"""
+
+    return {column["name"]: column for column in inspect(connection).get_columns(table_name)}
+
+
+def _check_constraint_clause(connection, table_name: str, constraint_name: str) -> str | None:
+    """查询指定 CHECK 约束表达式，不存在时返回 None。"""
+
+    return connection.execute(
+        text(
+            "SELECT cc.CHECK_CLAUSE FROM information_schema.TABLE_CONSTRAINTS tc "
+            "JOIN information_schema.CHECK_CONSTRAINTS cc "
+            "ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME "
+            "WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = :table_name "
+            "AND tc.CONSTRAINT_NAME = :constraint_name"
+        ),
+        {"table_name": table_name, "constraint_name": constraint_name},
+    ).scalar()
+
+
+def _assert_freight_constraint_matches(clause: str) -> None:
+    """确认既有的运费检查约束与 056/057 业务规则一致。"""
+
+    normalized = " ".join(str(clause).lower().replace("`", "").split())
+    if not all(token in normalized for token in ("freight_amount", ">= 0", "freight_tax_rate", "between 0 and 100")):
+        raise RuntimeError("chk_quote_item_freight 已存在但定义不匹配；停止迁移以保留现有约束")
+
+
 def _require_core_schema(connection) -> None:
     existing = set(inspect(connection).get_table_names())
     missing = sorted(CORE_TABLES - existing)
@@ -309,8 +338,14 @@ def _apply_migration(connection, migration: Migration) -> None:
             connection.commit()
     elif migration.version == "034":
         _apply_return_reconciliation_items(connection, migration)
+    elif migration.version == "051":
+        _apply_ai_purchase_draft_confirmations(connection, migration)
     elif migration.version == "053":
         _apply_purchase_order_source_guard(connection, migration)
+    elif migration.version == "055":
+        _apply_rfq_quote_comparability(connection, migration)
+    elif migration.version == "056":
+        _apply_rfq_total_cost_analysis(connection, migration)
     elif migration.version == "057":
         _apply_rfq_total_cost_repair(connection)
     elif migration.version == "066":
@@ -321,6 +356,89 @@ def _apply_migration(connection, migration: Migration) -> None:
         connection.commit()
     else:
         _execute_sql_file(connection, migration)
+
+
+def _apply_ai_purchase_draft_confirmations(connection, migration: Migration) -> None:
+    """兼容空库 schema.sql 已建好 051 表与旧库增量建表两种路径。"""
+
+    table = "ai_purchase_draft_confirmations"
+    if not _table_exists(connection, table):
+        _execute_sql_file(connection, migration)
+        return
+    required = {
+        "id", "confirmation_id", "user_id", "preview_version", "request_hash",
+        "draft_payload", "object_versions", "evidence", "status", "expires_at",
+        "purchase_request_id", "result", "created_at", "executed_at",
+    }
+    missing = sorted(required - set(_column_map(connection, table)))
+    if missing:
+        raise RuntimeError(f"Schema conflict: {table} 已存在但缺少列：" + ", ".join(missing))
+
+
+def _apply_rfq_quote_comparability(connection, migration: Migration) -> None:
+    """兼容 schema.sql 已含报价口径字段与旧库增量补充/回填路径。"""
+
+    statements = [part.strip() for part in migration.path.read_text(encoding="utf-8").split(";") if part.strip()]
+    comparison_cols = (
+        "currency_code", "unit_id", "tax_rate",
+        "tax_included", "comparison_status", "comparison_reasons",
+    )
+    for sql in statements:
+        normalized = " ".join(sql.upper().split())
+        if normalized.startswith("ALTER TABLE SUPPLIER_QUOTE_ITEMS"):
+            if _column_exists(connection, "supplier_quote_items", "tax_included"):
+                continue
+        elif normalized.startswith("ALTER TABLE QUOTE_COMPARISON_ITEMS"):
+            columns = _column_map(connection, "quote_comparison_items")
+            present = [col for col in comparison_cols if col in columns]
+            if len(present) == len(comparison_cols):
+                quoted_col = columns.get("quoted_unit_price")
+                if quoted_col is None or not quoted_col["nullable"]:
+                    raise RuntimeError("Schema conflict: quote_comparison_items.quoted_unit_price 应允许为空")
+                continue
+            if present:
+                raise RuntimeError(
+                    "Schema conflict: quote_comparison_items 存在部分 055 比较口径列："
+                    + ", ".join(present)
+                )
+        connection.exec_driver_sql(sql)
+        connection.commit()
+
+
+def _apply_rfq_total_cost_analysis(connection, migration: Migration) -> None:
+    """兼容 schema.sql 已含运费及总成本快照列与旧库 056 升级路径。"""
+
+    statements = [part.strip() for part in migration.path.read_text(encoding="utf-8").split(";") if part.strip()]
+    quote_cols = ("freight_amount", "freight_tax_rate", "freight_tax_included")
+    cmp_cols = ("freight_amount", "freight_tax_rate", "freight_tax_included", "analysis_json")
+    for sql in statements:
+        normalized = " ".join(sql.upper().split())
+        if normalized.startswith("ALTER TABLE SUPPLIER_QUOTE_ITEMS"):
+            existing_quote = set(_column_map(connection, "supplier_quote_items"))
+            present_quote = [col for col in quote_cols if col in existing_quote]
+            constraint = _check_constraint_clause(connection, "supplier_quote_items", "chk_quote_item_freight")
+            if len(present_quote) == len(quote_cols) and constraint is not None:
+                _assert_freight_constraint_matches(constraint)
+                continue
+            if len(present_quote) == len(quote_cols) and constraint is None:
+                connection.exec_driver_sql(
+                    "ALTER TABLE supplier_quote_items ADD CONSTRAINT chk_quote_item_freight CHECK ("
+                    "(freight_amount IS NULL OR freight_amount >= 0) AND "
+                    "(freight_tax_rate IS NULL OR freight_tax_rate BETWEEN 0 AND 100))"
+                )
+                connection.commit()
+                continue
+            if present_quote or constraint is not None:
+                raise RuntimeError("Schema conflict: supplier_quote_items 存在部分 056 运费结构或约束")
+        elif normalized.startswith("ALTER TABLE QUOTE_COMPARISON_ITEMS"):
+            existing_cmp = set(_column_map(connection, "quote_comparison_items"))
+            present_cmp = [col for col in cmp_cols if col in existing_cmp]
+            if len(present_cmp) == len(cmp_cols):
+                continue
+            if present_cmp:
+                raise RuntimeError("Schema conflict: quote_comparison_items 存在部分 056 快照列：" + ", ".join(present_cmp))
+        connection.exec_driver_sql(sql)
+        connection.commit()
 
 
 def _apply_rfq_total_cost_repair(connection) -> None:
@@ -334,15 +452,7 @@ def _apply_rfq_total_cost_repair(connection) -> None:
         if missing:
             raise RuntimeError(f"迁移 056 的结构未完整应用，{table} 缺少列：" + ", ".join(missing))
 
-    constraint = connection.execute(
-        text(
-            "SELECT cc.CHECK_CLAUSE FROM information_schema.TABLE_CONSTRAINTS tc "
-            "JOIN information_schema.CHECK_CONSTRAINTS cc "
-            "ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME "
-            "WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'supplier_quote_items' "
-            "AND tc.CONSTRAINT_NAME = 'chk_quote_item_freight'"
-        )
-    ).scalar()
+    constraint = _check_constraint_clause(connection, "supplier_quote_items", "chk_quote_item_freight")
     if constraint is None:
         connection.exec_driver_sql(
             "ALTER TABLE supplier_quote_items ADD CONSTRAINT chk_quote_item_freight CHECK ("
@@ -351,9 +461,7 @@ def _apply_rfq_total_cost_repair(connection) -> None:
         )
         connection.commit()
     else:
-        normalized = " ".join(str(constraint).lower().replace("`", "").split())
-        if not all(token in normalized for token in ("freight_amount", ">= 0", "freight_tax_rate", "between 0 and 100")):
-            raise RuntimeError("chk_quote_item_freight 已存在但定义不匹配；停止迁移以保留现有约束")
+        _assert_freight_constraint_matches(constraint)
 
     repair = MIGRATION_CHECKSUM_REPAIRS["056"]
     result = connection.execute(
