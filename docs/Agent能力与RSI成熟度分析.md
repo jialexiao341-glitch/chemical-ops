@@ -1,6 +1,6 @@
 # Agent 能力与 Harness/RSI 成熟度分析
 
-> 依据当前代码核对（代码截至 `7cbd0b9`，基线 `routing@1-752b1384__planner@1-2911a494`），不把“有接口、有测试”等同于“已验收”。量化数据注明来源与口径。
+> 依据当前代码核对（代码截至 `69edf39`，基线 `routing@1-752b1384__planner@1-2911a494`），不把“有接口、有测试”等同于“已验收”。量化数据注明来源与口径。
 
 ## 1 结论摘要
 
@@ -8,11 +8,11 @@
 | --- | --- | --- |
 | Agent 只读能力 | 15 个工具覆盖主数据、库存、报价、申请、订单、到货、质检、对账、供应商与异常 | 可用 |
 | Agent 写入能力 | 11 个动作处理器，全部经提案预览 + 显式确认 | 可用，边界收紧 |
-| 页面上下文 | 服务端按权限重读 8 类注册对象（前端详情已接入 7 类）；工作台与详情浮窗均接入 `/ai/route` 上下文消歧与受控提案弹窗；9 场景 × 3 轮专项实测 27/27（叠放修复后待浏览器复验） | 闭环可用 |
+| 页面上下文 | 服务端按权限重读 8 类注册对象（前端详情已接入 7 类）；工作台与详情浮窗均接入 `/ai/route` 上下文消歧与受控提案弹窗；9 场景 × 3 轮专项实测 27/27；`http://localhost:3000` 已实测详情抽屉/助手面板/弹窗三层叠放与申请改预算、询价开放式追问/提案取消及已下单订单状态拦截（当前库暂无 `DRAFT` 订单，其余 4 类详情页未逐一浏览器实操） | 闭环可用 |
 | 评测工程 | 当前基线 `routing@1-752b1384__planner@1-2911a494` 四套件各 3 轮：175/175 STABLE_PASS（0 退化/0 基础设施失败），分片并行同机全量 ~30 分钟；门禁四态裁决，Actions 工作流已拆矩阵并行（待首轮触发取证） | M2 已判定（耗时达标） |
 | 自改进（RSI） | 已落地后台轮询/`run_rsi_cycle.py` 自动脱敏归集 `DRAFT` 候选、按失败阶段/反馈聚类只读提案，以及一键编排 McNemar 对照实验与门禁报告（严禁自动写基线/改提示词）；待真实反馈样本积累 | M3 → T3 受控闭环（待生产样本） |
 
-一句话：**Agent 已经能干活，评测与受控 RSI 闭环机制已就绪，剩余工作主要为前端叠放与多详情页实机复验、云端 CI 首跑取证与生产反馈样本积累**。
+一句话：**Agent 已经能干活，评测、前端叠放提案与受控 RSI 闭环机制均已打通并经核心链路实机验证；后续聚焦云端 CI 首跑取证、真实反馈样本积累与长尾回归补齐**。
 
 ## 2 Agent 能力地图
 
@@ -308,11 +308,12 @@ business 3 条定向补证已落地（未提交）：
 | 专项脚本沉淀（`9d7186c`） | 新增独立脚本 `scripts/evaluate_page_context_routing.py`（支持 `eval`/`compare`，不改 34 条基线题集）与单测 `tests/test_eval_page_context_routing.py` | 路由与专项评测单测 118 项通过，`--help` 退出码 0 |
 | Harness 分片并行与 CI DAG（`3ebe8be`） | `evaluate_agent_business.py` 新增步长均衡分片（`--shard-index`/`--shard-count`）；`eval_harness.py` 支持本地并行分片（`--business-shards`）、跨套件并行（`--parallel-suites`）、单轮及 envelope 合并（`--merge-shards`）；`.github/workflows/agent-eval.yml` 拆分为 `preflight → fast-suites + 3×business-shard → gate` 矩阵并行 | `eval_harness` / `run_eval_suite` / 门禁相关 `pytest` 207 项通过；`--shard-index 1 --shard-count 3 --validate` 验证 40 条隔离样本构建；CI 工作流 YAML 解析通过；本机实测四套件 × 3 轮（`--business-shards 3 --workers 2 --parallel-suites`）总耗时约 29 分钟 56 秒（≤40 分钟 DoD 达标；GitHub Actions 云端实跑仍待首轮触发取证） |
 | 路由 Prompt 受控升级与基线切换（`42ae7db`） | `ROUTING_PROMPT` 增加 `purchase_update.action_fields` 允许字段说明与 `budget_amount` 边界示例，明确 `context.page_context` 指代绑定与 `valid_write_purposes` 能力/状态拦截规则；更新 `tests/fixtures/prompt_hashes.json` 并通过 `eval_prompt_gate.py --promote-baseline` 登记新基线 `routing@1-752b1384__planner@1-2911a494` | 9 场景 × 3 轮页面上下文专项实测升至 **`27/27`**（`PC03`、`GD02`、`GD04` 均 3/3）；四套件 × 3 轮（`deepseek-v4.1-flash`）全过：`routing 34/34`、`tasks 16/16`、`business 120/120`、`prod 5/5`（`175/175 STABLE_PASS`、0 失败、0 基础设施错误）；`prompt_experiment.py` 对旧基线 `routing@1-5531c235` 四套件均为 `0` 退化；`eval_prompt_gate.py --mode envelope --fail-on-regression` 判定 `PASS`；`record_eval_run.py` 入库后 `eval_trend.py` 显示 2026-11 累计 8 次运行 `345/350` 稳定通过（`98.6%`）；提示词/路由/门禁相关 `pytest` 209 项通过 |
-| 助手面板叠放层级修复（`85bc9c6`） | `page-copilot-drawer.vue` 设置抽屉 `:z-index="2050"`（高于业务详情抽屉 `1000`，低于浮动入口 `2100`），并为作用域下拉 `<Dropdown>` 与提案确认 `<Modal>` 统一设置 `:z-index="2150"` / `root: { zIndex: 2150 }` | `vue-tsc --noEmit` 退出码 0，`vitest` `floating-panel-state.test.ts` 4/4 通过；浏览器实测因 Vite 开发编译耗时被中断，详情抽屉叠放与多详情页动作流待复验 |
+| 助手面板叠放层级修复（`85bc9c6`） | `page-copilot-drawer.vue` 设置抽屉 `:z-index="2050"`（高于业务详情抽屉 `1000`，低于浮动入口 `2100`），并为作用域下拉 `<Dropdown>` 与提案确认 `<Modal>` 统一设置 `:z-index="2150"` / `root: { zIndex: 2150 }` | `vue-tsc --noEmit` 退出码 0，`vitest` `floating-panel-state.test.ts` 4/4 通过；详情抽屉三层叠放与多详情页动作流已在后续 `69edf39` 同次完成 `http://localhost:3000` 浏览器实机复验 |
 | M3 → T3 自动归集与实验闭环（`7cbd0b9`） | 新增 `rsi_cycle.py` 与 `scripts/run_rsi_cycle.py`，并在 `run_scheduler.py` `run_once()` 挂载异常隔离的自动候选归集：管理员权限校验 + 确定性脱敏后幂等生成 `DRAFT` 回归用例；按 `error_policy.failure_stage` 与 `AIFeedback.reason_code` 聚合至 `ROUTING_PROMPT` / `AGENT_TOOL_CONTRACTS` / `PLANNER_PROMPT` 只读改进提案（`auto_applied=False`）；支持编排 `eval_harness` + `prompt_experiment` + `eval_prompt_gate` 出统一 JSON/Markdown 报告且禁止 `--promote-baseline` | 离线 `pytest` 相关套件 `183 passed`（含 `tests/test_rsi_cycle.py`）；本地库 `run_rsi_cycle.py --dry-run --days 30` 联合 `routing@1-752b1384__planner@1-2911a494` 自比验证通过（`DRY_RUN`、`INCONCLUSIVE`、`PASS`）；当前库 30 天内反馈 `0` 条，`NO_PRODUCTION_SAMPLES` 待真实反馈积累 |
+| 开放式澄清契约修复与浏览器三层复验（`69edf39`） | `Understanding.normalize()` 允许 `clarify` 携带 `clarification_slot` 且 `clarification_options=[]` 的开放式追问（仍禁止仅 1 个选项），`service._save_clarification_if_bound` 仅持久化至少 2 个候选项的有限澄清；保持 `routing@1-752b1384` Prompt 不变 | 12 组 AI 相关 `pytest` 套件 `201 passed`（另既有附件用例 `test_ai_service.py::test_ai_chat_uses_mineru_for_enabled_office_attachment` 未在本轮修改范围内、单独运行报 `attachment_context` 断言失败）；`MaxApi / deepseek-v4.1-flash` 实测缺供应商追问与指定 `SUP-26001` 询价均通过；`http://localhost:3000` 浏览器验收 `QA-PO-20261004-03`（`ORDERED`）状态拦截、`PR20261025002124`（`DRAFT`）下拉菜单/`Escape`/预算修改取消（保持 `5,500 CNY`）、`QA-PR-20261004-03`（`APPROVED`）缺供应商开放式追问（HTTP 200）及 `SUP-26001` 询价提案取消与 `详情抽屉 → 化工助手面板 → 确认弹窗` 三层叠放（50 次请求 0 失败、0 未捕获异常；当前库无 `DRAFT` 采购订单，其余 4 类详情页未逐一浏览器实操） |
 
 后续任务顺序：
 
-1. **恢复浏览器实机验收（叠放层级 + 多详情页写操作提案）**：在预热后的 `http://localhost:3000` 验证详情抽屉与 `page-copilot-drawer` / `<Modal>` 叠放层级，并抽测草稿采购订单提交、已审批采购申请生成询价草稿等动作提案闭环。
-2. **完成 GitHub Actions 首轮实跑取证**：推送远端并触发 `.github/workflows/agent-eval.yml`，验证云端 `fast-suites` + 3 路 `business-shard` 并行耗时与模型限流表现。
-3. **补充生产反馈审核样本**：基于真实业务使用中的差评与有效失败任务，经后台审阅批准入 `prod-regression/cases.json`，以实测回归转化时长（目标 ≤1 天，解除 `NO_PRODUCTION_SAMPLES`）。
+1. **完成 GitHub Actions 首轮实跑与限流取证（P0）**：确认仓库 Secret `OPENAI_API_KEY` 就绪后推送并触发 `.github/workflows/agent-eval.yml`，验证云端 `preflight → fast-suites + 3×business-shard → gate` 矩阵并行耗时、`INVALID_RUN` / 限流处置与 30 天 artifact 留档，并在通过后登记跨月评估趋势。
+2. **补充生产反馈审核样本并推进 M3 真实演化（P1）**：收集真实业务使用中的差评与有效失败任务，经调度器 `sync_candidate_drafts` 脱敏归集并人工审阅批准入 `prod-regression/cases.json`，以实测回归转化时长（目标 ≤1 天，解除 `NO_PRODUCTION_SAMPLES`）；后续可依据聚类的路由提案（例如减少 `rfq_draft` 缺供应商时的首轮修补重试）决定是否发起一轮受控 `ROUTING_PROMPT` 对照实验。
+3. **补齐长尾验证与既有回归清理（P2）**：准备 `DRAFT` 采购订单样本完成订单提交提案浏览器验证，并按需抽测剩余 4 类已接入详情页（到货单、库存余额、质量验收核对、财务对账 / 供应商）；同步排查修复既有测试 `tests/test_ai_service.py::test_ai_chat_uses_mineru_for_enabled_office_attachment` 的 PDF 解析 `attachment_context` 失败项。
