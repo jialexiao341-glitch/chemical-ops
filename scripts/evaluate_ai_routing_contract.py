@@ -12,12 +12,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'backend'))
 
 from app.modules.ai_agent.agent_execution import capabilities
 from app.modules.ai_agent.agent_execution import routing
-from app.core.config import get_settings
 from app.modules.ai_agent.schema import Understanding, schema_response_format
+from scripts.eval_runtime_common import activate_eval_profile, exception_run_meta
 
 
 CASES = [
@@ -47,15 +48,16 @@ def synthetic_manifest(profile: str):
 
 
 async def evaluate(output: Path) -> int:
+    settings, profile = activate_eval_profile(min_timeout_seconds=120)
     semaphore = asyncio.Semaphore(2)
-    manifests = {profile: synthetic_manifest(profile) for profile in ('admin', 'inventory')}
+    manifests = {profile_key: synthetic_manifest(profile_key) for profile_key in ('admin', 'inventory')}
 
     async def one(case):
         async with semaphore:
             result = {"id": case['id'], "profile": case['profile'], "question": case['question'],
                       "expected_routes": case['routes']}
             try:
-                decision = await routing.understand(case['question'], case.get('context'), manifest=manifests[case['profile']])
+                decision = await routing.understand(case['question'], case.get('context'), settings, manifest=manifests[case['profile']])
                 passed = decision.route in case['routes']
                 if 'tasks' in case:
                     passed = passed and set(decision.tasks) == set(case['tasks'])
@@ -65,12 +67,18 @@ async def evaluate(output: Path) -> int:
                     passed = passed and len(decision.sub_tasks) == 1
                 result.update(passed=passed, decision=decision.model_dump(mode='json'))
             except Exception as exc:
-                result.update(passed=False, error_type=type(exc).__name__)
+                result.update(
+                    passed=False,
+                    error_type=type(exc).__name__,
+                    evaluation_error_code=getattr(exc, "code", None),
+                    run_meta=exception_run_meta(exc, default_infra_code="INTENT_SERVICE_ERROR"),
+                )
             print(f"{case['id']}={'PASS' if result['passed'] else 'FAIL'}", flush=True)
             return result
 
     results = await asyncio.gather(*(one(case) for case in CASES))
-    payload = {"evaluated_at": datetime.now(timezone.utc).isoformat(), "model": get_settings().llm_model,
+    payload = {"evaluated_at": datetime.now(timezone.utc).isoformat(), "model": profile.model,
+               "model_profile": profile.name,
                "prompt_sha256": hashlib.sha256(routing.ROUTING_PROMPT.encode()).hexdigest(),
                "schema_sha256": hashlib.sha256(json.dumps(schema_response_format(Understanding, 'intent_understanding'), sort_keys=True).encode()).hexdigest(),
                "manifest_digests": {key: value.digest for key, value in manifests.items()},

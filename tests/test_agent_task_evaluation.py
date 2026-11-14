@@ -110,3 +110,17 @@ def test_evaluator_records_rejection_without_calling_model(monkeypatch):
     result = asyncio.run(evaluation.evaluate(next(c for c in evaluation.CASES if c.id == 'T07')))
     assert result['passed'] and result['status'] == 'REJECTED'
     assert result['model_calls'] == []
+
+
+def test_evaluator_infra_timeout_records_run_meta_without_masking_generic_errors(monkeypatch):
+    """评测捕获底层超时或基础设施异常时写入 run_meta，供稳定性与门禁识别为无效轮次。"""
+    import httpx
+
+    async def timed_out(*_args, **_kwargs):
+        raise httpx.ReadTimeout('read timeout')
+
+    monkeypatch.setattr(runtime, 'create_task', timed_out)
+    result = asyncio.run(evaluation.evaluate(evaluation.CASES[0]))
+    assert result['status'] == 'EVALUATOR_ERROR' and not result['passed']
+    assert result['evaluation_error_type'] == 'ReadTimeout'
+    assert result['run_meta']['error']['class'] == 'AMBIGUOUS_TIMEOUT'

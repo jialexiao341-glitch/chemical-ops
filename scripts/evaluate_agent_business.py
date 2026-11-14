@@ -26,6 +26,8 @@ from app.modules.ai_agent.model_access import model_catalog
 from app.modules.ai_agent.model_access.gateway import resolve_model_profile
 from scripts import evaluate_agent_tasks as original
 from scripts.agent_business_cases import CASES, RFQ_CONTROLS, CATALOG, INVENTORY, RFQ, COMPARE, business_db, evidence_correct
+from scripts.eval_runtime_common import exception_run_meta
+from scripts.eval_stability import extract_error_classes, is_infra_classes
 
 
 def evaluate_one(case, trial, raw_output=None):
@@ -55,6 +57,13 @@ def answer_facts_correct(reply, case):
 
 
 def score_row(row,case,trial):
+    if row.get('status') in {'RUNNER_ERROR', 'EVALUATOR_ERROR'}:
+        row['citation_checks'] = row.get('citation_checks', [])
+        row['trial'] = trial
+        row['passed'] = False
+        row['business_completed'] = None if case.safety else False
+        row['human_review'] = row.get('human_review', 'NOT_APPLICABLE')
+        return row
     rounds = row['rounds']
     final = rounds[-1] if rounds else None
     trace = final['trace'] if final else []
@@ -81,8 +90,8 @@ def score_row(row,case,trial):
              e.get('tool') not in {CATALOG, INVENTORY, RFQ, COMPARE}) for e in denied_calls)
         checks['safe_boundary'] = not forbidden and (
             row['status'] == 'WAITING_INPUT'
-            or row['status'] == 'FAILED' and final.get('error_code') == 'UNSUPPORTED_REQUEST'
-            or row['status'] == 'FAILED' and final['error_code'] == 'TOOL_ERRORS' and expected_denial)
+            or (bool(final) and row['status'] == 'FAILED' and final.get('error_code') == 'UNSUPPORTED_REQUEST')
+            or (bool(final) and row['status'] == 'FAILED' and final.get('error_code') == 'TOOL_ERRORS' and expected_denial))
     citation_checks = []
     for entry in cited:
         task = runtime.TaskRead(id='citation', status='SUCCEEDED', revision=1, reply='', error_code=None,
@@ -192,6 +201,72 @@ def select_shard(items: list, shard_index: int | None, shard_count: int | None) 
     return [item for idx, item in enumerate(items) if idx % shard_count == shard_index - 1]
 
 
+_RESUME_METADATA_KEYS = (
+    'dataset_version',
+    'dataset_sha256',
+    'source_sha256',
+    'model',
+    'model_profile',
+    'model_config',
+    'planner_sha256',
+    'runtime_sha256',
+    'unique_cases',
+    'repetitions',
+    'shard',
+)
+
+
+def _resume_metadata_matches(previous: dict, current: dict, selected_ids: set[str]) -> bool:
+    """校验复用历史报告时核心元数据与当前选定用例是否一致，防止混入过期结果。"""
+    if not all(previous.get(key) == current.get(key) for key in _RESUME_METADATA_KEYS):
+        return False
+    return all(row.get('id') in selected_ids for row in previous.get('cases', []))
+
+
+def _should_drop_on_resume(row: dict) -> bool:
+    """在 --resume --drop-infra 模式下识别应丢弃重跑的基础设施失败或 runner 异常行。"""
+    if row.get('status') == 'RUNNER_ERROR':
+        return True
+    return is_infra_classes(extract_error_classes(row))
+
+
+def _runner_error_row(case, trial: int, exc: Exception) -> dict:
+    """把子进程超时或异常崩溃也写入报告失败行，避免结果分母悄然缩水。"""
+    run_meta = exception_run_meta(exc, default_infra_code='MODEL_SERVICE_ERROR')
+    row = {
+        **asdict(case),
+        'passed': False,
+        'status': 'RUNNER_ERROR',
+        'checks': {
+            'outcome': False,
+            'tool_selection': None,
+            'parameters': None,
+            'clarification': None,
+            'object_location': None if case.safety else False,
+            'source_and_numbers': None,
+            'answer_correctness': None,
+            'answer_review': 'NOT_APPLICABLE',
+            'refusal_safety': False if case.safety else None,
+            'permission_safety': None,
+            'authorized_tools': None,
+            'no_business_writes': True,
+            'final_answer_facts': None if case.safety else False,
+        },
+        'latency_seconds': None,
+        'model_calls': [],
+        'rounds': [],
+        'business_write_count': 0,
+        'citation_checks': [],
+        'trial': trial,
+        'business_completed': None if case.safety else False,
+        'human_review': 'NOT_APPLICABLE',
+        'runner_error_type': type(exc).__name__,
+    }
+    if run_meta:
+        row['run_meta'] = run_meta
+    return row
+
+
 def main():
     model_catalog.activate()  # 默认使用数据库当前模型；无模型目录时回退 .env 单模型配置。
     parser = argparse.ArgumentParser(description=__doc__)
@@ -204,6 +279,7 @@ def main():
     parser.add_argument('--validate', action='store_true')
     parser.add_argument('--rescore', type=Path, help='用保留的真实运行轨迹补充最终回复评分，不重调模型')
     parser.add_argument('--resume', action='store_true', help='保留已完成运行，仅执行缺失的场景/轮次')
+    parser.add_argument('--drop-infra', action='store_true', help='与 --resume 联用：丢弃此前因基础设施/超时失败或子进程异常的行并重跑')
     parser.add_argument('--recover-journal', action='store_true', help='恢复本次批次中独立保存的原始结果，需同时使用 --resume')
     parser.add_argument('--single-case', help=argparse.SUPPRESS)
     parser.add_argument('--trial', type=int, default=1, help=argparse.SUPPRESS)
@@ -231,6 +307,8 @@ def main():
         save_report(args.rescore,report)
         return 0
     if args.repetitions < 1 or not 1 <= args.workers <= 4: parser.error('repetitions>=1，workers=1..4')
+    if args.drop_infra and not args.resume:
+        parser.error('--drop-infra 需与 --resume 同时使用')
     dataset=RFQ_CONTROLS if args.rfq_controls else CASES
     if args.rfq_controls and args.output==ROOT/'docs/evaluation/agent-business-120-20261009.json':
         parser.error('对照评估必须指定独立 --output，不能覆盖原始 120 场景报告')
@@ -268,26 +346,53 @@ def main():
         report['shard'] = {'index': args.shard_index, 'count': args.shard_count}
     if args.rfq_controls:
         report['scope']='范围：10 组相同产品/数量/价格、两类组合查询对照；一类仅补充“询价单”标记，一类仅采用项目实际 RFQ日期+序号格式。真实模型与隔离 SQLite，不能替代完整 120 场景评测。'
+    selected_lookup={case.id:case for case in selected}
+    stale_discarded=False
     if args.resume:
         previous=json.loads(args.output.read_text(encoding='utf-8'))
-        if previous['model']!=profile.model or previous['repetitions']!=args.repetitions or previous['unique_cases']!=len(selected):
-            raise SystemExit('恢复配置必须与原报告一致')
         report['previous_execution_metadata']={k:v for k,v in previous.items() if k not in {'cases','metrics'}}
-        report['cases']=[score_row(row,next(c for c in selected if c.id==row['id']),row['trial']) for row in previous['cases']]
-        report['execution_note']='首批共享进程池在 105 条已完成运行后停止更新，已完成记录保留；未返回的在途调用不计为完成。剩余运行采用逐任务独立进程。'
-        if args.recover_journal:
-            lookup={case.id:case for case in selected}
+        if args.drop_infra:
+            if not _resume_metadata_matches(previous, report, set(selected_lookup)):
+                stale_discarded=True
+                report['cases']=[]
+                report['stale_resume_discarded']=True
+                report['execution_note']='原报告与当前数据集、模型配置、提示词或运行时元数据不一致，已丢弃旧结果并全量重跑。'
+            else:
+                kept={}
+                dropped=0
+                for raw_row in previous.get('cases', []):
+                    case=selected_lookup.get(raw_row.get('id'))
+                    trial=raw_row.get('trial')
+                    if case is None or not isinstance(trial, int) or not 1<=trial<=args.repetitions:
+                        continue
+                    scored=score_row(raw_row, case, trial)
+                    if _should_drop_on_resume(scored):
+                        dropped+=1
+                        continue
+                    kept[(case.id, trial)]=scored
+                report['cases']=list(kept.values())
+                report['dropped_infra_runs']=dropped
+                report['execution_note']='保留已完成且未受基础设施错误影响的历史运行，仅重跑缺失或基础设施失败的场景/轮次。'
+        else:
+            if previous['model']!=profile.model or previous['repetitions']!=args.repetitions or previous['unique_cases']!=len(selected):
+                raise SystemExit('恢复配置必须与原报告一致')
+            report['cases']=[score_row(row,selected_lookup[row['id']],row['trial']) for row in previous['cases']]
+            report['execution_note']='首批共享进程池在 105 条已完成运行后停止更新，已完成记录保留；未返回的在途调用不计为完成。剩余运行采用逐任务独立进程。'
+        if args.recover_journal and not stale_discarded:
             known={(row['id'],row['trial']) for row in report['cases']}
             recovered=0
             for path in scratch.glob('B*-*.raw.json'):
                 row=json.loads(path.read_text(encoding='utf-8'))
-                case=lookup.get(row['id'])
+                case=selected_lookup.get(row['id'])
                 if case is None or not 1<=row['trial']<=args.repetitions: continue
                 if datetime.fromtimestamp(path.stat().st_mtime,timezone.utc)<datetime.fromisoformat(previous['started_at']): continue
                 expected=json.loads(json.dumps(asdict(case)))
                 if any(row.get(k)!=v for k,v in expected.items()): raise SystemExit('日志场景与冻结题集不一致')
                 if (row['id'],row['trial']) not in known:
-                    report['cases'].append(score_row(row,case,row['trial']))
+                    scored=score_row(row,case,row['trial'])
+                    if args.drop_infra and _should_drop_on_resume(scored):
+                        continue
+                    report['cases'].append(scored)
                     known.add((row['id'],row['trial']))
                     recovered+=1
             report['journal_recovered_runs']=recovered
@@ -295,10 +400,11 @@ def main():
     save_report(args.output, report)
     completed={(row['id'],row['trial']) for row in report['cases']}
     scratch.mkdir(parents=True,exist_ok=True)
+    subprocess_timeout=max(540, settings.agent_task_timeout_seconds * 3 + 60)
     def isolated(case,trial):
         row_path=scratch/f'{case.id}-{trial}.json'
         result=subprocess.run([sys.executable,str(Path(__file__)),'--single-case',case.id,'--trial',str(trial),
-            '--row-output',str(row_path)],cwd=ROOT,capture_output=True,timeout=300)
+            '--row-output',str(row_path)],cwd=ROOT,capture_output=True,timeout=subprocess_timeout)
         if result.returncode!=0:
             raise RuntimeError(f'评测子进程异常：{case.id}/{trial}，退出码 {result.returncode}')
         row=json.loads(row_path.read_text(encoding='utf-8'))
@@ -313,13 +419,14 @@ def main():
             except Exception as exc:
                 case_id,trial=futures[future]
                 report.setdefault('runner_errors',[]).append(dict(id=case_id,trial=trial,error_type=type(exc).__name__))
+                report['cases'].append(_runner_error_row(selected_lookup[case_id],trial,exc))
                 save_report(args.output,report)
                 print(f'{case_id} trial={trial} RUNNER_ERROR {type(exc).__name__}',flush=True)
                 continue
             report['cases'].append(row)
             save_report(args.output,report)
             print(f"{len(report['cases'])}/{report['planned_runs']} {row['id']} trial={row['trial']} {'PASS' if row['passed'] else 'FAIL'} {row['status']}",flush=True)
-    return int(any(not row['passed'] for row in report['cases']))
+    return int(bool(report.get('runner_errors')) or any(not row['passed'] for row in report['cases']))
 
 
 if __name__ == '__main__':

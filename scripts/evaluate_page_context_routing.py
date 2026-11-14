@@ -20,7 +20,7 @@ from app.modules.ai_agent.agent_execution import routing  # noqa: E402
 from app.modules.ai_agent.agent_execution.routing import ROUTING_PROMPT, understand  # noqa: E402
 from app.modules.ai_agent.model_access import model_catalog  # noqa: E402
 from app.modules.ai_agent.model_access.gateway import resolve_model_profile  # noqa: E402
-from app.modules.ai_agent.shared_utils.error_policy import classify  # noqa: E402
+from scripts.eval_runtime_common import eval_llm_settings, exception_run_meta  # noqa: E402
 from scripts.evaluation_manifest import build_manifest  # noqa: E402
 
 
@@ -253,6 +253,7 @@ async def _run_case(
                 "seconds": round(perf_counter() - t0, 2),
             }
         except Exception as exc:
+            run_meta = exception_run_meta(exc, default_infra_code="INTENT_SERVICE_ERROR")
             return {
                 "id": case["id"],
                 "group": case["group"],
@@ -261,7 +262,9 @@ async def _run_case(
                 "round": round_idx,
                 "passed": False,
                 "error": f"{type(exc).__name__}: {exc}",
-                "error_class": classify(exc),
+                "evaluation_error_code": getattr(exc, "code", None),
+                "error_class": (run_meta.get("error") or {}).get("class") or "UNKNOWN",
+                "run_meta": run_meta,
                 "seconds": round(perf_counter() - t0, 2),
             }
         finally:
@@ -272,7 +275,7 @@ async def _run_case(
 async def evaluate(*, repeats: int = 3, mode: str = "eval", workers: int = 3) -> dict:
     """运行页面上下文与能力兜底专项评测，支持纯回归（eval）和前后对照（compare）。"""
     model_catalog.activate()
-    settings = get_settings().model_copy(update={"llm_max_retries": 0, "llm_timeout_seconds": 45})
+    settings = eval_llm_settings(get_settings(), min_timeout_seconds=120)
     profile = resolve_model_profile(settings)
     full_manifest = build_manifest("page-context-routing-eval").model_dump(mode="json")
     cases = build_cases(full_manifest)

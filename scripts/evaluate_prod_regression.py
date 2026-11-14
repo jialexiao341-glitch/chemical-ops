@@ -18,6 +18,7 @@ from app.modules.ai_agent.model_access import model_catalog
 from app.modules.ai_agent.agent_execution import routing  # noqa: E402
 from app.modules.ai_agent.model_access.gateway import resolve_model_profile  # noqa: E402
 from app.modules.ai_agent.model_access.prompt_registry import prompt_version  # noqa: E402
+from scripts.eval_runtime_common import eval_llm_settings, exception_run_meta  # noqa: E402
 from scripts.evaluation_manifest import build_manifest  # noqa: E402
 
 
@@ -39,16 +40,19 @@ def check_decision(decision, case: dict) -> dict:
 
 async def evaluate(cases: list[dict]) -> dict:
     manifest = build_manifest("prod-regression-eval")
+    model_settings = eval_llm_settings(get_settings(), min_timeout_seconds=120)
     results = []
     for case in cases:
         try:
-            decision = await routing.understand(case["question"], {}, manifest=manifest)
+            decision = await routing.understand(case["question"], {}, model_settings, manifest=manifest)
         except Exception as exc:
             results.append({
                 "id": case["id"], "question": case["question"], "passed": False,
                 "checks": {"execution_mode": False, "expected_tasks": False,
                            "forbidden_tasks": False, "passed": False},
                 "error_type": type(exc).__name__,
+                "evaluation_error_code": getattr(exc, "code", None),
+                "run_meta": exception_run_meta(exc, default_infra_code="INTENT_SERVICE_ERROR"),
             })
             continue
         checks = check_decision(decision, case)
@@ -57,7 +61,6 @@ async def evaluate(cases: list[dict]) -> dict:
             "checks": checks, "actual_mode": checks["actual_mode"],
             "actual_tasks": checks["actual_tasks"],
         })
-    model_settings = get_settings()
     model_profile = resolve_model_profile(model_settings)
     return {
         "dataset_version": "prod-regression-v1",

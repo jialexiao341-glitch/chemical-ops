@@ -26,6 +26,7 @@ from app.modules.ai_agent.agent_execution import agent_tools as tools
 from app.modules.ai_agent.model_access import model_catalog
 from app.modules.ai_agent.model_access.gateway import resolve_model_profile
 from scripts.agent_evaluation_data import evaluation_db, isolated_cache_namespace
+from scripts.eval_runtime_common import exception_run_meta
 
 
 @dataclass(frozen=True)
@@ -285,7 +286,9 @@ async def evaluate(case: Case, *, db_factory=evaluation_db, evidence_checker=che
                 'no_business_writes': all('ai_agent_tasks' in statement.lower() for statement in writes)},
             'latency_seconds': round(perf_counter()-began, 3), 'model_calls': calls, 'rounds': rounds,
             'business_write_count': sum('ai_agent_tasks' not in s.lower() for s in writes),
-            'evaluation_error_type': type(exc).__name__}
+            'evaluation_error_type': type(exc).__name__,
+            'evaluation_error_code': getattr(exc, 'code', None),
+            'run_meta': exception_run_meta(exc, default_infra_code='MODEL_SERVICE_ERROR')}
     finally:
         runtime.llm.chat = original_chat
 

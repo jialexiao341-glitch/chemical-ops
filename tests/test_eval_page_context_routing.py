@@ -76,3 +76,34 @@ def test_evaluate_compare_mode_reports_before_and_after_totals(monkeypatch):
     assert report["total"] == 9
     assert report["before_total_passed"] == 0
     assert report["passed"] >= 2
+
+
+def test_page_context_routing_records_infra_run_meta_and_preserves_timeout(monkeypatch):
+    """异常时必须安全写入 run_meta（不因错误调用 classify 崩溃），并保持 >=120s 超时与配置重试。"""
+    import httpx
+    from app.modules.ai_agent.agent_execution.routing import IntentRecognitionError
+
+    seen_settings = []
+    monkeypatch.setattr(eval_pc.model_catalog, "activate", lambda: None)
+    monkeypatch.setattr(
+        eval_pc,
+        "resolve_model_profile",
+        lambda _settings: SimpleNamespace(name="MaxApi", model="deepseek-v4.1-flash"),
+    )
+
+    async def timed_out_understand(question, context, settings, manifest=None):
+        seen_settings.append((settings.llm_timeout_seconds, settings.llm_max_retries))
+        cause = httpx.ReadTimeout("upstream timeout")
+        raise IntentRecognitionError("service timeout", "INTENT_SERVICE_ERROR") from cause
+
+    monkeypatch.setattr(eval_pc, "understand", timed_out_understand)
+
+    report = asyncio.run(eval_pc.evaluate(repeats=1, mode="after", workers=1))
+    assert seen_settings and seen_settings[0][0] >= 120
+    assert seen_settings[0][1] == eval_pc.get_settings().llm_max_retries
+    assert report["cases"][0]["error_class"] == "AMBIGUOUS_TIMEOUT"
+    assert report["cases"][0]["evaluation_error_code"] == "INTENT_SERVICE_ERROR"
+    assert report["cases"][0]["run_meta"]["error"] == {
+        "class": "AMBIGUOUS_TIMEOUT",
+        "code": "INTENT_SERVICE_ERROR",
+    }

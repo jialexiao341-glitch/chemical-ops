@@ -16,12 +16,18 @@ from types import SimpleNamespace as NS
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT/'backend'))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0,str(ROOT))
+if str(ROOT/'backend') not in sys.path:
+    sys.path.insert(0,str(ROOT/'backend'))
 from app.core.config import get_settings
 from app.core.errors import BusinessValidationError
+from app.modules.ai_agent.model_access import model_catalog
+from app.modules.ai_agent.model_access.gateway import resolve_model_profile
 from app.modules.files_storage.parser import ParsedFile, parse_file_content
 from app.modules.rfq_quotes import quote_extraction
 from app.modules.system_management import crud as system_crud
+from scripts.eval_runtime_common import eval_llm_settings, exception_run_meta
 
 HEADER_LINES=['Supplier: Demo A','Currency: CNY','Quote date: 2026-10-20','Valid until: 2026-11-20']
 ITEM_LINE='Ethanol | Model E99 | Quantity 10 L | Unit price 12.50 CNY/L | Tax 13% excluded | MOQ 20 L | Lead 7 days | Payment net 30 days'
@@ -164,12 +170,23 @@ def _record(case_id, case, content, candidate, error, model_calls, uploaded, res
 
 
 def run_case(case_id, case, *, live_model=False, live_ocr=False):
+    """运行单条报价抽取评测用例；真实模型模式下沿用激活的模型目录与至少 120s 超时。"""
     extension='pdf' if case['kind']=='scan' else case['kind']
     content=case.get('bytes') or (case['text'].encode() if case.get('text') else sample_bytes(case['kind']))
-    settings=get_settings().model_copy(update={'mineru_enabled':live_ocr or bool(case.get('stub_ocr')),
-        'llm_max_retries':0,'llm_timeout_seconds':40,'llm_max_tokens':3072,'llm_temperature':0,
-        'mineru_timeout_seconds':90,'mineru_max_retries':0,
-        'llm_model_profiles_json':'','llm_default_profile':''})
+    base_settings=get_settings()
+    if live_model:
+        settings=eval_llm_settings(
+            base_settings,
+            min_timeout_seconds=120,
+            updates={'mineru_enabled':live_ocr or bool(case.get('stub_ocr')),
+                'llm_max_tokens':3072,'llm_temperature':0,
+                'mineru_timeout_seconds':90,'mineru_max_retries':0},
+        )
+    else:
+        settings=base_settings.model_copy(update={'mineru_enabled':live_ocr or bool(case.get('stub_ocr')),
+            'llm_max_retries':0,'llm_timeout_seconds':40,'llm_max_tokens':3072,'llm_temperature':0,
+            'mineru_timeout_seconds':90,'mineru_max_retries':0,
+            'llm_model_profiles_json':'','llm_default_profile':''})
     rfq=NS(id=14,status='RESPONDING',items=[NS(id=31,requested_name='Ethanol',specification='E99',quantity=10),
         NS(id=32,requested_name='Methanol',specification='M99',quantity=20)])
     calls=[]; uploads=[]; responses=[]; ocr_responses=[]; parsed_files=[]; model_outputs=[]
@@ -199,7 +216,7 @@ def run_case(case_id, case, *, live_model=False, live_ocr=False):
         result=real_parse(*args,**kwargs)
         parsed_files.append(result)
         return result
-    candidate=None; error=None
+    candidate=None; error=None; error_code=None; run_meta={}
     with patch.object(quote_extraction,'get_settings',return_value=settings),\
          patch.object(quote_extraction.rfq_service,'get_rfq',return_value=rfq),\
          patch.object(system_crud,'get_user_role_codes',return_value=['BUYER']),\
@@ -220,21 +237,34 @@ def run_case(case_id, case, *, live_model=False, live_ocr=False):
                             candidate=_immediate(invoke()).model_dump(mode='json')
                     else: candidate=_immediate(invoke()).model_dump(mode='json')
             else: candidate=asyncio.run(invoke()).model_dump(mode='json')
-        except BusinessValidationError: error='BusinessValidationError'
-        except Exception as exc: error=type(exc).__name__
+        except BusinessValidationError as exc:
+            error='BusinessValidationError'
+            error_code=getattr(exc,'code',None)
+            run_meta=exception_run_meta(exc,default_infra_code='MODEL_SERVICE_ERROR')
+        except Exception as exc:
+            error=type(exc).__name__
+            error_code=getattr(exc,'code',None)
+            run_meta=exception_run_meta(exc,default_infra_code='MODEL_SERVICE_ERROR')
     row=_record(case_id,case,content,candidate,error,len(calls),len(uploads),len(responses),len(ocr_responses),parsed_files)
+    if error_code:
+        row['error_code']=error_code
+    if run_meta:
+        row['run_meta']=run_meta
     if live_model:
         row['synthetic_model_outputs']=model_outputs
     return row
 
 
 def report(rows, *, real_model=False, real_ocr=False):
+    model_name='stubbed adversarial model outputs'
+    if real_model:
+        model_name=resolve_model_profile(get_settings()).model
     return {'suite':'quote-extraction-synthetic-v1','created_at':datetime.now(timezone.utc).isoformat(),
         'real_model_requested':real_model,'real_ocr_requested':real_ocr,
         'real_model_evaluated':real_model and any(row['model_responses'] for row in rows),
         'real_ocr_evaluated':real_ocr and any(row['ocr_responses'] for row in rows),'business_writes':False,
         'scope':'合成文档的解析与候选字段契约；上传、业务权限和业务库隔离；不代表真实供应商文件准确率或业务收益',
-        'model':get_settings().llm_model if real_model else 'stubbed adversarial model outputs',
+        'model':model_name,
         'summary':{'total':len(rows),'passed':sum(r['passed'] for r in rows),'failed':sum(not r['passed'] for r in rows)},'cases':rows}
 
 
@@ -261,6 +291,7 @@ def main():
             content=case.get('bytes') or (case['text'].encode() if case.get('text') else sample_bytes(case['kind']))
             (args.samples_dir/(name+'.'+extension)).write_bytes(content)
     if args.live_model:
+        model_catalog.activate()  # 真实模型模式同步激活数据库模型目录。
         selected={key:cases()[key] for key in ('csv','pdf','xlsx') if args.case in (None,key)}
         if args.live_ocr and args.case in (None,'scan'): selected['scan']={'kind':'scan','prediction':base_prediction(),'expected':base_expected()}
         result=report([run_case(k,v,live_model=True,live_ocr=args.live_ocr) for k,v in selected.items()],

@@ -200,3 +200,24 @@ def test_unrecognized_report_returns_error_code(tmp_path):
     broken = _write(tmp_path, "broken.json", {"note": "no cases and no totals"})
 
     assert compare.main(["--baseline", str(broken), "--candidate", str(BASELINE)]) == 1
+
+
+def test_ambiguous_timeout_is_treated_as_infra_not_regression():
+    """AMBIGUOUS_TIMEOUT 在门禁对比中与 TRANSIENT_INFRA 同等按基础设施失真处理。"""
+    baseline = _report([
+        {"id": "B01", "trial": 1, "safety": False, "passed": True, "checks": {"outcome": True}},
+        {"id": "S01", "trial": 1, "safety": True, "passed": True, "checks": {"safe_boundary": True}},
+    ])
+    candidate = _report([
+        {"id": "B01", "trial": 1, "safety": False, "passed": False, "checks": {"outcome": False},
+         "rounds": [{"run_meta": {"error": {"class": "AMBIGUOUS_TIMEOUT", "code": "TASK_TIMEOUT"}}}]},
+        {"id": "S01", "trial": 1, "safety": True, "passed": False, "checks": {"safe_boundary": False},
+         "run_meta": {"error": {"class": "AMBIGUOUS_TIMEOUT", "code": "MODEL_SERVICE_ERROR"}}},
+    ])
+
+    result = compare.compare(baseline, candidate)
+
+    assert result["regressions"] == []
+    assert result["safety_failures"] == []
+    assert [row["key"] for row in result["infra_failures"]] == ["B01", "S01"]
+    assert result["verdict"] == "INVALID_RUN"

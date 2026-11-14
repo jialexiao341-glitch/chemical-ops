@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "docs/evaluation/offline-guards-v2-manifest.json"
 # 题集更新必须同时审阅 manifest 与此锚点，不能只改清单绕过文件校验。
-MANIFEST_SHA256 = "0b293551a518780c031fdb1d42420e074dc397dc1b6dcc0468e811e6d6664150"
+MANIFEST_SHA256 = "38095528b99e4e807838ccffa60348eb1f260bd9571e9c85c78f6b746112b4ae"
 
 
 def text_digest(raw: bytes) -> str:

@@ -328,3 +328,59 @@ def test_agent_eval_workflow_captures_merge_exit_and_aligns_timeouts() -> None:
     assert re.search(r"business-shard:\s+(?:#.*\n\s+)*needs:\s*fast-suites", workflow) is not None
     assert re.search(r'--merge-shards[^\n]*\n[^\n]*--out[^\n]*\|\|\s*code=\$\?', workflow) is not None
     assert "eval_prompt_gate.py" in workflow
+
+
+def test_ambiguous_timeout_and_runner_errors_trigger_contaminated_rerun_and_merge_failure(tmp_path) -> None:
+    """AMBIGUOUS_TIMEOUT 与 runner_errors 都必须触发污染重跑；未重试成功时不得合并成 PASS。"""
+    assert stability.is_infra_classes({"AMBIGUOUS_TIMEOUT"})
+    timeout_report = _report([
+        {"id": "B001", "passed": False, "run_meta": {"error": {"class": "AMBIGUOUS_TIMEOUT", "code": "TASK_TIMEOUT"}}},
+    ])
+    envelope = harness.merge_trials("business", [timeout_report], 1)
+    assert envelope["summary"]["verdict"] == "INVALID_RUN"
+    assert envelope["summary"]["infra_failed"] == 1
+
+    runner_err_report = {
+        "model": "deepseek-v4.1-flash",
+        "code_revision": "rev-1",
+        "cases": [{"id": "B001", "passed": True}],
+        "runner_errors": [{"id": "B002", "trial": 1, "error_type": "TimeoutExpired"}],
+    }
+    assert harness._contaminated(runner_err_report)
+    merged_err = harness.merge_trials("business", [runner_err_report], 1)
+    by_key = {c["key"]: c for c in merged_err["cases"]}
+    assert by_key["B002"]["trials"][0]["passed"] is False
+    assert "runner_error:TimeoutExpired" in by_key["B002"]["trials"][0]["failed_checks"]
+
+    seen_cmds = []
+
+    def runner(cmd, output_path):
+        seen_cmds.append(cmd)
+        payload = (
+            _report([{"id": "B001", "trial": 1, "passed": True}])
+            if "--resume" in cmd and "--drop-infra" in cmd
+            else timeout_report
+        )
+        output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return payload
+
+    first_envelopes = harness.run_all(
+        tmp_path,
+        suites=("business",),
+        repeat=1,
+        workers=1,
+        runner=runner,
+    )
+    assert first_envelopes["business"]["summary"]["verdict"] == "INVALID_RUN"
+
+    rerun_envelopes = harness.run_all(
+        tmp_path,
+        suites=("business",),
+        repeat=1,
+        workers=1,
+        resume=True,
+        runner=runner,
+    )
+    assert len(seen_cmds) == 2
+    assert "--resume" in seen_cmds[1] and "--drop-infra" in seen_cmds[1]
+    assert rerun_envelopes["business"]["summary"]["verdict"] == "PASS"

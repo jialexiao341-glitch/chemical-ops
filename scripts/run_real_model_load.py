@@ -11,9 +11,14 @@ import subprocess
 import sys
 from time import perf_counter
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+if str(ROOT / "backend") not in sys.path:
+    sys.path.insert(0, str(ROOT / "backend"))
 
 async def run(args):
+    """按显式 token 预算执行小批量 Gateway 并发压测，激活模型目录并使用标准基础设施错误归因。"""
     started_at = datetime.now(timezone.utc).isoformat()
     # 固定短 ASCII 输入，以 UTF-8 字节数保守预留输入 token；禁用重试/fallback。
     system = "Reply with OK only."
@@ -23,19 +28,24 @@ async def run(args):
     if args.requests * reservation > args.token_budget:
         raise SystemExit("Token 预算不足以预留全部请求输入和最大输出，未调用模型")
     from app.core.config import get_settings
+    from app.modules.ai_agent.model_access import model_catalog
     from app.modules.ai_agent.model_access.gateway import resolve_model_profile
     from app.modules.ai_agent.model_access.llm import chat
     from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest
+    from scripts.eval_runtime_common import eval_llm_settings, exception_run_meta
 
-    settings = get_settings()
-    profile = resolve_model_profile(settings)
-    settings = settings.model_copy(update={
-        "llm_model_profiles_json": "", "llm_default_profile": "",
-        "llm_provider": profile.provider, "llm_model": profile.model,
-        "openai_base_url": profile.base_url, "openai_api_key": profile.api_key,
-        "llm_max_tokens": args.max_output_tokens, "llm_max_retries": 0,
-        "llm_timeout_seconds": 60, "llm_max_concurrency": args.concurrency,
-    })
+    model_catalog.activate()
+    base_settings = get_settings()
+    profile = resolve_model_profile(base_settings)
+    settings = eval_llm_settings(
+        base_settings,
+        min_timeout_seconds=120,
+        updates={
+            "llm_max_tokens": args.max_output_tokens,
+            "llm_max_retries": 0,
+            "llm_max_concurrency": args.concurrency,
+        },
+    )
     results = []
     semaphore = asyncio.Semaphore(args.concurrency)
     started = perf_counter()
@@ -53,7 +63,13 @@ async def run(args):
                            nonempty_response=bool(response.message.content.strip()))
             except Exception as exc:
                 # 不输出上游异常正文，避免 URL 或凭据进入报告。
+                error_code = getattr(exc, "code", None)
+                run_meta = exception_run_meta(exc, default_infra_code="MODEL_SERVICE_ERROR")
                 row.update(status="error", error_type=type(exc).__name__)
+                if error_code:
+                    row["error_code"] = error_code
+                if run_meta:
+                    row["run_meta"] = run_meta
             row["duration_ms"] = round((perf_counter() - call_started) * 1000, 2)
             results.append(row)
 

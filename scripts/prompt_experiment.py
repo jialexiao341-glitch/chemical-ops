@@ -185,7 +185,7 @@ def render_text(result: dict) -> str:
             lines.append(f"{row['suite']} 退化：" + "、".join(item["key"] for item in row["degraded"]))
         if row["excluded"]:
             lines.append(f"{row['suite']} 无有效轮次：" + "、".join(item["key"] for item in row["excluded"]))
-    lines += ["", "口径：每条用例取有效轮次（排除 TRANSIENT_INFRA）的多数结果作为配对二值，"
+    lines += ["", "口径：每条用例取有效轮次（排除 TRANSIENT_INFRA / AMBIGUOUS_TIMEOUT）的多数结果作为配对二值，"
                   "McNemar 精确检验按不一致对做双侧二项检验；`p<0.05` 才判改善或退化。",
               "本脚本只读 envelope，不写基线；基线变更仍走人工 `eval_prompt_gate.py --promote-baseline`。"]
     return "\n".join(lines)

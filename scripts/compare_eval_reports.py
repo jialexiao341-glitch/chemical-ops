@@ -14,6 +14,12 @@ import json
 from pathlib import Path
 import sys
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.eval_stability import INFRA_ERROR_CLASSES, extract_error_classes, is_infra_classes  # noqa: E402
+
 KIND_NAMES = {
     "intent_routing": "路由评测",
     "agent_tasks": "Agent 任务评测",
@@ -23,29 +29,15 @@ KIND_NAMES = {
 
 META_KEYS = ("dataset_version", "dataset_sha256", "model", "code_revision")
 
-# 模型服务限流、连接中断等基础设施失败不代表实现退化；单列后由门禁判 INVALID_RUN。
-INFRA_ERROR_CLASSES = {"TRANSIENT_INFRA"}
 
-
-def _error_classes(row: dict) -> set[str]:
-    """收集用例行及其各轮的 error.class，用于区分实现回归与基础设施故障。"""
-    classes: set[str] = set()
-    sources = [row.get("run_meta") or {}]
-    sources += [(round_data.get("run_meta") or {}) for round_data in (row.get("rounds") or [])
-                if isinstance(round_data, dict)]
-    for meta in sources:
-        error = meta.get("error")
-        if isinstance(error, dict) and error.get("class"):
-            classes.add(str(error["class"]))
-    return classes
+_error_classes = extract_error_classes
 
 
 def _infra_failed(row: dict) -> bool:
     """失败但错误类别全部属于基础设施时，不参与回归与安全失败判定。"""
     if row.get("passed"):
         return False
-    classes = _error_classes(row)
-    return bool(classes) and classes <= INFRA_ERROR_CLASSES
+    return is_infra_classes(_error_classes(row))
 
 
 def load_report(path: Path) -> dict:

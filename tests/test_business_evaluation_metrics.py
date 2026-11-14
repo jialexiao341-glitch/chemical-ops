@@ -134,3 +134,122 @@ def test_evaluator_exception_is_retained_as_failure():
     assert row['status']=='EVALUATOR_ERROR' and not row['passed']
     assert row['evaluation_error_type']=='RuntimeError'
     assert row['model_calls']==[]
+
+
+def test_runner_error_appended_to_cases_and_resume_drop_infra_behavior(tmp_path, monkeypatch):
+    """子进程超时/崩溃必须计入 cases 失败分母并非零退出；--resume --drop-infra 仅在元数据一致时复用非基础设施行。"""
+    import hashlib
+    import json
+    import subprocess
+    import sys
+    from scripts import evaluate_agent_business as biz
+
+    case_ok = CASES[0]
+    case_infra = CASES[1]
+    case_fail = CASES[2]
+    err_row = biz._runner_error_row(case_infra, 1, subprocess.TimeoutExpired(cmd='x', timeout=540))
+    assert err_row['status'] == 'RUNNER_ERROR' and not err_row['passed']
+    assert err_row['business_completed'] is False
+    assert err_row['run_meta']['error']['class'] == 'AMBIGUOUS_TIMEOUT'
+    scored_err = score_row(err_row, case_infra, 1)
+    assert scored_err['status'] == 'RUNNER_ERROR' and not scored_err['passed']
+    assert summarize([scored_err])['business_completion'] == {'passed': 0, 'evaluated': 1, 'rate': 0.0}
+
+    settings = biz.get_settings().model_copy(update={'app_env': 'development', 'openai_api_key': 'k', 'agent_enabled': True})
+    monkeypatch.setattr(biz, 'get_settings', lambda: settings)
+    monkeypatch.setattr(biz.model_catalog, 'activate', lambda: None)
+    monkeypatch.setattr(biz, 'resolve_model_profile', lambda _s: SimpleNamespace(name='MaxApi', model='deepseek-v4.1-flash'))
+    monkeypatch.setattr(biz, 'CASES', (case_ok, case_infra, case_fail))
+
+    source_paths = [biz.Path(biz.__file__), biz.ROOT/'scripts/agent_business_cases.py',
+                    biz.ROOT/'scripts/agent_evaluation_data.py', biz.Path(original.__file__)]
+    fingerprint = b''.join(p.read_bytes() for p in source_paths)
+    dataset_sha = hashlib.sha256(json.dumps([biz.asdict(c) for c in (case_ok, case_infra, case_fail)], ensure_ascii=False, sort_keys=True).encode() + fingerprint).hexdigest()
+    base_meta = {
+        'dataset_version': 'agent-business-v1',
+        'dataset_sha256': dataset_sha,
+        'source_sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in source_paths},
+        'model': 'deepseek-v4.1-flash',
+        'model_profile': 'MaxApi',
+        'model_config': {'temperature': settings.llm_temperature, 'max_steps': settings.agent_max_steps,
+                         'timeout_seconds': settings.agent_task_timeout_seconds, 'max_tokens': min(settings.llm_max_tokens, 2048)},
+        'planner_sha256': hashlib.sha256(runtime.PLANNER_PROMPT.encode()).hexdigest(),
+        'runtime_sha256': hashlib.sha256(biz.Path(runtime.__file__).read_bytes()).hexdigest(),
+        'unique_cases': 3,
+        'repetitions': 1,
+    }
+
+    def _row(case, *, passed, status='SUCCEEDED', run_meta=None):
+        checks = {'outcome': passed, 'tool_selection': passed, 'parameters': passed, 'clarification': None,
+                  'object_location': passed, 'source_and_numbers': passed, 'answer_correctness': None,
+                  'answer_review': 'NOT_APPLICABLE', 'refusal_safety': None, 'permission_safety': True,
+                  'authorized_tools': True, 'no_business_writes': True, 'final_answer_facts': passed}
+        row = {**biz.asdict(case), 'trial': 1, 'passed': passed, 'status': status, 'checks': checks,
+               'latency_seconds': 1.0, 'model_calls': [], 'business_write_count': 0, 'citation_checks': [],
+               'business_completed': passed, 'human_review': 'NOT_APPLICABLE', 'rounds': []}
+        if run_meta:
+            row['run_meta'] = run_meta
+        return row
+
+    out = tmp_path / 'biz.json'
+    out.write_text(json.dumps({
+        **base_meta,
+        'started_at': '2026-11-14T00:00:00+08:00',
+        'planned_runs': 3,
+        'cases': [
+            _row(case_ok, passed=True),
+            _row(case_infra, passed=False, status='FAILED', run_meta={'error': {'class': 'AMBIGUOUS_TIMEOUT', 'code': 'TASK_TIMEOUT'}}),
+            _row(case_fail, passed=False, status='FAILED'),
+        ],
+    }, ensure_ascii=False), encoding='utf-8')
+
+    executed = []
+    real_subproc_run = subprocess.run
+
+    def fake_subproc(cmd, **kwargs):
+        if cmd and cmd[0] == 'git':
+            return real_subproc_run(cmd, **kwargs)
+        case_id = cmd[cmd.index('--single-case') + 1]
+        out_path = biz.Path(cmd[cmd.index('--row-output') + 1])
+        executed.append(case_id)
+        if case_id == case_infra.id:
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=540)
+        case_obj = next(c for c in (case_ok, case_infra, case_fail) if c.id == case_id)
+        out_path.write_text(json.dumps(_row(case_obj, passed=True), ensure_ascii=False), encoding='utf-8')
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(biz.subprocess, 'run', fake_subproc)
+    monkeypatch.setattr(sys, 'argv', ['evaluate_agent_business.py', '--output', str(out), '--repetitions', '1',
+                                      '--workers', '1', '--resume', '--drop-infra', '--scratch-dir', str(tmp_path/'scratch')])
+    code = biz.main()
+    assert code == 1
+    assert executed == [case_infra.id]
+    saved = json.loads(out.read_text(encoding='utf-8'))
+    assert len(saved['cases']) == 3
+    by_id = {r['id']: r for r in saved['cases']}
+    assert by_id[case_infra.id]['status'] == 'RUNNER_ERROR'
+    assert by_id[case_infra.id]['run_meta']['error']['class'] == 'AMBIGUOUS_TIMEOUT'
+
+    executed.clear()
+    out.write_text(json.dumps({
+        **base_meta,
+        'planner_sha256': 'stale-prompt-sha',
+        'started_at': '2026-11-14T00:00:00+08:00',
+        'planned_runs': 3,
+        'cases': [_row(case_ok, passed=True)],
+    }, ensure_ascii=False), encoding='utf-8')
+
+    def fake_rerun_all(cmd, **kwargs):
+        if cmd and cmd[0] == 'git':
+            return real_subproc_run(cmd, **kwargs)
+        cid = cmd[cmd.index('--single-case') + 1]
+        executed.append(cid)
+        out_path = biz.Path(cmd[cmd.index('--row-output') + 1])
+        case_obj = next(c for c in (case_ok, case_infra, case_fail) if c.id == cid)
+        out_path.write_text(json.dumps(_row(case_obj, passed=True), ensure_ascii=False), encoding='utf-8')
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(biz.subprocess, 'run', fake_rerun_all)
+    assert biz.main() == 0
+    assert set(executed) == {case_ok.id, case_infra.id, case_fail.id}
+    assert json.loads(out.read_text(encoding='utf-8'))['stale_resume_discarded'] is True

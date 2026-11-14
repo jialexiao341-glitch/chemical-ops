@@ -120,3 +120,37 @@ def test_manual_corrections_reach_quote_and_total_cost_without_being_replaced_by
         moq_quantity=saved.moq_quantity,moq_unit_id=saved.moq_unit_id,freight_amount=saved.freight_amount,
         freight_tax_rate=saved.freight_tax_rate,freight_tax_included=saved.freight_tax_included)
     assert cost.complete and cost.total_cost==Decimal('310.65')
+
+
+def test_live_model_preserves_profile_timeout_retries_and_infra_run_meta(monkeypatch):
+    """真实模型抽查必须使用激活目录的模型名、>=120s 超时且对超时异常写入 AMBIGUOUS_TIMEOUT。"""
+    import httpx
+    from app.core.errors import BusinessValidationError
+
+    seen = []
+    base = evaluation.get_settings().model_copy(
+        update={'llm_timeout_seconds': 60, 'llm_max_retries': 2, 'llm_model': 'deepseek-v4.1-flash'}
+    )
+    monkeypatch.setattr(evaluation, 'get_settings', lambda: base)
+    monkeypatch.setattr(
+        evaluation,
+        'resolve_model_profile',
+        lambda _s: NS(name='MaxApi', model='deepseek-v4.1-flash'),
+    )
+
+    async def fake_chat(_req, settings, **_kw):
+        seen.append((settings.llm_timeout_seconds, settings.llm_max_retries))
+        cause = httpx.ReadTimeout('upstream timeout')
+        err = BusinessValidationError('AI 服务响应超时，请稍后重试')
+        err.__cause__ = cause
+        raise err
+
+    monkeypatch.setattr(evaluation.quote_extraction, 'chat', fake_chat)
+    case = evaluation.cases()['csv']
+    row = evaluation.run_case('csv', case, live_model=True)
+    rep = evaluation.report([row], real_model=True)
+
+    assert seen and seen[0] == (120, 2)
+    assert rep['model'] == 'deepseek-v4.1-flash'
+    assert row['error_type'] == 'BusinessValidationError'
+    assert row['run_meta']['error']['class'] == 'AMBIGUOUS_TIMEOUT'

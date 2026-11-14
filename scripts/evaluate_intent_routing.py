@@ -15,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.core.config import get_settings
 from app.modules.ai_agent.model_access import model_catalog
 from app.modules.ai_agent.agent_execution import routing
-from app.modules.ai_agent.shared_utils.error_policy import classify
 from app.modules.ai_agent.model_access.gateway import resolve_model_profile
 from app.modules.ai_agent.agent_execution.routing import ROUTING_PROMPT, understand
+from scripts.eval_runtime_common import eval_llm_settings, exception_run_meta
 from scripts.evaluation_manifest import build_manifest
 
 
@@ -108,16 +108,8 @@ def check_execution_contract(result, expected_route: str) -> bool:
 
 
 def failure_meta(exc: Exception) -> dict:
-    """把异常码映射为与任务报告一致的 run_meta.error，供 harness 隔离基础设施失败。
-
-    routing 评测行原先只写 evaluation_error_code，eval_harness 读不到错误类别，
-    会把模型服务抖动当成实现失败计入稳定性分母，也无法在 resume 时自动重跑。
-    """
-    code = getattr(exc, "code", None)
-    if not code:
-        return {}
-    category, _, _ = classify(str(code), exc)
-    return {"error": {"class": category.value, "code": str(code)}}
+    """把异常码或底层传输/超时异常映射为与任务报告一致的 run_meta.error，供 harness 隔离基础设施失败。"""
+    return exception_run_meta(exc, default_infra_code="INTENT_SERVICE_ERROR")
 
 
 async def evaluate(output: Path, repeats: int = 1) -> None:
@@ -126,11 +118,7 @@ async def evaluate(output: Path, repeats: int = 1) -> None:
     output 为输出文件路径；并发最多三项，单次超时取配置与 120 秒中的较大值并沿用模型重试配置。
     仅校验路由类别和任务集合，不代表工具成功率、检索质量或生产收益。
     """
-    base_settings = get_settings()
-    settings = base_settings.model_copy(update={
-        "llm_max_retries": base_settings.llm_max_retries,
-        "llm_timeout_seconds": max(base_settings.llm_timeout_seconds, 120),
-    })
+    settings = eval_llm_settings(get_settings(), min_timeout_seconds=120)
     profile = resolve_model_profile(settings)
     manifest = build_manifest("intent-routing-eval")
     semaphore = asyncio.Semaphore(3)

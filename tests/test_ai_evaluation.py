@@ -76,3 +76,77 @@ def test_routing_evaluation_preserves_model_timeout_and_retry_settings(monkeypat
     assert seen_settings
     assert seen_settings[0][0] >= 120
     assert seen_settings[0][1] == eval_routing.get_settings().llm_max_retries
+
+
+def test_eval_runtime_common_distinguishes_4xx_config_from_infra() -> None:
+    """HTTP 400 配置错误不得误记为基础设施失败；上游断流/超时应归入 AMBIGUOUS_TIMEOUT。"""
+    import httpx
+    from app.core.errors import BusinessValidationError
+    from scripts.eval_runtime_common import exception_run_meta
+
+    bad_req = BusinessValidationError("AI 服务拒绝了请求（HTTP 400）")
+    bad_req.__cause__ = httpx.HTTPStatusError(
+        "bad request",
+        request=httpx.Request("POST", "https://example.test"),
+        response=httpx.Response(400),
+    )
+    assert exception_run_meta(bad_req) == {}
+
+    reset = httpx.RemoteProtocolError("Server disconnected")
+    assert exception_run_meta(reset, default_infra_code="INTENT_SERVICE_ERROR") == {
+        "error": {"class": "AMBIGUOUS_TIMEOUT", "code": "INTENT_SERVICE_ERROR"}
+    }
+
+
+def test_prod_regression_and_routing_contract_record_run_meta_and_timeout(monkeypatch, tmp_path) -> None:
+    """prod_regression 与 ai_routing_contract 必须启用 >=120s 超时、解析激活模型并写入 run_meta。"""
+    import asyncio
+    from types import SimpleNamespace
+    import httpx
+    from scripts import evaluate_ai_routing_contract as eval_contract
+    from scripts import evaluate_prod_regression as eval_prod
+
+    seen_prod = []
+
+    async def fake_prod_understand(question, context, settings, *, manifest=None):
+        seen_prod.append((settings.llm_timeout_seconds, settings.llm_max_retries))
+        cause = httpx.ReadTimeout("slow")
+        raise IntentRecognitionError("service timeout", "INTENT_SERVICE_ERROR") from cause
+
+    monkeypatch.setattr(eval_prod.routing, "understand", fake_prod_understand)
+    monkeypatch.setattr(eval_prod, "build_manifest", lambda _name: SimpleNamespace(digest="d"))
+    monkeypatch.setattr(
+        eval_prod,
+        "resolve_model_profile",
+        lambda _s: SimpleNamespace(name="MaxApi", model="deepseek-v4.1-flash"),
+    )
+    prod_report = asyncio.run(eval_prod.evaluate([{"id": "PR01", "question": "查乙醇库存"}]))
+    assert seen_prod[0][0] >= 120
+    assert prod_report["cases"][0]["evaluation_error_code"] == "INTENT_SERVICE_ERROR"
+    assert prod_report["cases"][0]["run_meta"]["error"]["class"] == "AMBIGUOUS_TIMEOUT"
+
+    seen_contract = []
+    base = eval_contract.routing.get_settings()
+
+    async def fake_contract_understand(question, context, settings, *, manifest=None):
+        seen_contract.append(settings.llm_timeout_seconds)
+        raise IntentRecognitionError("down", "INTENT_SERVICE_ERROR")
+
+    monkeypatch.setattr(eval_contract, "CASES", [{"id": "C1", "profile": "admin", "question": "查库存", "routes": ["agent"]}])
+    monkeypatch.setattr(eval_contract, "synthetic_manifest", lambda _p: SimpleNamespace(digest="m"))
+    monkeypatch.setattr(
+        eval_contract,
+        "activate_eval_profile",
+        lambda **kw: (base.model_copy(update={"llm_timeout_seconds": max(base.llm_timeout_seconds, kw.get("min_timeout_seconds", 120))}),
+                      SimpleNamespace(name="MaxApi", model="deepseek-v4.1-flash")),
+    )
+    monkeypatch.setattr(eval_contract.routing, "understand", fake_contract_understand)
+    contract_out = tmp_path / "contract.json"
+    code = asyncio.run(eval_contract.evaluate(contract_out))
+    assert code == 1
+    assert seen_contract[0] >= 120
+    import json
+    saved = json.loads(contract_out.read_text(encoding="utf-8"))
+    assert saved["model"] == "deepseek-v4.1-flash"
+    assert saved["cases"][0]["evaluation_error_code"] == "INTENT_SERVICE_ERROR"
+    assert saved["cases"][0]["run_meta"]["error"]["class"] == "TRANSIENT_INFRA"

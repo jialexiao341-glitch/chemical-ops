@@ -22,9 +22,14 @@ from sqlalchemy.orm import Session
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "backend"))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+if str(ROOT / "backend") not in sys.path:
+    sys.path.insert(0, str(ROOT / "backend"))
 
 from app.core.config import get_settings  # noqa: E402
+from app.modules.ai_agent.model_access import model_catalog  # noqa: E402
+from app.modules.ai_agent.model_access.gateway import resolve_model_profile  # noqa: E402
 from app.modules.ai_agent.schema import Intent# noqa: E402
 from app.modules.ai_agent.schema import AIChatMessage, AIChatRequest  # noqa: E402
 from app.modules.ai_agent.service import _classify_chat_intent, chat  # noqa: E402
@@ -32,6 +37,7 @@ from app.modules.doc_kb import retrieve as retrieve_module  # noqa: E402
 from app.modules.doc_kb.embedding import embed_texts  # noqa: E402
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection  # noqa: E402
 from app.modules.doc_kb.retrieve import no_doc_hits_reply  # noqa: E402
+from scripts.eval_runtime_common import eval_llm_settings, exception_run_meta  # noqa: E402
 
 
 GOLD = ROOT / "docs" / "evaluation" / "rag_golden_mixed200.jsonl"
@@ -131,8 +137,18 @@ def percentile(values: list[float], fraction: float) -> float | None:
     return round(ordered[math.ceil(fraction * len(ordered)) - 1], 3)
 
 
+def _resolve_generation_model(settings) -> str:
+    """读取当前生效的生成模型名称；仅做纯检索且未配置对话凭据时回退默认配置。"""
+    try:
+        return resolve_model_profile(settings).model
+    except Exception:
+        return settings.llm_model
+
+
 async def evaluate(cases: list[dict], *, with_generation: bool, concurrency: int, force: bool) -> list[dict]:
-    settings = get_settings()
+    """执行 RAG 检索与可选生成评测，保留断点并在生成失败时写入基础设施归因与失败分母。"""
+    base_settings = get_settings()
+    settings = eval_llm_settings(base_settings, min_timeout_seconds=120) if with_generation else base_settings
     engine = create_engine(settings.resolved_database_url)
     results = {} if force else {row["id"]: row for row in read_jsonl(RESULTS)}
     vectors: dict[str, list[float]] = {}
@@ -214,6 +230,9 @@ async def evaluate(cases: list[dict], *, with_generation: bool, concurrency: int
                     row["generation_seconds"] = round(perf_counter() - started, 3)
                 except Exception as exc:
                     row["generation_error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
+                    run_meta = exception_run_meta(exc, default_infra_code="MODEL_SERVICE_ERROR")
+                    if run_meta:
+                        row["run_meta"] = run_meta
                 results[case["id"]] = row
                 write_jsonl(RESULTS, [results[c["id"]] for c in cases if c["id"] in results])
 
@@ -221,7 +240,18 @@ async def evaluate(cases: list[dict], *, with_generation: bool, concurrency: int
 
     for case in cases:
         row = results.get(case["id"])
-        if row is None or "answer" not in row:
+        if row is None:
+            continue
+        if "answer" not in row:
+            # 保留未生成的断点以便下次续跑重查，同时计入失败分母而非悄然剔除。
+            if with_generation and "generation_error" in row:
+                if case["kind"] == "answerable":
+                    row["fact_match"] = False
+                    row["text_citation_present"] = False
+                elif case["kind"] == "no_evidence":
+                    row["abstained"] = False
+                else:
+                    row["requested_target"] = False
             continue
         answer = row["answer"]
         if case["kind"] == "answerable":
@@ -243,7 +273,11 @@ def summarize(cases: list[dict], rows: list[dict]) -> dict:
     unclear = [by_id[c["id"]] for c in cases if c["kind"] == "needs_target" and c["id"] in by_id]
 
     def mean(key: str, subset: list[dict]) -> float | None:
-        values = [float(row[key]) for row in subset if row.get(key) is not None]
+        values = [
+            0.0 if row.get(key) is None and "generation_error" in row else float(row[key])
+            for row in subset
+            if row.get(key) is not None or "generation_error" in row
+        ]
         return round(statistics.mean(values), 4) if values else None
 
     report = {
@@ -252,14 +286,14 @@ def summarize(cases: list[dict], rows: list[dict]) -> dict:
         "retriever_sha256": hashlib.sha256(Path(retrieve_module.__file__).read_bytes()).hexdigest(),
         "evaluator_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "embedding_model": get_settings().embedding_model,
-        "generation_model": get_settings().llm_model,
+        "generation_model": _resolve_generation_model(get_settings()),
         "case_count": len(cases), "evaluated_count": len(rows), "answerable_count": len(answerable),
         "no_evidence_count": len(negatives), "needs_target_count": len(unclear),
         "retrieval": {key: mean(key, answerable) for key in ("recall_at_6", "precision_at_6", "rr_at_6", "ndcg_at_6")},
         "answer_fact_accuracy": mean("fact_match", answerable),
         "source_grounded_fact_accuracy": round(
             sum(bool(r.get("fact_match")) and r.get("recall_at_6") == 1 for r in answerable) / len(answerable), 4
-        ) if answerable and all("fact_match" in r for r in answerable) else None,
+        ) if answerable and all("fact_match" in r or "generation_error" in r for r in answerable) else None,
         "answer_text_citation_rate": mean("text_citation_present", answerable),
         "no_evidence_abstention_rate": mean("abstained", negatives),
         "needs_target_clarification_rate": mean("requested_target", unclear),
@@ -348,6 +382,8 @@ def main() -> None:
         write_jsonl(GOLD, cases)
         prefix.with_name(prefix.name + "_evidence_mapping.json").write_text(
             json.dumps({"source_gold_sha256": source_hash, "changes": mapping}, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not args.retrieval_only:
+        model_catalog.activate()
     rows = asyncio.run(evaluate(cases, with_generation=not args.retrieval_only, concurrency=args.concurrency, force=args.force))
     print(json.dumps(summarize(cases, rows), ensure_ascii=False, indent=2))
 

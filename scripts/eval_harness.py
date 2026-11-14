@@ -12,7 +12,8 @@ envelope 结构：
 
 `--suite all` 一次跑完四个套件，写入 `--out-dir/harness-<suite>.json`，供
 `eval_prompt_gate.py --mode envelope` 直接消费；单套件模式可用 `--out` 指定单文件路径。
-`--resume` 复用已完成轮次，但含基础设施失败（TRANSIENT_INFRA）的轮次默认重跑，
+`--resume` 复用已完成轮次，但含基础设施/响应超时失败（TRANSIENT_INFRA / AMBIGUOUS_TIMEOUT）
+或异常中断的轮次默认重跑（business 支持保留已通过用例并仅补跑受污染用例），
 避免把一次模型抖动固化成稳定性结论；确需复用时显式加 `--reuse-infra`。
 
 退出码：0 全部通过；1 存在实现失败；2 仅剩基础设施失败（本轮不可作证据）。
@@ -28,13 +29,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.eval_stability import INFRA_ERROR_CLASSES, extract_error_classes, is_infra_classes  # noqa: E402
+
 PYTHON = sys.executable
 TRIAL_SUFFIX = ".trial-{index}.json"
 
 SUITES = ("routing", "tasks", "business", "prod")
-
-# 与 compare_eval_reports 保持一致：仅该类失败不计实现退化。
-INFRA_ERROR_CLASSES = {"TRANSIENT_INFRA"}
 
 
 def trial_path(out: Path, index: int) -> Path:
@@ -54,6 +57,7 @@ def build_command(
     workers: int,
     shard_index: int | None = None,
     shard_count: int | None = None,
+    resume_trial: bool = False,
 ) -> list[str]:
     """按套件拼评测命令；参数只做最小必要传递，其余沿用脚本默认值。"""
     if shard_index is not None or shard_count is not None:
@@ -74,6 +78,8 @@ def build_command(
                    "--scratch-dir", str(scratch)]
         if shard_count and shard_count > 1:
             command += ["--shard-index", str(shard_index), "--shard-count", str(shard_count)]
+        if resume_trial:
+            command += ["--resume", "--drop-infra"]
         return command
     if suite == "prod":
         return [PYTHON, str(ROOT / "scripts/evaluate_prod_regression.py"),
@@ -90,17 +96,7 @@ def _case_key(row: dict) -> str:
     raise ValueError("用例缺少 id 与 question，无法建立稳定键")
 
 
-def _error_classes(row: dict) -> set[str]:
-    """汇总用例行与各轮 run_meta.error.class。"""
-    classes: set[str] = set()
-    metas = [row.get("run_meta") or {}]
-    metas += [(round_data.get("run_meta") or {}) for round_data in (row.get("rounds") or [])
-              if isinstance(round_data, dict)]
-    for meta in metas:
-        error = meta.get("error")
-        if isinstance(error, dict) and error.get("class"):
-            classes.add(str(error["class"]))
-    return classes
+_error_classes = extract_error_classes
 
 
 def _failed_checks(row: dict) -> list[str]:
@@ -111,12 +107,21 @@ def _failed_checks(row: dict) -> list[str]:
     return sorted(str(name) for name, value in checks.items() if value is False)
 
 
+def _runner_error_classes(err: dict) -> list[str]:
+    """从 runner_errors 兼容条目提取错误分类，确保子进程超时不会静默丢轮次。"""
+    if err.get("error_class"):
+        return [str(err["error_class"])]
+    if err.get("error_type") == "TimeoutExpired":
+        return ["AMBIGUOUS_TIMEOUT"]
+    return []
+
+
 def _summarize_envelope_cases(ordered: list[dict]) -> dict:
     """按全通过、仅基础设施失败与实现失败统计 envelope 汇总结论。"""
     passed = [entry for entry in ordered if all(t["passed"] for t in entry["trials"])]
     failed = [entry for entry in ordered if entry not in passed]
     infra_only = [entry for entry in failed
-                  if all(set(t["error_classes"]) and set(t["error_classes"]) <= INFRA_ERROR_CLASSES
+                  if all(is_infra_classes(t["error_classes"])
                          for t in entry["trials"] if not t["passed"])]
     if not failed:
         verdict = "PASS"
@@ -139,8 +144,10 @@ def merge_trials(suite: str, reports: list[dict], repeat: int) -> dict:
     safety: dict[str, bool] = {}
     for index, report in enumerate(reports, start=1):
         rows = [row for row in (report.get("cases") or []) if isinstance(row, dict)]
+        seen_in_round: set[str] = set()
         for row in rows:
             key = _case_key(row)
+            seen_in_round.add(key)
             safety[key] = safety.get(key, False) or bool(row.get("safety"))
             entry = cases.setdefault(key, {"key": key, "trials": []})
             entry["trials"].append({
@@ -149,6 +156,24 @@ def merge_trials(suite: str, reports: list[dict], repeat: int) -> dict:
                 "status": row.get("status"),
                 "error_classes": sorted(_error_classes(row)),
                 "failed_checks": _failed_checks(row),
+            })
+        # 兼容旧报告或异常中断只写了 runner_errors 而缺席 cases 的情况，绝不允许漏记轮次变成假全过。
+        for err in (report.get("runner_errors") or []):
+            if not isinstance(err, dict) or err.get("id") is None:
+                continue
+            key = str(err["id"])
+            if key in seen_in_round:
+                continue
+            seen_in_round.add(key)
+            safety.setdefault(key, False)
+            entry = cases.setdefault(key, {"key": key, "trials": []})
+            error_type = str(err.get("error_type") or "UNKNOWN")
+            entry["trials"].append({
+                "trial": index,
+                "passed": False,
+                "status": f"RUNNER_ERROR:{error_type}",
+                "error_classes": sorted(_runner_error_classes(err)),
+                "failed_checks": [f"runner_error:{error_type}"],
             })
     ordered = list(cases.values())
     for entry in ordered:
@@ -240,15 +265,16 @@ def merge_envelopes(envelopes: list[dict]) -> dict:
 
 
 def _contaminated(report: dict) -> bool:
-    """本轮存在“失败且错误类别全是基础设施”的用例时，该轮不能作为稳定性证据。
+    """本轮存在“失败且错误类别全是基础设施”或存在 runner_errors 缺失用例时，该轮不能作为稳定性证据。
 
     resume 默认重跑这类轮次：静默复用会把一次模型抖动固化成“2/3 通过”的假波动。
     """
+    if report.get("runner_errors"):
+        return True
     for row in (report.get("cases") or []):
         if not isinstance(row, dict) or row.get("passed"):
             continue
-        classes = _error_classes(row)
-        if classes and classes <= INFRA_ERROR_CLASSES:
+        if is_infra_classes(_error_classes(row)):
             return True
     return False
 
@@ -294,11 +320,13 @@ def run(
     reports: list[dict] = []
     for index in range(1, repeat + 1):
         path = trial_path(out, index)
+        rerunning_contaminated = False
         if resume and path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             if reuse_infra or not _contaminated(data):
                 reports.append(data)
                 continue
+            rerunning_contaminated = True
             print(f"[harness] 第 {index} 轮含基础设施失败，重跑：{path}", flush=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         if suite == "business" and business_shards > 1:
@@ -312,6 +340,7 @@ def run(
                             workers=workers,
                             shard_index=idx,
                             shard_count=business_shards,
+                            resume_trial=(rerunning_contaminated and _shard_trial_path(path, idx, business_shards).exists()),
                         ),
                         _shard_trial_path(path, idx, business_shards),
                     )
@@ -330,6 +359,7 @@ def run(
                         workers=workers,
                         shard_index=shard_index,
                         shard_count=shard_count,
+                        resume_trial=(rerunning_contaminated and suite == "business" and path.exists()),
                     ),
                     path,
                 )
