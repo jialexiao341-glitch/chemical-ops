@@ -3,6 +3,7 @@
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,47 +11,100 @@ import pytest
 from dotenv import dotenv_values
 from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.engine import URL
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.task_queue.model import TaskExecution, TaskOutbox, TaskResourceLock
 from app.modules.task_queue import service
 from app.modules.task_queue import worker
 from app.core.config import Settings
+from app.models.base import Base
+from app.modules.ai_agent.model import AIAgentTask
 from app.modules.jobs_scheduler.model import SchedulerJobRun
 from app.modules.jobs_scheduler.service import start_scheduled_run
 from app.modules.doc_kb.model import AiDocument, AiDocumentSection
+from app.modules.system_management.model import Department, User
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="module")
 def queue_engine():
+    """为队列集成测试创建独立的临时 MySQL 库并在模块结束后销毁。"""
     config = dotenv_values(ROOT / ".env")
-    if not config.get("MYSQL_ROOT_PASSWORD"):
+    is_ci = os.environ.get("CI", "").strip().lower() == "true"
+    password = os.environ.get("MYSQL_ROOT_PASSWORD") or config.get("MYSQL_ROOT_PASSWORD")
+    if not password:
+        if is_ci:
+            pytest.fail("CI 环境缺少 MYSQL_ROOT_PASSWORD，无法创建队列隔离测试库")
         pytest.skip("Isolated MySQL acceptance credentials unavailable")
-    engine = create_engine(URL.create("mysql+pymysql", username="root",
-        password=config["MYSQL_ROOT_PASSWORD"], host=config.get("MYSQL_HOST", "127.0.0.1"),
-        port=int(config.get("MYSQL_PORT", "3306")), database="chemicalops_mq_acceptance_20261008"))
-    with engine.begin() as connection:
-        for _ in range(2):
-            for filename in ("041_async_task_dispatch.sql", "042_database_task_queue.sql"):
-                for statement in (ROOT / "database/migrations" / filename).read_text().split(";"):
+    host = os.environ.get("MYSQL_HOST") or config.get("MYSQL_HOST", "127.0.0.1")
+    port = int(os.environ.get("MYSQL_PORT") or config.get("MYSQL_PORT", "3306"))
+    database = f"chemicalops_mq_acceptance_{uuid4().hex[:12]}"
+    admin = create_engine(
+        URL.create("mysql+pymysql", username="root", password=password, host=host, port=port),
+        pool_pre_ping=True,
+        connect_args={"connect_timeout": 2},
+    )
+    engine = None
+    database_created = False
+    try:
+        try:
+            with admin.connect():
+                pass
+        except OperationalError as exc:
+            if getattr(exc.orig, "args", (None,))[0] == 2003 and not is_ci:
+                pytest.skip("Isolated MySQL server is unavailable")
+            raise
+        with admin.begin() as connection:
+            connection.exec_driver_sql(
+                f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+        database_created = True
+        engine = create_engine(
+            URL.create(
+                "mysql+pymysql",
+                username="root",
+                password=password,
+                host=host,
+                port=port,
+                database=database,
+            ),
+            pool_pre_ping=True,
+        )
+        with engine.begin() as connection:
+            for _ in range(2):
+                for filename in ("041_async_task_dispatch.sql", "042_database_task_queue.sql"):
+                    for statement in (ROOT / "database/migrations" / filename).read_text(encoding="utf-8").split(";"):
+                        if statement.strip():
+                            connection.exec_driver_sql(statement)
+            execution_columns = set(connection.execute(text(
+                "SELECT COLUMN_NAME FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() AND table_name = 'async_task_executions'"
+            )).scalars())
+            if "started_at" not in execution_columns:
+                for statement in (ROOT / "database/migrations/050_task_execution_timing.sql").read_text(encoding="utf-8").split(";"):
                     if statement.strip():
                         connection.exec_driver_sql(statement)
-        execution_columns = set(connection.execute(text(
-            "SELECT COLUMN_NAME FROM information_schema.columns "
-            "WHERE table_schema = DATABASE() AND table_name = 'async_task_executions'"
-        )).scalars())
-        if "started_at" not in execution_columns:
-            for statement in (ROOT / "database/migrations/050_task_execution_timing.sql").read_text().split(";"):
-                if statement.strip():
-                    connection.exec_driver_sql(statement)
-    SchedulerJobRun.__table__.create(engine, checkfirst=True)
-    AiDocument.__table__.create(engine, checkfirst=True)
-    AiDocumentSection.__table__.create(engine, checkfirst=True)
-    yield engine
-    engine.dispose()
+        Base.metadata.create_all(
+            engine,
+            tables=[
+                SchedulerJobRun.__table__,
+                AiDocument.__table__,
+                AiDocumentSection.__table__,
+                Department.__table__,
+                User.__table__,
+                AIAgentTask.__table__,
+            ],
+        )
+        yield engine
+    finally:
+        if engine is not None:
+            engine.dispose()
+        if database_created:
+            with admin.begin() as connection:
+                connection.exec_driver_sql(f"DROP DATABASE IF EXISTS `{database}`")
+        admin.dispose()
 
 
 @pytest.fixture

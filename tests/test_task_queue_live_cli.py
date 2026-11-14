@@ -63,7 +63,7 @@ def test_live_database_worker_clis_and_crash_recovery(queue_engine, tmp_path):
     env_file = tmp_path / "queue-acceptance.env"
     env_file.write_text("\n".join(f"{key}={value}" for key, value in {
         "MYSQL_HOST": values.get("MYSQL_HOST", "127.0.0.1"), "MYSQL_PORT": values.get("MYSQL_PORT", "3306"),
-        "MYSQL_DATABASE": "chemicalops_mq_acceptance_20261008", "MYSQL_USER": "root",
+        "MYSQL_DATABASE": queue_engine.url.database, "MYSQL_USER": "root",
         "MYSQL_PASSWORD": values["MYSQL_ROOT_PASSWORD"],
         "AGENT_EXECUTION_MODE": "database", "TECHNICAL_DOCUMENT_EXECUTION_MODE": "database",
         "OPENAI_BASE_URL": f"http://127.0.0.1:{server.server_port}", "OPENAI_API_KEY": "acceptance-only",

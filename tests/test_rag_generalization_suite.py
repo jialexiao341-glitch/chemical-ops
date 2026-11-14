@@ -14,6 +14,12 @@ def _read(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+def _normalized_crlf_sha256(raw: bytes) -> str:
+    """统一换行符为生成冻结清单时使用的 CRLF，避免 Git 跨平台 LF/CRLF 检出差异导致误报。"""
+
+    return hashlib.sha256(raw.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")).hexdigest()
+
+
 def test_new_suite_is_frozen_unique_and_does_not_reuse_old_questions():
     cases = _read(CASES)
     previous = _read(ROOT / "docs/evaluation/rag-20261009-before_cases.jsonl")
@@ -21,7 +27,7 @@ def test_new_suite_is_frozen_unique_and_does_not_reuse_old_questions():
     assert len(cases) == len({case["id"] for case in cases}) == len({case["question"] for case in cases}) == 100
     assert not {case["question"] for case in cases}.intersection(case["question"] for case in previous)
     assert Counter(case["kind"] for case in cases) == {"answerable": 60, "no_evidence": 24, "needs_target": 16}
-    assert manifest["gold_sha256"] == hashlib.sha256(CASES.read_bytes()).hexdigest()
+    assert manifest["gold_sha256"] == _normalized_crlf_sha256(CASES.read_bytes())
 
 
 def test_multi_chemical_and_source_cases_retain_all_evidence():

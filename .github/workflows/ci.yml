@@ -22,6 +22,10 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=20
+      qdrant:
+        image: qdrant/qdrant:v1.16.3
+        ports:
+          - 6333:6333
     env:
       CI: "true"
       APP_ENV: test
@@ -89,6 +93,22 @@ jobs:
           pip-audit -r backend/requirements.txt
           bandit -q -ll -r backend/app
           bandit -q -ll -s B608 -r scripts
+      - name: Wait for Qdrant readiness
+        run: |
+          python - <<'PY'
+          import time
+          from urllib.request import urlopen
+
+          for _ in range(30):
+              try:
+                  with urlopen("http://127.0.0.1:6333/readyz", timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit("Qdrant readiness check failed")
+          PY
       - name: Run tests
         run: python -m pytest --strict-config --strict-markers -q -rs
       - name: Start API for smoke load test
