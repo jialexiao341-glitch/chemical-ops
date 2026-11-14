@@ -60,5 +60,20 @@ def test_batches_stay_searchable_and_late_seeds_stay_inert(vectors):
 
 
 def test_server_version_gate():
-    with pytest.raises(BusinessValidationError, match="1.16"):
-        store.require_conditional_writes(SimpleNamespace(info=lambda: SimpleNamespace(version="1.15.9")))
+    """校验 Qdrant < 1.17 及缺少条件写入参数的客户端均会被拦截，>= 1.17 且参数齐全时放行。"""
+    for version in ("1.15.9", "1.16.9"):
+        with pytest.raises(BusinessValidationError, match="1.17"):
+            store.require_conditional_writes(SimpleNamespace(info=lambda: SimpleNamespace(version=version)))
+    with pytest.raises(BusinessValidationError, match="qdrant-client"):
+        store.require_conditional_writes(
+            SimpleNamespace(
+                info=lambda: SimpleNamespace(version="1.17.0"),
+                upsert=lambda points, **kwargs: None,
+            )
+        )
+    store.require_conditional_writes(
+        SimpleNamespace(
+            info=lambda: SimpleNamespace(version="1.17.0"),
+            upsert=lambda points, update_filter=None, update_mode=None: None,
+        )
+    )

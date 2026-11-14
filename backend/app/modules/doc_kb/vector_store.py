@@ -61,11 +61,12 @@ def upsert_sections(client: Any, rows: list[dict], *, name: str | None = None) -
 
 
 def require_conditional_writes(client: Any):
-    """Fail before touching points if either server or SDK lacks conditional writes."""
+    """在修改向量点前校验 Qdrant 服务端与客户端 SDK 是否均支持条件写入（update_filter 与 update_mode）。"""
     version = client.info().version
     match = re.match(r"(\d+)\.(\d+)", version)
-    if not match or tuple(map(int, match.groups())) < (1, 16):
-        raise BusinessValidationError("受保护向量写入要求 Qdrant >= 1.16")
+    # update_filter 始于 1.16，而 update_mode（INSERT_ONLY / UPDATE_ONLY）需要 Qdrant >= 1.17
+    if not match or tuple(map(int, match.groups())) < (1, 17):
+        raise BusinessValidationError("受保护向量写入要求 Qdrant >= 1.17")
     if not {"update_filter", "update_mode"}.issubset(inspect.signature(client.upsert).parameters):
         raise BusinessValidationError("请升级 qdrant-client 以支持条件写入")
 
