@@ -313,3 +313,18 @@ def test_run_business_with_local_shards_and_parallel_suites(tmp_path):
     assert [c["key"] for c in envelopes["business"]["cases"]] == ["B001", "B002"]
     assert (tmp_path / "harness-business.trial-1.json").exists()
     assert len(seen_commands) == 3
+
+
+def test_agent_eval_workflow_captures_merge_exit_and_aligns_timeouts() -> None:
+    """验证 GitHub Actions 评测工作流对齐 MaxApi 超时、串行控制并发并在合并后继续执行门禁。"""
+    from pathlib import Path
+    import re
+
+    workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/agent-eval.yml").read_text(encoding="utf-8")
+    assert 'LLM_TIMEOUT_SECONDS: "120"' in workflow
+    assert 'LLM_MAX_RETRIES: "2"' in workflow
+    assert 'AGENT_TASK_TIMEOUT_SECONDS: "240"' in workflow
+    assert "--parallel-suites" not in workflow
+    assert re.search(r"business-shard:\s+(?:#.*\n\s+)*needs:\s*fast-suites", workflow) is not None
+    assert re.search(r'--merge-shards[^\n]*\n[^\n]*--out[^\n]*\|\|\s*code=\$\?', workflow) is not None
+    assert "eval_prompt_gate.py" in workflow

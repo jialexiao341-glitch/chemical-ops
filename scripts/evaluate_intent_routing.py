@@ -123,10 +123,14 @@ def failure_meta(exc: Exception) -> dict:
 async def evaluate(output: Path, repeats: int = 1) -> None:
     """调用配置模型评测合成样本，写入不含密钥的 JSON 证据。
 
-    output 为输出文件路径；并发最多三项，每项超时 45 秒且不重试。
+    output 为输出文件路径；并发最多三项，单次超时取配置与 120 秒中的较大值并沿用模型重试配置。
     仅校验路由类别和任务集合，不代表工具成功率、检索质量或生产收益。
     """
-    settings = get_settings().model_copy(update={"llm_max_retries": 0, "llm_timeout_seconds": 45})
+    base_settings = get_settings()
+    settings = base_settings.model_copy(update={
+        "llm_max_retries": base_settings.llm_max_retries,
+        "llm_timeout_seconds": max(base_settings.llm_timeout_seconds, 120),
+    })
     profile = resolve_model_profile(settings)
     manifest = build_manifest("intent-routing-eval")
     semaphore = asyncio.Semaphore(3)

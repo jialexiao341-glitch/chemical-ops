@@ -18,16 +18,16 @@
       "path": "scripts/agent_business_cases.py"
     },
     {
-      "sha256": "ace987d98ed721a6a26a1994ddc9132211da3d0fae1a144ee07151ff3ffe6294",
+      "sha256": "626a935796d4e59e4805b0f0dc231adc921e83252e0e5d75baffdcf9d70804d2",
       "path": "scripts/agent_evaluation_data.py"
     },
     {
-      "sha256": "42d1ba837137bda6fbb08aa4e788bcf4e63cb12b673899b61e663f5ad0de2e1c",
+      "sha256": "8c79193e558e7ade58b70a5615a7f22feeb7697593d52eee92b97c6ad3c67a96",
       "path": "scripts/evaluate_agent_tasks.py"
     }
   ],
   "hash_mode": "utf8-lf",
   "rfq_control_case_count": 20,
-  "refreshed_at": "2026-11-11",
-  "refresh_note": "2026-11-09 评测能力清单与 prompt 门禁改动、2026-11-11 评测记录实际模型后审阅题集并刷新哈希；未改变冻结用例的业务期望"
+  "refreshed_at": "2026-11-14",
+  "refresh_note": "2026-11-14 核对模块重构 ea90900 与 42c69ea 仅调整 scripts/agent_evaluation_data.py 与 scripts/evaluate_agent_tasks.py 的 ai_agent 导入路径并刷新哈希；未改变冻结用例的业务期望"
 }
